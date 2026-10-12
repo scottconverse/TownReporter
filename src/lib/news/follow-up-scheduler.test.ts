@@ -356,4 +356,17 @@ describe("Run now dispatch", () => {
       assert.equal(observed.dispatches, 1);
     });
   }
+
+  it("queues Run now behind a queued draft instead of refusing the editor's request", async () => {
+    const newsroomId = NEWSRoom(16);
+    const id = await agentFollowUp(newsroomId, "Check the published story", { nextRunAt: future(60) });
+    await enqueueJob({ userId: EDITOR, newsroomId, kind: "draft", subjectId: 777, kick: false });
+
+    const result = await startFollowUpRun({ userId: EDITOR, newsroomId }, id, new Date(), { kick: false });
+    assert.deepEqual(result, { started: true, skipped: null });
+    const queued = await followUpJobs(newsroomId);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]!.status, "queued", "the check waits in the work queue");
+    await removeQueuedFollowUp(newsroomId);
+  });
 });

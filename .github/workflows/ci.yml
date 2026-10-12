@@ -103,7 +103,7 @@ jobs:
           check run_import_stories '^(scripts/co-transcript-walk\.mjs|scripts/import-stories-e2e\.mjs)$'
           check run_paste_one_story '^(scripts/meeting-settings-e2e\.mjs|scripts/paste-one-story-e2e\.mjs)$'
           check run_import_any_format '^(scripts/import-any-format-e2e\.mjs)$'
-          check run_front_page_river '^(scripts/front-page-river-e2e\.mjs|scripts/paper-panels\.mjs|scripts/stats-privacy-e2e\.mjs)$'
+          check run_front_page_river '^(scripts/front-page-river-e2e\.mjs|scripts/paper-panels\.mjs|scripts/stats-privacy-e2e\.mjs|scripts/reading-stats-export-e2e\.mjs)$'
           check run_import_civic_scanner_v26 '^(scripts/import-civic-scanner-v26-e2e\.mjs)$'
           check run_daily_scan_automatic '^(scripts/daily-scan-automatic-e2e\.mjs)$'
           check run_desk_dark_flash '^(scripts/desk-dark-flash-walk\.mjs|scripts/fb6-desk-feedback-walk\.mjs|scripts/walk-every-control-0681\.mjs)$'
@@ -203,20 +203,23 @@ jobs:
   #
   # `TOWNREPORTER_TEST_SHARD_TOTAL` must equal the number of entries in
   # `matrix.shard`, or the files in the missing slices would never run anywhere.
-  # scripts/test-shards-cover-the-suite.test.mjs fails the build if they ever
-  # disagree, and `fail-fast: false` keeps one shard's failure from cancelling
-  # the others, so a red run still reports every failure it found.
+  # scripts/test-shards-cover-the-suite.test.mjs checks the count, and
+  # `max-parallel: 6` keeps active workers at the prior limit while the 24 slices
+  # divide the suite's uneven workload more evenly. `fail-fast: false` keeps one
+  # shard's failure from cancelling the others, so a red run still reports all failures.
   unit-tests:
-    name: Unit suite, shard ${{ matrix.shard }} of 6
+    name: Unit suite, shard ${{ matrix.shard }} of 24
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Twenty-four slices reduce the long tail in the serial suite.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
-      TOWNREPORTER_TEST_SHARD_TOTAL: "6"
+      TOWNREPORTER_TEST_SHARD_TOTAL: "24"
       GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
       FAKE_GEMINI_SIGNED_OUT: "1"
     steps:
@@ -227,7 +230,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - run: timeout --signal=TERM --kill-after=5s 15m npm test
 
   # One check that is green only when the whole unit gate is green.
   #
@@ -1629,6 +1632,11 @@ jobs:
       # something to touch. ~9s.
       - name: The Stats page keeps no per-person trace, in a browser
         run: node scripts/stats-privacy-e2e.mjs
+      - name: The Stats screen and CSV agree on loads and visits, in a browser
+        env:
+          BETTER_AUTH_SECRET: ci-reading-stats-export-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/reading-stats-export-e2e.mjs
       # `npm run check:panels`. The paper's two ink panels, measured in a real
       # browser: white-on-cream text, text past the panel's own right edge, and
       # words broken across lines are all invisible to a font-size floor, to the

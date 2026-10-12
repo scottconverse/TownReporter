@@ -107,6 +107,8 @@ export function JobCard({
   if (darkCase) cancelLabel = "Stop";
   const state = jobCardState(job);
   const running = state === "running";
+  const queued = state === "queued";
+  const open = running || queued;
   const [, tick] = useState(0);
   /*
     One tick per second, and only while something is actually running. The
@@ -137,7 +139,7 @@ export function JobCard({
   // quiet"; the server's stall rule says the same thing.
   const quiet = job.beatAt ? Math.max(0, Math.floor((t - job.beatAt) / 1000)) : 0;
   const stalled = running && quiet >= stallSeconds * (1 + waived);
-  const col = state === "done" ? "done" : state === "failed" ? "failed" : stalled ? "stalled" : "running";
+  const col = state === "done" ? "done" : state === "failed" ? "failed" : stalled ? "stalled" : state === "queued" ? "queued" : "running";
 
   return (
     <div className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
@@ -168,8 +170,7 @@ export function JobCard({
           </span>
         </div>
         <b className="job-card-elapsed">
-          {state === "done" ? "Done " : state === "failed" ? "Stopped " : ""}
-          {fmt(elapsed)}
+          {queued ? "Queued" : state === "done" ? `Done ${fmt(elapsed)}` : state === "failed" ? `Stopped ${fmt(elapsed)}` : fmt(elapsed)}
         </b>
       </div>
 
@@ -201,7 +202,9 @@ export function JobCard({
 
       <div className="job-card-foot">
         <b className="job-card-now" role="status" aria-live="polite">
-          {state === "failed" ? job.error : state === "done" ? job.doneText : `Now: ${job.step}`}
+          {state === "failed" ? job.error : state === "done" ? job.doneText : queued
+            ? `Waiting · position ${job.queuePosition ?? "?"} of ${job.queueLength ?? "?"}`
+            : `Now: ${job.step}`}
         </b>
         {running && !stalled ? <span className="job-card-quiet">Last activity {fmt(quiet)} ago</span> : null}
       </div>
@@ -242,12 +245,12 @@ export function JobCard({
       ) : null}
 
       <div className="job-card-actions">
-        {running && onView ? (
+        {open && onView ? (
           <button type="button" className="btn" onClick={onView}>
             {viewLabel ?? "Open your story"}
           </button>
         ) : null}
-        {running && !job.cancelRequested && onCancel ? (
+        {open && !job.cancelRequested && onCancel ? (
           <button type="button" className="btn danger" onClick={onCancel}>
             {cancelLabel}
           </button>

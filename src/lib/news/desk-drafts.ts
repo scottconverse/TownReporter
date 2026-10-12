@@ -50,6 +50,7 @@ export type DeskDraftFacts = {
 
 export type DeskDraftStateKey =
   | "running"
+  | "queued"
   | "failed"
   | "names"
   | "evidence"
@@ -68,6 +69,8 @@ export type DeskDraftState = {
   needsYou: boolean;
   /** Is a job working on it right now? */
   running: boolean;
+  /** Is the draft waiting for a worker rather than being written? */
+  queued: boolean;
   /** Did a job fail on it? */
   failed: boolean;
   /** Did the editor write the headline on this row, rather than the model? */
@@ -114,15 +117,17 @@ export function deskDraftElapsed(fromIso: string | null | undefined, nowMs: numb
  */
 export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftState {
   const job = String(facts.job_status ?? "");
-  const running = job === "running" || job === "queued";
+  const running = job === "running";
+  const queued = job === "queued";
   const failed = job === "failed";
   const yours = editorOwnsHeadline(facts);
   const unresolved = Math.max(0, Number(facts.names_unresolved) || 0);
-  const base = { needsYou: false, running, failed, yours };
+  const base = { needsYou: false, running, queued, failed, yours };
 
   // A filed empty row is still waiting for its first draft, regardless of its memo.
   if (!facts.has_body) {
     if (failed) return { ...base, key: "failed", label: "Draft failed" };
+    if (queued) return { ...base, key: "queued", label: "Queued" };
     if (running) {
       const stage = String(facts.job_stage ?? "").trim() || "Working…";
       return { ...base, key: "running", label: elapsed ? `${stage} · ${elapsed}` : stage };
@@ -132,11 +137,18 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
 
   if (facts.story_readiness !== undefined) {
     const readiness = readinessWithAcceptedClaims(savedStoryReadiness(facts.story_readiness, running), facts.unreviewed_claims ?? 0, facts.unreviewed_claims_accepted_count ?? 0);
-    const key = running ? "running" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
-    return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou: readiness.state === "to-check" };
+    if (failed) return { ...base, key: "failed", readiness, label: "Draft failed" };
+    const key = running ? "running" : queued ? "queued" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
+    const outstandingClaims = Math.max(0, Number(facts.unreviewed_claims ?? 0) - Number(facts.unreviewed_claims_accepted_count ?? 0));
+    const needsYou = !running && !queued && !failed && (
+      readiness.state === "to-check" || readiness.state === "not-checked" ||
+      outstandingClaims > 0 || (facts.evidence_required && !facts.evidence_decision) || unresolved > 0
+    );
+    return { ...base, key, readiness, label: queued ? "Queued" : storyReadinessChip(readiness).text, needsYou };
   }
 
   if (failed) return { ...base, key: "failed", label: "Draft failed" };
+  if (queued) return { ...base, key: "queued", label: "Queued" };
   if (running) {
     const stage = String(facts.job_stage ?? "").trim() || "Working…";
     return { ...base, key: "running", label: elapsed ? `${stage} · ${elapsed}` : stage };
@@ -226,6 +238,7 @@ export function deskDraftMatchesFilter(state: DeskDraftState, filter: DeskDraftF
 export function deskDraftAction(state: DeskDraftState): string {
   switch (state.key) {
     case "running":
+    case "queued":
       return "Watch";
     case "failed":
       return "Retry";

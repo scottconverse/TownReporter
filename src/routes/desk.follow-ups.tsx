@@ -122,7 +122,7 @@ function FollowUpsPage() {
       */
       announceToDesk(
         input.action === "run-now"
-          ? "Run started."
+          ? "Follow-up added to the work queue."
           : input.action === "stop"
             ? followUpStoppedNotice()
             : "Follow-up updated.",

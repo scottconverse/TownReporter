@@ -41,6 +41,10 @@ export type JobProgressView = {
   leadId: number;
   kind: JobKind;
   status: JobStatus;
+  /** Position among waiting jobs in this job's worker lane. */
+  queuePosition?: number | null;
+  /** Number of waiting jobs in this job's worker lane. */
+  queueLength?: number | null;
   /** The card's bold line: what this job is doing, in the editor's words. */
   title: string;
   /**
@@ -241,6 +245,8 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
     kind: row.kind,
     subjectId: row.subject_id,
     status: row.status,
+    queuePosition: row.queue_position ?? null,
+    queueLength: row.queue_length ?? null,
     model,
     modelEffort: darkJobEffort(row),
     stages: jobStages(row),
@@ -451,6 +457,16 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       DeskJob & { lead_id: number; draft_id: number | null; headline: string | null }
     >`
       select j.*, j.subject_id as lead_id,
+        case when j.status = 'queued' then (
+          select count(*)::int from desk_jobs waiting
+          where waiting.newsroom_id = j.newsroom_id and waiting.lane = j.lane
+            and waiting.status = 'queued' and waiting.id <= j.id
+        ) else null end as queue_position,
+        case when j.status = 'queued' then (
+          select count(*)::int from desk_jobs waiting
+          where waiting.newsroom_id = j.newsroom_id and waiting.lane = j.lane
+            and waiting.status = 'queued'
+        ) else null end as queue_length,
         /*
           The drafts row first, the lead second, as two INDEPENDENT scalar
           subqueries rather than one nested in the other. A lead whose draft

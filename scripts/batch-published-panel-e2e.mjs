@@ -167,6 +167,8 @@ const startPress = (count) =>
     name: `Start ${count} ${count === 1 ? "story" : "stories"} from the selected leads`,
     exact: true,
   });
+const reviewSelectionPress = () =>
+  bulkStrip().getByRole("button", { name: "Review selected leads", exact: true });
 
 /**
  * Open the batch panel the way an editor does: pick the leads the strip is
@@ -175,7 +177,8 @@ const startPress = (count) =>
  * the dialog with the strip's selection already copied in.
  */
 async function openBatchPanel(count) {
-  await startPress(count).click();
+  if (count === 0) await reviewSelectionPress().click();
+  else await startPress(count).click();
   const dialog = page.getByRole("dialog", { name: "Draft the selected leads" });
   await dialog.locator("#draft-batch").waitFor({ timeout: 45_000 });
   return dialog;
@@ -322,8 +325,8 @@ async function printTheFirstStory() {
   await topic.selectOption(values.includes("council") ? "council" : values[0]);
   await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: /^Publish in / }).click();
-  await page.getByRole("button", { name: /^Yes, print it in / }).click();
-  await page.getByText("On the paper").waitFor({ timeout: 45_000 });
+  await page.getByRole("button", { name: /^Publish anyway in / }).click();
+  await page.getByText(/published story/i).waitFor({ timeout: 45_000 });
   step(`"${printedHeadline}" is printed, and its lead is now published`);
   return href;
 }
@@ -358,13 +361,20 @@ async function main() {
     */
     await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
     /*
-      The panel lives in the batch dialog in phase 2a. The story still being
-      worked is the one draftable lead left, so picking it and pressing the
-      strip's Start is how an editor reopens the panel to read the batch.
+      The panel lives in the batch dialog in phase 2a. The remaining selected
+      story already has a draft, so Review selection opens the panel while its
+      Start action remains disabled with the exclusion reason.
     */
     await rowChoice(openHeadline).waitFor({ timeout: 45_000 });
     await rowChoice(openHeadline).check();
-    await openBatchPanel(1);
+    const dialog = await openBatchPanel(0);
+    await dialog.getByText("0 available to draft; 1 selected.").waitFor();
+    await dialog.getByText(`${openHeadline}: This lead already has a draft.`).waitFor();
+    assert.equal(
+      await dialog.getByRole("button", { name: "No new drafts to start", exact: true }).isDisabled(),
+      true,
+      "a selected lead with an existing draft cannot start another batch",
+    );
     await results().getByText(/Batch saved draft #\d+/).first().waitFor({ timeout: 45_000 });
     assert.equal(
       await rowFor(openHeadline).count(),
@@ -396,7 +406,7 @@ async function main() {
     */
     await rowChoice(openHeadline).waitFor({ timeout: 45_000 });
     await rowChoice(openHeadline).check();
-    await openBatchPanel(1);
+    await openBatchPanel(0);
     await page.waitForTimeout(1_500);
     assert.equal(
       await results().count(),

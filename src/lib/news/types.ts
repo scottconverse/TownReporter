@@ -86,6 +86,8 @@ export type LeadRow = {
   origin?: string | null;
   article_slug?: string | null;
   investigation_id?: number | null;
+  /** True only when prose already exists; empty placeholder drafts do not count. */
+  has_draft?: boolean;
   notes_json?: string | null;
   resurfaced_count?: number;
   last_resurfaced_at?: string | null;

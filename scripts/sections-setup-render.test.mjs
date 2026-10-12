@@ -217,6 +217,10 @@ const deskNavUrl = moduleUrl(
   await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
   "desk-nav.ts",
 );
+const deskJobGroupsUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk/desk-job-groups.ts", import.meta.url), "utf8"),
+  "desk-job-groups.ts",
+);
 
 /*
   Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
@@ -258,6 +262,7 @@ const DESK_CHROME_IMPORTS = {
     "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
   ),
   "@/lib/desk-nav": deskNavUrl,
+  "@/lib/desk/desk-job-groups": deskJobGroupsUrl,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
 
   "@/components/desk-toaster": deskToasterStub,

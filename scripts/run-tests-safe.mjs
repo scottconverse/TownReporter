@@ -84,10 +84,18 @@ function run(args) {
 for (const args of [
   // The scripts group is static analysis of the scripts themselves -- it
   // opens no database, so it gets no schema preload.
-  ["--test", "--import", modelSealPreload, ...slice, "scripts/**/*.test.mjs"],
+  [
+    "--test",
+    "--test-timeout=300000",
+    "--import",
+    modelSealPreload,
+    ...slice,
+    "scripts/**/*.test.mjs",
+  ],
   [
     "--experimental-strip-types",
     "--test",
+    "--test-timeout=300000",
     "--test-concurrency=1",
     "--import",
     modelSealPreload,

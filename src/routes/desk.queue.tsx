@@ -73,6 +73,7 @@ import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
 import { dismissDraftBatch, getDraftBatch, visibleDraftBatchItems, type DraftBatchRuntime } from "@/lib/news/draft-batch";
+import { resolveDraftBatchSelection } from "@/lib/news/draft-batch-selection";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -868,22 +869,21 @@ function QueuePage() {
     lead still on this desk. Saved lifecycle state is warned about by the
     server and does not remove an editor's selection.
   */
-  const selectedBatchLeads = batchLeadIds.filter((leadId) =>
-    batchEligible.some((lead) => lead.id === leadId),
-  );
+  const batchSelection = resolveDraftBatchSelection(batchLeadIds, batchEligible, batchPool.data !== undefined);
+  const selectedBatchLeads = batchSelection.startableIds;
   /*
     The same selection as rows, so the dialog can name what it is about to
     queue instead of only counting it: "3 of 5 selected" tells an editor how
     much model work the press costs, and this tells them what it is spent on.
   */
-  const selectedBatchLeadRows = batchEligible.filter((lead) =>
-    selectedBatchLeads.includes(lead.id),
-  );
+  const selectedBatchLeadRows = batchSelection.rows.filter((lead) => !lead.has_draft);
+  const selectedBatchExcluded = batchSelection.excluded;
   const batchQueuedNow =
     batchQueued !== null &&
     batchQueued.length === selectedBatchLeads.length &&
     batchQueued.every((leadId) => selectedBatchLeads.includes(leadId));
-  const suggestedFocus = suggestFocusLeads(batchEligible, sections, focusTarget);
+  const batchDraftablePool = batchEligible.filter((lead) => !lead.has_draft);
+  const suggestedFocus = suggestFocusLeads(batchDraftablePool, sections, focusTarget);
   const focusAddable = suggestedFocus.filter((lead) => !selectedBatchLeads.includes(lead.id));
   const last = scans.data?.rows?.[0];
   /*
@@ -932,7 +932,8 @@ function QueuePage() {
     bar, and every press in the bar is a press the row itself already offers.
   */
   const selectedLeads = leads.filter((lead) => selectedDeleteLeads.includes(lead.id));
-  const bulkDraftable = selectedLeads;
+  const bulkDraftable = selectedLeads.filter((lead) => !lead.has_draft);
+  const selectedAlreadyDrafted = selectedLeads.filter((lead) => lead.has_draft).length;
   /*
     M7 of the batch-6 pre-merge audit. This loop used to be
     `for (const lead of selectedLeads) setStatus.mutate({id, status})`, so a
@@ -1287,34 +1288,30 @@ function QueuePage() {
                   bar said it would.
                 */}
                 {/*
-                  FB6, owner report 7b: this button could read "Start 0 stories"
-                  -- a press that would do nothing, labelled with a count of
-                  nothing, next to a selection that is entirely held, killed or
-                  printed. The count is left out when there is nothing to
-                  count, the button stands down, and the line below the bar
-                  (which was already there) says why.
+                  When nothing in the selection can start a draft, the bar
+                  offers Review selection so an editor can see each exclusion
+                  and any saved batch. The dialog's Start stays disabled; the
+                  line below names why the selection cannot be drafted.
                 */}
                 <InkButton
-                  disabled={
-                    startBatch.isPending || bulkDraftable.length === 0
-                  }
+                  disabled={startBatch.isPending}
                   ariaLabel={
                     bulkDraftable.length === 0
-                      ? "Nothing in this selection can be drafted"
+                      ? "Review selected leads"
                       : `Start ${bulkDraftable.length} ${
                           bulkDraftable.length === 1 ? "story" : "stories"
                         } from the selected leads`
                   }
                   onClick={() => {
                     setBatchNotice(null);
-                    setBatchLeadIds(bulkDraftable.map((l) => l.id));
+                    setBatchLeadIds([...selectedDeleteLeads]);
                     setPanel("batch");
                   }}
                 >
                   {startBatch.isPending
                     ? "Starting…"
                     : bulkDraftable.length === 0
-                      ? "Start stories"
+                      ? "Review selection"
                       : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
                 <ActionButton
@@ -1482,7 +1479,10 @@ function QueuePage() {
               {bulkDraftable.length !== selectedDeleteLeads.length ? (
                 <span className="queue-bulk-what">
                   {selectedDeleteLeads.length - bulkDraftable.length} of these cannot be drafted
-                  (held, killed or already printed).
+                  (held, killed, already printed, or already drafted).
+                  {selectedAlreadyDrafted > 0
+                    ? ` ${selectedAlreadyDrafted} already have a draft; open it to continue or redraft it there.`
+                    : ""}
                 </span>
               ) : null}
             </>
@@ -1912,7 +1912,11 @@ function QueuePage() {
             ? "Batch started"
             : startBatch.isPending
               ? "Starting…"
-              : `Start ${selectedBatchLeads.length} ${selectedBatchLeads.length === 1 ? "story" : "stories"}`
+              : batchSelection.loading
+                ? "Checking selection…"
+                : selectedBatchLeads.length === 0
+                  ? "No new drafts to start"
+                  : `Start ${selectedBatchLeads.length} ${selectedBatchLeads.length === 1 ? "story" : "stories"}`
         }
         primaryDisabled={
           newsroomId === null ||
@@ -1926,10 +1930,10 @@ function QueuePage() {
             already hold -- this names the reason, so that a future change to
             any of them cannot quietly arm a Start that queues the wrong leads.
           */
-          batchPoolPending
+          batchPoolPending || batchPool.isError || selectedBatchLeads.length === 0
         }
         onPrimary={() => {
-          const leadIds = selectedBatchLeads;
+          const leadIds = batchSelection.startableIds;
           setBatchNotice(null);
           startBatch.mutate(
             { leadIds, runtime: batchRuntime, modelEffort: batchEffort },
@@ -1977,7 +1981,7 @@ function QueuePage() {
                 setBatchLeadIds((ids) =>
                   mergeFocusSelection(
                     ids,
-                    batchEligible.map((lead) => lead.id),
+                    batchDraftablePool.map((lead) => lead.id),
                     suggestedFocus.map((lead) => lead.id),
                     5,
                   ),
@@ -2000,7 +2004,11 @@ function QueuePage() {
             disabled={startBatch.isPending}
             compact
           />
-          <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
+          <p className="meta">
+            {batchSelection.loading
+              ? `${batchSelection.selectedCount} selected. Checking which leads can be drafted…`
+              : `${selectedBatchLeads.length} available to draft; ${batchSelection.selectedCount} selected. Usual batch: 1 to 5.`}
+          </p>
           {/*
             BF5: name the leads the press below will draft. Until the batch
             moved into this dialog the panel's own checkboxes showed which
@@ -2015,6 +2023,16 @@ function QueuePage() {
                 <li key={lead.id}>{lead.headline}</li>
               ))}
             </ul>
+          ) : null}
+          {selectedBatchExcluded.length > 0 ? (
+            <ul className="meta" aria-label="Selected leads not available to draft">
+              {selectedBatchExcluded.map((row) => (
+                <li key={row.id}>{row.headline}: {row.reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          {panel === "batch" && batchPool.isError ? (
+            <Notice kind="err">Could not check the selected leads. Try again before starting a batch.</Notice>
           ) : null}
           {batchNotice ? <Notice kind={batchNotice.kind}>{batchNotice.text}</Notice> : null}
           {desk.isPending || batch.isPending ? (

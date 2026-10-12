@@ -72,6 +72,10 @@ const deskNavUrl = moduleUrl(
   await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
   "desk-nav.ts",
 );
+const deskJobGroupsUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk/desk-job-groups.ts", import.meta.url), "utf8"),
+  "desk-job-groups.ts",
+);
 
 function inlineModule(source) {
   const rewritten = source.replaceAll('"react"', JSON.stringify(REACT_URL));
@@ -779,6 +783,7 @@ const { Chip } = await import(
       */
       "@/lib/news/desk-copy": deskCopy,
       "@/lib/desk-nav": deskNavUrl,
+      "@/lib/desk/desk-job-groups": deskJobGroupsUrl,
       "@/components/desk-chrome-utils": deskChromeUtils,
 
       "@/components/desk-toaster": deskToasterStub,

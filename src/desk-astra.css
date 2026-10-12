@@ -5158,6 +5158,9 @@
 .desk-ltr.astra .job-card.state-running {
   --job-col: var(--a);
 }
+.desk-ltr.astra .job-card.state-queued {
+  --job-col: var(--fg2);
+}
 .desk-ltr.astra .job-card.state-stalled {
   --job-col: var(--job-warn);
 }

@@ -743,6 +743,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
       article_slug: string | null;
       investigation_id: number | null;
       story_headline: string | null;
+      has_draft: boolean;
     }
   >`
     select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
@@ -753,6 +754,8 @@ async function queryLeadRows(context: { newsroomId: number }) {
            coalesce(a.headline, (select nullif(d.headline, '') from drafts d
              where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
              order by d.updated_at desc,d.id desc limit 1)) as story_headline,
+           exists(select 1 from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
+             and length(trim(d.body)) > 0) as has_draft,
            l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
            l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
            -- U28: the duplicate check's verdict, so the row's "Looks already
@@ -5326,7 +5329,7 @@ export const updateAiFollowUp = createServerFn({ method: "POST" })
  */
 const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, string> = {
   "draft-running":
-    "A draft is being written right now. Follow-ups run one at a time and never alongside a draft — try again once it finishes.",
+    "A draft is in the queue. This check will wait behind it.",
   "follow-up-running":
     "Another follow-up is already running. They run one at a time — try again once it finishes.",
   "not-found": "That follow-up is gone.",
