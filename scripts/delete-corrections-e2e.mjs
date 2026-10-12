@@ -828,7 +828,7 @@ async function main() {
       - The inventory is a shut extra at the foot of the list (no id, found by
         the `#draft-pass-claims-heading` it holds). It carries NO controls: the
         returned claim's record checks and judgment live on that claim's OWN row
-        above, which is where `View exact captured version` is pressed now.
+      above, which is where `Open the saved source copy` is pressed now.
       - Editor-authored claims are rows of the list too. They are found by the
         `Manual claim N · <kind>` heading their row renders (uppercased on
         screen by CSS), and the add-a-claim form is the other shut extra,
@@ -870,7 +870,7 @@ async function main() {
   /*
     The inventory leg, re-authored for unit CW2 (f6953ca1). The returned claim's
     record checks and judgment moved onto that claim's OWN row of the drawn list
-    above, so `View exact captured version` is no longer inside the inventory --
+    above, so `Open the saved source copy` is no longer inside the inventory --
     measured 2026-09-28 on the merged tree, the inventory's shut disclosure holds
     zero controls (artifacts/db2/review-dom.json, details[3].controls = []), and
     the card is on the claim's row instead, still exactly one of it. The
@@ -897,10 +897,10 @@ async function main() {
   if ((await returnedClaimRow.count()) !== 1)
     throw new Error("expected the returned claim to have exactly one row of its own in the list");
   if (
-    (await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).count()) !== 1
+    (await returnedClaimRow.getByRole("button", { name: "Open the saved source copy" }).count()) !== 1
   )
     throw new Error("expected one rendered exact-provenance card for the shared artifact and capture event");
-  await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).first().click();
+  await returnedClaimRow.getByRole("button", { name: "Open the saved source copy" }).first().click();
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
     .waitFor();
