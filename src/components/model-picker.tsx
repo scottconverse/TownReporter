@@ -537,7 +537,7 @@ export function ModelPicker(props: Props) {
           </option>
         ) : null}
       </select>
-      {shownValue === "local-model" || localReason ? (
+      {shownValue === "local-model" ? (
         <span className="model-picker-help">
           {localStatus}
           {localReason ? ` — ${localReason}` : ""}

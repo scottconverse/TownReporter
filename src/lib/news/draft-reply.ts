@@ -24,7 +24,8 @@ export async function runDraftReply(
     if (!result.ok) return partialText ? { ...result, partialText } : result;
     const draft = coerceDraft(result.text, { headline: "", dek: "", topic: "" });
     if (!draft.body) {
-      problem = options.requireReadable ? "unreadable" : "empty";
+      // A reply with no JSON object at all is unreadable; one that parsed with a blank body is empty.
+      problem = options.requireReadable || !/\{[\s\S]*\}/.test(result.text) ? "unreadable" : "empty";
       if (!i) await options.onRetry?.();
       continue;
     }

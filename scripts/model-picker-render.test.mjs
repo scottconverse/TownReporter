@@ -241,7 +241,7 @@ test("the owner keeps the local model controls", () => {
 */
 test("an unavailable provider remains selectable with its reason", () => {
   availabilityStub.__setAvailability({ "local-model": false });
-  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "local-model", onChange() {} }));
   // DHE1-11: the Local option is named by its model (here none is chosen yet);
   // the backend status prints once beside the picker, not inside the option.
   assert.match(html, /<option[^>]*value="local-model"[^>]*>Local model<\/option>/);
