@@ -4193,7 +4193,7 @@ function StoryPage() {
                       disabled={publish.isPending || !publishConfirm.enabled}
                       onAct={() => setConfirmingPublish(true)}
                     >
-                      {`Publish anyway in ${sectionNameNow} (no section was chosen)`}
+                      {`Publish anyway in ${sectionNameNow}`} (no section was chosen)
                     </ActionButton>
                   ) : null}
                   {/*
