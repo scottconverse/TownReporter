@@ -135,3 +135,27 @@ it("leaves a draft without AI authoring receipts free of an AI claim", async () 
     "no model-written body or public-research receipt means no AI line is stored",
   );
 });
+
+it("does not say AI drafted a piece the editor pasted in, though its text is held as the model body", async () => {
+  const { leadId, draftId } = await importedFixture("");
+  const sql = await getSql();
+  // What fileEditorial files for "Paste a piece I wrote" (FC04): the pasted text
+  // is copied into model_body, and editorial_extras records who wrote it.
+  await sql.query("update drafts set model_body = body where id = $1", [draftId]);
+  await sql.query(
+    `insert into editorial_extras(draft_id,newsroom_id,fact_sheet,image_prompt,source_kind,source_ref)
+     values($1,$2,'','','written-by-the-editor','pasted into the Opinion desk')`,
+    [draftId, NEWSROOM],
+  );
+  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, undefined, undefined, {}, ["unchecked"]);
+  assert.equal(published.ok, true);
+  const [article] = await sql.query<{ disclosure_text: string }>(
+    "select disclosure_text from articles where lead_id=$1",
+    [leadId],
+  );
+  assert.equal(
+    article.disclosure_text,
+    "",
+    "a pasted piece no model wrote gets no AI line, so the public page cannot say AI helped write it",
+  );
+});

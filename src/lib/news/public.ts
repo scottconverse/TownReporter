@@ -12,7 +12,7 @@ import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { markRemovedCaptures, removedCapturesFor } from "./evidence.ts";
 import { publicSlug, publicTopic } from "./request-input.ts";
-import { disclosureForPublishedStory } from "./ai-disclosure.ts";
+import { disclosureForReader } from "./ai-disclosure.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
@@ -221,6 +221,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
         routine_notice: boolean;
         origin_model_body: string | null;
         origin_research_json: string | null;
+        origin_pasted: boolean;
       }>`
       select articles.id, articles.slug, articles.headline, articles.dek, articles.body,
              articles.topic, articles.source_urls, articles.status, articles.published_at,
@@ -228,6 +229,9 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
              articles.disclosure_text,
              origin.model_body as origin_model_body,
              origin.research_json as origin_research_json,
+             /* A piece the editor pasted into the Opinion desk keeps its text in
+                model_body, but no model wrote it (FC04). */
+             pasted.draft_id is not null as origin_pasted,
              /* Whether a fixed-template routine notice printed this row. The
                 reader-facing disclosure line depends on it, and it cannot be
                 inferred from the article's own columns: a routine notice is
@@ -239,6 +243,9 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       from articles
       left join drafts as origin
         on origin.id = articles.origin_draft_id and origin.newsroom_id = articles.newsroom_id
+      left join editorial_extras as pasted
+        on pasted.draft_id = origin.id and pasted.newsroom_id = articles.newsroom_id
+          and pasted.source_kind = 'written-by-the-editor'
       where articles.slug = ${slug} and articles.status = 'published' and articles.newsroom_id = ${DEFAULT_NEWSROOM_ID}
       limit 1
     `;
@@ -250,13 +257,14 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
         what it opens. See that function for why the flags are joined here
         rather than stored in `provenance_json`.
       */
-      const { origin_model_body, origin_research_json, ...articleRow } = rows[0];
+      const { origin_model_body, origin_research_json, origin_pasted, ...articleRow } = rows[0];
       const article = await publicArticleForReaders({
         ...articleRow,
-        disclosure_text: disclosureForPublishedStory({
+        disclosure_text: disclosureForReader({
           text: articleRow.disclosure_text,
           modelBody: origin_model_body,
           researchJson: origin_research_json,
+          pastedByEditor: origin_pasted,
         }),
       });
       const corrs = await sql<{ body: string; created_at: string }>`

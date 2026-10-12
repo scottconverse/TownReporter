@@ -6706,6 +6706,16 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         `provenance_json` and `source_urls` are the captured-page side of the
         row and are left as they are.
       */
+      /* A piece the editor pasted into the Opinion desk keeps its text in
+         model_body too, but no model wrote it (FC04). Only a model-written
+         body counts as an AI draft for the public line. */
+      const [pastedByEditor] = await sql<{ pasted: boolean }>`
+        select exists (
+          select 1 from editorial_extras
+          where draft_id = ${row.id} and newsroom_id = ${owned(context)}
+            and source_kind = 'written-by-the-editor'
+        ) as pasted
+      `;
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
@@ -6721,7 +6731,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
            from the model-body and public-research receipts on this draft. */
         ${storableText(disclosureForPublishedStory({
           text: row.disclosure_text,
-          modelBody: row.model_body,
+          modelBody: pastedByEditor?.pasted ? null : row.model_body,
           researchJson: row.research_json,
         }))},
         /* The geography pill this story answers to. NULL is the home town on the
