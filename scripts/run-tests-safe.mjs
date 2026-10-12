@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { safeTestEnvironment } from "./test-environment.mjs";
-import { shardArgs, shardNotice } from "./test-shard.mjs";
+import { shardArgs, shardNotice, testGroupTimeoutMs } from "./test-shard.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
@@ -65,38 +65,70 @@ if (notice) console.log(notice);
  * production or development DATABASE_URL turn that fixture cleanup into a
  * real-database cleanup.
  */
-function run(args) {
+function run(label, args) {
   return new Promise((resolve, reject) => {
+    let timedOut = false;
     const child = spawn(process.execPath, ["--import", guard, ...args], {
       cwd: root,
       env: safeTestEnvironment(),
       stdio: "inherit",
       windowsHide: true,
     });
-    child.once("error", reject);
+    const timeoutMs = testGroupTimeoutMs();
+    const timeout = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          console.error(`[test runner] ${label} did not finish within ${timeoutMs / 60000} minutes.`);
+          child.kill();
+        }, timeoutMs)
+      : null;
+    timeout?.unref();
+    child.once("error", (error) => {
+      if (timeout) clearTimeout(timeout);
+      reject(error);
+    });
     child.once("exit", (code, signal) => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) {
+        resolve(1);
+        return;
+      }
       if (signal) reject(new Error(`test process ended by ${signal}`));
       else resolve(code ?? 1);
     });
   });
 }
 
-for (const args of [
-  // The scripts group is static analysis of the scripts themselves -- it
-  // opens no database, so it gets no schema preload.
-  ["--test", "--import", modelSealPreload, ...slice, "scripts/**/*.test.mjs"],
+for (const [label, args] of [
   [
-    "--experimental-strip-types",
-    "--test",
-    "--test-concurrency=1",
-    "--import",
-    modelSealPreload,
-    "--import",
-    migrationsPreload,
-    ...slice,
-    "src/**/*.test.ts",
+    "scripts tests",
+    // This group is static analysis of scripts -- it opens no database, so it
+    // gets no schema preload.
+    [
+      "--test",
+      "--test-timeout=300000",
+      "--import",
+      modelSealPreload,
+      ...slice,
+      "scripts/**/*.test.mjs",
+    ],
+  ],
+  [
+    "source tests",
+    [
+      "--experimental-strip-types",
+      "--test",
+      "--test-timeout=300000",
+      "--test-concurrency=1",
+      "--import",
+      modelSealPreload,
+      "--import",
+      migrationsPreload,
+      ...slice,
+      "src/**/*.test.ts",
+    ],
   ],
 ]) {
-  const code = await run(args);
+  const code = await run(label, args);
   if (code !== 0) process.exit(code);
 }
