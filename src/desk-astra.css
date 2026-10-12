@@ -4156,10 +4156,10 @@
 }
 /* THT-11: the one line that says what the "≈ Printed" count counts. Readable-first: not small or faint. */
 .desk-ltr.astra .queue-tab-note {
-  flex: 0 1 auto;
+  display: block;
+  margin-top: 6px;
   font-size: 14px;
   color: var(--fg);
-  min-width: 0;
 }
 .desk-ltr.astra .queue-filters {
   display: flex;

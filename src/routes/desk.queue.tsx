@@ -1250,8 +1250,6 @@ function QueuePage() {
             </button>
           ))}
         </div>
-        {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
-        <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
         <div className="queue-filters">
           <input
             type="search"
@@ -1299,6 +1297,8 @@ function QueuePage() {
           </div>
         </div>
       </div>
+      {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
+      <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
 
       {/*
         FB6, item 3: the scan's own card, in place, under the press that started
