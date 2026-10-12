@@ -261,11 +261,29 @@ async function largeQueueFiltersRemainClickable() {
     const count = await buttons.count();
     assert.ok(count >= 4, `the ${width}px Queue keeps every pile button visible`);
     const overlap = await page.evaluate(() => {
+      const bounds = (selector) => {
+        const rect = document.querySelector(selector)?.getBoundingClientRect();
+        return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+      };
       const tabs = document.querySelector(".queue-tabs")?.getBoundingClientRect();
       const search = document.querySelector(".queue-search")?.getBoundingClientRect();
-      return Boolean(tabs && search && tabs.right > search.left && tabs.bottom > search.top && search.bottom > tabs.top);
+      return {
+        overlaps: Boolean(tabs && search && tabs.right > search.left && tabs.bottom > search.top && search.bottom > tabs.top),
+        controls: bounds(".queue-controls"),
+        tabs: bounds(".queue-tabs"),
+        filters: bounds(".queue-filters"),
+        search: bounds(".queue-search"),
+      };
     });
-    assert.equal(overlap, false, `Search does not cover any part of the Queue pile buttons at ${width}px`);
+    assert.equal(overlap.overlaps, false, `Search does not cover any part of the Queue pile buttons at ${width}px: ${JSON.stringify(overlap)}`);
+    if (width === 1440) {
+      const rowDelta = await page.evaluate(() => {
+        const tabs = document.querySelector(".queue-tabs")?.getBoundingClientRect();
+        const filters = document.querySelector(".queue-filters")?.getBoundingClientRect();
+        return tabs && filters ? Math.abs(tabs.top - filters.top) : Number.POSITIVE_INFINITY;
+      });
+      assert.ok(rowDelta <= 1, "the Large-text desktop Queue keeps tabs and filters on one row at 1440px");
+    }
     for (let index = 0; index < count; index += 1) {
       const button = buttons.nth(index);
       await button.click();
@@ -277,7 +295,7 @@ async function largeQueueFiltersRemainClickable() {
     await page.getByLabel("Sort", { exact: true }).selectOption("newest");
     await page.getByLabel("Section", { exact: true }).selectOption("all");
   }
-  step("every Large-text Queue filter works at 1440px and 390px, with normal-text wraps preserved through 1279px");
+  step("every Large-text Queue filter works at 1440px and 390px, the desktop row stays on one line, and normal-text wraps remain through 1279px");
 }
 
 async function main() {

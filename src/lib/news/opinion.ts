@@ -116,12 +116,11 @@ export const getPaperEditorialVoice = createServerFn({ method: "GET" })
 
 export const savePaperEditorialVoice = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => {
-    if (typeof value !== "string" || value.length > 200_000) {
-      throw new Error("The voice must be text under 200,000 characters.");
-    }
-    return value;
-  })
+  .validator((value: unknown) =>
+    editorialText
+      .refine((text) => text.length <= 200_000, "The voice must be text under 200,000 characters.")
+      .parse(value),
+  )
   .handler(async ({ context, data }) => {
     assertOwner(context.role);
     const { savePaperVoiceText } = await import("./voice.server.ts");

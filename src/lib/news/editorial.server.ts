@@ -926,6 +926,7 @@ export async function ensureEditorialRequestSchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      voice_mode text not null default 'paper',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
@@ -934,7 +935,6 @@ export async function ensureEditorialRequestSchema() {
   `,
     `alter table editorial_requests add column if not exists model_choice text not null default 'auto'`,
     `alter table editorial_requests add column if not exists source_text text not null default ''`,
-    `alter table editorial_requests add column if not exists voice_mode text not null default 'paper'`,
   ]);
 }
 

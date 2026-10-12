@@ -16,7 +16,7 @@ import {
   leaveAsEditor,
   listPendingEditorInvites,
 } from "./membership";
-import { claimEmail, claimToken, recoveryCodeInput, setupCodeInput } from "./request-input.ts";
+import { claimEmail, claimToken, recoveryCodeInput, rowId, setupCodeInput } from "./request-input.ts";
 import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.server.ts";
 import {
   generateRecoveryCodes,
@@ -204,11 +204,7 @@ export const listMyPendingInvites = createServerFn({ method: "GET" })
 
 export const cancelMyPendingInvite = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((value: unknown) => {
-    const id = Number(value);
-    if (!Number.isInteger(id) || id <= 0) throw new Error("A pending invite id is required.");
-    return id;
-  })
+  .validator((value: unknown) => rowId.parse(value))
   .handler(async ({ context, data: inviteId }) => {
     const cancelled = await cancelPendingEditorInvite(context.userId, inviteId);
     return cancelled
