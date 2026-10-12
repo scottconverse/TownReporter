@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  NO_MODEL_IN_TIME,
   failOverAndRetry,
   failOverOperationAndRetry,
+  rungTimeoutMs,
   runPinnedCallWithFailover,
   storyProviderFailure,
   type DraftInput,
@@ -160,6 +162,70 @@ describe("runPinnedCallWithFailover", () => {
     assert.equal(calls, 1);
     assert.equal(result.snapshot, snapshot);
     assert.deepEqual(result.result, { ok: false, error: refusal });
+  });
+
+  it("does not walk a failed ladder again on a retry in the same draft run", async () => {
+    const tried = new Set<string>();
+    const calls: string[] = [];
+    const first = { modelChoice: "deepseek-flash" };
+    const failing = async (snapshot: { modelChoice: string }) => {
+      calls.push(snapshot.modelChoice);
+      return { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT };
+    };
+    const options = {
+      source: "editor" as const,
+      exhaustLadder: true,
+      tried,
+      run: failing,
+      probe: readyProbe(),
+      resolve: async (choice: string) => ({ modelChoice: choice }),
+      onSwitch: async () => {},
+    };
+
+    const once = await runPinnedCallWithFailover({ ...options, snapshot: first });
+    const callsAfterFirst = calls.length;
+    const retry = await runPinnedCallWithFailover({ ...options, snapshot: once.snapshot });
+
+    assert.ok(callsAfterFirst >= 1);
+    assert.equal(calls.length, callsAfterFirst, "the retry must not re-run a rung that already failed");
+    assert.equal(retry.result.ok, false);
+    assert.match(retry.result.error ?? "", /already failed/);
+  });
+
+  it("stops without switching once the draft run has no time for another model", async () => {
+    const switches: string[] = [];
+    const snapshot = { modelChoice: "codex-balanced" };
+
+    const result = await runPinnedCallWithFailover({
+      snapshot,
+      source: "editor",
+      exhaustLadder: true,
+      run: async () => ({ ok: false as const, error: NO_MODEL_IN_TIME }),
+      outOfTime: () => true,
+      probe: readyProbe(),
+      resolve: async () => {
+        throw new Error("no time left, so no fallback may be resolved");
+      },
+      onSwitch: async ({ nextChoice }) => {
+        switches.push(nextChoice);
+      },
+    });
+
+    assert.deepEqual(switches, []);
+    assert.equal(result.result.error, NO_MODEL_IN_TIME);
+  });
+});
+
+describe("rungTimeoutMs", () => {
+  it("gives each model its own limit, never the leftover of an earlier model", () => {
+    const deadlineAt = 100_000;
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 150_000, deadlineAt, now: 0 }), { timeoutMs: 100_000 });
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 20_000, deadlineAt, now: 0 }), { timeoutMs: 20_000 });
+  });
+
+  it("refuses a call when the run has under the shortest real limit left, instead of sending 1 ms", () => {
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 150_000, deadlineAt: 100_000, now: 99_999 }), { refused: true });
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 1, deadlineAt: 100_000, now: 0 }), { refused: true });
   });
 });
 
