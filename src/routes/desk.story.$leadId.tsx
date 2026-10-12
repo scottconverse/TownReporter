@@ -129,7 +129,7 @@ import {
   retiredModelChoiceNote,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
-import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { automaticEffortNote, defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { providerAvailability } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
@@ -3223,6 +3223,9 @@ function StoryPage() {
                   disabled={waiting || reconcileActive || savePending}
                   compact
                 />
+                {modelChoice === "auto" ? (
+                  <p className="model-picker-help" role="status">{automaticEffortNote(modelEffort)}</p>
+                ) : null}
                 <DraftScopePicker
                   value={researchScope}
                   onChange={setResearchScope}

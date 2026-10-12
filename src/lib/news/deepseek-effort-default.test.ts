@@ -123,7 +123,8 @@ describe("the shared model picker shows None for DeepSeek", () => {
     assert.equal(pickerShownEffort("deepseek-flash", null, null), "none");
   });
 
-  it("keeps an effort the editor picked by hand on screen", () => {
-    assert.equal(pickerShownEffort("deepseek-flash", null, "high"), "high");
+  it("shows None even when the editor picked High by hand, because the run is none", () => {
+    assert.equal(pickerShownEffort("deepseek-flash", null, "high"), "none");
+    assert.equal(pickerShownEffort("deepseek-flash", null, "max"), "none");
   });
 });

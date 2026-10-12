@@ -10,6 +10,7 @@ import {
   type ProviderId,
   type RetiredProviderId,
   modelEffort,
+  storedEffortIsLegal,
   type ModelEffort,
 } from "./provider-registry.ts";
 import type { ProviderProbe } from "./ai.ts";
@@ -287,7 +288,7 @@ export function parseForcedRuntimeSnapshot(
       ) {
         const parsedEffort =
           row.modelEffort === undefined ? null : modelEffort(row.runtime, row.modelEffort, local.id);
-        if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
+        if (row.modelEffort !== undefined && !storedEffortIsLegal(row.runtime, row.modelEffort, local.id)) return null;
         return {
           runtime: row.runtime,
           modelChoice: row.runtime,
@@ -316,7 +317,7 @@ export function parseForcedRuntimeSnapshot(
       const parsedEffort = row.modelEffort === undefined
         ? null
         : modelEffort("local-model", row.modelEffort, local.id);
-      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
+      if (row.modelEffort !== undefined && !storedEffortIsLegal("local-model", row.modelEffort, local.id)) return null;
       return {
         runtime: "local",
         modelChoice: "local-model",
@@ -341,8 +342,8 @@ export function parseForcedRuntimeSnapshot(
       const parsedEffort = row.modelEffort === undefined
         ? null
         : modelEffort(row.runtime, row.modelEffort, row.model);
-      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
-      return row as ForcedRuntimeSnapshot;
+      if (row.modelEffort !== undefined && !storedEffortIsLegal(row.runtime, row.modelEffort, row.model)) return null;
+      return { ...row, ...(parsedEffort ? { modelEffort: parsedEffort } : {}) } as ForcedRuntimeSnapshot;
     }
     const runtime = row.runtime as ForcedRuntime;
     // A retired id (`RETIRED_PROVIDER_IDS`) has no entry and no transport
@@ -367,8 +368,8 @@ export function parseForcedRuntimeSnapshot(
       row.transport === entry.kind
     ) {
       const parsedEffort = row.modelEffort === undefined ? null : modelEffort(choice, row.modelEffort);
-      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
-      return row as ForcedRuntimeSnapshot;
+      if (row.modelEffort !== undefined && !storedEffortIsLegal(choice, row.modelEffort)) return null;
+      return { ...row, ...(parsedEffort ? { modelEffort: parsedEffort } : {}) } as ForcedRuntimeSnapshot;
     }
   }
   return null;

@@ -31,7 +31,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
-import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { automaticEffortNote, defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { OverrideAnyway } from "@/components/override-anyway";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -608,6 +608,9 @@ function OpinionPage() {
             onEffortChange={setModelEffort}
             disabled={start.isPending}
           />
+          {modelChoice === "auto" ? (
+            <p className="model-picker-help" role="status">{automaticEffortNote(modelEffort)}</p>
+          ) : null}
           {startWarning ? <OverrideAnyway warning={startWarning} actionWord="Write"
             busy={start.isPending} onOverride={() => {
               acceptedOverrides.current = [...new Set([...acceptedOverrides.current, startWarning.key])];

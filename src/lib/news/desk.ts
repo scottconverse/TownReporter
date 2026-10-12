@@ -287,6 +287,7 @@ import {
   FORCED_FAILOVER_LADDER,
   isAutomaticRungId,
   modelEffort,
+  recordedModelEffort,
   type ModelEffort,
   type ProviderOverrides,
 } from "./provider-registry.ts";
@@ -3777,6 +3778,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         await setStage(job.id, `Switched to ${modelChoiceLabel(activeBatchSnapshot.modelChoice)}: ${receipt.switchReason}`);
         await setFailoverNote(job.id, receipt.switchNote);
         activeBatchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, activeBatchSnapshot, receipt);
+      }
+      // A writer that answered on its first rung never switched, so the job row
+      // still holds the pick ("auto"). Record the rung that actually answered, so
+      // "Last draft" names the model that wrote the saved draft, never the pick.
+      if (attempted.result.ok && !switchState.receipt && activeBatchSnapshot.modelChoice !== job.model_choice) {
+        const answeredEffort = recordedModelEffort(
+          activeBatchSnapshot.modelChoice,
+          "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
+        );
+        await setModelRuntime(job.id, activeBatchSnapshot.modelChoice, answeredEffort);
+        job.model_choice = activeBatchSnapshot.modelChoice;
       }
       return attempted.result;
     };

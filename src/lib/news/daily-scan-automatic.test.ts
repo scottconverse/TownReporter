@@ -137,8 +137,9 @@ describe("daily scan on Automatic", () => {
         try {
           const receipt = await validateDailyRuntime(1, "auto", null);
           assert.equal(receipt.requestedRuntime, "auto");
-          // Automatic's own default effort, the one the policy row stores.
-          assert.equal(receipt.requestedEffort, "medium");
+          // Automatic has no single effort of its own: no pick is recorded as
+          // requested, and the run record below shows what the rung really ran at.
+          assert.equal(receipt.requestedEffort, null);
           assert.equal(receipt.resolvedRuntime, "deepseek-flash");
           assert.equal(receipt.modelChoice, "deepseek-flash");
           assert.equal(receipt.transport, "local");

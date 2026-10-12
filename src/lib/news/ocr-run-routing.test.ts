@@ -58,8 +58,9 @@ describe("ordinary public-document OCR model routing", () => {
       globalThis.fetch = originalFetch;
     }
     assert.equal(bodies[0]?.reasoning_effort, "none", "Off must explicitly disable thinking");
-    assert.equal(bodies[1]?.reasoning_effort, "high");
-    assert.equal(bodies[2]?.reasoning_effort, "max");
+    // DeepSeek v4.1 Flash always runs with thinking off, even when the editor picked High or Max (Release H).
+    assert.equal(bodies[1]?.reasoning_effort, "none");
+    assert.equal(bodies[2]?.reasoning_effort, "none");
     assert.equal("reasoning_effort" in (bodies[3] ?? {}), false);
   });
 
