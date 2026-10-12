@@ -95,7 +95,7 @@ test("an unreadable Gemini key is disclosed before the draft press", () => {
   availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
   try {
     const html = render({ value: "custom:gemini" });
-    assert.match(html, /This connection&#x27;s key cannot be read.*Open Models and paste the key again/);
+    assert.match(html, /Gemini \(key\) — key can&#x27;t be read\. Fix it in Server -&gt; Connections\./);
     assert.doesNotMatch(html, /value="custom:gemini"[^>]*disabled=""/);
   } finally { availabilityStub.__setConnections([]); }
 });
@@ -385,7 +385,7 @@ test("a stored SuperGrok choice on the forced surface falls back to Automatic", 
 for (const [choice, error, sentence] of [
   ["claude-haiku", "Claude is signed out. Open Claude Code, sign in, then try again.", "Claude is signed out on this server. Sign in once: run claude auth login on the server."],
   ["claude-sonnet", "Claude Code CLI not found. Install it.", "Claude Code is not installed on this server."],
-  ["custom:broken", "The saved API key cannot be decrypted.", "This connection's key cannot be read. Open Models and paste the key again."],
+  ["custom:broken", "The saved API key cannot be decrypted.", "Custom (key) — key can't be read. Fix it in Server -> Connections."],
 ]) test(`${choice}: option and readiness line disclose the server reason`, async () => {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
@@ -395,7 +395,8 @@ for (const [choice, error, sentence] of [
   availabilityStub.__setConnections(custom ? [custom] : []);
   try {
     const page = await browser.newPage();
-    const input = { choice, availability, customConnection: custom, label: "Claude" };
+    // The picker names a custom connection by its connection name (model-picker.tsx).
+    const input = { choice, availability, customConnection: custom, label: custom ? custom.name : "Claude" };
     const reason = writerBar.writerUnavailableReason?.(input);
     const dot = writerBar.readinessDot(false, { state: "ready", reason: "Story checked." }, reason);
     await page.setContent(renderToStaticMarkup(createElement("div", {},

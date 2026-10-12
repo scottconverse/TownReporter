@@ -15,7 +15,9 @@ import {
   enabledAutomaticLadder,
   defaultModelEffort,
   modelEffort,
+  modelEffortLabel,
   modelEffortsFor,
+  recordedModelEffort,
   opinionAutomaticLadder,
   plannerModelFor,
   providerEnabled,
@@ -667,5 +669,21 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
 
   it("has no planner substitution -- a local server has never heard of another provider's model", () => {
     assert.equal(plannerModelFor("local-model"), "");
+  });
+});
+
+describe("DeepSeek v4.1 Flash runs with effort none, and the receipt says so", () => {
+  it("a local-model run of deepseek-v4.1-flash:cloud with no pick records none", () => {
+    assert.equal(recordedModelEffort("local-model", null, "deepseek-v4.1-flash:cloud"), "none");
+    assert.equal(recordedModelEffort("local-model", undefined, "deepseek-v4.1-flash:cloud"), "none");
+  });
+
+  it("the picker and Models read the same label for that model: None — fastest", () => {
+    assert.equal(modelEffortLabel("none", "deepseek-v4.1-flash:cloud"), "None — fastest");
+    assert.equal(modelEffortLabel("none", "deepseek-flash"), "None — fastest");
+  });
+
+  it("Qwen models that default to thinking off keep their own wording", () => {
+    assert.equal(modelEffortLabel("none", "qwen3.8"), "Off — no extra thinking");
   });
 });

@@ -916,13 +916,20 @@ export function openAiCompatibleModelEfforts(
   return [];
 }
 
+/** The one label source for an effort: every picker, Models, and receipts use it.
+ * DeepSeek v4.1 Flash reads "None — fastest" whatever provider id reaches it;
+ * the Off wording stays only for the Qwen models that default to thinking off. */
 export function modelEffortLabel(
   effort: ModelEffort,
   model?: string | null): string {
-  if (effort === "none" && defaultsToThinkingOff(model)) {
+  if (effort === "none" && defaultsToThinkingOff(model) && !isDeepSeekFlashModel(model)) {
     return "Off — no extra thinking";
   }
   return MODEL_EFFORT_LABELS[effort];
+}
+
+function isDeepSeekFlashModel(model: string | undefined | null): boolean {
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model?.trim() ?? "");
 }
 
 /** Effort values accepted by TownReporter's transport for this choice.
@@ -1012,6 +1019,20 @@ export function modelEffort(
   return typeof value === "string" && choices.includes(value as ModelEffort)
     ? (value as ModelEffort)
     : defaultModelEffort(id, exactModel);
+}
+
+/** The effort a run records in its receipt. A local model whose exact id declares
+ * its own levels resolves through them, so no pick means that model's default
+ * (DeepSeek v4.1 Flash: none). Other choices keep `modelEffort` unchanged. */
+export function recordedModelEffort(
+  id: string | undefined | null,
+  value: unknown,
+  exactModel?: string | null,
+): ModelEffort | null {
+  if (id === "local-model" && exactModel && modelEffortsFor(id, exactModel).length) {
+    return modelEffort(id, value, exactModel);
+  }
+  return modelEffort(id, value);
 }
 
 /** Every entry a given picker should offer, registry order, Automatic aside. */

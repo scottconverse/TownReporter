@@ -607,7 +607,16 @@ function StoryPage() {
         if (choice === receipt.requestedRuntime && receipt.requestedCustomModelLabel) return receipt.requestedCustomModelLabel as string;
       } catch { /* Legacy receipt; use the connection list when it arrives. */ }
     }
-    return modelChoiceLabel(choice, "story", connection);
+    const label = modelChoiceLabel(choice, "story", connection);
+    // DHC03: a local run names the exact model it pinned, read from the job
+    // receipt (the same receipt the Last draft line already reads).
+    if (choice === "local-model" && choice === data?.job?.model_choice) {
+      try {
+        const exactModel = JSON.parse(data?.job?.result_json ?? "{}").localModel?.id;
+        if (typeof exactModel === "string" && exactModel) return `${label} (${exactModel})`;
+      } catch { /* Legacy receipt; the plain label stays. */ }
+    }
+    return label;
   };
 
   const previousJobError =

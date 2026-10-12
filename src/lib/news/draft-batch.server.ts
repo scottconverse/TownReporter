@@ -81,7 +81,7 @@ modelChoiceExplicit = false,
   }
   try {
     const snapshot = await validate(newsroomId, runtime, requestedEffort);
-    return { ...snapshot, requestedRuntime: runtime, requestedEffort, resolvedRuntime: runtime, switchReason: null, switchNote: null ,
+    return { ...snapshot, requestedRuntime: runtime, requestedEffort: requestedEffort ?? snapshot.modelEffort ?? null, resolvedRuntime: runtime, switchReason: null, switchNote: null ,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -113,7 +113,7 @@ modelChoiceExplicit = false,
     return {
       ...snapshot,
       requestedRuntime: runtime,
-      requestedEffort,
+      requestedEffort: requestedEffort ?? snapshot.modelEffort ?? null,
       resolvedRuntime: snapshot.runtime,
       switchReason: failoverReasonPhrase(previousLabel, plan.reason),
       switchNote: failoverNoteSentence(plan.label, previousLabel, plan.reason),

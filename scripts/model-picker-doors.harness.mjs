@@ -91,8 +91,10 @@ async function fileModule(url) {
   return pathToFileURL(file).href;
 }
 export const cleanupDoorModules = () => rm(fixtureRoot, { recursive: true });
-export async function doorModule(path, exports = []) {
-  const key = path + exports.join(",");
+// `extra` replaces more module names for one door (e.g. DeskShell, which keeps the
+// Queue header's `actions` slot; the default shell drops it).
+export async function doorModule(path, exports = [], extra = {}) {
+  const key = path + exports.join(",") + JSON.stringify(extra);
   if (cache.has(key)) return cache.get(key);
   const imports = {
     "@/components/model-picker": modelPickerUrl,
@@ -131,7 +133,7 @@ export async function doorModule(path, exports = []) {
   })) {
     if (path !== child) imports[name] = await doorModuleChild(child);
   }
-  const url = await screenModuleUrl(path, overrides, [], {
+  const url = await screenModuleUrl(path, { ...overrides, ...extra }, [], {
     imports,
     transform: (source, file) =>
       seedState(source, file) + (exports.length ? `\nexport {${exports.join(",")}};` : ""),

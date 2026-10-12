@@ -1303,6 +1303,7 @@ function QueuePage() {
                 */}
                 <ModelPicker
                   scope="forced"
+                  label="Model for these stories"
                   value={batchRuntime}
                   onChange={(choice) => {
                     const runtime = choice as DraftBatchRuntime;

@@ -76,7 +76,7 @@ export function readinessFailureMessage(choice: string, name: string, message: s
     if (/CLI not found|not installed/i.test(message)) return "Claude Code is not installed on this server.";
     if (/signed out|not logged|sign in|session expired/i.test(message)) return "Claude is signed out on this server. Sign in once: run claude auth login on the server.";
   }
-  if (isCustomModelChoice(choice) && /key.*(?:decrypt|cannot be read)|decrypt.*key/i.test(message)) return "This connection's key cannot be read. Open Models and paste the key again.";
+  if (isCustomModelChoice(choice) && /key.*(?:decrypt|cannot be read)|decrypt.*key/i.test(message)) return `${name} (key) — key can't be read. Fix it in Server -> Connections.`;
   if (/usage limit|out of quota|quota.*(?:exceeded|exhausted)|insufficient_quota/i.test(message)) return `${name} hit its usage limit.`;
   return `${name} is not ready: ${message}`;
 }
