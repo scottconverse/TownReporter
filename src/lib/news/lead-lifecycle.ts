@@ -44,16 +44,6 @@ function normalizeContext(
   return { context, newsroomId: context.newsroomId };
 }
 
-/** The kill reason Compare and the Queue write for a duplicate (desk-copy `duplicateKillReason`). */
-const DUPLICATE_KILL_PREFIX = "Duplicate of ";
-
-/** The policy key for "This lead has a written draft" on a status change. */
-const DRAFTED_KILL_WARNING_KEY = "lead-status-drafted";
-
-function isDuplicateKillReason(reason: string | undefined): boolean {
-  return reason?.startsWith(DUPLICATE_KILL_PREFIX) ?? false;
-}
-
 export async function setLeadStatusForEditor(
   sql: AuditSqlTag,
   context: LeadLifecycleContext | number,
@@ -89,19 +79,11 @@ export async function setLeadStatusForEditor(
       )
     : null;
   if (publishedWarning) return publishedWarning;
-  // DHG-1: a kill as a duplicate (Compare's "Same story" press) on a lead with a
-  // saved draft. The editor has already confirmed "Kill X as a duplicate of Y?",
-  // and the kill keeps the draft, so the draft warning is answered here. The
-  // answer is still audited by editorWarning, and the kill still gets Undo.
-  const duplicateKill = data.status === "killed" && isDuplicateKillReason(reason);
-  const draftedOverride = duplicateKill
-    ? [...(data.override ?? []), DRAFTED_KILL_WARNING_KEY]
-    : data.override;
   const draftedWarning = lead.status === "drafted" || lead.has_draft
     ? await editorWarning(
         { ...ctx, sql },
-        typeof context === "number" ? undefined : draftedOverride,
-        DRAFTED_KILL_WARNING_KEY,
+        typeof context === "number" ? undefined : data.override,
+        "lead-status-drafted",
         "This lead has a written draft. Changing its status will keep the saved draft.",
         { kind: "lead", id: data.id },
       )
