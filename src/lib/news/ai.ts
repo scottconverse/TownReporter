@@ -1335,8 +1335,12 @@ function reasoningEffortFor(
   if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
   const declared = openAiCompatibleModelEfforts(model);
   if (requested) {
-    if (!declared.includes(requested)) return undefined;
-    return requested;
+    if (declared.includes(requested)) return requested;
+    // DeepSeek v4.1 Flash is always Off (Scott's standing rule). A stray effort
+    // Automatic carried in, such as "medium", becomes Off here; it must not fall
+    // to provider default, where thinking spends the output budget.
+    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+    return deepSeekFlash && declared.includes("none") ? "none" : undefined;
   }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
   if (override && REASONING_EFFORTS.has(override)) {
