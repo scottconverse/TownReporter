@@ -431,6 +431,15 @@ function StoryPage() {
     would otherwise happen silently.
   */
   const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
+  /*
+    DHG-3: the "Suggest headlines" press runs the model its own picker shows.
+    Until the editor picks, that is the "Headline suggestions" job's model from
+    Server -> Models "Who does what" (headlineAssignment); a pick replaces both
+    the model and its effort for this press and the dialog's.
+  */
+  const [headlinePick, setHeadlinePick] = useState<{ model: StoryModelChoice; effort: ModelEffort | null } | null>(null);
+  const headlineModel = (headlinePick?.model ?? headlineAssignment.providerId) as StoryModelChoice;
+  const headlineEffort = headlinePick ? headlinePick.effort : headlineAssignment.effort;
   const [headlineNote, setHeadlineNote] = useState("");
 
   const [liveWarning, setLiveWarning] = useState<{
@@ -1703,8 +1712,8 @@ function StoryPage() {
         data: {
           leadId: id,
           headline: headline.trim() || undefined,
-          modelChoice: headlineAssignment.providerId,
-          modelEffort: headlineAssignment.effort,
+          modelChoice: headlineModel,
+          modelEffort: headlineEffort,
         },
       }),
     onSuccess: (res) => {
@@ -3460,6 +3469,17 @@ function StoryPage() {
                   headline, and what a printed story shows is the article's own
                   field, saved by "Save headline" above.
                 */}
+                <ModelPicker
+                  scope="story"
+                  label="Headline model"
+                  layout="stacked"
+                  compact
+                  value={headlineModel}
+                  effort={headlineEffort}
+                  onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
+                  onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
+                  disabled={suggest.isPending || waiting}
+                />
                 <button
                   type="button"
                   className="btn"
@@ -4408,8 +4428,8 @@ function StoryPage() {
       <HeadlineDialog
         leadId={id}
         current={headline}
-        defaultModel={headlineAssignment.providerId}
-        defaultEffort={headlineAssignment.effort}
+        defaultModel={headlineModel}
+        defaultEffort={headlineEffort}
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {

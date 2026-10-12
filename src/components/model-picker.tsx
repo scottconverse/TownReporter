@@ -15,6 +15,7 @@ import {
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import {
+  automaticEffortNote,
   modelEffortLabel,
   modelEffortsFor,
   pickerShownEffort,
@@ -580,7 +581,14 @@ export function ModelPicker(props: Props) {
               )
             }
           >
-            {selectedEffort == null ? <option value="">Provider default</option> : null}
+            {/*
+              DHF-6 / DHF-8: Automatic has no single effort, so its empty choice
+              says what each model does (automaticEffortNote), not a bare
+              "Provider default" that reads as no answer.
+            */}
+            {selectedEffort == null ? (
+              <option value="">{shownValue === "auto" ? automaticEffortNote(null) : "Provider default"}</option>
+            ) : null}
             {effortOptions.map((effort) => (
               <option key={effort} value={effort}>
                 {modelEffortLabel(effort, exactModel)}

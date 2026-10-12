@@ -107,7 +107,7 @@ const doorScopes = {
   "Server Writing models": assignmentScopes,
   "Meeting Draft with AI": ["story"],
   Transcript: ["story"],
-  "Meeting Redraft": ["story", "story"],
+  "Meeting Redraft": ["story", "story", "story"],
 };
 
 // A single parity test exercises the production screen/door components. It
@@ -355,7 +355,7 @@ test("FM3c: rendered shared options and actual local select agree across AI door
       const counts = {
         "Today New story": 3,
         "Drafts New story destination": 2,
-        "Meeting Redraft": 2,
+        "Meeting Redraft": 3,
         "Models Who does what": 27,
         "Server Writing models": 27,
       };

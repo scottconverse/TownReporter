@@ -837,6 +837,25 @@ function OpinionPage() {
                       </Link>
                     ) : null}
                     {/*
+                      DHG-2: a claims row keeps Repair claims as its primary and
+                      also offers "Publish anyway". The server treats the claims
+                      appendix as a warning the editor may accept, so the first
+                      press asks for the warning (the panel below repeats its
+                      sentence) and the second press -- "I accept these claims are
+                      unreviewed" -- publishes and records the override.
+                    */}
+                    {claims && r.draft_id && r.finished_at && !r.error && !r.published_slug ? (
+                      <InkButton
+                        tone="quiet"
+                        disabled={publish.isPending}
+                        onClick={() => publish.mutate({ draftId: r.draft_id! })}
+                      >
+                        {publish.isPending && publish.variables?.draftId === r.draft_id
+                          ? "Publishing…"
+                          : "Publish anyway"}
+                      </InkButton>
+                    ) : null}
+                    {/*
                       Unit CA, note 1. A finished piece offered Read it / Edit
                       / Delete and nothing else, and "Publish to the paper"
                       lived only inside the panel Read it opens -- so an editor
@@ -854,8 +873,9 @@ function OpinionPage() {
                       The panel has no confirm step and neither does this: the
                       press is the confirmation, exactly as it is up there.
                       `publishEditorial` still refuses a piece whose claims
-                      appendix is incomplete, so the claims row keeps Repair
-                      claims as its primary and draws no Publish at all.
+                      appendix is incomplete on a bare press, so the claims row
+                      keeps Repair claims as its primary and offers "Publish
+                      anyway" (DHG-2, above) instead of a plain Publish.
                     */}
                     {r.draft_id && r.finished_at && !r.error && !r.published_slug && !claims ? (
                       <>
@@ -1202,6 +1222,9 @@ function OpinionPublishWarnings({
   busy: boolean;
   onPublishAnyway: () => void;
 }) {
+  /* DHG-2: the claims warning's confirm uses the Story page's own words. */
+  const claimsWarning = warnings.some((warning) => warning.key === "editorial-sources");
+  const confirmWords = claimsWarning ? "Publish anyway — I accept these claims are unreviewed" : "Publish anyway";
   return (
     <div className="mt-3 border border-rule bg-paper-2 p-4" role="alert">
       {warnings.map((warning) => (
@@ -1211,7 +1234,7 @@ function OpinionPublishWarnings({
       ))}
       <div className="mt-3">
         <button type="button" className="btn" disabled={busy} onClick={onPublishAnyway}>
-          {busy ? "Publishing…" : "Publish anyway"}
+          {busy ? "Publishing…" : confirmWords}
         </button>
       </div>
     </div>
