@@ -21,7 +21,9 @@ import {
   queueCounts,
   queueMatchesSearch,
   queueNeedle,
+  queueRowTick,
   queueSelect,
+  queueSelectAllShown,
   queueSort,
   QUEUE_FILTERS,
   QUEUE_SORTS,
@@ -206,6 +208,32 @@ test("a lead killed today is on the Killed tab above older kills, even one that 
   );
 });
 
+test("on the Killed tab, Newest first is the kill time, not the filing time", () => {
+  // 359 was filed after 437 but killed a fortnight earlier; the pile must put
+  // the 10-12 kill above the 09-30 kill whatever the filing dates say.
+  const rows = [
+    lead({ id: 359, status: "killed", created_at: "2026-10-01T00:00:00.000Z", killed_at: "2026-09-30T09:00:00.000Z" }),
+    lead({ id: 437, status: "killed", created_at: "2026-09-01T00:00:00.000Z", killed_at: "2026-10-12T02:31:00.000Z" }),
+    lead({ id: 452, status: "killed", created_at: "2026-09-15T00:00:00.000Z", killed_at: "2026-10-12T02:29:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "newest", "killed").map((l) => l.id),
+    [437, 452, 359],
+  );
+});
+
+test("on the Killed tab, Oldest first is the kill time, earliest first, kills with no time last", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-01T00:00:00.000Z", killed_at: null }),
+    lead({ id: 2, status: "killed", created_at: "2026-10-01T00:00:00.000Z", killed_at: "2026-10-12T02:31:00.000Z" }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-20T00:00:00.000Z", killed_at: "2026-09-30T09:00:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "oldest", "killed").map((l) => l.id),
+    [3, 2, 1],
+  );
+});
+
 test("the Killed tab's Best order does not leak into the score order on other tabs", () => {
   const rows = [
     lead({ id: 1, status: "new", newsworthiness: 1, last_resurfaced_at: "2026-09-05T00:00:00.000Z" }),
@@ -298,4 +326,17 @@ test("the counts and the tabs cannot disagree: each tab's length is its own coun
     const shown = queueSelect(rows, PRINTED, { filter, section: "all", sort: "best", needle: "" });
     assert.equal(shown.length, counts[filter], `tab ${filter}`);
   }
+});
+
+test("ticking one row picks that row and no other, and unticking drops only it", () => {
+  assert.deepEqual(queueRowTick([], 7, true), [7]);
+  assert.deepEqual(queueRowTick([3, 7], 9, true), [3, 7, 9]);
+  assert.deepEqual(queueRowTick([3, 7, 9], 7, false), [3, 9]);
+  assert.deepEqual(queueRowTick([3, 9], 7, false), [3, 9], "unticking a row that was never picked changes nothing");
+});
+
+test("the header box picks exactly the leads on screen, and clears them all", () => {
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], true), [1, 2, 3]);
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], false), []);
+  assert.deepEqual(queueSelectAllShown([], true), []);
 });

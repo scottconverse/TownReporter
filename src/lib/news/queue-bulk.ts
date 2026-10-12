@@ -1,5 +1,6 @@
 import { editorTitle } from "./desk-copy.ts";
 import { parseNotes } from "./notes.ts";
+import { bulkDeskWarnings, type BulkDeskWarning } from "./desk-warning.ts";
 
 /**
  * What a bulk press on the Queue says when it is finished.
@@ -122,6 +123,48 @@ export function bulkStatusSummary(report: Pick<BulkStatusReport, "status" | "don
   const failed = `${report.failures.length} failed`;
   const first = report.failures[0];
   return first ? `${head} ${failed}: ${first}` : `${head} ${failed}.`;
+}
+
+/**
+ * Settle a bulk Kill, answering its written-draft warnings inside the press.
+ *
+ * Walk D2 (D2-a): a Kill of two open leads, one of them with a written draft,
+ * killed one lead and left the other unresolved -- "Killing…" on the strip and
+ * "Another change to this selection is still being saved" on its neighbor. The
+ * press is already one explicit choice over every selected lead, and it has one
+ * Undo that puts every killed lead back, so the draft warning is answered by
+ * that press: the drafted leads are sent again once, carrying their own draft
+ * override. Only a draft warning is answered this way. Any other warning (a
+ * lead already in print, for one) is left in the results for the desk to show
+ * with its own "anyway" button.
+ *
+ * `send` is the per-lead write for the whole list, in the same order as `ids`;
+ * `drafted` is the warnings that were answered, for the summary to say so.
+ */
+export async function settleBulkKill(
+  ids: readonly number[],
+  send: (
+    ids: readonly number[],
+    overrideById: Record<number, string[]>,
+  ) => Promise<PromiseSettledResult<unknown>[]>,
+  overrideById: Record<number, string[]> = {},
+): Promise<{ settled: PromiseSettledResult<unknown>[]; drafted: BulkDeskWarning[] }> {
+  const first = await send(ids, overrideById);
+  const drafted = bulkDeskWarnings(ids, first).filter((warning) =>
+    warning.key.toLowerCase().includes("draft"),
+  );
+  if (drafted.length === 0) return { settled: first, drafted };
+  const retryIds = drafted.map((warning) => warning.id);
+  const retryOverrides: Record<number, string[]> = { ...overrideById };
+  for (const warning of drafted) {
+    retryOverrides[warning.id] = [...new Set([...(overrideById[warning.id] ?? []), warning.key])];
+  }
+  const second = await send(retryIds, retryOverrides);
+  const settled = ids.map((id, index) => {
+    const at = retryIds.indexOf(id);
+    return at === -1 ? first[index] : second[at];
+  });
+  return { settled, drafted };
 }
 
 /** Each selected lead keeps its own recorded reason in the delete confirmation. */

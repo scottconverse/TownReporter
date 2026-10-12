@@ -204,6 +204,29 @@ describe("failOverAndRetry", () => {
     );
   });
 
+  it("the failover note names the effort the failed DeepSeek rung actually ran at, not the job's medium", async () => {
+    let noteWritten = "";
+
+    await failOverAndRetry({
+      job: job({ model_choice: "deepseek-flash" }),
+      error: LIVE_401,
+      draftInput: { ...draftInput, modelEffort: "medium" },
+      runReport: async () => successfulDraft,
+      probe: readyProbe(),
+      setModelChoice: async () => {},
+      setStage: async () => {},
+      setFailoverNote: async (_id, note) => {
+        noteWritten = note;
+      },
+    });
+
+    assert.equal(
+      noteWritten,
+      "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed (DeepSeek v4.1 Flash ran at effort none)",
+      "DeepSeek v4.1 Flash runs with thinking off, so the receipt must say none, not the requested medium",
+    );
+  });
+
   it("fails over on a timeout / zero-output error: picks the next rung and words the switch as 'timed out'", async () => {
     const modelChoiceCalls: [number, string][] = [];
     const stageMessages: string[] = [];

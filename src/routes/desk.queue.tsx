@@ -42,13 +42,14 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import type { QueueFilter, QueueSort } from "@/lib/news/queue-rows";
+import { queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
   bulkDeleteReasonLines,
   bulkStatusSummary,
+  settleBulkKill,
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
@@ -978,11 +979,16 @@ function QueuePage() {
       */
       bulkMuted.current = true;
       try {
-        const settled = await Promise.allSettled(
-          input.ids.map((id) =>
-            setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: input.overrideById?.[id], restore: input.restores?.[id] }),
-          ),
-        );
+        const sendAll = (ids: readonly number[], overrideById: Record<number, string[]>) =>
+          Promise.allSettled(
+            ids.map((id) =>
+              setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: overrideById[id], restore: input.restores?.[id] }),
+            ),
+          );
+        // D2-a: a Kill answers its written-draft warnings inside this press, so no lead is left waiting on one.
+        const { settled, drafted } = input.status === "killed"
+          ? await settleBulkKill(input.ids, sendAll, input.overrideById ?? {})
+          : { settled: await sendAll(input.ids, input.overrideById ?? {}), drafted: [] };
         const warnings = bulkDeskWarnings(input.ids, settled);
         const allowed = input.ids.map((id, index) => ({ id, outcome: settled[index] })).filter(({ outcome }) => outcome.status !== "fulfilled" || !deskWarning(outcome.value));
         const report = bulkStatusReport({
@@ -990,7 +996,7 @@ function QueuePage() {
           reason: (error) => deskErrorReason(error, input.status === "held" ? "hold that lead" : "kill that lead"),
         });
         const undoIds = [...new Set([...(input.completedIds ?? []), ...report.undoIds])];
-        return { ...report, done: undoIds.length, undoIds, warnings, failures: [...(input.previousFailures ?? []), ...report.failures] };
+        return { ...report, done: undoIds.length, undoIds, warnings, drafted, failures: [...(input.previousFailures ?? []), ...report.failures] };
       } finally {
         bulkMuted.current = false;
       }
@@ -998,7 +1004,8 @@ function QueuePage() {
     onSuccess: (report, input) => {
       setBulkWarnings(report.warnings.length ? { warnings: report.warnings, press: { ...input, completedIds: report.undoIds, previousFailures: report.failures } } : null);
       if (report.warnings.length && !report.done && !report.failures.length) return;
-      const summary = bulkStatusSummary(report);
+      // The draft warning is still said, on the same line as the count and its Undo.
+      const summary = [bulkStatusSummary(report), report.drafted.length ? bulkWarningSentence(report.drafted) : ""].filter(Boolean).join(" ");
       deskToast(summary, {
         tone: report.failures.length ? "err" : "ok",
         // One line that updates, not a stack that disagrees with itself.
@@ -1671,7 +1678,7 @@ function QueuePage() {
                 onChange={(event) => {
                   setConfirmingBulkDelete(false);
                   setBulkDeleteNotice("");
-                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                  setSelectedDeleteLeadIds(queueSelectAllShown(shownIds, event.target.checked));
                 }}
               />
               <span className="queue-box" aria-hidden="true">
@@ -1804,11 +1811,7 @@ function QueuePage() {
                     setCursor(index);
                     setConfirmingBulkDelete(false);
                     setBulkDeleteNotice("");
-                    setSelectedDeleteLeadIds((ids) =>
-                      selected
-                        ? [...ids.filter((id) => id !== l.id), l.id]
-                        : ids.filter((id) => id !== l.id),
-                    );
+                    setSelectedDeleteLeadIds((ids) => queueRowTick(ids, l.id, selected));
                   }}
                   onDraft={(modelChoice, modelEffort, modelChoiceExplicit) => {
                     setDraftNotices((notices) => {
@@ -2043,6 +2046,7 @@ function QueuePage() {
           </div>
           <ModelPicker
             scope="forced"
+            label="Model for these stories"
             value={batchRuntime}
             onChange={(choice) => {
               const runtime = choice as DraftBatchRuntime;
