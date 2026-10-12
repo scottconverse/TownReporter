@@ -2,6 +2,7 @@ import { getSql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
 import {
+  addDays,
   collectStoryDates,
   type StoryDateItem,
   type StoryDateSource,
@@ -157,6 +158,37 @@ export async function listThisWeekDates(): Promise<StoryDateItem[]> {
   const { sources, today } = await readSources(null);
   if (!today) return [];
   return collectStoryDates(sources, { from: today, days: WEEK_DAYS, limit: FRONT_WEEK_LIMIT });
+}
+
+/**
+ * "This week" on the front page: the paper's newest printed stories, one row
+ * each, newest first. The box is for the reader who has not seen the new
+ * stories yet, so it lists the stories themselves rather than the dates in them.
+ *
+ * Published in the last seven days on the paper's own calendar, leaving out
+ * the story the front page leads with (`skipSlug`). When none of the paper's
+ * stories is that recent, the box prints the newest ones anyway rather than
+ * nothing. A row is its story's headline and the day the story was published.
+ */
+export async function listNewestStories(skipSlug: string): Promise<StoryDateItem[]> {
+  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [];
+  const config = await getPaperConfig(DEFAULT_NEWSROOM_ID);
+  const today = localDay(config.timezone, new Date());
+  const from = addDays(today, -(WEEK_DAYS - 1));
+  const sql = await getSql();
+  const rows = await sql<{ slug: string; headline: string | null; published_at: string }>`
+    select slug, headline, published_at from articles
+    where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
+    order by published_at desc, id desc limit ${SOURCE_LIMIT}`;
+  const stories: StoryDateItem[] = rows
+    .filter((row) => row.slug !== skipSlug && (row.headline ?? "").trim() !== "")
+    .map((row) => ({
+      date: localDay(config.timezone, new Date(row.published_at)),
+      what: row.headline ?? "",
+      slug: row.slug,
+    }));
+  const recent = stories.filter((story) => story.date >= from && story.date <= today);
+  return (recent.length ? recent : stories).slice(0, FRONT_WEEK_LIMIT);
 }
 
 /**
