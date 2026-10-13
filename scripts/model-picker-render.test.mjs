@@ -40,18 +40,108 @@ test("every Claude choice stays selected and warns before drafting when its CLI 
   }
 });
 
+test("both Gemini Pro options show the shared Connections readiness word", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const cases = [
+      {
+        availability: { "gemini-flash": true, "gemini-pro": false },
+        expected: "Ready",
+      },
+      {
+        availability: {
+          "gemini-flash": false,
+          "gemini-pro": true,
+          reasons: { "gemini-flash": "Gemini program check timed out." },
+        },
+        expected: "Gemini program check timed out.",
+      },
+    ];
+    for (const entry of cases) {
+      availabilityStub.__setAvailability(entry.availability);
+      const html = renderToStaticMarkup(createElement(ModelPicker, { value: "gemini-pro", onChange() {} }));
+      await page.setContent(html);
+      for (const choice of ["gemini-flash", "gemini-pro"]) {
+        const line = await page.locator(`option[value="${choice}"]`).innerText();
+        assert.ok(line.includes(entry.expected), `${choice} should show ${entry.expected}`);
+      }
+      assert.equal(writerBar.geminiReadinessWord(entry.availability), entry.expected);
+    }
+  } finally {
+    availabilityStub.__setAvailability(undefined);
+    await browser.close();
+  }
+});
+
 test("the primary local picker names its cloud backend before it is chosen", async () => {
   availabilityStub.__setLocalChoice({ override: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" }, catalog: { servers: [], defaultModel: null } });
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent(render());
+    await page.setContent(render({ value: "local-model" }));
+    // DHE1-11: the Local option is named by the model it will run...
     const text = await page.locator('option[value="local-model"]').innerText();
-    assert.match(text, /deepseek-v4\.1-flash:cloud.*cloud.*spends credits/);
+    assert.equal(text, "Local model (deepseek-v4.1-flash:cloud)");
+    // ...and the backend status (cloud, spends credits) prints once beside the picker.
+    const status = await page.locator(".model-picker-help").allInnerTexts();
+    assert.equal(status.filter((line) => /spends credits/.test(line)).length, 1);
+    assert.match(status.join("\n"), /Local model — deepseek-v4\.1-flash:cloud.*cloud.*spends credits/);
     assert.doesNotMatch(text, /on this computer/);
   } finally {
     availabilityStub.__setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null } });
+    await browser.close();
+  }
+});
+
+test("THT-1/2: with nothing stored, Local model shows 'use whatever is loaded', never the cloud default", async () => {
+  // The resolver's answer when nothing is stored and nothing is loaded: the
+  // preferred CLOUD model as a "default". It must not name the option, fill the
+  // exact-model select, or pick the effort list.
+  const cloud = { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" };
+  availabilityStub.__setRole("owner");
+  availabilityStub.__setLocalChoice({
+    override: cloud,
+    storedPick: null,
+    source: "default",
+    notice: null,
+    catalog: { servers: [{ baseUrl: cloud.baseUrl, reachable: true, models: [{ id: cloud.id, cloud: true, loaded: false }] }], defaultModel: cloud, checkedAt: 0 },
+  });
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(render({ value: "local-model", effort: null, onEffortChange() {} }));
+    // Release H: a reachable server with nothing loaded says so; it never names the cloud default.
+    assert.equal(await page.locator('option[value="local-model"]').innerText(), "Local model (nothing loaded)");
+    const sub = page.locator(".local-model-picker select").first();
+    assert.equal(await sub.inputValue(), "* *");
+    assert.equal(await sub.locator("option:checked").innerText(), "Use whatever model is loaded (recommended)");
+  } finally {
+    availabilityStub.__setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null } });
+    await browser.close();
+  }
+});
+
+test("THT-20: the Dark Desk effort select offers each model's own default under Automatic, then the shared list", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    availabilityStub.__setAvailability({});
+    const page = await browser.newPage();
+    await page.setContent(render({ scope: "dark", value: "auto", effort: null, onEffortChange() {} }));
+    const lines = await page.getByLabel("Thinking effort").locator("option").allInnerTexts();
+    assert.match(lines[0], /each model's own default/);
+    assert.ok(lines.length >= 5, lines.join(" | "));
+    const sameAsStory = (await (async () => {
+      await page.setContent(render({ scope: "story", value: "auto", effort: null, onEffortChange() {} }));
+      return page.getByLabel("Thinking effort").locator("option").allInnerTexts();
+    })());
+    assert.deepEqual(lines, sameAsStory);
+  } finally {
+    availabilityStub.__setAvailability(undefined);
     await browser.close();
   }
 });
@@ -60,7 +150,7 @@ test("an unreadable Gemini key is disclosed before the draft press", () => {
   availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
   try {
     const html = render({ value: "custom:gemini" });
-    assert.match(html, /This connection&#x27;s key cannot be read.*Open Models and paste the key again/);
+    assert.match(html, /Gemini \(key\) — key can&#x27;t be read\. Fix it in Server -&gt; Connections\./);
     assert.doesNotMatch(html, /value="custom:gemini"[^>]*disabled=""/);
   } finally { availabilityStub.__setConnections([]); }
 });
@@ -174,11 +264,11 @@ test("a non-owner sees the local model choice read-only, with the owner-only lin
     assert.match(html, /Only the owner can change model connections\./);
     // The label is still drawn, and the read-only branch names the choice
     // itself (the stub's catalog is empty and no pick is stored).
-    assert.match(html, /On-device model/);
+    assert.match(html, /Local model/);
     assert.match(html, /No local model is chosen for this desk\./);
     // No way to change it: no model list and no Refresh button for an editor.
     assert.doesNotMatch(html, /Choose a model…/);
-    assert.doesNotMatch(html, /Use whatever is loaded/);
+    assert.doesNotMatch(html, /Use whatever model is loaded/);
     assert.doesNotMatch(html, /model-picker-refresh/);
   } finally {
     availabilityStub.__setRole("owner");
@@ -201,10 +291,11 @@ test("the owner keeps the local model controls", () => {
 */
 test("an unavailable provider remains selectable with its reason", () => {
   availabilityStub.__setAvailability({ "local-model": false });
-  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
-  // Unit P item 7: the option shows the registry's short half-line, not the
-  // 56-character clause that was clipped to "...or anot" in a 191px box.
-  assert.match(html, /<option[^>]*value="local-model"[^>]*>Local model — backend not checked yet — TownReporter cannot reach a local model[\s\S]*?<\/option>/);
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "local-model", onChange() {} }));
+  // DHE1-11: the Local option is named by its model (here none is chosen yet);
+  // the backend status prints once beside the picker, not inside the option.
+  assert.match(html, /<option[^>]*value="local-model"[^>]*>Local model<\/option>/);
+  assert.match(html, /<span class="model-picker-help">Local model — backend not checked yet — TownReporter cannot reach a local model/);
   // The option remains marked; provider help belongs to the selected model.
   assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
   assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
@@ -337,7 +428,7 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   // Automatic will actually do, read from the ladder itself. The middle rung
   // reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of its
   // own, because it runs whatever LM Studio has loaded.
-  assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/);
+  assert.match(html, /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), then Gemini 3\.8 Flash \(Pro plan\)/);
 });
 
 test("a stored SuperGrok choice on the forced surface falls back to Automatic", () => {
@@ -350,7 +441,7 @@ test("a stored SuperGrok choice on the forced surface falls back to Automatic", 
 for (const [choice, error, sentence] of [
   ["claude-haiku", "Claude is signed out. Open Claude Code, sign in, then try again.", "Claude is signed out on this server. Sign in once: run claude auth login on the server."],
   ["claude-sonnet", "Claude Code CLI not found. Install it.", "Claude Code is not installed on this server."],
-  ["custom:broken", "The saved API key cannot be decrypted.", "This connection's key cannot be read. Open Models and paste the key again."],
+  ["custom:broken", "The saved API key cannot be decrypted.", "Custom (key) — key can't be read. Fix it in Server -> Connections."],
 ]) test(`${choice}: option and readiness line disclose the server reason`, async () => {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
@@ -360,7 +451,8 @@ for (const [choice, error, sentence] of [
   availabilityStub.__setConnections(custom ? [custom] : []);
   try {
     const page = await browser.newPage();
-    const input = { choice, availability, customConnection: custom, label: "Claude" };
+    // The picker names a custom connection by its connection name (model-picker.tsx).
+    const input = { choice, availability, customConnection: custom, label: custom ? custom.name : "Claude" };
     const reason = writerBar.writerUnavailableReason?.(input);
     const dot = writerBar.readinessDot(false, { state: "ready", reason: "Story checked." }, reason);
     await page.setContent(renderToStaticMarkup(createElement("div", {},
@@ -376,4 +468,24 @@ for (const [choice, error, sentence] of [
     availabilityStub.__setAvailability(undefined);
     await browser.close();
   }
+});
+
+
+test("Gemini Pro plan choices remain selectable with their own setup warning", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    for (const choice of ["gemini-flash", "gemini-pro"]) {
+      const reason = "The Gemini program is not signed in. Open a terminal on the server and run agy, then sign in with your Google account.";
+      availabilityStub.__setAvailability({ "gemini-flash": false, reasons: { "gemini-flash": reason } });
+      await page.setContent(renderToStaticMarkup(createElement(ModelPicker, { value: choice, onChange() {} })));
+      const select = page.getByLabel("Writing model", { exact: true });
+      await select.selectOption(choice);
+      assert.equal(await select.inputValue(), choice);
+      assert.equal(await select.locator("option:checked").isEnabled(), true);
+      assert.match(await select.locator("option:checked").innerText(), /Gemini .*Pro plan/);
+      assert.match(await page.locator(".model-picker-help").first().innerText(), /Gemini program is not signed in.*run agy/);
+    }
+  } finally { availabilityStub.__setAvailability(undefined); await browser.close(); }
 });

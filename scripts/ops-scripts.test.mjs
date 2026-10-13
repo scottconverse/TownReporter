@@ -579,6 +579,42 @@ test(
 );
 
 test(
+  "Get-TownReporterFileHash hashes a relative path from the PowerShell location, not the process folder",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    // promote.ps1 runs Set-Location $app, then hashes "package-lock.json".
+    // Started from another folder, the hash came back '' and npm ci was skipped (H05).
+    const dir = mkdtempSync(join(tmpdir(), "lock-hash-"));
+    try {
+      writeFileSync(join(dir, "package-lock.json"), "{}\n", "utf8");
+      const probe = join(dir, "probe.ps1");
+      writeFileSync(
+        probe,
+        [
+          '$ErrorActionPreference = "Continue"',
+          `. '${join(OPS, "lib-backup.ps1")}'`,
+          `Set-Location '${dir}'`,
+          '"hash=" + (Get-TownReporterFileHash -Path "package-lock.json")',
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", probe],
+        { encoding: "utf8", timeout: 120_000, cwd: tmpdir() },
+      );
+      const line = out.split(/\r?\n/).find((l) => l.startsWith("hash="));
+      assert.ok(line, `the probe printed no hash= line:\n${out}`);
+      // SHA256 of "{}\n"
+      assert.equal(line.slice(5).trim(), "CA3D163BAB055381827226140568F3BEF7EAAC187CEBD76878E0B63E9E442356");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "redlib-relocate.ps1 on a fake install: copies it, rewrites its paths, refuses a live one",
   { skip: !onWindows ? "PowerShell only" : false },
   () => {

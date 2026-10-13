@@ -168,7 +168,8 @@ for (const outcome of ["success", "refusal", "unreadable", "exception"]) {
     let editCalls = 0;
     deps.chat = async (system, user) => {
       if (system.includes('"fetch_urls"')) return {ok:true, text:JSON.stringify({form:"brief",news:lead.headline})};
-      if (system === REPORT_EDIT_SYSTEM) {
+      // A retry appends its instruction to the same system prompt, so match the prefix.
+      if (system.startsWith(REPORT_EDIT_SYSTEM)) {
         editCalls++;
         assert.match(user, /CLAIMS TO RECONCILE/);
         assert.ok(user.includes(supplied));
@@ -181,7 +182,8 @@ for (const outcome of ["success", "refusal", "unreadable", "exception"]) {
       return {ok:true,text:JSON.stringify({headline:lead.headline,body:"The notice lists new library hours for residents this week.",topic:lead.topic,source_urls:[supplied],claims:[{fact:"Library opens at noon Tuesday.",url:supplied,kind:"primary"}]})};
     };
     const result = await reportAndDraft({userId:"reconcile",lead,urls:[supplied],memory:[],researchScope:"supplied",modelChoice:"claude-frontier"},deps);
-    assert.equal(editCalls,1);
+    // An empty or unreadable edit reply gets one retry on the same model (DHE1-5).
+    assert.equal(editCalls, outcome === "unreadable" ? 2 : 1);
     assert.ok(!("error" in result));
     if (!("error" in result)) {
       if (outcome === "success") assert.match(result.body,/opens at noon Tuesday/);
@@ -367,7 +369,19 @@ it("supplied-only never searches, follows discoveries, or credits an invented UR
   assert.ok(!("error" in result));
   assert.deepEqual(log.searches, []);
   assert.deepEqual(log.fetched, [supplied]);
-  if (!("error" in result)) assert.deepEqual(result.source_urls, [supplied]);
+  if (!("error" in result)) {
+    assert.deepEqual(result.source_urls, [supplied]);
+    assert.equal(result.research_memo.publicAiResearchCompleted, undefined);
+  }
+});
+it("records public AI research only after the public research model returns readable work", async () => {
+  const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
+  const result = await reportAndDraft(
+    { userId: "public-research-receipt", lead, urls: [supplied], memory: [], modelChoice: "claude-frontier" },
+    dependencies(log),
+  );
+  assert.ok(!("error" in result));
+  if (!("error" in result)) assert.equal(result.research_memo.publicAiResearchCompleted, true);
 });
 it("research rejects unrelated press-release content before it reaches the writing packet", async () => {
   const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };

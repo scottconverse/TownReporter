@@ -52,6 +52,8 @@ export type DeskUndo = {
 
 export type DeskToastOptions = {
   tone?: DeskTone;
+  /** An explicit policy override; it stays visible until its retry answers. */
+  action?: DeskUndo;
   /** An Undo for a reversible action, or null when there is nothing to take back. */
   undo?: DeskUndo | null;
   /** Override the tone's default life. Milliseconds. */
@@ -315,7 +317,21 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
     editor watching the only way back disappear with no explanation.
   */
   let id: string | number = "";
-  if (undo) {
+  const action = options.action;
+  if (action) {
+    data.action = {
+      label: action.label,
+      onClick: (event: MouseEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        const button = event.currentTarget;
+        if (button.disabled) return;
+        button.disabled = true;
+        void Promise.resolve().then(() => action.run()).catch((error: unknown) => {
+          deskToast(deskErrorReason(error), { tone: "err", id });
+        }).finally(() => { button.disabled = false; });
+      },
+    };
+  } else if (undo) {
     data.action = {
       label: undo.label,
       onClick: (event: MouseEvent) => {
@@ -335,3 +351,16 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
   const sink = tone === "err" ? toast.error : tone === "warn" ? toast.warning : toast.success;
   id = sink(message, data);
 }
+
+/** Dialog presses use the same one-press warning toast without another dialog. */
+let consentToastSequence = 0;
+export function askDeskToastOverride(request: { action: string; sentence: string }): Promise<boolean> {
+  const id = `desk-consent-${++consentToastSequence}`;
+  return new Promise(resolve => deskToast(request.sentence, {
+    tone: "warn", duration: Infinity, id,
+    action: { label: `${request.action} anyway`, run: () => { resolve(true); toast.dismiss(id); } },
+  }));
+}
+
+/** Clear an approved warning when the caller intentionally has no success sentence. */
+export function dismissDeskToast(id: string): void { toast.dismiss(id); }

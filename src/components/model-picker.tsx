@@ -1,14 +1,10 @@
 import {
-  DARK_MODEL_CHOICES,
-  FORCED_MODEL_CHOICES,
-  OPINION_MODEL_CHOICES,
-  STORY_MODEL_CHOICES,
+  SHARED_MODEL_CHOICES,
   localModelOptionLabel,
   localModelOptionText,
   localModelSelectionHelp,
   sortLocalModelsForPicker,
   isCustomModelChoice,
-  modelChoicesFor,
   modelChoiceHelp,
   pickerOptionText,
   pickerOptionTitle,
@@ -19,9 +15,11 @@ import {
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import {
-  defaultModelEffort,
+  automaticEffortNote,
   modelEffortLabel,
   modelEffortsFor,
+  pickerShownEffort,
+  providerEntry,
   type ModelEffort,
 } from "@/lib/news/provider-registry";
 import {
@@ -30,10 +28,12 @@ import {
   refreshLocalModelCatalog,
 } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
+import { USE_LOADED_RECOMMENDED_LABEL } from "@/lib/news/desk-local-model";
+import { USE_LOADED_LOCAL_MODEL, isUseLoadedLocalModelPick } from "@/lib/news/model-choice";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
-import { writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
+import { geminiReadinessWord, writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
@@ -72,7 +72,6 @@ type PickerControls<T extends StoryModelChoice> = {
   disabled?: boolean;
   compact?: boolean;
   layout?: "stacked" | "inline";
-  excludeAutomatic?: boolean;
   effort?: ModelEffort | null;
   onEffortChange?: (value: ModelEffort | null) => void;
 };
@@ -90,7 +89,11 @@ type Props =
  * queries (the live catalog, the newsroom's stored pick) only ever run when
  * they are needed.
  */
-export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced" }) {
+export function LocalModelSelect({
+  scope,
+}: {
+  scope: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced";
+}) {
   const qc = useQueryClient();
   const selectId = useId();
   /*
@@ -116,8 +119,13 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
     staleTime: 15_000,
   });
   const save = useMutation({
-    mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: { ...picked, scope } }),
-    onSuccess: (_result, picked) => {
+    mutationFn: (picked: { baseUrl: string; id: string }) =>
+      saveLocalModelFn({ data: { ...picked, scope } }),
+    onSuccess: (result, picked) => {
+      if (!result.ok) {
+        announceToDesk(result.error);
+        return;
+      }
       qc.invalidateQueries({ queryKey: ["local-model-choice"] });
       announceToDesk(`Local model set to ${picked.id}.`);
     },
@@ -136,11 +144,15 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
 
   const servers = catalog.data?.servers ?? [];
   const reachable = servers.filter((s) => s.reachable);
-  const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
+  const selected = choice.data
+    ? choice.data.source === "default" && !choice.data.storedPick
+      ? null
+      : choice.data.override
+    : (catalog.data?.defaultModel ?? null);
   const source = choice.data?.source ?? "stored";
   /* Store and display the exact endpoint/model pair that a run will use. */
   const selectedServer = selected
-    ? reachable.find((server) => server.baseUrl === selected.baseUrl) ?? null
+    ? (reachable.find((server) => server.baseUrl === selected.baseUrl) ?? null)
     : null;
   const selectedModel = selectedServer?.models.find((model) => model.id === selected?.id) ?? null;
   const notice = choice.data?.notice;
@@ -151,14 +163,28 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
       !choice.data ||
       !selected ||
       source === "stored" ||
+      choice.data.storedPick ||
       attemptedDiscoveredDefaultSaveFor.has(scope)
-    ) return;
+    )
+      return;
     attemptedDiscoveredDefaultSaveFor.add(scope);
-    save.mutate(selected);
+    /*
+      THT-1/THT-2: with nothing stored, the first owner view used to save the
+      discovered model as an exact pick. That model was whatever the resolver
+      returned at that moment: the loaded one, or -- when nothing was loaded --
+      the preferred CLOUD model (deepseek-v4.1-flash:cloud), which then became
+      "Local model" for good and put DeepSeek's effort list under it. What the
+      editor has chosen is the use-loaded choice, so that is what is stored.
+    */
+    save.mutate({ baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL });
   }, [choice.data, ownerKnown, save, scope, selected, source]);
 
-  if (catalog.isLoading) return null;
-
+  /*
+    H06: while the catalog is still loading the block stays on screen, with
+    the use-loaded option (it needs no catalog) and a "looking" line. It used
+    to return null here, so a fresh dialog or the first paint showed Local
+    model with no local select at all.
+  */
   if (readOnly) {
     /*
       Read-only, with the choice still named: an editor whose story will run on
@@ -187,14 +213,16 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
       <label htmlFor={selectId} className="model-picker-label">
         {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "On-device model"}
       </label>
-      {reachable.length === 0 ? (
+      {catalog.isLoading ? (
+        <span className="model-picker-help">Looking for local models on this computer…</span>
+      ) : reachable.length === 0 ? (
         <span className="model-picker-help">
           No local server found on this machine. Start LM Studio&apos;s server or Ollama, or set
           LLM_BASE_URL. See docs/local-models.md.
         </span>
-      ) : (
-        <>
-          {/*
+      ) : null}
+      <>
+        {/*
             B6. An Ollama Cloud tag is listed beside the on-device models but
             it does not run here: picking one spends Ollama credits. The option
             text now carries "cloud · spends credits" (localModelOptionText),
@@ -202,29 +230,40 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
             selection IS one -- an editor who picks a cloud model should not
             have to reopen the closed select to find out it was hosted.
           */}
-          {reachable.some((server) => server.models.some((model) => model.cloud)) ? (
-            <span className="model-picker-help">
-              Models marked “cloud · spends credits” run on Ollama&apos;s hosted service, not on
-              this computer. Picking one uses your Ollama allowance rather than your machine.
-            </span>
+        {reachable.some((server) => server.models.some((model) => model.cloud)) ? (
+          <span className="model-picker-help">
+            Models marked “cloud · spends credits” run on Ollama&apos;s hosted service, not on this
+            computer. Picking one uses your Ollama allowance rather than your machine.
+          </span>
+        ) : null}
+        <select
+          id={selectId}
+          disabled={save.isPending}
+          value={
+            !choice.data?.storedPick || isUseLoadedLocalModelPick(choice.data.storedPick)
+              ? `${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`
+              : selected
+                ? `${selected.baseUrl} ${selected.id}`
+                : ""
+          }
+          onChange={(event) => {
+            const [baseUrl, id] = event.target.value.split(" ");
+            if (baseUrl && id) save.mutate({ baseUrl, id });
+          }}
+        >
+          <option value={`${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`}>
+            {USE_LOADED_RECOMMENDED_LABEL}
+          </option>
+          {!selected ? <option value="">Choose a model…</option> : null}
+          {selected && !selectedModel ? (
+            <option value={`${selected.baseUrl} ${selected.id}`}>
+              {selected.id} (currently unavailable)
+            </option>
           ) : null}
-          <select
-            id={selectId}
-            disabled={save.isPending}
-            value={selected ? `${selected.baseUrl} ${selected.id}` : ""}
-            onChange={(event) => {
-              const [baseUrl, id] = event.target.value.split(" ");
-              if (baseUrl && id) save.mutate({ baseUrl, id });
-            }}
-          >
-            {!selected ? <option value="">Choose a model…</option> : null}
-            {selected && !selectedModel
-              ? <option value={`${selected.baseUrl} ${selected.id}`}>{selected.id} (currently unavailable)</option>
-              : null}
-            {reachable.map((server) => (
-              <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
-                {sortLocalModelsForPicker(server.models).map((model) => (
-                  /*
+          {reachable.map((server) => (
+            <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
+              {sortLocalModelsForPicker(server.models).map((model) => (
+                /*
                     The id plus " · loaded" when it is: the id is the part an
                     editor is choosing between, and whether it is in memory is
                     the thing this picker previously hid in a hover title that
@@ -233,34 +272,38 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
                     · vision" measured 465px) stay in the title and, for the
                     model actually selected, in the help line below.
                   */
-                  <option
-                    key={model.id}
-                    value={`${server.baseUrl} ${model.id}`}
-                    title={localModelOptionLabel(model)}
-                  >
-                    {localModelOptionText(model)}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <span className="model-picker-help">
-            {localModelSelectionHelp({
-              model: selectedModel,
-              serverKind: selectedServer?.kind ?? null,
-              source,
-            }) || `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.`}
-            {selectedModel?.cloud
-              ? ` It may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}`
-              : ""}
-            {selectedModel?.vision
-              ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it."
-              : ""}
+                <option
+                  key={model.id}
+                  value={`${server.baseUrl} ${model.id}`}
+                  title={localModelOptionLabel(model)}
+                >
+                  {localModelOptionText(model)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <span className="model-picker-help">
+          {localModelSelectionHelp({
+            model: selectedModel,
+            serverKind: selectedServer?.kind ?? null,
+            source,
+          }) ||
+            `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.`}
+          {selectedModel?.cloud
+            ? ` It may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}`
+            : ""}
+          {selectedModel?.vision
+            ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it."
+            : ""}
+        </span>
+        {notice ? <span className="model-picker-help">{notice}</span> : null}
+        {save.isError ? (
+          <span className="model-picker-help" role="alert">
+            Could not save this local model. Choose it again to retry.
           </span>
-          {notice ? <span className="model-picker-help">{notice}</span> : null}
-          {save.isError ? <span className="model-picker-help" role="alert">Could not save this local model. Choose it again to retry.</span> : null}
-        </>
-      )}
+        ) : null}
+      </>
       <button
         type="button"
         className="model-picker-refresh"
@@ -291,18 +334,7 @@ export function ModelPicker(props: Props) {
     queryFn: () => localModelCatalog(),
     staleTime: 15_000,
   });
-  const builtInOptions =
-    props.scope === "opinion"
-      ? OPINION_MODEL_CHOICES
-      : props.scope === "dark"
-        ? DARK_MODEL_CHOICES
-      : props.scope === "forced"
-          ? FORCED_MODEL_CHOICES
-          : props.scope === "ocr"
-            ? modelChoicesFor("ocr")
-          : props.scope === "follow-up"
-            ? modelChoicesFor("follow-up")
-          : STORY_MODEL_CHOICES;
+  const builtInOptions = SHARED_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
     label: connection.name,
@@ -319,11 +351,7 @@ export function ModelPicker(props: Props) {
   const noneOptions: ModelChoiceOption[] = props.noneOption
     ? [{ value: "none" as StoryModelChoice, label: "None", detail: "" }]
     : [];
-  const options = [
-    ...noneOptions,
-    ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
-    ...customOptions,
-  ];
+  const options = [...noneOptions, ...builtInOptions, ...customOptions];
   if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
     options.push({
       value: props.value,
@@ -347,14 +375,15 @@ export function ModelPicker(props: Props) {
   const shownValue = noFallback
     ? "none"
     : retiredNote
-    ? options.some((option) => option.value === "auto")
-      ? "auto"
-      : options[0]?.value ?? "auto"
-    : props.value;
+      ? options.some((option) => option.value === "auto")
+        ? "auto"
+        : (options[0]?.value ?? "auto")
+      : props.value;
   const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();
   const selectId = useId();
+  const pickerScope = props.scope ?? "story";
   /*
     Which providers are actually usable ON THIS SERVER, not just offered for
     this surface. `providersFor()` (provider-registry.ts) only filters by
@@ -385,21 +414,42 @@ export function ModelPicker(props: Props) {
   */
   function isAvailable(value: string): boolean {
     if (value === "none") return true;
+    const entry = providerEntry(value);
+    if (entry && !entry.offeredFor[pickerScope]) return false;
     return writerIsReady({
       choice: value,
       availability: availability.data,
+      localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
       customConnection: isCustomModelChoice(value)
         ? (connections.data?.find((row) => `custom:${row.id}` === value) ?? null)
         : null,
     });
   }
   function unavailableReason(option: ModelChoiceOption): string {
-    return writerUnavailableReason({
-      choice: option.value,
-      label: option.label,
-      availability: availability.data,
-      customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
-    }) ?? "";
+    const entry = providerEntry(option.value);
+    if (entry && !entry.offeredFor[pickerScope]) {
+      if (pickerScope === "ocr") return "This model cannot read images for OCR.";
+      return "This model is not available for this kind of work.";
+    }
+    return (
+      writerUnavailableReason({
+        choice: option.value,
+        label: option.label,
+        availability: availability.data,
+        localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
+        customConnection:
+          connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
+      }) ?? ""
+    );
+  }
+  function optionStatusSuffix(option: ModelChoiceOption): string {
+    // DHE1-11: the Local status is printed once beside the picker, not in the list.
+    if (option.value === "local-model") return "";
+    if (providerEntry(option.value)?.kind === "gemini-cli") {
+      const status = geminiReadinessWord(availability.data);
+      return status ? ` · ${status}` : "";
+    }
+    return isAvailable(option.value) ? "" : ` — ${unavailableReason(option)}`;
   }
   const selectedUnavailable = !isAvailable(shownValue);
   const checkingReadiness = shownValue !== "auto" && !noFallback && !availability.data;
@@ -408,40 +458,75 @@ export function ModelPicker(props: Props) {
       ? "Could not check this model's readiness. Draft preflight will check it before starting."
       : "Checking this model's readiness on the server…"
     : noFallback
-    ? "No fallback model is set for this rank."
-    : retiredNote
-    ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
-    : isCustomModelChoice(shownValue)
-      ? selectedUnavailable
-        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
-        : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
-      : selectedUnavailable
-        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
-        : modelChoiceHelp(selected.value, props.scope ?? "story");
+      ? "No fallback model is set for this rank."
+      : retiredNote
+        ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
+        : isCustomModelChoice(shownValue)
+          ? selectedUnavailable
+            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
+          : selectedUnavailable
+            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
-  const exactModel = !noFallback && shownValue === "local-model"
-    ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
-    : customConnection?.modelId ?? null;
+  /*
+    THT-1/THT-2: with nothing stored and nothing loaded the resolver answers
+    with the preferred CLOUD model as a "default". That is not what Local model
+    will run (the editor's choice is "use whatever is loaded"), so it must not
+    name the option or pick the effort list.
+  */
   const localPick = selectedLocalChoice.data
-    ? selectedLocalChoice.data.override
+    ? selectedLocalChoice.data.source === "default" && !selectedLocalChoice.data.storedPick
+      ? null
+      : selectedLocalChoice.data.override
     : selectedLocalCatalog.data?.defaultModel;
+  const exactModel =
+    !noFallback && shownValue === "local-model"
+      ? (localPick?.id ?? null)
+      : (customConnection?.modelId ?? null);
   const localBackend = localPick?.id ?? null;
   const localMetadata = selectedLocalCatalog.data?.servers
-    .find(server => server.baseUrl === localPick?.baseUrl)?.models.find(model => model.id === localBackend);
-  const optionText = (option: ModelChoiceOption) => option.value === "local-model"
-    ? localBackend
-      ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
-      : "Local model — backend not checked yet"
-    : pickerOptionText(option);
+    .find((server) => server.baseUrl === localPick?.baseUrl)
+    ?.models.find((model) => model.id === localBackend);
+  /*
+    DHE1-11: the Local option is named by the model it will run; the backend
+    status ("spends credits", "backend not checked yet") is printed once beside
+    the select below, not repeated inside the option list.
+  */
+  const localStatus = localBackend
+    ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
+    : "Local model — backend not checked yet";
+  const localOption = options.find((option) => option.value === "local-model");
+  const localReason =
+    localOption && !isAvailable("local-model") ? unavailableReason(localOption) : null;
+  /*
+    DHF-10: the Local entry names itself as Local, with its model in brackets,
+    so it never reads as a bare model name that looks like a second DeepSeek.
+  */
+  const optionText = (option: ModelChoiceOption) =>
+    option.value === "local-model"
+      ? (localBackend
+          ? `Local model (${localBackend})`
+          : selectedLocalChoice.data?.catalog.servers.some((server) => server.reachable)
+            ? // A local server answered and none of them has a model in
+              // memory: say so rather than leave a bare name, and never name
+              // a cloud default here. With no server reachable at all the
+              // status line already says "backend not checked yet".
+              "Local model (nothing loaded)"
+            : "Local model")
+      : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
-  const selectedEffort =
-    props.effort && effortOptions.includes(props.effort)
-      ? props.effort
-      : defaultModelEffort(shownValue, exactModel);
+  const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
   return (
-    <div className={["model-picker", props.compact ? "compact" : "", props.layout].filter(Boolean).join(" ")}>
+    <div
+      data-model-picker="shared"
+      data-model-scope={pickerScope}
+      className={["model-picker", props.compact ? "compact" : "", props.layout]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <label htmlFor={selectId} className="model-picker-label">
         {props.label ?? (props.scope === "dark" ? "Digging model" : "Writing model")}
       </label>
@@ -455,7 +540,9 @@ export function ModelPicker(props: Props) {
           pickerOptionText), so the full sentence goes here as a title: a
           select clips its own text and there is no CSS that can recover it.
         */
-        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? ` — ${unavailableReason(selected)}` : ""}` : undefined}
+        title={
+          selected ? `${pickerOptionTitle(selected)}${optionStatusSuffix(selected)}` : undefined
+        }
         onChange={(event) => {
           if (props.noneOption && event.target.value === "none") {
             props.onClear?.();
@@ -465,34 +552,73 @@ export function ModelPicker(props: Props) {
         }}
       >
         {options.map((option) => {
-          const available = isAvailable(option.value);
           return (
             <option
               key={option.value}
               value={option.value}
-              title={`${pickerOptionTitle(option)}${available ? "" : ` — ${unavailableReason(option)}`}`}
+              title={`${pickerOptionTitle(option)}${optionStatusSuffix(option)}`}
             >
               {optionText(option)}
-              {available ? "" : ` — ${unavailableReason(option)}`}
+              {optionStatusSuffix(option)}
             </option>
           );
         })}
+        {/*
+          DHE1-1: the saved connections (the Gemini key line among them) arrive
+          from their own query. While it is pending the list must say so, not
+          silently come out shorter than the other doors'.
+        */}
+        {connections.isPending ? (
+          <option value="custom-connections-loading" disabled>
+            Saved API connections — loading…
+          </option>
+        ) : null}
       </select>
+      {shownValue === "local-model" ? (
+        <span className="model-picker-help">
+          {localStatus}
+          {localReason ? ` — ${localReason}` : ""}
+        </span>
+      ) : null}
+      {pickerScope === "ocr" ? (
+        <span className="model-picker-help">
+          OCR reads images. Models without image support stay listed and are marked as unable to
+          read images for OCR.
+        </span>
+      ) : null}
       <span id={helpId} className="model-picker-help">
         {help}
       </span>
       {props.onEffortChange ? (
-        <div className={["model-picker", props.layout].filter(Boolean).join(" ")} style={{ gridColumn: "1 / -1" }}>
-          <label htmlFor={effortId} className="model-picker-label">Thinking effort</label>
+        <div
+          className={["model-picker", props.layout].filter(Boolean).join(" ")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <label htmlFor={effortId} className="model-picker-label">
+            Thinking effort
+          </label>
           <select
             id={effortId}
             value={selectedEffort ?? ""}
             disabled={props.disabled || effortOptions.length === 0}
-            onChange={(event) => props.onEffortChange?.(event.target.value ? event.target.value as ModelEffort : null)}
+            onChange={(event) =>
+              props.onEffortChange?.(
+                event.target.value ? (event.target.value as ModelEffort) : null,
+              )
+            }
           >
-            {selectedEffort == null ? <option value="">Provider default</option> : null}
+            {/*
+              DHF-6 / DHF-8: Automatic has no single effort, so its empty choice
+              says what each model does (automaticEffortNote), not a bare
+              "Provider default" that reads as no answer.
+            */}
+            {selectedEffort == null ? (
+              <option value="">{shownValue === "auto" ? automaticEffortNote(null) : "Provider default"}</option>
+            ) : null}
             {effortOptions.map((effort) => (
-              <option key={effort} value={effort}>{modelEffortLabel(effort, exactModel)}</option>
+              <option key={effort} value={effort}>
+                {modelEffortLabel(effort, exactModel)}
+              </option>
             ))}
           </select>
           <span className="model-picker-help">
@@ -502,9 +628,7 @@ export function ModelPicker(props: Props) {
           </span>
         </div>
       ) : null}
-      {props.value === "local-model" ? (
-        <LocalModelSelect scope={props.scope ?? "story"} />
-      ) : null}
+      {props.value === "local-model" ? <LocalModelSelect scope={props.scope ?? "story"} /> : null}
       {connections.isError ? (
         <span className="model-picker-help" role="status">
           Could not load custom API connections. Existing model choices still work.
@@ -558,10 +682,14 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
-              . For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
-              Ollama Cloud models are hosted and appear separately after Ollama is connected. TownReporter discovers default local addresses automatically. Use{" "}
-              <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
-              for a different address, model or authenticated server -- see{" "}
+              . For Gemini (Pro plan), install the Gemini program on that computer, run{" "}
+              <code>agy</code> and sign in with your Google account. Use{" "}
+              <code>GEMINI_CLI_PATH</code> if it is installed elsewhere. No API key is needed. For
+              an on-device model, start llama.cpp, LM Studio, or Ollama on that computer. Ollama
+              Cloud models are hosted and appear separately after Ollama is connected. TownReporter
+              discovers default local addresses automatically. Use <code>LLM_BASE_URL</code>,{" "}
+              <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only for a different address,
+              model or authenticated server -- see{" "}
               <a
                 className="inline-link"
                 href="https://github.com/scottconverse/TownReporter/blob/main/docs/local-models.md"

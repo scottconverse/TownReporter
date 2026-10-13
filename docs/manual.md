@@ -1348,9 +1348,24 @@ comment on each, is [`.env.example`](../.env.example).
 | `TOWNREPORTER_CODEX_REASONING_EFFORT`                             | Optional per-launch CLI override; unset preserves native config. `high` is the only value verified here; invalid values fail clearly. |
 | `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                                         |
 | `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                                   |
+| `GEMINI_CLI_PATH`                                                 | Gemini (Pro plan) program location; otherwise tries `%USERPROFILE%\Tools\agy\bin\agy.exe`, then `agy` on PATH                            |
 | `CRON_SECRET`                                                     | Lets an external monitor ping the job runner                                                                                          |
 | `HOST`                                                            | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it.                |
 | `VITE_AUTH_ENABLED=false`                                         | No login at all. Local only. Never on a public host.                                                                                  |
+
+Gemini (Pro plan) uses the signed-in Google account in the Gemini command-line
+program (`agy`), with no API key or API credit. Open a terminal on the server,
+run `agy`, and sign in with your Google account. The desk offers Gemini 3.8
+Flash and Gemini 3.1 Pro for writing; it keeps the separate API-key Gemini
+connection unchanged. Thinking effort selects the model suffix: Flash has
+low, medium, and high; Pro has low and high, with medium using high.
+
+Automatic tries DeepSeek, the loaded local model, Codex Sol 6.1 (balanced),
+then Gemini 3.8 Flash (Pro plan). Unavailable models remain selectable and
+explain how to fix the connection. A remembered Ollama Cloud usage-limit
+response appears as a warning with Ollama's own words until a later call or
+a connection test succeeds. Add credit at `ollama.com/settings`, or the desk
+moves to the next model.
 
 ## Job kinds
 

@@ -21,6 +21,38 @@ const claude = {
 } as const satisfies ForcedRuntimeSnapshot;
 
 describe("forced runtime snapshots", () => {
+  it("runs named DeepSeek on its own endpoint and provider transport", async () => {
+    const snapshot = {
+      runtime: "deepseek-flash",
+      modelChoice: "deepseek-flash",
+      transport: "local",
+      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+      modelEffort: "high",
+    } as const;
+    // A snapshot saved with an old High pick still parses, and it runs at none:
+    // DeepSeek v4.1 Flash always runs with thinking off (Release H).
+    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), { ...snapshot, modelEffort: "none" });
+    let received: unknown;
+    const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
+      claude: async () => assert.fail("DeepSeek must use its own transport"),
+      codex: async () => assert.fail("DeepSeek must use its own transport"),
+      local: async (_system, _user, _tokens, options) => {
+        received = options;
+        return "deepseek response";
+      },
+    });
+    assert.equal(result, "deepseek response");
+    assert.equal((received as { choice: string }).choice, "deepseek-flash");
+    assert.deepEqual((received as { localModel: unknown }).localModel, snapshot.localModel);
+    assert.equal((received as { reasoningEffort: string }).reasoningEffort, "none");
+    const {resolveProvider}=await import("./ai.ts");
+    const pinned={baseUrl:"http://127.0.0.1:11999/v1",id:"pinned-deepseek"};
+    const provider=resolveProvider("deepseek-flash",pinned,pinned.id);
+    assert.equal(provider?.kind,"openai");
+    if (provider?.kind !== "openai") assert.fail("DeepSeek must keep its own compatible transport");
+    assert.equal(provider.baseUrl,pinned.baseUrl);
+    assert.equal(provider.model,pinned.id);
+  });
   it("rejects a runtime paired with another provider choice", () => {
     assert.equal(parseForcedRuntimeSnapshot({ ...claude, modelChoice: "codex-balanced" }), null);
   });
@@ -241,7 +273,8 @@ describe("forced runtime snapshots", () => {
         return new Response(JSON.stringify({ data: [{ id: legacyModel, state: legacyState, type: "llm" }] }), {
           status: 200,
           headers: { "content-type": "application/json" },
-        });
+        },
+        );
       }
       const models = url.startsWith(`${scopedBase}/`)
         ? forcedModels
@@ -309,8 +342,10 @@ describe("forced runtime snapshots", () => {
         else process.env[key] = value;
       }
       resetLocalCatalogCacheForTests();
-      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='forced'", [newsroomId]);
-      await sql.query("delete from provider_settings where newsroom_id=$1 and provider_id='local-model'", [newsroomId]);
+      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='forced'", [newsroomId],
+      );
+      await sql.query("delete from provider_settings where newsroom_id=$1 and provider_id='local-model'", [newsroomId],
+      );
       await sql.query("delete from newsrooms where id=$1", [newsroomId]);
     }
   });

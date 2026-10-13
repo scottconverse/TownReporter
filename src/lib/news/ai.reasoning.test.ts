@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { grokChat } from "./ai.ts";
+import { ollamaCloudWarning } from "./ollama-cloud-readiness.server.ts";
 
 const ENV_KEYS = [
   "LLM_BASE_URL",
@@ -46,6 +47,21 @@ function withFetch<T>(handler: typeof fetch, fn: () => Promise<T>): Promise<T> {
 }
 
 describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () => {
+  it("keeps cloud usage warnings after a real HTTP failure and clears after the same model answers", async () => {
+    const baseUrl = "http://127.0.0.1:11434/v1";
+    const model = "release-h-http:cloud";
+    const words = "you (sconverse) have reached your monthly usage limit";
+    await withEnvAsync({ LLM_BASE_URL: baseUrl, LLM_MODEL: model }, async () => {
+      const failed = await withFetch(async () => new Response(words, { status: 429 }), () =>
+        grokChat("sys", "user", 200, { choice: "local-model", timeoutMs: 5000 }));
+      assert.equal(failed.ok, false);
+      assert.match(ollamaCloudWarning(baseUrl, model)!, /sconverse/);
+      const succeeded = await withFetch(async () => new Response(JSON.stringify({ choices: [{ message: { content: "A draft." } }] })), () =>
+        grokChat("sys", "user", 200, { choice: "local-model", timeoutMs: 5000 }));
+      assert.equal(succeeded.ok, true);
+      assert.equal(ollamaCloudWarning(baseUrl, model), undefined);
+    });
+  });
   it("omits an invented reasoning effort for a thinking model without declared capabilities", async () => {
     let sentBody: Record<string, unknown> | undefined;
     await withFetch(

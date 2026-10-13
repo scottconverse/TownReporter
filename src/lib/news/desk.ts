@@ -1,4 +1,5 @@
 import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
+import { disclosureForPublishedStory } from "./ai-disclosure.ts";
 import { runDraftReply } from "./draft-reply.ts";
 import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
@@ -269,6 +270,9 @@ import {
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import {
+  MIN_RUNG_MS,
+  NO_MODEL_IN_TIME,
+  rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
 } from "./desk-model-run.ts";
@@ -279,10 +283,12 @@ import { styleAuditSummary, styleRecordFromRepair } from "./draft-audit-record.t
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import {
   FORCED_FAILOVER_LADDER,
   isAutomaticRungId,
   modelEffort,
+  recordedModelEffort,
   type ModelEffort,
   type ProviderOverrides,
 } from "./provider-registry.ts";
@@ -1463,6 +1469,7 @@ export const runScan = createServerFn({ method: "POST" })
     return commitScanForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       daily: data.daily,
       sectionKey: data.sectionKey,
@@ -3654,21 +3661,31 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             : null;
       if (nextChoice) await persistReportSwitch(nextChoice, reason);
     };
+    // One wall-clock deadline and one failed-rung set per draft run (decisions 2-3).
+    const draftRunDeadlineAt = Date.now() + providerBudget(activeReportSnapshot.modelChoice, draftInput.providerOverrides).wallMs;
+    const draftRunTriedRungs = new Set<string>();
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
-      const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => storyChat([system, retryInstruction].filter(Boolean).join("\n\n"), user, maxTokens, {
-        timeoutMs: Math.max(
-          1,
-          options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
-        ),
-        choice: snapshot.modelChoice,
-        newsroomId: job.newsroom_id,
-        localModel: (draftInput.providerOverrides as ProviderOverrides | undefined)?.["local-model"]?.localModel,
-        reasoningEffort: snapshot.modelEffort,
-      });
+      const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => {
+        const rung = rungTimeoutMs({
+          requestedMs: options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
+          deadlineAt: draftRunDeadlineAt,
+          now: Date.now(),
+        });
+        if ("refused" in rung) return Promise.resolve({ ok: false as const, error: NO_MODEL_IN_TIME });
+        return storyChat([system, retryInstruction].filter(Boolean).join("\n\n"), user, maxTokens, {
+          timeoutMs: rung.timeoutMs,
+          choice: snapshot.modelChoice,
+          newsroomId: job.newsroom_id,
+          localModel: (draftInput.providerOverrides as ProviderOverrides | undefined)?.["local-model"]?.localModel,
+          reasoningEffort: snapshot.modelEffort,
+        });
+      };
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeReportSnapshot,
         source: job.model_choice_source ?? "editor",
         exhaustLadder: options?.draftReply === true,
+        tried: options?.draftReply ? draftRunTriedRungs : undefined,
+        outOfTime: () => Date.now() + MIN_RUNG_MS > draftRunDeadlineAt,
         run: options?.draftReply ? snapshot => runDraftReply(instruction => run(snapshot, instruction), options.minimumWords, {
           requireReadable: true,
           onRetry: () => setStage(job.id, "Retrying the draft once — reply with JSON only"),
@@ -3762,6 +3779,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         await setStage(job.id, `Switched to ${modelChoiceLabel(activeBatchSnapshot.modelChoice)}: ${receipt.switchReason}`);
         await setFailoverNote(job.id, receipt.switchNote);
         activeBatchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, activeBatchSnapshot, receipt);
+      }
+      // A writer that answered on its first rung never switched, so the job row
+      // still holds the pick ("auto"). Record the rung that actually answered, so
+      // "Last draft" names the model that wrote the saved draft, never the pick.
+      if (attempted.result.ok && !switchState.receipt && activeBatchSnapshot.modelChoice !== job.model_choice) {
+        const answeredEffort = recordedModelEffort(
+          activeBatchSnapshot.modelChoice,
+          "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
+        );
+        await setModelRuntime(job.id, activeBatchSnapshot.modelChoice, answeredEffort);
+        job.model_choice = activeBatchSnapshot.modelChoice;
       }
       return attempted.result;
     };
@@ -4377,6 +4405,7 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
       meetingArtifactId: typeof data === "number" ? undefined : data.meetingArtifactId,
@@ -4435,6 +4464,7 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId: data.leadId,
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       researchScope: data.researchScope,
       meetingArtifactId: data.meetingArtifactId,
@@ -4521,6 +4551,18 @@ const DESK_DRAFT_ROWS_SQL = `
         -- published, is not a draft on the desk.
         and l.status in ('new','drafted','held')
       order by d.lead_id, d.updated_at desc, d.id desc
+    ), desk_work as (
+      select * from latest_draft
+      union all
+      -- First writes have jobs before saved drafts. Negative ids identify temporary rows.
+      select -l.id, l.id, l.headline, null, l.topic, null,
+             null, null, l.created_at, false, l.headline, l.status, l.origin,
+             l.newsworthiness, l.why, '{}'::jsonb
+      from leads l
+      where l.newsroom_id = $1 and l.status in ('new','drafted','held')
+        and not exists (select 1 from latest_draft d where d.lead_id = l.id)
+        and exists (select 1 from desk_jobs j where j.newsroom_id = $1
+          and j.kind = 'draft' and j.subject_id = l.id and j.status in ('queued','running'))
     )
     select v.id, v.lead_id,
            coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
@@ -4551,7 +4593,7 @@ const DESK_DRAFT_ROWS_SQL = `
              then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
                     where r->>'status' = 'unresolved')
              else 0 end as names_unresolved
-    from latest_draft v
+    from desk_work v
     left join lateral (
       select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
       from desk_jobs j
@@ -4713,6 +4755,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       modelEffort: data.modelEffort,
       researchScope: data.researchScope,
     });
@@ -4731,14 +4774,16 @@ export const structureImportStories = createServerFn({ method: "POST" })
   .validator((input: unknown) => importStructureInput.parse(input))
   .handler(async ({ context, data }) => {
     const { readImportStructure } = await import("./import-stories.server.ts");
-    const localModel = data.modelChoice === "local-model"
+    const { resolveRequestedJobModel } = await import("./job-model-runtime.server.ts");
+    const assignment = await resolveRequestedJobModel(owned(context), "story-draft", data.modelChoice, data.modelEffort, data.modelChoiceExplicit);
+    const localModel = assignment.providerId === "local-model"
       ? (await import("./provider-settings.ts")).resolveLocalModelChoice(owned(context), "story").then((choice) => choice.override ?? undefined)
       : undefined;
     return readImportStructure({
       text: data.text,
       newsroomId: owned(context),
-      modelChoice: data.modelChoice,
-      modelEffort: data.modelEffort,
+      modelChoice: assignment.providerId,
+      modelEffort: assignment.effort,
       localModel: await localModel,
     });
   });
@@ -4829,6 +4874,7 @@ export const startReporting = createServerFn({ method: "POST" })
         seedUrls: data.seedUrls,
         parentRequestId: data.parentRequestId,
         modelChoice: data.modelChoice,
+        modelChoiceExplicit: data.modelChoiceExplicit,
         modelEffort: data.modelEffort ?? null,
         researchScope: data.researchScope,
       },
@@ -4849,6 +4895,7 @@ export const answerReportingFollowUp = createServerFn({ method: "POST" })
         override: data.override,
         seedUrls: data.seedUrls,
         modelChoice: data.modelChoice,
+        modelChoiceExplicit: data.modelChoiceExplicit,
         modelEffort: data.modelEffort ?? null,
         researchScope: data.researchScope,
       },
@@ -5176,28 +5223,8 @@ export const restoreKilledLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => leadStatusRestoreInput.parse(input))
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const room = owned(context);
-    if (data.status === "drafted") {
-      const rows = await sql<{ id: number }>`
-        update leads set status = 'drafted'
-        where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-          and exists (
-            select 1 from drafts
-            where drafts.lead_id = leads.id and drafts.newsroom_id = ${room}
-          )
-        returning id
-      `;
-      if (!rows.length) return { ok: false as const, error: "That lead has no draft to go back to." };
-      return { ok: true as const };
-    }
-    const rows = await sql<{ id: number }>`
-      update leads set status = ${data.status}
-      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-      returning id
-    `;
-    if (!rows.length) return { ok: false as const, error: "That lead is not killed." };
-    return { ok: true as const };
+    const { restoreKilledLeadForEditor } = await import("./lead-lifecycle.ts");
+    return restoreKilledLeadForEditor(await getSql(), { userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 /**
@@ -6669,6 +6696,16 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         `provenance_json` and `source_urls` are the captured-page side of the
         row and are left as they are.
       */
+      /* A piece the editor pasted into the Opinion desk keeps its text in
+         model_body too, but no model wrote it (FC04). Only a model-written
+         body counts as an AI draft for the public line. */
+      const [pastedByEditor] = await sql<{ pasted: boolean }>`
+        select exists (
+          select 1 from editorial_extras
+          where draft_id = ${row.id} and newsroom_id = ${owned(context)}
+            and source_kind = 'written-by-the-editor'
+        ) as pasted
+      `;
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
@@ -6680,10 +6717,17 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${storableText(draft.body)}, ${storableText(draft.topic)}, ${draft.source_urls}, 'published', now(),
         ${provenanceJson}, ${storableText(row.form || "reported")}, ${storableText(row.found_note || "")},
         ${row.unanswered || "[]"}, ${row.id},
-        /* The line the editor chose on the import screen, carried on the draft.
-           Empty for every story the desk wrote, which prints the standard AI
-           line exactly as before. */
-        ${storableText(row.disclosure_text || "")},
+        /* The editor's imported line wins; otherwise derive the public line
+           from the model-body and public-research receipts on this draft. */
+        ${storableText(disclosureForPublishedStory({
+          text: row.disclosure_text,
+          modelBody: pastedByEditor?.pasted ? null : row.model_body,
+          researchJson: row.research_json,
+          /* DHF-2: an unchanged model draft is stored as approved, not edited. */
+          publishedBody: draft.body,
+          /* THT-17: an override of unreviewed claims is not an approval. */
+          publishedWithUnreviewedClaims: fenced.outstandingClaims > 0,
+        }))},
         /* The geography pill this story answers to. NULL is the home town on the
            paper, which is the rule for the whole pre-0098 archive too -- see
            story-area.ts, which owns the four keys. */
@@ -6948,7 +6992,7 @@ export const LIVE_STORY_CHANGE_KEY = "published-live-change";
 
 /** The sentence the desk shows before it lets a live change through. */
 export const LIVE_STORY_CHANGE_SENTENCE =
-  "This story is live. Your change will show on the paper.";
+  "This story is live. Your change will show on the public page.";
 
 export type LiveStoryChangeInput = {
   articleId?: number;
@@ -7368,12 +7412,12 @@ export async function performSuggestHeadlines(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   currentHeadline?: string,
-  model?: { choice?: string | null; effort?: string | null },
+  model?: { choice?: string | null; effort?: string | null; modelChoiceExplicit?: boolean },
   deps: {
     chat?: typeof grokChat;
     resolveLocalModel?: (newsroomId: number, scope: "story") => Promise<LocalModelOverride | null>;
   } = {},
-): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; options: string[]; model: string | null } | { ok: false; error: string }> {
   const sql = await getSql();
   const leads = await sql<LeadRow>`
     select id, headline, topic from leads
@@ -7400,8 +7444,10 @@ export async function performSuggestHeadlines(
     is what this call has always done. The pick is the dialog's own row, and
     `grokChat` is still the thing that resolves an "auto".
   */
-  const choice = (model?.choice || "auto") as EffectiveProviderChoice;
   const newsroomId = owned(context);
+  const { resolveRequestedJobModel } = await import("./job-model-runtime.server.ts");
+  const assignment = await resolveRequestedJobModel(newsroomId, "headlines", model?.choice, modelEffort(model?.choice ?? "auto", model?.effort), model?.modelChoiceExplicit);
+  const choice = assignment.providerId as EffectiveProviderChoice;
   const localModel = choice === "local-model"
     ? await (deps.resolveLocalModel
       ? deps.resolveLocalModel(newsroomId, "story")
@@ -7411,9 +7457,53 @@ export async function performSuggestHeadlines(
     choice,
     newsroomId,
     ...(localModel ? { localModel } : {}),
-    reasoningEffort: (model?.effort ?? null) as ModelEffort | null,
+    reasoningEffort: assignment.effort,
   });
+  /*
+    DHG-3 / DHH-3: every headline call leaves a receipt row, the way a draft
+    does -- what the editor asked for, what ran, and the effort it ran with --
+    so "Suggested by <model>" can be audited afterwards. The row is written
+    whether the call answered or not; a call that cannot be audited is the
+    defect this closes. `kind = 'headlines'` is a receipt, never a queued job:
+    it is born finished, so no worker claims it and the one-open-job index
+    (queued / running only) cannot collide with it.
+  */
+  const ranModel = got.meta?.model?.trim() || null;
+  const receipt = initialModelRuntimeReceipt({
+    requestedRuntime: model?.choice ?? "auto",
+    requestedEffort: modelEffort(model?.choice ?? "auto", model?.effort),
+    actualRuntime: choice,
+    actualEffort: modelEffort(choice, assignment.effort, ranModel ?? undefined),
+    localModel: localModel ?? null,
+  });
+  const recordReceipt = async (status: "completed" | "failed", error: string | null, count: number) => {
+    try {
+      await sql.query(
+        `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error, result_json, started_at, finished_at)
+         values ($1, $2, 'headlines', $3, $4, $5, 'default', $6, $7, $8, $9, now(), now())`,
+        [
+          newsroomId,
+          context.userId,
+          leadId,
+          choice,
+          assignment.source === "explicit" ? "editor" : "assignment",
+          status,
+          status === "completed" ? "Headline suggestions ready" : "Headline suggestions failed",
+          error,
+          JSON.stringify({
+            ...receipt,
+            ranModel,
+            ranProvider: got.meta?.provider ?? null,
+            suggestions: count,
+          }),
+        ],
+      );
+    } catch {
+      // The receipt is a record of the call, never a reason to lose the answer.
+    }
+  };
   if (!got.ok) {
+    await recordReceipt("failed", got.error.slice(0, 800), 0);
     return {
       ok: false as const,
       error:
@@ -7422,13 +7512,15 @@ export async function performSuggestHeadlines(
   }
   const options = parseHeadlineSuggestions(got.text);
   if (!options.length) {
+    await recordReceipt("failed", "The model answered with nothing that would print as a headline.", 0);
     return {
       ok: false as const,
       error:
         "The story model did not come back with anything that would print as a headline. Your headline is exactly as you left it.",
     };
   }
-  return { ok: true as const, options };
+  await recordReceipt("completed", null, options.length);
+  return { ok: true as const, options, model: ranModel };
 }
 
 export const suggestHeadlines = createServerFn({ method: "POST" })
@@ -7437,6 +7529,7 @@ export const suggestHeadlines = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     performSuggestHeadlines(context, data.leadId, data.headline, {
       choice: data.modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       effort: data.modelEffort as ModelEffort | null | undefined,
     }),
   );

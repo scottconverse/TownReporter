@@ -674,6 +674,27 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 
+  it("a DeepSeek refusal names the provider that declined, so the job says who refused", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async () => {
+      events.push("local");
+      return { ok: false, error: "EDITORIAL_REFUSAL: the requested piece asks for an invented quote" };
+    };
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      runtime,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("a refusal must not file");
+    assert.match(
+      (result as { error: string }).error,
+      /^DeepSeek v4\.1 Flash declined: EDITORIAL_REFUSAL: the requested piece asks for an invented quote$/,
+    );
+    assert.deepEqual(events, ["voice:locate", "local"]);
+  });
+
   it("an explicit Claude choice does the same", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
@@ -1249,6 +1270,44 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     for (const earlier of searched.slice(0, -1)) assert.match(earlier, /^site:/);
     assert.ok(stages.includes(DESK_RESEARCH_STAGE), `stages: ${stages.join(" | ")}`);
     assert.equal(stages[stages.length - 1], "Writing the editorial");
+  });
+
+  it("supplied-only Opinion skips outside research and asks the writer to name missing facts in editor checks", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const searched: string[] = [];
+    const result = await writeEditorial(
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        researchScope: "supplied",
+        subject: "Longmont Public Media's studio tour",
+        sourceText: "The supplied material says a studio tour is planned. It does not provide an event date.",
+        onStage: async () => {},
+      },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          return STOPPED;
+        },
+        deskResearch: {
+          ...deskSeams(searched),
+          search: async (query) => {
+            searched.push(query);
+            return { hits: [], decision: "not-evaluated" };
+          },
+        },
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the one writing call");
+    assert.deepEqual(searched, [], "supplied-only scope does not search outside the packet");
+    assert.equal(calls.length, 1, "there is no desk planning or reading call");
+    assert.match(calls[0]!.user, /supplied-only scope/i);
+    assert.match(calls[0]!.user, /EDITOR CHECKS/i);
+    assert.match(calls[0]!.user, /date/);
+    assert.doesNotMatch(calls[0]!.user, /RESEARCH RUN BY THE DESK|RESEARCH GATHERED FOR THIS PIECE/);
   });
 
   /*

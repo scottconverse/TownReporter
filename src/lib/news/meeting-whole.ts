@@ -3391,24 +3391,35 @@ export async function runWholeMeetingWriter(input: {
   };
 
   await stage("Writing the lead story");
-  const leadReply = await chat(
-    `${meetings}\n${LEAD_WRITE_SYSTEM}`,
-    [
-      `LEAD ITEM SOURCE (this is the record; write only from it):\n${sourceFor(leadItems)}`,
-      leadItems[0] ? motionBlock(leadItems[0]) : "",
-      nameMapBlock,
-      termBlock,
-      `TRANSCRIPT EXCERPTS:\n${nameMap.text.slice(0, 24_000)}`,
-      `PACKET EXCERPTS:\n${packetExcerptFor(leadItems)}`,
-      voteLines.length ? `VOTES FROM THE STRUCTURED RECORD:\n${voteLines.join("\n")}` : "VOTES: no vote was established from the structured record. Do not infer a vote or outcome.",
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    LEAD_REPLY_TOKENS,
-  );
-  const lead = leadReply.ok
+  const leadSystem = `${meetings}\n${LEAD_WRITE_SYSTEM}`;
+  const leadUser = [
+    `LEAD ITEM SOURCE (this is the record; write only from it):\n${sourceFor(leadItems)}`,
+    leadItems[0] ? motionBlock(leadItems[0]) : "",
+    nameMapBlock,
+    termBlock,
+    `TRANSCRIPT EXCERPTS:\n${nameMap.text.slice(0, 24_000)}`,
+    `PACKET EXCERPTS:\n${packetExcerptFor(leadItems)}`,
+    voteLines.length ? `VOTES FROM THE STRUCTURED RECORD:\n${voteLines.join("\n")}` : "VOTES: no vote was established from the structured record. Do not infer a vote or outcome.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  // An empty or unreadable lead reply gets one more try on the same call before
+  // the story is written without its lead (the same single retry as the draft
+  // path's runDraftReply).
+  let leadReply = await chat(leadSystem, leadUser, LEAD_REPLY_TOKENS);
+  let lead = leadReply.ok
     ? parseLeadWriteReply(leadReply.text)
     : { valid: false, headline: "", dek: "", lead: "" };
+  if (!lead.valid) {
+    leadReply = await chat(
+      `${leadSystem}\nSTRICT RETRY: return valid JSON only, one object with headline, dek and lead (the full lead text). Escape quotes and newlines inside strings.`,
+      leadUser,
+      LEAD_REPLY_TOKENS,
+    );
+    lead = leadReply.ok
+      ? parseLeadWriteReply(leadReply.text)
+      : { valid: false, headline: "", dek: "", lead: "" };
+  }
   const headline = lead.headline || input.meeting.title;
   const dek = lead.dek;
 
@@ -3498,6 +3509,13 @@ export async function runWholeMeetingWriter(input: {
     packetText,
   );
   const body = spelled.text;
+  // No lead, section or roundup text came back from the model: that is a failed
+  // attempt, not a draft. Nothing is saved, so the job ends failed with this line.
+  if (!body.trim()) {
+    throw new Error(
+      "The writing model returned no story text for this meeting, so no draft was saved. Try again, or pick another transcript.",
+    );
+  }
   // Each written paragraph is checked against the item it was written from --
   // the lead item's paragraph, each section's, each roundup item's -- so a
   // figure or tally that belongs to another action, or a procedural tally, can

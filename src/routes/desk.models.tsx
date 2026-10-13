@@ -51,11 +51,15 @@ import { ModelPicker } from "@/components/model-picker";
 import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
-import { getLocalModelChoice } from "@/lib/news/provider-settings";
+import { DeskLocalModelBox } from "@/components/desk-local-model";
+import { localServerStatus } from "@/lib/news/desk-local-model";
+import { USE_LOADED_LOCAL_MODEL } from "@/lib/news/model-choice";
+import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import {
   localModelCatalog,
   providerAvailability,
   refreshLocalModelCatalog,
+  testCloudUsageWarnings,
 } from "@/lib/news/provider-availability";
 import { modelReadiness, type ReadinessFacts } from "@/lib/news/model-readiness";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
@@ -75,8 +79,6 @@ import {
   MODEL_JOBS,
   cleanJobEffort,
   connectionWord,
-  jobEffortLabel,
-  jobEffortOptionTitle,
   jobEffortOptions,
   jobStatusHelp,
   jobStatusKind,
@@ -103,12 +105,14 @@ import {
 } from "@/lib/news/model-assignments-settings";
 import {
   defaultModelEffort,
+  modelEffortLabel,
   providersFor,
   type ModelEffort,
   type ProviderEntry,
   type ProviderKind,
   type ProviderSurface,
 } from "@/lib/news/provider-registry";
+import { customConnectionStatus, geminiReadinessWord } from "@/lib/news/writer-bar";
 
 export const Route = createFileRoute("/desk/models")({
   head: () => ({ meta: [{ title: "Models — TownReporter" }] }),
@@ -205,6 +209,7 @@ function ModelsPage() {
   */
   const testAll = useMutation({
     mutationFn: async () => {
+      await testCloudUsageWarnings();
       const [fresh] = await Promise.all([
         refreshLocalModelCatalog(),
         qc.invalidateQueries({ queryKey: ["provider-statuses"], refetchType: "all" }),
@@ -218,7 +223,7 @@ function ModelsPage() {
     onSuccess: (fresh) => {
       qc.setQueryData(["local-model-catalog"], fresh);
       setNote(
-        "Re-read every sign-in and looked for local servers on this machine. Nothing was sent to any model — a card's own Test is what asks a model for one word.",
+        "Re-read every sign-in and looked for local servers. Retained Ollama Cloud usage warnings were checked with one short model call each.",
       );
     },
     onError: (e) =>
@@ -323,7 +328,7 @@ function ModelsPage() {
           "which models could I run here at all".
         */}
         <LocalModelsOnThisComputer headingLevel={2} />
-        <AssignmentsTab isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
+        <ModelAssignmentsPanel isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
       </div>
       <div
         id="models-panel-conn"
@@ -372,7 +377,7 @@ function ModelsPage() {
    "Who does what"
    -------------------------------------------------------------------------- */
 
-function AssignmentsTab({
+export function ModelAssignmentsPanel({
   isOwner,
   connections,
   onNote,
@@ -630,9 +635,11 @@ function JobRow({
       status: statuses.data?.find((row) => row.provider === signin),
       connection: connections.find((row) => `custom:${row.id}` === providerId),
       available: availability.data?.[providerId],
+      reason: availability.data?.reasons?.[providerId],
     };
   }
-  const readinessLabel = modelReadiness(readinessFor(resolvedSaved.providerId));
+  const readinessFacts = readinessFor(resolvedSaved.providerId);
+  const readinessLabel = modelReadiness(readinessFacts);
 
   const facts = {
     built: job?.built ?? true,
@@ -718,7 +725,7 @@ function JobRow({
               title={
                 efforts.length
                   ? shownEffort
-                    ? jobEffortOptionTitle(shownEffort)
+                    ? modelEffortLabel(shownEffort, firstExact)
                     : "This model declares no effort levels; the desk sends none"
                   : PROVIDER_DEFAULT_HELP
               }
@@ -734,8 +741,8 @@ function JobRow({
                   and the closed control wears the selected option's title.
                 */
                 efforts.map((effort: ModelEffort) => (
-                  <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
-                    {jobEffortLabel(effort)}
+                  <option key={effort} value={effort} title={modelEffortLabel(effort, firstExact)}>
+                    {modelEffortLabel(effort, firstExact)}
                   </option>
                 ))
               ) : (
@@ -786,10 +793,10 @@ function JobRow({
         <div className="model-job-status">
           <StatusChip
             label={readinessLabel}
-            help={jobStatusHelp(facts)}
+            help={readinessFacts.reason ?? jobStatusHelp(facts)}
             /* Name the resolved default without making it a readiness state. */
             below={
-              kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined
+              readinessFacts.reason ?? (kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined)
             }
           />
         </div>
@@ -936,10 +943,18 @@ function ConnectionsTab({
       tab names no action for an editor to press.
     */
     return (
-      <p className="mt-4 max-w-3xl text-base text-ink-2">
-        Only the owner can change model connections. Which model the paper is allowed to write with
-        is on the other tab, with each job&rsquo;s live state beside it.
-      </p>
+      <div className="mt-4 flex flex-col gap-7">
+        <p className="max-w-3xl text-base">
+          Only the owner can change model connections. Which model the paper is allowed to write
+          with is on the other tab, with each job&rsquo;s live state beside it.
+        </p>
+        <ConnectionGroup
+          title="Local & self-hosted"
+          note="Runs on this machine or your own servers. Free per use; speed depends on the hardware. Choose a model on this computer or your own server. Cloud models spend credits."
+        >
+          <LocalServers onNote={onNote} isOwner={false} />
+        </ConnectionGroup>
+      </div>
     );
   }
   return (
@@ -965,13 +980,14 @@ function ConnectionsTab({
         }
       >
         <SignInConnections onNote={onNote} />
+        <GeminiPlanConnection />
       </ConnectionGroup>
 
       <ConnectionGroup
         title="Local & self-hosted"
-        note="Runs on this machine or your own servers. Free per use; speed depends on the hardware."
+        note="Runs on this machine or your own servers. Free per use; speed depends on the hardware. Choose a model on this computer or your own server. Cloud models spend credits."
       >
-        <LocalServers onNote={onNote} />
+        <LocalServers onNote={onNote} isOwner={isOwner} />
       </ConnectionGroup>
     </div>
   );
@@ -1114,11 +1130,11 @@ function EffortChips({
       {efforts.map((effort) => (
         <span
           key={effort}
-          title={jobEffortOptionTitle(effort)}
+          title={modelEffortLabel(effort, exactModel)}
           className="text-sm font-bold"
           style={{ border: "1px solid var(--line)", color: "var(--fg2)", padding: "0 6px" }}
         >
-          {jobEffortLabel(effort)}
+          {modelEffortLabel(effort, exactModel)}
         </span>
       ))}
     </div>
@@ -1209,7 +1225,7 @@ function ApiKeyConnections({
     onSuccess: (res, row) => {
       onNote(
         res.ok
-          ? `${row.name} answered in ${(res.latencyMs / 1000).toFixed(1)} seconds.`
+          ? `${row.name}: ${res.message} (${(res.latencyMs / 1000).toFixed(1)} seconds.)`
           : `${row.name} did not answer: ${res.message}`,
       );
       refresh();
@@ -1234,52 +1250,50 @@ function ApiKeyConnections({
   const rows = connections.data ?? [];
   return (
     <>
-      {rows.map((row) => (
-        <ConnectionCard
-          key={row.id}
-          title={row.name}
-          how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
-          chip={
-            <ConnectionChip
-              kind={!row.hasApiKey ? "notset" : row.enabled ? "connected" : "off"}
-              label={!row.hasApiKey ? undefined : row.enabled ? undefined : "Turned off"}
-            />
-          }
-          actions={
-            <>
-              <InkButton
-                tone="quiet"
-                disabled={test.isPending || !row.hasApiKey}
-                onClick={() => {
-                  if (
-                    !confirm(
-                      `Testing sends a small prompt to ${row.name} and may incur a charge. Continue?`,
+      {rows.map((row) => {
+        const status = customConnectionStatus(row);
+        return (
+          <ConnectionCard
+            key={row.id}
+            title={row.name}
+            how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
+            chip={<ConnectionChip kind={status.kind} label={status.label} help={status.help} />}
+            actions={
+              <>
+                <InkButton
+                  tone="quiet"
+                  disabled={test.isPending || !row.hasApiKey}
+                  onClick={() => {
+                    if (
+                      !confirm(
+                        `Testing sends a small prompt to ${row.name} and may incur a charge. Continue?`,
+                      )
                     )
-                  )
-                    return;
-                  test.mutate(row);
-                }}
-              >
-                {test.isPending ? "Testing…" : "Test"}
-              </InkButton>
-              <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
-                Settings
-              </InkButton>
-              <InkButton
-                tone="quiet-danger"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (confirm(`Remove ${row.name}? This cannot be undone.`)) remove.mutate(row);
-                }}
-              >
-                {remove.isPending ? "Removing…" : "Remove"}
-              </InkButton>
-            </>
-          }
-        >
-          <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
-        </ConnectionCard>
-      ))}
+                      return;
+                    test.mutate(row);
+                  }}
+                >
+                  {test.isPending ? "Testing…" : "Test"}
+                </InkButton>
+                <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
+                  Settings
+                </InkButton>
+                <InkButton
+                  tone="quiet-danger"
+                  disabled={remove.isPending}
+                  onClick={() => {
+                    if (confirm(`Remove ${row.name}? This cannot be undone.`)) remove.mutate(row);
+                  }}
+                >
+                  {remove.isPending ? "Removing…" : "Remove"}
+                </InkButton>
+              </>
+            }
+          >
+            <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
+          </ConnectionCard>
+        );
+      })}
 
       {/*
         A provider with nothing configured is a card with one button, not a
@@ -1309,6 +1323,30 @@ function ApiKeyConnections({
  * owns them on /desk/ops; this is the place they are LINKED to, not a second
  * place to edit them.
  */
+function GeminiPlanConnection() {
+  const availability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const readinessWord = geminiReadinessWord(availability.data);
+  const ready = readinessWord === "Ready";
+  const message = readinessWord === "Ready"
+    ? "The Gemini program is installed and signed in to your Google account. Drafts use your Pro plan, with no API key or API credit."
+    : readinessWord ?? (availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
+      : "Could not check the Gemini program. Use Test all connections to check again.");
+  return (
+    <ConnectionCard
+      title="Gemini (Pro plan)"
+      how="Uses the Gemini command-line program and your Google sign-in"
+      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={readinessWord ?? (availability.isPending ? "Checking" : "Warning")} help={message} />}
+    >
+      <p className="text-sm text-muted">{message}</p>
+      <ProviderModelRows entries={entriesOfKind("gemini-cli")} />
+    </ConnectionCard>
+  );
+}
+
 function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
   const statuses = useQuery({
     queryKey: ["provider-statuses"],
@@ -1419,7 +1457,7 @@ function ConnectionGroup({
  * effort chips are the levels that exact model takes, from the same function
  * the pickers use.
  */
-function LocalServers({ onNote }: { onNote: (text: string) => void }) {
+function LocalServers({ onNote, isOwner }: { onNote: (text: string) => void; isOwner: boolean }) {
   const qc = useQueryClient();
   const catalog = useQuery({
     queryKey: ["local-model-catalog"],
@@ -1430,13 +1468,49 @@ function LocalServers({ onNote }: { onNote: (text: string) => void }) {
     mutationFn: () => refreshLocalModelCatalog(),
     onSuccess: (fresh) => {
       qc.setQueryData(["local-model-catalog"], fresh);
+      void qc.invalidateQueries({ queryKey: ["local-model-choice"] });
       onNote("Looked for local servers again.");
     },
     onError: () => onNote("Could not look for local servers just now."),
   });
 
-  if (catalog.isPending) return <ListSkeleton rows={2} />;
-  const servers: LocalServer[] = catalog.data?.servers ?? [];
+  const choice = useQuery({
+    queryKey: ["local-model-choice", "story"],
+    queryFn: () => getLocalModelChoice({ data: { scope: "story" } }),
+    refetchInterval: 15_000,
+  });
+  const save = useMutation({
+    mutationFn: (pick: { baseUrl: string; id: string }) =>
+      saveLocalModelFn({ data: { ...pick, scope: "story" } }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        onNote(result.error);
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: ["local-model-choice"] });
+      void qc.invalidateQueries({ queryKey: PROVIDER_AVAILABILITY_QUERY_KEY });
+      onNote("The desk's local model was saved.");
+    },
+    onError: () => onNote("Could not save the desk's local model. Try again."),
+  });
+  const box = (
+    <DeskLocalModelBox
+      isOwner={isOwner}
+      choice={choice.data}
+      pending={save.isPending || choice.isPending}
+      onUseLoaded={() =>
+        save.mutate({ baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL })
+      }
+    />
+  );
+  if (catalog.isPending)
+    return (
+      <>
+        {box}
+        <ListSkeleton rows={2} />
+      </>
+    );
+  const servers: LocalServer[] = choice.data?.catalog.servers ?? catalog.data?.servers ?? [];
   if (!servers.length) {
     /*
       The empty state is a card too, in the same grid as a server card, so the
@@ -1444,32 +1518,43 @@ function LocalServers({ onNote }: { onNote: (text: string) => void }) {
       the two honest actions: look again, or go change the address.
     */
     return (
-      <ConnectionCard
-        title="No local server answering"
-        how="Nothing on this machine's loopback or the configured address answered"
-        chip={<ConnectionChip kind="unreachable" />}
-        actions={
-          <>
-            <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-              {refresh.isPending ? "Checking…" : "Check again"}
-            </InkButton>
-            <a className="inline-link" href="/desk/ops">
-              Settings
-            </a>
-          </>
-        }
-      >
-        <p className="text-sm text-ink-2">
-          Start LM Studio or Ollama and check again — TownReporter never starts a server and never
-          loads a model for you.
-        </p>
-      </ConnectionCard>
+      <>
+        {box}
+        <ConnectionCard
+          title="No local server answering"
+          how="Nothing on this machine's loopback or the configured address answered"
+          chip={<ConnectionChip kind="unreachable" />}
+          actions={
+            <>
+              <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+                {refresh.isPending ? "Checking…" : "Check again"}
+              </InkButton>
+              <a className="inline-link" href="/desk/models?tab=conn#local-model">
+                Settings
+              </a>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-2">
+            Start LM Studio or Ollama and check again — TownReporter never starts a server and never
+            loads a model for you.
+          </p>
+        </ConnectionCard>
+      </>
     );
   }
   return (
     <>
+      {box}
       {servers.map((server) => (
-        <LocalServerCard key={`${server.kind}-${server.baseUrl}`} server={server} />
+        <LocalServerCard
+          key={`${server.kind}-${server.baseUrl}`}
+          server={server}
+          isOwner={isOwner}
+          chosen={choice.data?.override ?? null}
+          pending={save.isPending}
+          onPick={(id) => save.mutate({ baseUrl: server.baseUrl, id })}
+        />
       ))}
     </>
   );
@@ -1482,12 +1567,24 @@ const SERVER_KIND_LABEL: Record<string, string> = {
   "openai-compatible": "OpenAI-compatible server",
 };
 
-function LocalServerCard({ server }: { server: LocalServer }) {
+function LocalServerCard({
+  server,
+  isOwner,
+  chosen,
+  pending,
+  onPick,
+}: {
+  server: LocalServer;
+  isOwner: boolean;
+  chosen: { baseUrl: string; id: string } | null;
+  pending: boolean;
+  onPick: (id: string) => void;
+}) {
   const [showAll, setShowAll] = useState(false);
   const kindLabel = SERVER_KIND_LABEL[server.kind] ?? server.kind;
   const loopback = isLoopback(server.baseUrl);
   const origin = originOf(server.baseUrl);
-  const inMemory = server.models.filter((model) => model.loaded === true).length;
+  const inMemory = server.models.filter((model) => model.loaded === true && !model.cloud).length;
   return (
     <ConnectionCard
       title={`${kindLabel} · ${loopback ? "this machine" : "remote"}`}
@@ -1502,7 +1599,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
       chip={
         <ConnectionChip
           kind={!server.reachable ? "unreachable" : "running"}
-          label={server.reachable ? "Ready" : undefined}
+          label={server.reachable ? (inMemory ? "Ready" : "Running") : undefined}
           help={
             server.reachable
               ? "This server answers. Its models and load states are listed below."
@@ -1534,21 +1631,30 @@ function LocalServerCard({ server }: { server: LocalServer }) {
                   : `Open ${kindLabel} ↗`}
             </a>
           ) : null}
-          <a className="inline-link" href="/desk/ops">
+          <a className="inline-link" href="/desk/models?tab=conn#local-model">
             Settings
           </a>
         </>
       }
     >
+      <p className="text-base font-bold">{localServerStatus(server)}</p>
       <div className="flex flex-col">
         {server.models.length === 0 ? (
           <p className="py-2 text-sm text-ink-2" style={{ borderTop: "1px solid var(--line)" }}>
             {server.reachable ? "No chat models on this server." : "Nothing to list."}
           </p>
         ) : (
-          (showAll ? server.models : server.models.slice(0, 5)).map((model) => (
+          (showAll
+            ? server.models
+            : server.models.filter(
+                (model, index) =>
+                  index < 5 || (chosen?.baseUrl === server.baseUrl && chosen.id === model.id),
+              )
+          ).map((model) => (
             <div
               key={model.id}
+              role="group"
+              aria-label={`${model.id} on ${kindLabel}`}
               /*
                 Two fraction columns, NOT `1fr auto`. The right-hand column is
                 the long one on real data -- "load state unknown · 256K context
@@ -1567,7 +1673,25 @@ function LocalServerCard({ server }: { server: LocalServer }) {
                 borderTop: "1px solid var(--line)",
               }}
             >
-              <span className="text-base font-bold">{model.label || model.id}</span>
+              <span className="text-base font-bold" style={{ overflowWrap: "anywhere" }}>
+                {model.label || model.id}
+              </span>
+              {model.cloud ? (
+                <span className="text-base">cloud — spends credits, not this computer</span>
+              ) : null}
+              {chosen?.baseUrl === server.baseUrl && chosen.id === model.id ? (
+                <strong
+                  className="text-base"
+                  style={{ border: "2px solid var(--fg)", padding: "4px 8px" }}
+                >
+                  The desk uses this
+                </strong>
+              ) : null}
+              {isOwner ? (
+                <InkButton tone="quiet" disabled={pending} onClick={() => onPick(model.id)}>
+                  Use this one
+                </InkButton>
+              ) : null}
               <span className="text-sm text-ink-2">
                 {model.loaded === null
                   ? "load state unknown"

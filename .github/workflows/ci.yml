@@ -86,7 +86,7 @@ jobs:
           }
           check run_lifecycle '^(scripts/lifecycle-e2e\.mjs)$'
           check run_smoke_dev '^(scripts/astra-dialog-e2e\.mjs|scripts/smoke-built-server\.mjs)$'
-          check run_desk_flows '^(scripts/desk-flows-e2e\.mjs)$'
+          check run_desk_flows '^(scripts/desk-flows-e2e\.mjs|scripts/release-h-blockers-e2e\.mjs)$'
           check run_desk_production_regression '^(scripts/desk-production-regression\.mjs)$'
           check run_scan_refresh_browser '^(scripts/scan-refresh-old-merge-falsification\.mjs|scripts/scan-refresh-runtime-proof\.mjs)$'
           check run_provider_signin '^(scripts/provider-signin-e2e\.mjs)$'
@@ -155,7 +155,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth 0: the removed-UI guard diffs the pull request's base against its head.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
@@ -182,6 +185,18 @@ jobs:
       # It is pure: it parses src/styles.css and src/desk-astra.css and opens
       # no browser, no server and no database. ~0.2s, beside lint.
       - run: node --test scripts/contrast-audit.mjs
+      - name: Shared model-picker coverage guard
+        run: node --test scripts/shared-model-picker-guard.test.mjs
+      # Scott's never-remove rule: fails when this PR removes or rewords on-screen text
+      # in src/**/*.tsx unless the PR body has "Scott asked to remove: <text>".
+      # Cost: one git diff, about 1 second. Pull requests only; nightly runs have no base.
+      - name: Removed on-screen text guard
+        if: github.event_name == 'pull_request'
+        env:
+          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
+          GUARD_HEAD: ${{ github.event.pull_request.head.sha }}
+          GUARD_PR_BODY: ${{ github.event.pull_request.body }}
+        run: node --test scripts/no-removed-ui-guard.test.mjs
 
   # The unit gate, on several machines at once.
   #
@@ -217,6 +232,8 @@ jobs:
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
       TOWNREPORTER_TEST_SHARD_TOTAL: "6"
+      GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
+      FAKE_GEMINI_SIGNED_OUT: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -349,6 +366,20 @@ jobs:
         env:
           SECURITY_HEADERS_BASE_URL: http://127.0.0.1:3000
         run: node scripts/security-headers-e2e.mjs
+      - name: Set the local model from the Models page and reload
+        env:
+          LOCAL_MODELS_BASE_URL: http://127.0.0.1:3488
+          LOCAL_MODELS_OUT_DIR: artifacts/release-h-local-ci
+        run: node scripts/local-models-page-e2e.mjs --fixture
+      - name: Preserve local model setup screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: local-model-setup-screenshots
+          path: |
+            artifacts/release-h-local-ci/*.png
+            artifacts/release-h-local-ci/fixture-server.log
+          if-no-files-found: ignore
       - name: Walk the rendered desk and reader design matrix
         env:
           UIWALK_BASE_URL: http://127.0.0.1:3491
@@ -534,6 +565,12 @@ jobs:
             echo "built server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
           }
           node scripts/desk-flows-e2e.mjs
+      - name: Queue and Today Kill anyway, draft preservation and Undo
+        run: node scripts/desk-kill-anyway-walk.mjs
+      - name: Release H Walk A six browser regressions
+        run: node scripts/release-h-walka-browser.mjs
+      - name: Release H blocks-work browser walk
+        run: node scripts/release-h-blockers-e2e.mjs
 
   # Directive item 5: an authenticated desk regression that walks Queue, Scan,
   # Sources, Published, Stats, and Server signed-in. The signed-in walk itself is
@@ -733,6 +770,7 @@ jobs:
           PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
           PROVIDER_SIGNIN_PHASE: fake
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
           FAKE_CLAUDE_STATE_FILE: /tmp/fake-claude-signed-in
           FAKE_CLAUDE_DELAY_MS: "8000"
         run: |
@@ -932,6 +970,7 @@ jobs:
           HOST: 127.0.0.1
           DARK_PICKER_BASE_URL: http://127.0.0.1:3316
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
         run: |
           npm start > /tmp/dark-picker.log 2>&1 &
           DEV_PID=$!
@@ -988,6 +1027,7 @@ jobs:
           DAILY_SCAN_E2E_ARTIFACT_DIR: "${{ runner.temp }}/daily-scan-evidence"
           DATABASE_URL: ""
           CLAUDE_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-claude-cli.mjs"
+          GEMINI_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-gemini-cli.mjs"
           FAKE_CLAUDE_SIGNED_IN: "1"
           FAKE_CLAUDE_VALID_DRAFT: "1"
         run: |
@@ -1043,6 +1083,7 @@ jobs:
           SOURCES_DESK_BASE_URL: http://127.0.0.1:3421
           DATABASE_URL: ""
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
           FAKE_CLAUDE_SIGNED_IN: "1"
         run: |
           npm start > /tmp/sources-desk.log 2>&1 &

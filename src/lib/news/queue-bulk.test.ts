@@ -5,6 +5,8 @@ import {
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
   bulkStatusSummary,
+  settleBulkKill,
+  undoBulkKill,
 } from "./queue-bulk.ts";
 
 /**
@@ -119,5 +121,74 @@ describe("one toast per bulk press", () => {
     // The id is the same for Hold and for Kill on purpose: they act on the same
     // selection, and two summaries that disagree about it is the defect.
     assert.equal(BULK_STATUS_UNDO_LABEL, "Undo");
+  });
+});
+
+describe("a bulk Kill that meets a written draft (walk D2, D2-a)", () => {
+  const DRAFT_KEY = "lead-has-written-draft";
+  const draftWarning = {
+    ok: false,
+    error: "This lead has a written draft.",
+    warning: { key: DRAFT_KEY, sentence: "This lead has a written draft." },
+  };
+
+  // A fake of the per-lead write: the lead with a draft answers its warning
+  // until the press carries that warning's override.
+  const fakeSend = (warnedIds: number[]) =>
+    async (ids: readonly number[], overrideById: Record<number, string[]>) =>
+      ids.map((id) => {
+        const answered = overrideById[id]?.includes(DRAFT_KEY) ?? false;
+        const warned = warnedIds.includes(id) && !answered;
+        return { status: "fulfilled" as const, value: warned ? draftWarning : { ok: true } };
+      });
+
+  it("a bulk Kill of two leads, one with a draft, kills both and reports both as undoable", async () => {
+    const settled = await settleBulkKill([452, 437], fakeSend([437]));
+    const report = bulkStatusReport({
+      status: "killed",
+      ids: [452, 437],
+      settled: settled.settled,
+      reason: () => "could not kill",
+    });
+    assert.equal(report.done, 2);
+    assert.deepEqual(report.undoIds, [452, 437]);
+    assert.deepEqual(report.failures, []);
+    assert.deepEqual(settled.drafted.map((w) => w.id), [437]);
+  });
+
+  it("the draft answer is for drafts only: a warning of another kind is left for the desk to show", async () => {
+    const otherWarning = {
+      ok: false,
+      error: "This lead is already in print.",
+      warning: { key: "lead-is-published", sentence: "This lead is already in print." },
+    };
+    const send = async (ids: readonly number[]) =>
+      ids.map((id) => ({ status: "fulfilled" as const, value: id === 437 ? otherWarning : { ok: true } }));
+    const settled = await settleBulkKill([452, 437], send);
+    assert.deepEqual(settled.drafted, []);
+    const report = bulkStatusReport({ status: "killed", ids: [452, 437], settled: settled.settled, reason: () => "x" });
+    assert.deepEqual(report.undoIds, [452]);
+  });
+});
+
+describe("THU-4: the bulk Kill's Undo waits for the batch and puts back every lead it killed", () => {
+  it("restores exactly the killed leads, once the press has answered", async () => {
+    const calls: number[] = [];
+    let answer!: (r: { undoIds: number[] }) => void;
+    const report = new Promise<{ undoIds: number[] }>((resolve) => { answer = resolve; });
+    const undone = undoBulkKill(report, async (id) => { calls.push(id); });
+    // Pressed before the batch answered: nothing is restored yet.
+    await Promise.resolve();
+    assert.deepEqual(calls, []);
+    answer({ undoIds: [4, 9] });
+    await undone;
+    assert.deepEqual(calls.sort(), [4, 9]);
+  });
+
+  it("says how many leads could not be put back", async () => {
+    await assert.rejects(
+      undoBulkKill(Promise.resolve({ undoIds: [1, 2, 3] }), async (id) => { if (id !== 2) throw new Error("no"); }),
+      /2 leads could not be put back/,
+    );
   });
 });

@@ -68,7 +68,13 @@ export type PublishBlockerTarget =
    * printed unchecked can always be traced to the person who read it.
    */
   | { kind: "acknowledge-unchecked" }
-  | { kind: "publish-bar" };
+  | { kind: "publish-bar" }
+  /**
+   * DHD2-2: the held and killed cards' "Publish anyway" press. It publishes in
+   * the same press (the server un-holds or restores the lead inside the publish
+   * transaction), so the page runs the publish rather than scrolling to the bar.
+   */
+  | { kind: "publish-now" };
 
 export type PublishBlockerAction = {
   label: string;
@@ -223,12 +229,9 @@ function empty(text: string): boolean {
  * get the old behaviour back silently, which is exactly the bug.
  */
 export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
-  /* `status` is kept in the signature on purpose: the argument is still asked
-     for at every call site, so a future rule that reads it does not have to
-     change every caller, and the desk never decides this on the draft alone by
-     accident. */
-  void status;
-  return hasDraft;
+  /* Walk E2, DHE2-1: a published story is already in print. Its Story page
+     must not count down to a press that cannot happen again. */
+  return hasDraft && status !== "published";
 }
 
 /**
@@ -498,7 +501,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       key: "lead-held",
       kind: "warning",
       sentence: "This draft is on hold. This press un-holds it and publishes it in the same press.",
-      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+      action: { label: "Publish anyway", target: { kind: "publish-now" } },
     });
   }
 
@@ -506,8 +509,8 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     blockers.push({
       key: "lead-killed",
       kind: "warning",
-      sentence: "This draft is killed. This press restores it and publishes it in the same press.",
-      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+      sentence: "This draft is killed. \"Publish anyway\" restores the lead and publishes this draft.",
+      action: { label: "Publish anyway", target: { kind: "publish-now" } },
     });
   }
 
@@ -579,7 +582,8 @@ export function publishGateNote(blockers: readonly PublishBlocker[]): string {
  *     The page snapshots exactly these at the moment of the confirm press, so a
  *     warning that arrives while the dialog is open is not silently accepted.
  *   - `confirmLabel` -- "Publish anyway in <section>" when there is anything to
- *     overrule, the desk's own unchanged "Yes, print it in <section>" when
+ *     overrule (with the unreviewed-claims words after it when that is the
+ *     warning, matching the button above the press), the desk's own unchanged "Yes, print it in <section>" when
  *     there is not.
  *
  * A blocker with NO `kind` (an older caller, or a hand-built list) is treated as
@@ -596,15 +600,37 @@ export type PublishConfirmation = {
 export function publishConfirmation(
   blockers: readonly PublishBlocker[],
   sectionName: string,
+  options: {
+    /*
+      DJ-3: the editor has recorded "I accept these claims are unreviewed" on
+      this page. The warning that carried those words is gone from `blockers`
+      once the record exists, so the confirm keeps the words itself: an act that
+      accepted unreviewed claims must read as that act on its button.
+    */
+    claimsAccepted?: boolean;
+  } = {},
 ): PublishConfirmation {
   const warnings = blockers.filter((blocker) => blocker.kind === "warning");
   const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
+  /*
+    DHI-8: the warning block above the press offers "Publish anyway — I accept
+    these claims are unreviewed", and this confirm is the same act. It carries
+    the same words after the section, so the two buttons never read as two
+    different decisions.
+  */
+  const acceptWords = warnings
+    .find((warning) => warning.key === "claims-unreviewed" && warning.altAction?.target.kind === "accept-unreviewed")
+    ?.altAction?.label.replace(/^Publish anyway/, "");
+  const words = acceptWords ?? (options.claimsAccepted ? " — I accept these claims are unreviewed" : "");
+  /* A piece with no section has no "in <section>" to say (THU-10). */
+  const where = sectionName.trim() ? ` in ${sectionName}` : "";
+  const overrideLabel = `Publish anyway${where}${words}`;
   return {
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
     confirmLabel:
-      warnings.length > 0 ? `Publish anyway in ${sectionName}` : `Yes, print it in ${sectionName}`,
+      warnings.length > 0 || words !== "" ? overrideLabel : `Yes, print it${where}`,
   };
 }
 

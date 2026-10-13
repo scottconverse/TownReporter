@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
-import { stubUrl, transpileToUrl } from "./dom-harness.mjs";
+import { stubUrl, transpileToUrl, noJobModelAssignmentUrl } from "./dom-harness.mjs";
 
 const runtimeCache = new Map();
 async function runtimeModule(file) {
@@ -36,14 +36,23 @@ export async function screenModule(path, overrides = {}, real = []) {
  */
 const ALWAYS_REAL = ["@/lib/news/unchecked-story-gate", "@/lib/news/writer-bar"];
 
-export async function screenModuleUrl(path, overrides = {}, real = []) {
-  const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+export async function screenModuleUrl(path, overrides = {}, real = [], fixture = {}) {
+  let source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+  if (fixture.transform) source = fixture.transform(source, path);
   const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const imports = {};
   const stubs = {};
   for (const node of ast.statements) {
     if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) continue;
     const name = node.moduleSpecifier.text;
+    if (fixture.imports?.[name]) {
+      imports[name] = fixture.imports[name];
+      continue;
+    }
+    if (name === "@/components/use-job-model-assignment" && !real.includes(name)) {
+      imports[name] = noJobModelAssignmentUrl;
+      continue;
+    }
     if (name === "react") continue;
     if (real.includes(name) || ALWAYS_REAL.includes(name)) {
       const file =
@@ -75,7 +84,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
         .map((e) => {
           const key = (e.propertyName ?? e.name).text;
           const defaults = {
-            createFileRoute: `() => options => ({...options, useParams: () => ({leadId:"22"})})`,
+            createFileRoute: `() => options => ({...options, useParams: () => ({leadId:"22"}), useSearch: () => ({})})`,
             useQuery: `({queryKey}) => ({data: (() => { const d = globalThis.screenData[queryKey[0]]; return d && typeof d === "object" && !Array.isArray(d) ? { uncheckedRecordedClaims: 0, uncheckedEvidenceChecked: true, uncheckedStoryAcknowledged: false, uncheckedExempt: false, ...d } : d; })(), isPending:false, isError:false})`,
             useMutation: `() => ({mutate(){}, isPending:false})`,
             useQueryClient: `() => ({invalidateQueries(){}})`,
@@ -86,6 +95,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
             usePaper: `() => ({city:"Longmont",timezone:"America/Denver"})`,
             useAreaLabels: `() => ({})`,
             useDeskJobs: `() => ({jobs:[], activeJobs:[]})`,
+            resolveJobModel: `() => ({providerId:"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
             usePaperSetupGate: `() => ({blocked:false})`,
             auditDraft: `() => ({findings:[]})`,
             findingsWithIds: `() => []`,

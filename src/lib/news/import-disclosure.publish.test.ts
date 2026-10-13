@@ -42,8 +42,7 @@ after(async () => vite.close());
 const NEWSROOM = 98433;
 const USER = "import-disclosure-editor";
 
-const OUTSIDE_AI_LINE =
-  "An outside AI research tool wrote this from public records; an editor reviewed it.";
+const PERSON_LINE = "A person wrote this from public records; an editor reviewed it.";
 
 /**
  * An imported lead and its draft: origin "import", provenance recorded, the
@@ -91,7 +90,7 @@ async function importedFixture(disclosureText: string) {
 }
 
 it("prints the imported story under the line the editor chose, and needs no AI pass", async () => {
-  const { leadId } = await importedFixture(OUTSIDE_AI_LINE);
+  const { leadId } = await importedFixture(PERSON_LINE);
   const ctx = { userId: USER, newsroomId: NEWSROOM };
   const warned = await performPublish(ctx, leadId);
   assert.ok(!warned.ok && warned.warnings?.some(row => row.key === "unchecked"));
@@ -110,7 +109,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
   );
   assert.equal(
     article.disclosure_text,
-    OUTSIDE_AI_LINE,
+    PERSON_LINE,
     "the line the editor chose reaches the published article, word for word",
   );
   assert.equal(
@@ -120,7 +119,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
   );
 });
 
-it("leaves the standard disclosure line alone for a story the desk wrote", async () => {
+it("leaves a draft without AI authoring receipts free of an AI claim", async () => {
   const { leadId } = await importedFixture("");
   const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, undefined, undefined, {}, ["unchecked"]);
   assert.equal(published.ok, true);
@@ -132,6 +131,30 @@ it("leaves the standard disclosure line alone for a story the desk wrote", async
   assert.equal(
     article.disclosure_text,
     "",
-    "empty means 'print the standard line', so nothing changes for a desk-written story",
+    "no model-written body or public-research receipt means no AI line is stored",
+  );
+});
+
+it("does not say AI drafted a piece the editor pasted in, though its text is held as the model body", async () => {
+  const { leadId, draftId } = await importedFixture("");
+  const sql = await getSql();
+  // What fileEditorial files for "Paste a piece I wrote" (FC04): the pasted text
+  // is copied into model_body, and editorial_extras records who wrote it.
+  await sql.query("update drafts set model_body = body where id = $1", [draftId]);
+  await sql.query(
+    `insert into editorial_extras(draft_id,newsroom_id,fact_sheet,image_prompt,source_kind,source_ref)
+     values($1,$2,'','','written-by-the-editor','pasted into the Opinion desk')`,
+    [draftId, NEWSROOM],
+  );
+  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, undefined, undefined, {}, ["unchecked"]);
+  assert.equal(published.ok, true);
+  const [article] = await sql.query<{ disclosure_text: string }>(
+    "select disclosure_text from articles where lead_id=$1",
+    [leadId],
+  );
+  assert.equal(
+    article.disclosure_text,
+    "",
+    "a pasted piece no model wrote gets no AI line, so the public page cannot say AI helped write it",
   );
 });

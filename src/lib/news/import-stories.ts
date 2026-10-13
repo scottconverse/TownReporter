@@ -399,7 +399,8 @@ export const IMPORT_DISCLOSURES: { key: DisclosureKey; label: string; line: stri
   {
     key: "outside-ai",
     label: "An outside AI tool",
-    line: "An outside AI research tool wrote this from public records; an editor reviewed it.",
+    // Scott, Oct 12 2026: no AI wording on the paper, so this choice prints no line.
+    line: "",
   },
   {
     key: "person",

@@ -1,10 +1,12 @@
 import { startDraftBatch } from "@/components/scoped-actions";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { ModelPicker } from "@/components/model-picker";
+import { useBatchModelChoice } from "@/components/batch-model-choice";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
@@ -29,45 +31,53 @@ import { KillDialog } from "@/components/dialogs/KillDialog";
 import { EditLeadDialog } from "@/components/dialogs/EditLeadDialog";
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { deleteLead, listLeads, listPublishedDesk, listQueuePage, listScans, restoreKilledLead } from "@/lib/news/desk";
-import { draftLead, fileLead, runScan, setLeadStatus } from "@/components/scoped-actions";
+import { deleteLead, listLeads, listPublishedDesk, listQueuePage, listScans, restoreKilledLead, setLeadStatus } from "@/lib/news/desk";
+import { draftLead, fileLead, runScan } from "@/components/scoped-actions";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
   duplicateKillReason,
+  BULK_START_NOTE,
   editorActionError,
   mergeFocusSelection,
+  PRINTED_TAB_NOTE,
   printedDupChip,
+  queueTabCountText,
   suggestFocusLeads,
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import type { QueueFilter, QueueSort } from "@/lib/news/queue-rows";
+import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
   bulkDeleteReasonLines,
   bulkStatusSummary,
+  settleBulkKill,
+  undoBulkKill,
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
 import { darkLeadPrefill } from "@/lib/news/dark-seed";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
+import { createLeadWrites } from "@/lib/lead-writes-in-flight";
 import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
-import { deskErrorReason, deskToast } from "@/components/desk-toast";
+import { deskErrorReason, deskToast, dismissDeskToast } from "@/components/desk-toast";
 import {
   KILL_TOAST_MS,
   KillReasonChips,
   killPress,
   killUndoPress,
+  bringBackPress,
   restoreStatus,
   type KillReasonRequest,
   type KillUndoPress,
   type RestoreStatus,
 } from "@/components/fast-kill";
+import { bulkDeskWarnings, bulkDeskRetry, bulkWarningSentence, deskWarning, withDeskOverride, type BulkDeskWarning } from "@/lib/news/desk-warning";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
@@ -108,6 +118,7 @@ function darkPrefill(lead: LeadRow) {
   return darkLeadPrefill(lead.headline, source ?? null);
 }
 
+
 function QueuePage() {
   const { sections } = useEditorSections();
   const TOPICS = sections.map((s) => s.key);
@@ -120,6 +131,13 @@ function QueuePage() {
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const scanModelTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: scanModelTouched,
+    setChoice: setScanModel,
+    setEffort: setScanModelEffort,
+  });
   /*
     The drawn Queue header's own "Run scan now" (README "3. Queue", handoff
     Desk Screens.dc.html line 21). It is the same scan Today's button runs --
@@ -136,7 +154,7 @@ function QueuePage() {
     reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort, modelChoiceExplicit: scanModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -177,6 +195,8 @@ function QueuePage() {
   */
   const saveKillReason = useDeskMutation({
     mutationFn: (request: KillReasonRequest) => setLeadStatus({ data: request.data }),
+    warningAction: "Kill",
+    overrideVariables: (request, keys) => ({ ...request, data: withDeskOverride(request.data, keys) }),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Keeping the reason…",
     done: () => "",
@@ -196,9 +216,20 @@ function QueuePage() {
     `new`, which is where it put every lead before this fix.
   */
   const killedFrom = useRef(new Map<number, RestoreStatus>());
+  /*
+    THT-7, THT-9: the last kill this screen pressed. A killed lead leaves the
+    Open list at once, so the cursor is on the next lead by the time U is
+    pressed; U reads this instead, so the hint's own promise holds.
+  */
+  const lastKill = useRef<{ id: number; restore: RestoreStatus; bulk?: true } | null>(null);
+  /* THU-4: the report of the bulk Kill in flight; its Undo and the U key wait for it. */
+  const bulkKillReport = useRef<{ promise: Promise<{ undoIds: number[] }>; settle: (r: { undoIds: number[] }) => void } | null>(null);
+  /* THT-8: each lead's status write that has not answered yet; a restore waits for it. */
+  const leadWrites = useRef(createLeadWrites());
   const killLead = (lead: { id: number; status: string }) => {
     const restore = restoreStatus(lead.status);
     killedFrom.current.set(lead.id, restore);
+    lastKill.current = { id: lead.id, restore };
     return killPress(lead.id, restore);
   };
   /*
@@ -215,10 +246,35 @@ function QueuePage() {
     Open tab in the same paint as the Undo press and moves back if the server
     refuses -- leaving the lead killed and the toast saying why.
   */
+  /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
+  const undoOptimistic = leadStatusOptimistic(qc);
+  const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
-    mutationFn: (press: KillUndoPress) =>
-      restoreKilledLead({ data: { id: press.id, status: press.status } }),
-    ...leadStatusOptimistic(qc),
+    mutationFn: async (press: KillUndoPress) => {
+      // The lead is being put back, so U must not aim at it again.
+      if (lastKill.current?.id === press.id) lastKill.current = null;
+      /*
+        THT-8, DHJ-2: the toast says "Restoring…" in the same paint as the press,
+        and goes when the write answers (the done or failed toast takes over).
+        A bulk press owns its own outcome, so it stays quiet here.
+      */
+      const restoringId = `desk-restoring-${press.id}`;
+      if (!bulkMuted.current) deskToast("Restoring…", { id: restoringId, duration: Infinity });
+      try {
+        /*
+          THT-8: the restore reads the lead's status on the server, and a slow
+          kill write (several seconds under load) lands AFTER a U pressed right
+          behind it -- the restore found nothing killed, then the kill landed and
+          U was lost. The way back waits for this lead's own write first.
+        */
+        await leadWrites.current.settled(press.id);
+        return await restoreKilledLead({ data: { id: press.id, status: press.status, keepRecord: press.keepRecord } });
+      } finally {
+        dismissDeskToast(restoringId);
+      }
+    },
+    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…",
     done: () => "Undone: the lead is back on the Queue.",
@@ -239,6 +295,7 @@ function QueuePage() {
       status: "held" | "killed" | "new";
       killReason?: string;
       killReasonUrl?: string;
+      override?: string[];
       release?: boolean;
       /*
         Carried by a kill press only, and never sent from here: it is the status
@@ -248,12 +305,18 @@ function QueuePage() {
         to `setLeadStatus` would be a refusal waiting to happen.
       */
       restore?: RestoreStatus;
-    }) => setLeadStatus({ data: {
-      id: input.id,
-      status: input.status,
-      killReason: input.killReason,
-      killReasonUrl: input.killReasonUrl,
-    } }),
+    }) => {
+      const write = setLeadStatus({ data: {
+        id: input.id,
+        status: input.status,
+        killReason: input.killReason,
+        killReasonUrl: input.killReasonUrl,
+        override: input.override,
+      } });
+      // Remembered per lead so a restore pressed behind it waits its turn (THT-8).
+      leadWrites.current.track(input.id, write);
+      return write;
+    },
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take. `desk-lead-status.ts` owns the rule
@@ -273,6 +336,7 @@ function QueuePage() {
       A row's own Hold/Kill, which is the same mutation, is never muted.
     */
     muted: () => bulkMuted.current,
+    warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
     done: (_result, input) =>
       input.release
@@ -307,11 +371,11 @@ function QueuePage() {
                 press, not guessed -- and it goes through `undoKill`, the one
                 write that may restore `drafted`; `setStatus` would refuse it.
               */
-              if (input.release) {
-                await setStatus.mutateAsync({ id: input.id, status: "held" as const });
+              if (input.release || input.status === "held") {
+                await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
                 return;
               }
-              await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
+              await undoKill.mutateAsync(killUndoPress(input.id, input.restore));
             },
           },
     /*
@@ -322,7 +386,7 @@ function QueuePage() {
     */
     chips: (_result, input) =>
       input.status === "killed" ? (
-        <KillReasonChips leadId={input.id} save={(request) => saveKillReason.mutate(request)} />
+        <KillReasonChips leadId={input.id} save={(request) => saveKillReason.mutate({ ...request, data: withDeskOverride(request.data, input.override ?? []) })} />
       ) : null,
     /*
       And that toast lives longer than an ordinary one, because it is the only
@@ -337,10 +401,15 @@ function QueuePage() {
    * recorded (migration 0094). It rejects on failure so the row can say
    * "That did not save." instead of looking like it worked.
    */
-  const killAsDuplicate = useMutation({
-    mutationFn: (input: { id: number; killReason: string }) =>
-      setLeadStatus({ data: { id: input.id, status: "killed", killReason: input.killReason } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  const killAsDuplicate = useDeskMutation({
+    mutationFn: (input: { id: number; killReason: string; override?: string[]; restore?: RestoreStatus }) =>
+      setLeadStatus({ data: { ...input, status: "killed" } }),
+    warningAction: "Kill",
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Killing…",
+    done: () => "The lead moved to Killed.",
+    undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore)); } }),
+    failedLead: "Could not kill that lead. ",
   });
   const remove = useMutation({
     mutationFn: (id: number) => deleteLead({ data: id }),
@@ -483,7 +552,17 @@ function QueuePage() {
           sort,
         },
       }),
-    placeholderData: keepPreviousData,
+    // DHE1-6: the old rows stay only for the same tab, section and sort. A
+    // tab press shows the loading rows, not the other tab's leads.
+    placeholderData: (previousData, previousQuery) => {
+      const [, fromFilter, fromSection, fromSort] = previousQuery?.queryKey ?? [];
+      return queueKeepsRowsWhileLoading(
+        previousQuery ? { filter: fromFilter, section: fromSection, sort: fromSort } : undefined,
+        { filter, section: sectionFilter, sort },
+      )
+        ? previousData
+        : undefined;
+    },
   });
   const { isPending, isError, error, refetch, isRefetching } = leadsQuery;
   /*
@@ -551,8 +630,15 @@ function QueuePage() {
     panel's progress and its "started with X" line (below); it no longer writes
     the picker's state, which is the editor's alone until they submit.
   */
-  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("auto");
-  const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
+  // DHE1-10 / DHD1-2: the strip and the dialog read and write this one state, so
+  // the model and effort shown in either are the ones Start runs.
+  const {
+    runtime: batchRuntime,
+    effort: batchEffort,
+    setEffort: setBatchEffort,
+    pick: pickBatchRuntime,
+    touched: batchRuntimeTouched,
+  } = useBatchModelChoice();
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -585,12 +671,14 @@ function QueuePage() {
       leadIds: number[];
       runtime: DraftBatchRuntime;
       modelEffort: ModelEffort | null;
+      modelChoiceExplicit: boolean;
     }) =>
       startDraftBatch({
         data: {
           items: input.leadIds.map((leadId) => ({ leadId })),
           runtime: input.runtime,
           modelEffort: input.modelEffort,
+          modelChoiceExplicit: input.modelChoiceExplicit,
         },
       }),
     onSuccess: (result) => {
@@ -642,6 +730,7 @@ function QueuePage() {
       leadId: number;
       modelChoice: StoryModelChoice;
       modelEffort?: ModelEffort | null;
+      modelChoiceExplicit?: boolean;
       fromBatch?: boolean;
     }) =>
       draftLead({
@@ -649,6 +738,7 @@ function QueuePage() {
           leadId: input.leadId,
           modelChoice: input.modelChoice,
           modelEffort: input.modelEffort,
+          modelChoiceExplicit: input.modelChoiceExplicit,
         },
       }),
     onMutate: ({ leadId }) =>
@@ -789,7 +879,7 @@ function QueuePage() {
         });
         break;
       case "hold":
-        if (lead) setHoldFor(lead);
+        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
         break;
       case "kill":
         /*
@@ -800,7 +890,11 @@ function QueuePage() {
           once, with the Undo and the reason chips on the toast. The dialog is
           still there for a written reason, in the row's More ▾ menu.
         */
-        if (lead) setStatus.mutate(killLead(lead));
+        // THT-8: X on a focused row Kill button kills that row (`rowId`), not the cursor row.
+        {
+          const target = action.rowId == null ? lead : shown.find((l) => String(l.id) === action.rowId);
+          if (target) setStatus.mutate(killLead(target));
+        }
         break;
       case "undo":
         if (lead && lead.status === "held") {
@@ -811,6 +905,16 @@ function QueuePage() {
             this Undo has always had.
           */
           setStatus.mutate({ id: lead.id, status: "new", release: true });
+        } else if (lastKill.current) {
+          // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
+          const last = lastKill.current;
+          if (last.bulk && bulkKillReport.current) {
+            // THU-4: U puts back every lead the bulk press killed, the same as its toast's Undo.
+            lastKill.current = null;
+            void runBulkKillUndo();
+          } else {
+            void undoKill.mutate(killUndoPress(last.id, last.restore));
+          }
         } else if (lead && lead.status === "killed") {
           /*
             A kill's way back, through the same write the row's own Undo uses --
@@ -818,7 +922,7 @@ function QueuePage() {
             from, so it reads this session's memory (`killedFrom`) and falls back
             to `new` for a lead killed before the screen knew.
           */
-          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id) ?? "new"));
+          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id)));
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
@@ -884,12 +988,12 @@ function QueuePage() {
   */
   const tabCounts = leadsQuery.data?.counts;
   const publishedCount = tabCounts?.publishedLeads ?? 0;
-  const queueFilters: { key: QueueFilter; label: string; count: number }[] = [
-    { key: "open", label: "Open", count: tabCounts?.open ?? 0 },
-    { key: "held", label: "Held", count: tabCounts?.held ?? 0 },
-    { key: "killed", label: "Killed", count: tabCounts?.killed ?? 0 },
-    { key: "printed", label: "≈ Printed", count: tabCounts?.printed ?? 0 },
-    { key: "all", label: "All", count: tabCounts?.all ?? 0 },
+  const queueFilters: { key: QueueFilter; label: string; count: number | null }[] = [
+    { key: "open", label: "Open", count: tabCounts?.open ?? null },
+    { key: "held", label: "Held", count: tabCounts?.held ?? null },
+    { key: "killed", label: "Killed", count: tabCounts?.killed ?? null },
+    { key: "printed", label: "≈ Printed", count: tabCounts?.printed ?? null },
+    { key: "all", label: "All", count: tabCounts?.all ?? null },
   ];
   const printed = published.data ?? [];
   /*
@@ -932,12 +1036,11 @@ function QueuePage() {
     invalidation), `Promise.allSettled` collects the results, and the batch is
     reported in one sentence under one id.
   */
+  type BulkPress = { ids: number[]; status: "held" | "killed"; killReason?: string;
+    overrideById?: Record<number, string[]>; completedIds?: number[]; previousFailures?: string[]; restores?: Record<number, RestoreStatus> };
+  const [bulkWarnings, setBulkWarnings] = useState<{ warnings: BulkDeskWarning[]; press: BulkPress } | null>(null);
   const bulkStatus = useMutation({
-    mutationFn: async (input: {
-      ids: number[];
-      status: "held" | "killed";
-      killReason?: string;
-    }) => {
+    mutationFn: async (input: BulkPress) => {
       /*
         The per-item toasts are suppressed for exactly as long as the batch is
         in flight: `setStatus` would otherwise speak once per lead, and this
@@ -945,34 +1048,55 @@ function QueuePage() {
       */
       bulkMuted.current = true;
       try {
-        const settled = await Promise.allSettled(
-          input.ids.map((id) =>
-            setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason }),
-          ),
-        );
-        return bulkStatusReport({
-          status: input.status,
-          ids: input.ids,
-          settled,
+        const sendAll = (ids: readonly number[], overrideById: Record<number, string[]>) =>
+          Promise.allSettled(
+            ids.map((id) =>
+              setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: overrideById[id], restore: input.restores?.[id] }),
+            ),
+          );
+        // D2-a: a Kill answers its written-draft warnings inside this press, so no lead is left waiting on one.
+        const { settled, drafted } = input.status === "killed"
+          ? await settleBulkKill(input.ids, sendAll, input.overrideById ?? {})
+          : { settled: await sendAll(input.ids, input.overrideById ?? {}), drafted: [] };
+        const warnings = bulkDeskWarnings(input.ids, settled);
+        const allowed = input.ids.map((id, index) => ({ id, outcome: settled[index] })).filter(({ outcome }) => outcome.status !== "fulfilled" || !deskWarning(outcome.value));
+        const report = bulkStatusReport({
+          status: input.status, ids: allowed.map(item => item.id), settled: allowed.map(item => item.outcome),
           reason: (error) => deskErrorReason(error, input.status === "held" ? "hold that lead" : "kill that lead"),
         });
+        const undoIds = [...new Set([...(input.completedIds ?? []), ...report.undoIds])];
+        return { ...report, done: undoIds.length, undoIds, warnings, drafted, failures: [...(input.previousFailures ?? []), ...report.failures] };
       } finally {
         bulkMuted.current = false;
       }
     },
-    onSuccess: (report) => {
-      const summary = bulkStatusSummary(report);
+    onSuccess: (report, input) => {
+      bulkKillReport.current?.settle({ undoIds: report.undoIds });
+      setBulkWarnings(report.warnings.length ? { warnings: report.warnings, press: { ...input, completedIds: report.undoIds, previousFailures: report.failures } } : null);
+      if (report.warnings.length && !report.done && !report.failures.length) return;
+      // The draft warning is still said, on the same line as the count and its Undo.
+      const summary = [bulkStatusSummary(report), report.drafted.length ? bulkWarningSentence(report.drafted) : ""].filter(Boolean).join(" ");
       deskToast(summary, {
         tone: report.failures.length ? "err" : "ok",
         // One line that updates, not a stack that disagrees with itself.
         id: BULK_STATUS_TOAST_ID,
+        // DHC08: a bulk Kill keeps the same Undo window as a single kill (the
+        // single kill's toast is KILL_TOAST_MS for the same reason).
+        duration: input.status === "killed" ? KILL_TOAST_MS : undefined,
         undo:
           report.undoIds.length > 0
             ? {
                 label: BULK_STATUS_UNDO_LABEL,
                 run: async () => {
+                  if (input.status === "killed") {
+                    if (lastKill.current?.bulk) lastKill.current = null;
+                    await undoBulkKill(Promise.resolve({ undoIds: report.undoIds }), (id) =>
+                      undoKill.mutateAsync(killUndoPress(id, input.restores?.[id])),
+                    );
+                    return;
+                  }
                   const back = await Promise.allSettled(
-                    report.undoIds.map((id) => setStatus.mutateAsync({ id, status: "new" })),
+                    report.undoIds.map((id) => setStatus.mutateAsync({ id, status: "new", override: input.overrideById?.[id] })),
                   );
                   const failed = back.filter((r) => r.status === "rejected").length;
                   if (failed > 0)
@@ -987,6 +1111,7 @@ function QueuePage() {
       });
     },
     onError: (error: Error) => {
+      bulkKillReport.current?.settle({ undoIds: [] });
       deskToast(`Could not change those leads. ${deskErrorReason(error, "change those leads")}`, {
         tone: "err",
         id: BULK_STATUS_TOAST_ID,
@@ -1006,14 +1131,52 @@ function QueuePage() {
    * answer ("no reason"), which is the design's fast path.
    */
   const [bulkKillReason, setBulkKillReason] = useState<string | null>(null);
+  /*
+    THU-4: the Undo for a bulk Kill, whether the toast's button or the U key
+    presses it. It waits for the batch's own report, so it works the moment the
+    toast shows, and puts back exactly the leads that press killed.
+  */
+  const runBulkKillUndo = async () => {
+    const pending = bulkKillReport.current;
+    if (!pending) return;
+    lastKill.current = null;
+    const restoringId = "desk-restoring-bulk";
+    deskToast("Restoring…", { id: restoringId, duration: Infinity });
+    try {
+      await undoBulkKill(pending.promise, (id) => undoKill.mutateAsync(killUndoPress(id, bulkRestores.current[id])));
+      deskToast("Undone: the leads are back on the Queue.", { tone: "ok", id: BULK_STATUS_TOAST_ID });
+    } catch (error) {
+      deskToast(`Could not put those leads back. ${deskErrorReason(error, "put those leads back")}`, { tone: "err", id: BULK_STATUS_TOAST_ID });
+    } finally {
+      dismissDeskToast(restoringId);
+    }
+  };
+  const bulkRestores = useRef<Record<number, RestoreStatus>>({});
   const bulkSetStatus = (status: "held" | "killed", reason?: string) => {
     const ids = selectedLeads.map((lead) => lead.id);
     if (ids.length === 0) return;
-    if (status === "killed" && reason !== undefined && reason.trim()) {
-      bulkStatus.mutate({ ids, status, killReason: reason.trim() });
-      return;
+    const restores = Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)]));
+    if (status === "killed") {
+      /*
+        THU-4: the same Undo toast the row Kill shows, at the press and not
+        after the round trip; the batch's report replaces it under the same id.
+      */
+      let settle: (r: { undoIds: number[] }) => void = () => {};
+      const promise = new Promise<{ undoIds: number[] }>((resolve) => { settle = resolve; });
+      bulkKillReport.current = { promise, settle };
+      bulkRestores.current = restores;
+      lastKill.current = { id: ids[0], restore: restores[ids[0]], bulk: true };
+      deskToast(`Killed ${ids.length} lead${ids.length === 1 ? "" : "s"}.`, {
+        tone: "ok",
+        id: BULK_STATUS_TOAST_ID,
+        duration: KILL_TOAST_MS,
+        undo: { label: BULK_STATUS_UNDO_LABEL, run: runBulkKillUndo },
+      });
     }
-    bulkStatus.mutate({ ids, status });
+    bulkStatus.mutate({
+      ids, status, restores,
+      ...(status === "killed" && reason !== undefined && reason.trim() ? { killReason: reason.trim() } : {}),
+    });
   };
   const bulkBusy =
     setStatus.isPending || bulkStatus.isPending || startBatch.isPending || bulkRemove.isPending;
@@ -1074,7 +1237,11 @@ function QueuePage() {
               scope="scan"
               label="Model for this scan"
               value={scanModel}
-              onChange={setScanModel}
+              onChange={(choice) => {
+                scanModelTouched.current = true;
+                setScanModel(choice);
+                setScanModelEffort(defaultModelEffort(choice));
+              }}
               effort={scanModelEffort}
               onEffortChange={setScanModelEffort}
             />
@@ -1134,9 +1301,11 @@ function QueuePage() {
               className={filter === f.key ? "on" : ""}
               aria-pressed={filter === f.key}
               title={
-                f.key === "held" && f.count > 0
+                f.key === "held" && (f.count ?? 0) > 0
                   ? `${f.count} lead${f.count === 1 ? "" : "s"} waiting on you under Held`
-                  : undefined
+                  : f.key === "printed"
+                    ? PRINTED_TAB_NOTE
+                    : undefined
               }
               onClick={() => {
                 setFilter(f.key);
@@ -1154,9 +1323,9 @@ function QueuePage() {
                 words is unchanged.
               */}
               <span
-                className={"filter-badge" + (f.key === "held" && f.count > 0 ? " waiting" : "")}
+                className={"filter-badge" + (f.key === "held" && (f.count ?? 0) > 0 ? " waiting" : "")}
               >
-                {f.count}
+                {queueTabCountText(f.count)}
               </span>
             </button>
           ))}
@@ -1208,6 +1377,8 @@ function QueuePage() {
           </div>
         </div>
       </div>
+      {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
+      <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
 
       {/*
         FB6, item 3: the scan's own card, in place, under the press that started
@@ -1257,6 +1428,22 @@ function QueuePage() {
               <span className="queue-bulk-count">{selectedDeleteLeads.length} selected</span>
               <div className="queue-bulk-acts">
                 {/*
+                  DHB1: this is the picker whose choice the Start press is
+                  about to use. The batch dialog below shares the same runtime
+                  and effort state, so opening it can still review the exact
+                  model this strip selected without a second resolution path.
+                */}
+                <ModelPicker
+                  scope="forced"
+                  label="Model for these stories"
+                  value={batchRuntime}
+                  onChange={pickBatchRuntime}
+                  effort={batchEffort}
+                  onEffortChange={setBatchEffort}
+                  disabled={startBatch.isPending}
+                  compact
+                />
+                {/*
                   Start N stories is the same batch the desk has always run
                   (startDraftBatch, one job per lead, five at a time); the bar
                   is a second way to reach it, not a new mechanism. A held,
@@ -1278,6 +1465,8 @@ function QueuePage() {
                   count, the button stands down, and the line below the bar
                   (which was already there) says why.
                 */}
+                {/* THT-21: the line under the button says what it does -- it starts AI drafts. */}
+                <span className="bulk-start-stack">
                 <InkButton
                   disabled={
                     startBatch.isPending || bulkDraftable.length === 0
@@ -1301,6 +1490,8 @@ function QueuePage() {
                       ? "Start stories"
                       : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
+                <span className="bulk-start-note">{BULK_START_NOTE}</span>
+                </span>
                 <ActionButton
                   tone="quiet"
                   /*
@@ -1338,9 +1529,7 @@ function QueuePage() {
                       leads would be a different record than the desk drew), so
                       that press keeps the immediate hold it has today.
                     */
-                    const only = selectedLeads.length === 1 ? selectedLeads[0] : null;
-                    if (only) setHoldFor(only);
-                    else bulkSetStatus("held");
+                    bulkSetStatus("held");
                   }}
                 >
                   Hold
@@ -1478,8 +1667,9 @@ function QueuePage() {
 
       {/* The note explains the rows it is printed above, so it is read off the
           page rather than off the whole list (Unit CZ-long-lists): on the
-          Killed tab "best" puts resurfaced leads first, so a page that holds
-          none of them is a page the note has nothing to say about. */}
+          Killed tab "best" lists the newest kill first, so a page that holds
+          none of the came-back leads is a page the note has nothing to say
+          about. */}
       {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
         <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
       ) : null}
@@ -1509,6 +1699,13 @@ function QueuePage() {
           </InkButton>
         </div>
       ) : null}
+      {bulkWarnings ? <div className="queue-bulk" role="status">
+        <span>{bulkWarningSentence(bulkWarnings.warnings)}</span>{" "}
+        <InkButton disabled={bulkStatus.isPending} onClick={() => {
+          const { press, warnings } = bulkWarnings;
+          bulkStatus.mutate(bulkDeskRetry(press, warnings));
+        }}>{bulkWarnings.press.status === "killed" ? "Kill all anyway" : "Hold all anyway"}</InkButton>
+      </div> : null}
       {bulkDeleteNotice ? <Notice kind="ok">{bulkDeleteNotice}</Notice> : null}
       {undo != null ? (
         <Notice kind="ok">
@@ -1599,7 +1796,7 @@ function QueuePage() {
                 onChange={(event) => {
                   setConfirmingBulkDelete(false);
                   setBulkDeleteNotice("");
-                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                  setSelectedDeleteLeadIds(queueSelectAllShown(shownIds, event.target.checked));
                 }}
               />
               <span className="queue-box" aria-hidden="true">
@@ -1654,13 +1851,16 @@ function QueuePage() {
                     either: this menu's kill row is the drawn "Kill with a
                     reason" below.
                   */
-                  onBack={() => setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" })}
+                  onBack={() => (l.status === "killed"
+                    ? undoKill.mutate(bringBackPress(l.id))
+                    : setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" }))}
                   /*
                     FB6, item 5: the row's own Release / Bring back says what it
                     is doing while it does it, and carries the failure sentence.
                     The state is the screen's because the mutation is.
                   */
                   backPending={setStatus.isPending && setStatus.variables?.id === l.id}
+                  onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
                   onHoldWithReason={() => setHoldFor(l)}
                   onEdit={() => setEditFor(l)}
                   onDarkDesk={() => setDarkFor(l)}
@@ -1702,8 +1902,9 @@ function QueuePage() {
                    whoever reads it next. */
                     dupMatch
                       ? async () => {
-                          await killAsDuplicate.mutateAsync({
+                          return await killAsDuplicate.mutateAsync({
                             id: l.id,
+                            restore: restoreStatus(l.status),
                             killReason: duplicateKillReason(dupMatch.headline),
                           });
                         }
@@ -1725,21 +1926,18 @@ function QueuePage() {
                   bulkDeleteReason={bulkDeleteReasons[l.id] ?? null}
                   deleteSelected={selectedDeleteLeads.includes(l.id)}
                   onDeleteSelect={(selected) => {
+                    setCursor(index);
                     setConfirmingBulkDelete(false);
                     setBulkDeleteNotice("");
-                    setSelectedDeleteLeadIds((ids) =>
-                      selected
-                        ? [...ids.filter((id) => id !== l.id), l.id]
-                        : ids.filter((id) => id !== l.id),
-                    );
+                    setSelectedDeleteLeadIds((ids) => queueRowTick(ids, l.id, selected));
                   }}
-                  onDraft={(modelChoice, modelEffort) => {
+                  onDraft={(modelChoice, modelEffort, modelChoiceExplicit) => {
                     setDraftNotices((notices) => {
                       const next = { ...notices };
                       delete next[l.id];
                       return next;
                     });
-                    queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort });
+                    queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort, modelChoiceExplicit });
                   }}
                   drafting={draftingIds.includes(l.id)}
                   draftNotice={draftNotices[l.id] ?? null}
@@ -1909,7 +2107,7 @@ function QueuePage() {
           const leadIds = selectedBatchLeads;
           setBatchNotice(null);
           startBatch.mutate(
-            { leadIds, runtime: batchRuntime, modelEffort: batchEffort },
+            { leadIds, runtime: batchRuntime, modelEffort: batchEffort, modelChoiceExplicit: batchRuntimeTouched.current },
             {
               onSuccess: (result) => {
                 if (!result.ok) return;
@@ -1966,18 +2164,20 @@ function QueuePage() {
           </div>
           <ModelPicker
             scope="forced"
+            label="Model for these stories"
             value={batchRuntime}
-            onChange={(choice) => {
-              const runtime = choice as DraftBatchRuntime;
-              setBatchRuntime(runtime);
-              setBatchEffort(defaultModelEffort(runtime));
-            }}
+            onChange={pickBatchRuntime}
             effort={batchEffort}
             onEffortChange={setBatchEffort}
             disabled={startBatch.isPending}
             compact
           />
           <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
+          {/*
+            DHD1-2: the strip behind has the same "Model for these stories"
+            choice. Both read one state, so this line says so on screen.
+          */}
+          <p className="meta">Same choice as the strip behind: changing either one changes both, and Start runs the model shown here.</p>
           {/*
             BF5: name the leads the press below will draft. Until the batch
             moved into this dialog the panel's own checkboxes showed which
@@ -2057,7 +2257,7 @@ function QueuePage() {
                         pins this exact call, trailing comma and all, as the proof
                         that a redraft sends the runtime the picker is showing.
                       */
-                      queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, fromBatch: true });
+                      queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, modelChoiceExplicit: batchRuntimeTouched.current, fromBatch: true });
                     }}
                   />
                 );
@@ -2149,6 +2349,8 @@ function QueuePage() {
       {killFor ? (
         <KillDialog
           leadId={killFor.id}
+          leadStatus={killFor.status}
+          onRestored={() => qc.invalidateQueries({ queryKey: ["leads"] })}
           open
           onOpenChange={(open) => {
             if (!open) setKillFor(null);

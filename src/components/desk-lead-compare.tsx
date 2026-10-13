@@ -1,9 +1,10 @@
+import { deskWarning } from "../lib/news/desk-warning.ts";
+import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
 import { parseUrlList } from "@/lib/paper";
-import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
@@ -13,6 +14,7 @@ import {
   comparePressNote,
   KILLED_LEAD_HEADING,
   killRecordLine,
+  ALREADY_KILLED_DUPLICATE_LABEL,
   KILL_THIS_ONE_LABEL,
   MOVE_TO_NEW_LABEL,
   REOPEN_LABEL,
@@ -48,7 +50,12 @@ export type CompareSide = {
 
 /** What a press reports back. `false` means it did not land, and the panel
  * says so in the editor's words rather than the server's. */
-export type CompareResult = { ok: boolean; error?: string };
+export type CompareResult = {
+  ok: boolean;
+  error?: string;
+  warning?: { key: string; sentence: string };
+  undo?: () => Promise<void>;
+};
 
 export function LeadComparePanel({
   current,
@@ -61,8 +68,8 @@ export function LeadComparePanel({
 }: {
   current: CompareSide;
   prior: CompareSide;
-  onNotADuplicate?: () => Promise<CompareResult>;
-  onKillThis?: () => Promise<CompareResult>;
+  onNotADuplicate?: (override?: string[]) => Promise<CompareResult>;
+  onKillThis?: (override?: string[]) => Promise<CompareResult>;
   onReopenPrior?: () => Promise<CompareResult>;
   matchReason?: string;
   /** The paper's own date formatter, passed in so the panel renders the same
@@ -75,7 +82,7 @@ export function LeadComparePanel({
 
   const run = (
     which: "not-a-duplicate" | "kill" | "reopen",
-    press: (() => Promise<CompareResult>) | undefined,
+    press: ((override?: string[]) => Promise<CompareResult>) | undefined,
   ) => {
     if (!press || busy) return;
     setBusy(which);
@@ -83,6 +90,15 @@ export function LeadComparePanel({
     void press().then(
       (res) => {
         setBusy("");
+        const warning = deskWarning(res);
+        if (warning) {
+          /* DHG-1: a press the desk held for a yes/no answer used to leave this
+             panel silent, so the lead looked unchanged with no reason given. The
+             panel now says that nothing was saved and where the question is. The
+             warning itself stays in the desk message, the one place it is shown. */
+          setNote({ kind: "err", text: "Nothing was saved yet. Confirm the press in the desk message that just appeared." });
+          return;
+        }
         setNote(comparePressNote(which, res, { current, prior }));
       },
       () => {
@@ -93,6 +109,8 @@ export function LeadComparePanel({
   };
 
   const priorIsKilled = prior.status === "killed";
+  /* DHD2-8: a killed lead reads "Already killed", so the press no longer claims a kill it cannot make. */
+  const currentIsKilled = current.status === "killed";
   return (
     <section className="lead-compare" aria-labelledby="lead-compare-heading">
       <div className="lead-compare-head">
@@ -122,20 +140,26 @@ export function LeadComparePanel({
         >
           {busy === "not-a-duplicate" ? "Saving…" : MOVE_TO_NEW_LABEL}
         </InkButton>
-        {current.status !== "killed" && current.status !== "published" && onKillThis ? (
+        {current.status !== "published" && onKillThis ? (
           <InkButton
             tone="quiet-danger"
             disabled={busy !== ""}
-            onClick={() =>
-              confirmBeforeKillingDuplicate(
+            /* DHG-1: the confirm stays (never remove a feature). A walk in an
+               automated browser dismissed it, so the press sent nothing and the
+               panel said nothing. A closed confirm now says so in the panel. */
+            onClick={() => {
+              const killed = confirmBeforeKillingDuplicate(
                 (message) => window.confirm(message),
-                "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
+                currentIsKilled
+                  ? "Add a duplicate note to “" + current.headline + "”, already killed, as a duplicate of “" + prior.headline + "”?"
+                  : "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
                 () => run("kill", onKillThis),
-              )
-            }
-            ariaLabel={`${KILL_THIS_ONE_LABEL}: ${current.headline}`}
+              );
+              if (!killed) setNote({ kind: "err", text: "Nothing was killed: the question was closed without a yes. Press the button again and choose OK to kill it." });
+            }}
+            ariaLabel={`${currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}: ${current.headline}`}
           >
-            {busy === "kill" ? "Saving…" : KILL_THIS_ONE_LABEL}
+            {busy === "kill" ? "Saving…" : currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}
           </InkButton>
         ) : null}
         {onReopenPrior ? (
@@ -245,7 +269,7 @@ export function KilledLeadRecord({
   return (
     <section className="lead-killed-record" aria-labelledby="lead-killed-heading">
       <h2 id="lead-killed-heading" className="lead-compare-headline">
-        {KILLED_LEAD_HEADING}
+        {reopened ? editorTitle(lead.headline) : KILLED_LEAD_HEADING}
       </h2>
       <p className="meta">
         <Chip s={lead.status} />
@@ -282,7 +306,7 @@ export function KilledLeadRecord({
               void onReopen().then(
                 (res) => {
                   setBusy(false);
-                  if (!res?.ok) setError(res?.error || COMPARE_NO_ANSWER);
+                  if (!res?.ok && !deskWarning(res)) setError(res?.error || COMPARE_NO_ANSWER);
                 },
                 () => {
                   setBusy(false);

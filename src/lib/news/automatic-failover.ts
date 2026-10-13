@@ -52,7 +52,7 @@ export type AutomaticFailoverInput = {
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
-export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable" | "cutoff";
+export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable" | "cutoff" | "empty";
 
 export type AutomaticFailoverPlan = {
   next: StoryModelChoice;
@@ -95,7 +95,7 @@ export function looksLikeProviderQuota(detail: string | null | undefined): boole
 export function looksLikeProviderUnavailable(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
-    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
+    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|Gemini program was not found|Gemini program could not start|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
       detail!,
     )
   );
@@ -135,10 +135,11 @@ export function automaticFailoverReason(
   if (looksLikeContentRefusal(detail)) return null;
   if (/reply was cut off/i.test(detail ?? "")) return "cutoff";
   if (looksLikeUnreadableReply(detail)) return "unreadable";
+  if (/returned an empty draft/i.test(detail ?? "")) return "empty";
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
   if (looksLikeProviderAuthFailure(detail)) return "auth";
-  if (looksLikeProviderUnavailable(detail)) return "unavailable";
+  if (looksLikeProviderUnavailable(detail) || /^Gemini says:|^Gemini request failed/i.test(detail ?? "")) return "unavailable";
   return null;
 }
 
@@ -203,6 +204,7 @@ export function failoverReasonPhrase(
   if (reason === "auth") return `${previousLabel} sign-in lapsed`;
   if (reason === "quota") return `${previousLabel} reached its usage limit`;
   if (reason === "unreadable") return `${previousLabel} sent a reply the desk could not read`;
+  if (reason === "empty") return `${previousLabel} returned an empty draft`;
   return `${previousLabel} was unavailable`;
 }
 

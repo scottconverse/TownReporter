@@ -4,6 +4,80 @@ import { getSql } from "../db.ts";
 import { saveDraftForEditor } from "./draft-edit.server.ts";
 import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { parseStyleRecord } from "./draft-audit-record.ts";
+import { publicArticleForReaders } from "./public.ts";
+
+it("saves the Pace Street summary without the year note and keeps that note in editor checks", async () => {
+  const sql = await getSql();
+  const leadId = 7004;
+  await sql.query(`insert into section_config(newsroom_id) values (91) on conflict do nothing`);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible) values (91,'community','Community',100,true) on conflict do nothing`,
+  );
+  await sql.query(
+    `insert into leads (id,newsroom_id,user_id,headline,why,topic) values ($1,91,'pace-editor','Pace Street asphalt plan calls for delays and intersection closures','Fixture','community') on conflict (id) do nothing`,
+    [leadId],
+  );
+
+  const headline = "Pace Street asphalt plan calls for delays and intersection closures";
+  const publicDek =
+    "Longmont anticipates milling delays and two to three days of paving impacts near 9th and Mountain View avenues.";
+  const note = "The notice does not state the schedule year.";
+  const savedResult = await saveDraftForEditor(
+    { userId: "pace-editor", newsroomId: 91 },
+    {
+      leadId,
+      headline,
+      dek: `${publicDek} ${note}`,
+      body: "Longmont expects milling delays and two to three days of paving impacts near 9th and Mountain View avenues.",
+      topic: "community",
+    },
+  );
+  const [saved] = await sql<{ headline: string; dek: string; integrity_notes: string }>`
+    select headline, dek, integrity_notes from drafts where lead_id = ${leadId}
+  `;
+  assert.equal(savedResult.ok, true);
+  assert.equal(saved?.headline, headline);
+  assert.equal(saved?.dek, publicDek);
+  assert.match(saved?.integrity_notes ?? "", /The notice does not state the schedule year\./);
+
+  const fallbackBody = "Longmont expects milling delays and two to three days of paving impacts.";
+  const noteOnlySave = await saveDraftForEditor(
+    { userId: "pace-editor", newsroomId: 91 },
+    { leadId, headline, dek: note, body: fallbackBody, topic: "community" },
+  );
+  const [savedWithFallback] = await sql<{ dek: string }>`select dek from drafts where lead_id = ${leadId}`;
+  assert.equal(noteOnlySave.ok, true);
+  assert.equal(savedWithFallback?.dek, fallbackBody);
+
+  await sql`update drafts set integrity_notes = '' where lead_id = ${leadId}`;
+  const slug = `pace-street-save-test-${leadId}`;
+  await sql`
+    insert into articles (user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status)
+    values ('pace-editor', 91, ${leadId}, ${slug}, ${headline}, ${`${publicDek} ${note}`}, 'Paving work is planned.', 'community', '[]', 'published')
+  `;
+  const [liveArticle] = await sql<{ id: number }>`select id from articles where slug = ${slug}`;
+  const printed = await publicArticleForReaders({
+    id: Number(liveArticle!.id),
+    newsroom_id: 91,
+    slug,
+    headline,
+    dek: `${publicDek} ${note}`,
+    body: "Paving work is planned.",
+    topic: "community",
+    source_urls: "[]",
+    status: "published",
+    published_at: "2026-10-10T12:00:00Z",
+  });
+  assert.equal(printed.dek, publicDek);
+  const [printChecks] = await sql<{ integrity_notes: string }>`
+    select integrity_notes from drafts where lead_id = ${leadId}
+  `;
+  assert.match(printChecks?.integrity_notes ?? "", /The notice does not state the schedule year\./);
+
+  await sql`delete from articles where slug = ${slug}`;
+  await sql`delete from drafts where lead_id = ${leadId}`;
+  await sql`delete from leads where id = ${leadId}`;
+});
 
 // Bug 19c: style-repair output reached the editor-save writer with NULs intact.
 it("draft saves strip NUL from model repair text", async () => {

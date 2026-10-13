@@ -348,6 +348,7 @@ export function buildEditorialPack(input: {
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
+  researchScope?: "public" | "supplied";
   paper?: NewsroomIdentity;
 }): string {
   const parts: string[] = [
@@ -361,7 +362,9 @@ export function buildEditorialPack(input: {
   if (input.ourStory) {
     parts.push(
       "",
-      "TOWNREPORTER'S OWN REPORTING ON THIS (citable, and worth going underneath):",
+      input.researchScope === "supplied"
+        ? "TOWNREPORTER'S OWN REPORTING EXPLICITLY SELECTED AS SUPPLIED CONTEXT (cite this page URL only; do not open or fetch it):"
+        : "TOWNREPORTER'S OWN REPORTING ON THIS (citable, and worth going underneath):",
       `${input.ourStory.headline}${input.ourStory.dek ? ` — ${input.ourStory.dek}` : ""}`,
       input.ourStory.url,
     );
@@ -370,7 +373,9 @@ export function buildEditorialPack(input: {
   const pointers = input.pointers.filter((p) => p.what.trim());
   parts.push(
     "",
-    "DOCUMENT POINTERS FROM THE DESK (unverified leads, open them yourself):",
+    input.researchScope === "supplied"
+      ? "EXPLICITLY SUPPLIED SOURCE POINTERS (provided by the editor; do not fetch or open):"
+      : "DOCUMENT POINTERS FROM THE DESK (unverified leads, open them yourself):",
     pointers.length
       ? pointers.map((p) => `- ${p.what}${p.url ? `\n  ${p.url}` : ""}`).join("\n")
       : "(none — start from the subject line)",
@@ -382,7 +387,9 @@ export function buildEditorialPack(input: {
 
   parts.push(
     "",
-    "Research the subject and document pointers above. Return sourced findings for the writing pass.",
+    input.researchScope === "supplied"
+      ? "The editor selected supplied-only scope. Do not discover, search for, open, fetch, or cite anything outside the material explicitly supplied above. Return only what that material supports; identify missing facts for EDITOR CHECKS rather than filling them in."
+      : "Research the subject and document pointers above. Return sourced findings for the writing pass.",
   );
   return parts.join("\n");
 }
@@ -670,6 +677,7 @@ export function buildWritingPack(input: {
   subject: string;
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
+  researchScope?: "public" | "supplied";
   research: string;
   paper?: NewsroomIdentity;
   /**
@@ -715,10 +723,39 @@ export function buildWritingPack(input: {
   if (input.ourStory) {
     parts.push(
       "",
-      "TOWNREPORTER'S OWN REPORTING ON THIS (citable, and worth going underneath):",
+      input.researchScope === "supplied"
+        ? "TOWNREPORTER'S OWN REPORTING EXPLICITLY SELECTED AS SUPPLIED CONTEXT (cite this page URL only; do not open or fetch it):"
+        : "TOWNREPORTER'S OWN REPORTING ON THIS (citable, and worth going underneath):",
       `${input.ourStory.headline}${input.ourStory.dek ? ` — ${input.ourStory.dek}` : ""}`,
       input.ourStory.url,
     );
+  }
+
+  if (input.researchScope === "supplied") {
+    const supplied = suppliedMaterialForPrompt({
+      subject: input.subject,
+      sourceText: input.suppliedMaterial,
+      ...(input.suppliedMaterialCap ? { cap: input.suppliedMaterialCap } : {}),
+    });
+    if (supplied) parts.push("", suppliedMaterialHeading(supplied), supplied.text);
+    parts.push(
+      "",
+      "SUPPLIED-ONLY SCOPE: The editor selected 'Use only supplied material'. There was no outside research pass.",
+      "Do not search, browse, open or fetch outside sources. Do not add any citation, URL, date, name, number or other factual claim that the supplied material does not contain.",
+      "Cite only URLs explicitly present in the supplied material or the explicitly selected TownReporter story above, and exact supplied document filenames with page/section locators. Never cite a source you did not receive.",
+      "Every checkable claim must be supported by that supplied record, or qualified/removed.",
+      "When a fact needed for the piece is missing, do not guess or fill it from memory. Name it in an EDITOR CHECKS subsection inside EDITOR'S FACT SHEET so the editor can supply or verify it.",
+    );
+    if (input.askedFor?.trim()) parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    parts.push(
+      "",
+      "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
+      "Include CLAIMS AND SOURCES for every factual claim, using only the supplied record above. Do not invent facts or citations.",
+      "If you cannot deliver the complete editorial, return",
+      "EDITORIAL_REFUSAL: <concise reason>",
+      "and nothing else. Never format a refusal as a headline or article.",
+    );
+    return parts.join("\n");
   }
 
   const research = input.research.trim();

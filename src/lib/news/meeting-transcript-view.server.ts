@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type { Sql } from "../db.ts";
 import {
+  TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
   TranscriptViewRefused,
   type TranscriptView,
   type TranscriptViewLine,
@@ -133,8 +134,24 @@ export async function loadTranscriptView(
     format: artifact.format,
     byteSize: Number(artifact.byte_size ?? 0),
     capturedAt: artifact.captured_at,
+    originalAvailable: originalIsReadable(artifact.storage_path),
     lines,
   };
+}
+
+/**
+ * Whether the stored original can be opened for reading right now.
+ *
+ * Checked when the page loads, so the integrity line is true on first paint
+ * rather than appearing only after an editor clicks Download and gets a 404.
+ */
+function originalIsReadable(storagePath: string): boolean {
+  try {
+    accessSync(storagePath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export type TranscriptOriginal = {
@@ -164,9 +181,8 @@ export async function readTranscriptOriginal(
     // not accept. The hash below is over these same bytes either way.
     bytes = new Uint8Array(readFileSync(artifact.storage_path));
   } catch {
-    throw new Error(
-      `The stored transcript file is not readable at the recorded path for artifact ${artifact.id}.`,
-    );
+    // A 404 with the words the editor sees: the text transcript is still in the row.
+    throw new TranscriptViewRefused("original-missing", TRANSCRIPT_ORIGINAL_MISSING_MESSAGE);
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (sha256 !== artifact.sha256) {
@@ -186,6 +202,40 @@ export async function readTranscriptOriginal(
 export function attachmentFilename(filename: string): string {
   const cleaned = filename.replace(/["\\\r\n]/g, "").trim();
   return cleaned || "transcript";
+}
+
+/** Preserve the original format's media type instead of labelling every file as opaque bytes. */
+export function transcriptOriginalMimeType(filename: string): string {
+  const extension = filename.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
+  switch (extension) {
+    case ".srv3":
+    case ".xml":
+      return "application/xml";
+    case ".csv":
+      return "text/csv";
+    case ".json":
+      return "application/json";
+    case ".txt":
+      return "text/plain";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+export function transcriptOriginalContentDisposition(filename: string): string {
+  const safe = attachmentFilename(filename);
+  const fallback = safe.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 /**
@@ -234,9 +284,10 @@ export async function transcriptFileHandler(request: Request): Promise<Response>
     return new Response(new Blob([file.bytes]), {
       status: 200,
       headers: {
-        "content-type": "application/octet-stream",
+        "content-type": transcriptOriginalMimeType(file.filename),
         "content-length": String(file.bytes.byteLength),
-        "content-disposition": `attachment; filename="${attachmentFilename(file.filename)}"`,
+        "content-disposition": transcriptOriginalContentDisposition(file.filename),
+        "x-content-type-options": "nosniff",
         "cache-control": "no-store",
       },
     });

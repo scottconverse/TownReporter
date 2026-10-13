@@ -1,3 +1,6 @@
+import { holdLead } from "@/lib/news/editor-dialog-actions";
+import { withEditorWarningAction } from "../editor-warning-consent.ts";
+import { askDeskToastOverride } from "../desk-toast.ts";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
 import { addLead } from "@/components/scoped-actions";
 import { openDarkInvestigation, fileLead, writeStoryFromInput } from "@/components/scoped-actions";
@@ -45,6 +48,7 @@ import * as React from "react";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { ModelPicker as SharedModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 import { dialogPressProps } from "@/lib/news/dialog-press";
@@ -52,7 +56,7 @@ import { dialogPressProps } from "@/lib/news/dialog-press";
 import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
 import type { DuplicateWarning } from "@/lib/news/import-review";
 
-import { chooseHeadline, findSources, holdLead } from "@/components/scoped-actions";
+import { chooseHeadline, findSources } from "@/components/scoped-actions";
 import { sourceKillPattern, weaveIntoStory } from "@/lib/news/editor-dialog-actions";
 import {
   addSourcesLabel,
@@ -92,6 +96,7 @@ import {
   addToRequest,
   darkFileFromSeed,
   darkFileSeed,
+  darkFileWithShared,
   darkProblem,
   darkRequest,
   fillStepId,
@@ -298,6 +303,7 @@ type WriteStoryStepIn = {
   documentIds?: string[];
   modelChoice?: string;
   modelEffort?: string | null;
+  modelChoiceExplicit?: boolean;
 };
 type FileLeadStepIn = {
   headline: string;
@@ -343,6 +349,23 @@ export type NewStoryDialogProps = {
 export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<NewStoryState>(newStoryInitial, open, press.clear);
+  const modelTouched = React.useRef(false);
+  React.useEffect(() => {
+    if (open) modelTouched.current = false;
+  }, [open]);
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelTouched,
+    setChoice: (choice) => set({ model: choice as StoryModelChoice }),
+    setEffort: (effort) => set({ effort }),
+    refreshWhen: open,
+  });
+  const setFromEditor = React.useCallback((patch: Partial<NewStoryState>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "model")) {
+      modelTouched.current = true;
+    }
+    set(patch);
+  }, [set]);
   const [documents, setDocuments] = React.useState<string[]>([]);
   /*
     Unit BW5: the paste tab's duplicate warning.
@@ -385,7 +408,15 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   const start = (which: "primary" | "alt") => () =>
     press.run(async () => {
       setDuplicate(null);
-      const plan = newStoryRequest(state, which, documents);
+      const requestState =
+        !modelTouched.current && storyDraftAssignment.resolution.source === "assignment"
+          ? {
+              ...state,
+              model: storyDraftAssignment.resolution.providerId as StoryModelChoice,
+              effort: storyDraftAssignment.resolution.effort,
+            }
+          : state;
+      const plan = newStoryRequest(requestState, which, documents);
       let leadId: number | null = null;
       for (const raw of plan.steps) {
         /*
@@ -395,7 +426,11 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
         */
         const step: NewStoryStep = leadId === null ? raw : fillStepId(raw, leadId);
         if (step.call === "writeStory") {
-          const filed = await writeStoryFromInput({ data: step.input as WriteStoryStepIn });
+          const writeInput: WriteStoryStepIn = {
+            ...(step.input as WriteStoryStepIn),
+            modelChoiceExplicit: modelTouched.current,
+          };
+          const filed = await writeStoryFromInput({ data: writeInput });
           if (!filed.ok) return { problem: filed.error };
           return done(plan.done);
         }
@@ -457,6 +492,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
               leadId,
               modelChoice: state.model || "auto",
               modelEffort: state.effort,
+              modelChoiceExplicit: modelTouched.current,
             },
           });
           if (checked.ok === false) return { problem: checked.error, note: plan.done };
@@ -470,7 +506,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
             optional, so `{leadId}` alone is the call the desk made before this
             dialog drew a row.
           */
-          const asked = await suggestHeadlines({ data: { leadId, ...step.input } });
+          const asked = await suggestHeadlines({ data: { leadId, ...step.input, modelChoiceExplicit: modelTouched.current } });
           const options = asked.ok ? asked.options : [];
           return done(
             options.length
@@ -513,7 +549,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
     >
       <NewStoryBody
         state={state}
-        set={set}
+        set={setFromEditor}
         problem={press.problem ?? newStoryProblem(state, documents.length)}
         note={press.note}
         ModelPicker={DialogModelPicker}
@@ -887,12 +923,27 @@ export function AddToStoryDialog({
 
 /* ------------------------------------------------------------- dark file --- */
 
+export type DarkFileSharedModel = {
+  model: StoryModelChoice;
+  effort: ModelEffort | null;
+  onModelChoice: (choice: StoryModelChoice) => void;
+  onModelEffort: (effort: ModelEffort | null) => void;
+};
+
 export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
   defaultLimit?: string;
   defaultModel?: StoryModelChoice;
   defaultEffort?: ModelEffort | null;
+  defaultModelExplicit?: boolean;
+  /**
+   * The model and effort the page itself shows (its "Digging model" picker).
+   * When given, the dialog draws and writes these instead of its own copy, so
+   * a pick in either place shows in both and the file opens with the value on
+   * screen. The `default*` props are then only the factory's starting point.
+   */
+  shared?: DarkFileSharedModel;
   /**
    * Seeds the file fields the caller already knows, instead of making the editor
    * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
@@ -924,7 +975,7 @@ export type DarkFileDialogProps = {
   */
   onOpened?: (
     investigationId: number,
-    run: { paste: string; modelChoice?: string; modelEffort?: string | null },
+    run: { paste: string; modelChoice?: string; modelEffort?: string | null; modelChoiceExplicit?: boolean },
   ) => void;
 };
 
@@ -953,7 +1004,7 @@ export type DarkFileDialogProps = {
  * memoized on the two strings rather than on the object: a caller passing an
  * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride, defaultModelExplicit, shared }: DarkFileDialogProps) {
   const press = usePress();
   const modelFromModels = useFirstRunPickerDefault("dark") ?? "auto";
   const defaultModel = modelOverride ?? modelFromModels;
@@ -975,14 +1026,41 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, default
     [seed, prefillQuestion, prefillTip, prefillExplanation, defaultModel, defaultEffort, defaultLimit],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
+  const modelTouched = React.useRef(false);
+  React.useEffect(() => {
+    if (open) modelTouched.current = false;
+  }, [open]);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "dark",
+    touched: modelTouched,
+    setChoice: (choice) => { if (!shared) set({ model: choice }); },
+    setEffort: (effort) => { if (!shared) set({ effort }); },
+    preserveCurrent: modelOverride !== undefined,
+    refreshWhen: open,
+  });
+  // With `shared`, the page's model and effort are the only copy on screen: the
+  // dialog's own `model`/`effort` fields are not drawn and not written.
+  const view = darkFileWithShared(state, shared);
+  const setFromEditor = React.useCallback((patch: Partial<DarkFileState>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "model")) modelTouched.current = true;
+    if (shared) {
+      // The shared picker only offers the page's own model and effort unions.
+      if (patch.model !== undefined) shared.onModelChoice(patch.model as StoryModelChoice);
+      if (Object.prototype.hasOwnProperty.call(patch, "effort")) shared.onModelEffort((patch.effort ?? null) as ModelEffort | null);
+      const { model: _model, effort: _effort, ...rest } = patch;
+      if (Object.keys(rest).length > 0) set(rest);
+      return;
+    }
+    set(patch);
+  }, [set, shared]);
 
   const onPrimary = () =>
     press.run(async () => {
-      const request = darkRequest(state);
+      const request = darkRequest(view);
       const opened = await openDarkInvestigation({ data: request.open });
       if (!opened.ok) return { problem: opened.error };
       announceToDesk(`Opened "${opened.title}".`);
-      onOpened?.(opened.investigationId, request.run);
+      onOpened?.(opened.investigationId, { ...request.run, modelChoiceExplicit: modelTouched.current || defaultModelExplicit === true });
       onClose();
       return undefined;
     });
@@ -996,12 +1074,12 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, default
       footNote="You'll watch its activity log live and can stop it any time."
       primaryLabel="Open the file"
       onPrimary={onPrimary}
-      primaryDisabled={press.busy || darkProblem(state) !== null}
+      primaryDisabled={press.busy || darkProblem(view) !== null}
     >
       <DarkFileBody
-        state={state}
-        set={set}
-        problem={press.problem ?? darkProblem(state)}
+        state={view}
+        set={setFromEditor}
+        problem={press.problem ?? darkProblem(view)}
         note={press.note}
         ModelPicker={DialogModelPicker}
         Choice={Choice}
@@ -1058,9 +1136,11 @@ export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: Hold
     press.run(async () => {
       setPressed(withReason ? "primary" : "alt");
       try {
-        const answer = await holdLead({
-          data: { id: leadId, ...holdRequest(state, withReason) },
-        });
+        const captured = { id: leadId, ...holdRequest(state, withReason) };
+        const answer = await withEditorWarningAction(
+          override => holdLead({ data: { ...captured, override } }),
+          { action: "Hold" }, warning => { onClose(); return askDeskToastOverride(warning); },
+        );
         if (!answer.ok) return { problem: answer.error };
         return done(
           answer.notice ??
@@ -1110,6 +1190,25 @@ export type HeadlineDialogProps = {
   leadId: number;
   /** The headline the story has now, which "Keep mine" saves. */
   current: string;
+  /** First choice and effort from Models > Who does what for headlines. */
+  defaultModel?: string;
+  defaultEffort?: string | null;
+  /**
+   * DHG-3 / H06: the screen's own headline pick, when it has one.
+   *
+   * The story screen draws a "Model for suggestions" row beside its "Suggest
+   * headlines" press and this dialog draws "Model for headline suggestions".
+   * Both are the one headline job, so when the screen hands its state over the
+   * dialog reads and writes THAT state instead of keeping a second copy that
+   * can disagree. Without `onModelChange` the dialog keeps its own pick, as it
+   * always has.
+   */
+  model?: string;
+  effort?: string | null;
+  /** True once the editor picked on the screen, so "Automatic" is a real pick. */
+  modelPicked?: boolean;
+  onModelChange?: (model: string) => void;
+  onEffortChange?: (effort: string | null) => void;
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
@@ -1140,14 +1239,54 @@ export type HeadlineDialogProps = {
 export function HeadlineDialog({
   leadId,
   current,
+  defaultModel = "auto",
+  defaultEffort = null,
+  model: screenModel,
+  effort: screenEffort = null,
+  modelPicked = false,
+  onModelChange,
+  onEffortChange,
   open,
   onClose,
   onDone,
   onSaved,
 }: HeadlineDialogProps) {
   const press = usePress();
-  const factory = React.useCallback(() => headlineInitial(current), [current]);
-  const [state, set] = useDialogState<HeadlineState>(factory, open, press.clear);
+  const factory = React.useCallback(
+    () => headlineInitial(current, defaultModel, defaultEffort),
+    [current, defaultModel, defaultEffort],
+  );
+  const [ownState, set] = useDialogState<HeadlineState>(factory, open, press.clear);
+  const shared = typeof onModelChange === "function";
+  // One headline job, one pick: on the story screen the row below is the
+  // screen's own row, so the press reads the same value the row shows.
+  const state: HeadlineState = shared
+    ? { ...ownState, model: screenModel ?? ownState.model, effort: screenEffort }
+    : ownState;
+  const modelTouched = React.useRef(false);
+  React.useEffect(() => {
+    if (open) modelTouched.current = false;
+  }, [open]);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "headlines",
+    touched: modelTouched,
+    setChoice: (choice) => set({ model: choice }),
+    setEffort: (effort) => set({ effort }),
+    refreshWhen: open,
+  });
+  const setFromEditor = React.useCallback((patch: Partial<HeadlineState>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "model") || Object.prototype.hasOwnProperty.call(patch, "effort")) {
+      modelTouched.current = true;
+    }
+    if (onModelChange) {
+      const { model: pickedModel, effort: pickedEffort, ...rest } = patch;
+      if (typeof pickedModel === "string") onModelChange(pickedModel);
+      else if (Object.prototype.hasOwnProperty.call(patch, "effort")) onEffortChange?.(pickedEffort ?? null);
+      if (Object.keys(rest).length) set(rest);
+      return;
+    }
+    set(patch);
+  }, [set, onModelChange, onEffortChange]);
 
   const done = (text: string): PressAnswer => {
     announceToDesk(text);
@@ -1162,12 +1301,21 @@ export function HeadlineDialog({
   const onSuggested = () =>
     press.run(async () => {
       const asked = await suggestHeadlines({
-        data: { leadId, ...headlineSuggestRequest(state) },
+        data: {
+          leadId,
+          ...headlineSuggestRequest(state),
+          modelChoiceExplicit: modelTouched.current || modelPicked,
+        },
       });
       if (!asked.ok) return { problem: asked.error };
       if (!asked.options.length) return { problem: "The AI offered no headlines. Your own line still works." };
       set({ suggestions: asked.options, choice: asked.options[0] ?? state.choice });
-      return { note: `${asked.options.length} suggestions. Pick one, or type your own.` };
+      const runtime = asked.model?.trim();
+      return {
+        note: runtime
+          ? `Suggested by ${runtime}. ${asked.options.length} suggestions from ${runtime}. Pick one, or type your own.`
+          : `${asked.options.length} suggestions. The provider did not report which model ran. Pick one, or type your own.`,
+      };
     });
 
   const onPrimary = () =>
@@ -1195,7 +1343,7 @@ export function HeadlineDialog({
     >
       <HeadlineBody
         state={state}
-        set={set}
+        set={setFromEditor}
         problem={press.problem ?? headlineProblem(state)}
         note={press.note}
         ModelPicker={DialogModelPicker}

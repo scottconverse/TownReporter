@@ -15,21 +15,26 @@ import {
   fileWrittenEditorial,
   getEditorial,
   getFailedEditorialMaterial,
+  getPaperEditorialVoice,
   listEditorials,
   opinionReadiness,
   publishEditorial,
+  savePaperEditorialVoice,
   startEditorial,
 } from "@/lib/news/opinion";
+import { myDesk } from "@/lib/news/claim";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
-import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { automaticEffortNote, defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { OverrideAnyway } from "@/components/override-anyway";
+import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
@@ -76,8 +81,15 @@ function OpinionPage() {
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
+  const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
+  const [paperVoiceText, setPaperVoiceText] = useState("");
+  const [paperVoiceNotice, setPaperVoiceNotice] = useState<{ text: string; kind: "error" | "success" } | null>(null);
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [startWarning, setStartWarning] = useState<{key: string; sentence: string} | null>(null);
+  const [publishWarning, setPublishWarning] = useState<{
+    draftId: number;
+    warnings: { key: string; sentence: string }[];
+  } | null>(null);
   const acceptedOverrides = useRef<string[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
@@ -91,7 +103,8 @@ function OpinionPage() {
   */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
-  useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, retryRequestId]);
+  const startVoiceMode = useRef<"paper" | "neutral">("paper");
+  useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, researchScope, retryRequestId]);
   /*
     F3b: F3 stores the first-run default for Opinion's scope too, and this page
     sends whatever the picker shows as an explicit pick -- so on a fresh
@@ -101,10 +114,16 @@ function OpinionPage() {
     before (see first-run-picker-default.ts).
   */
   const modelChoiceTouched = useRef(false);
+  const opinionAssignment = useJobModelAssignment<OpinionModelChoice>({
+    jobKey: "opinion",
+    touched: modelChoiceTouched,
+    setChoice: (choice) => setModelChoice(choice as OpinionModelChoice),
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "opinion",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || opinionAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -158,6 +177,28 @@ function OpinionPage() {
   const ready = useQuery({
     queryKey: ["opinion-ready", modelChoice],
     queryFn: () => opinionReadiness({ data: modelChoice }),
+  });
+  const deskIdentity = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const paperVoice = useQuery({
+    queryKey: ["paper-editorial-voice"],
+    queryFn: () => getPaperEditorialVoice(),
+    enabled: deskIdentity.data?.role === "owner",
+  });
+  useEffect(() => {
+    if (paperVoice.data?.ok) setPaperVoiceText(paperVoice.data.text);
+  }, [paperVoice.data]);
+  const saveVoice = useMutation({
+    mutationFn: (text: string) => savePaperEditorialVoice({ data: text }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setPaperVoiceNotice({ text: result.error, kind: "error" });
+        return;
+      }
+      setPaperVoiceNotice({ text: "The paper's editorial voice is saved.", kind: "success" });
+      void qc.invalidateQueries({ queryKey: ["paper-editorial-voice"] });
+      void qc.invalidateQueries({ queryKey: ["opinion-ready"] });
+    },
+    onError: () => setPaperVoiceNotice({ text: "The paper's editorial voice could not be saved.", kind: "error" }),
   });
 
   const list = useQuery({
@@ -222,7 +263,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: (override?: string[]) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, documentIds: documents.map((d) => d.id), retryRequestId, override } }),
+    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, researchScope, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         if (res && "warning" in res) { setStartWarning(res.warning); return; }
@@ -254,6 +295,7 @@ function OpinionPage() {
       if (!res.ok) { setError(res.error); return; }
       setSubject(res.sourceText);
       setAskedFor(res.askedFor);
+      setResearchScope(res.researchScope);
       setRetryRequestId(res.requestId);
       setSuccess(`The complete saved material is back in the form above.${res.attachmentCount ? ` ${res.attachmentCount} retained attachment${res.attachmentCount === 1 ? " is" : "s are"} ready for retry.` : ""}`);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -269,12 +311,24 @@ function OpinionPage() {
     server fn, same guard: nothing publishes without this click.
   */
   const publish = useMutation({
-    mutationFn: (draftId: number) => publishEditorial({ data: draftId }),
-    onSuccess: (r) => {
+    mutationFn: (request: { draftId: number; acknowledgedWarningKeys?: string[] }) =>
+      publishEditorial({
+        data: {
+          draftId: request.draftId,
+          acknowledgedWarningKeys: request.acknowledgedWarningKeys,
+        },
+      }),
+    onSuccess: (r, request) => {
       if (!r?.ok) {
+        const warnings = r && "warnings" in r ? r.warnings : undefined;
+        if (warnings?.length) {
+          setPublishWarning({ draftId: request.draftId, warnings });
+          return;
+        }
         setError(r?.error ?? "That did not print.");
         return;
       }
+      setPublishWarning(null);
       setSuccess("On the paper. See it under Published, or read it on the paper.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
@@ -336,14 +390,24 @@ function OpinionPage() {
           Check again
         </InkButton>
       </div>
-    ) : ready.data && !ready.data.ready ? (
+    ) : ready.data && !ready.data.modelReady ? (
       <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
         <b>This desk cannot write yet.</b>
         <ul className="mt-1 list-disc pl-5">
-          {ready.data.problems.map((problem, index) => (
+          {ready.data.modelProblems.map((problem, index) => (
             <li key={`${index}-${problem}`}>{problem}</li>
           ))}
         </ul>
+      </div>
+    ) : ready.data && !ready.data.voiceReady ? (
+      <div role="status" className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-ink">
+        The paper's editorial voice has not been saved.{" "}
+        {deskIdentity.data?.role === "owner" ? (
+          <a className="inline-link" href="#paper-editorial-voice">Paper's editorial voice</a>
+        ) : (
+          <span>Ask the owner to set the paper's voice on this screen.</span>
+        )}
+        {" "}You can also choose Write anyway to use a neutral house voice.
       </div>
     ) : null;
 
@@ -419,6 +483,53 @@ function OpinionPage() {
           {notice && notice.kind !== "error" ? notice.text : ""}
         </span>
       </div>
+      {deskIdentity.data?.role === "owner" ? (
+        <section id="paper-editorial-voice" className="mt-8 border border-rule bg-paper-2 p-4">
+          <h2 className="text-lg font-semibold">Paper's editorial voice</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted">
+            Paste the voice the paper uses, or load it from a text file. The desk saves it for future editorials.
+          </p>
+          {paperVoice.isError || (paperVoice.data && !paperVoice.data.ok) ? (
+            <p className="mt-2 text-sm text-rust" role="alert">The saved voice could not be loaded. You can paste a replacement below.</p>
+          ) : null}
+          <label className="mt-3 block text-sm font-medium">
+            Paper's editorial voice
+            <textarea
+              className={inputClass + " mt-1 w-full"}
+              rows={10}
+              value={paperVoiceText}
+              onChange={(event) => setPaperVoiceText(event.target.value)}
+              aria-label="Paper's editorial voice"
+            />
+          </label>
+          <label className="mt-3 block text-sm">
+            Load voice from a text file
+            <input
+              className="mt-1 block min-h-11 max-w-full border border-rule bg-paper px-3 py-2"
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                void file.text().then((text) => {
+                  setPaperVoiceText(text);
+                  setPaperVoiceNotice({ text: "Text file loaded. Save to use this voice.", kind: "success" });
+                });
+              }}
+            />
+          </label>
+          {paperVoiceNotice ? (
+            <p className={paperVoiceNotice.kind === "error" ? "mt-2 text-sm text-rust" : "mt-2 text-sm text-muted"} role={paperVoiceNotice.kind === "error" ? "alert" : "status"}>
+              {paperVoiceNotice.text}
+            </p>
+          ) : null}
+          <div className="mt-3">
+            <InkButton tone="solid" disabled={saveVoice.isPending} onClick={() => saveVoice.mutate(paperVoiceText)}>
+              {saveVoice.isPending ? "Saving…" : "Save paper's voice"}
+            </InkButton>
+          </div>
+        </section>
+      ) : null}
       <div className="astra-2col wide">
         {/*
           CY item 8. The drawing draws the AI intake as a *door*, not as an open
@@ -472,6 +583,11 @@ function OpinionPage() {
             onBusy={setDocumentsBusy}
             disabled={start.isPending}
           />
+          <DraftScopePicker
+            value={researchScope}
+            onChange={setResearchScope}
+            disabled={start.isPending}
+          />
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Anything you want it to know (optional)
@@ -492,15 +608,21 @@ function OpinionPage() {
             onEffortChange={setModelEffort}
             disabled={start.isPending}
           />
+          {modelChoice === "auto" ? (
+            <p className="model-picker-help" role="status">{automaticEffortNote(modelEffort)}</p>
+          ) : null}
           {startWarning ? <OverrideAnyway warning={startWarning} actionWord="Write"
             busy={start.isPending} onOverride={() => {
               acceptedOverrides.current = [...new Set([...acceptedOverrides.current, startWarning.key])];
-              start.mutate(acceptedOverrides.current);
+              start.mutate({ override: acceptedOverrides.current, voiceMode: startVoiceMode.current });
             }} /> : null}
           <div className="astra-panel-acts">
             <InkButton
               tone="solid"
-              onClick={() => start.mutate(undefined)}
+              onClick={() => {
+                startVoiceMode.current = "paper";
+                start.mutate({ voiceMode: "paper" });
+              }}
               disabled={
                 start.isPending ||
                 ready.isPending ||
@@ -517,6 +639,26 @@ function OpinionPage() {
                   ? "Checking…"
                   : "Write an editorial"}
             </InkButton>
+            {ready.data && !ready.data.voiceReady ? (
+              <InkButton
+                tone="quiet"
+                disabled={
+                  start.isPending ||
+                  ready.isPending ||
+                  ready.isFetching ||
+                  ready.isError ||
+                  (subject.trim().length < 6 && documents.length === 0) ||
+                  documentsBusy ||
+                  !ready.data.modelReady
+                }
+                onClick={() => {
+                  startVoiceMode.current = "neutral";
+                  start.mutate({ voiceMode: "neutral" });
+                }}
+              >
+                Write anyway
+              </InkButton>
+            ) : null}
             {/*
               CY item 8: a shut door needs a way back. Card two has had a
               "Cancel" on its own disclosure since it was built; this is the
@@ -526,6 +668,16 @@ function OpinionPage() {
               Cancel
             </InkButton>
           </div>
+          {ready.data && !ready.data.voiceReady ? (
+            <p className="mt-2 text-sm text-muted" role="note">
+              Write an editorial is disabled until a voice is saved.{" "}
+              {deskIdentity.data?.role === "owner" ? (
+                <a className="inline-link" href="#paper-editorial-voice">Set the paper's editorial voice</a>
+              ) : (
+                "Ask the owner to set the paper's editorial voice."
+              )}
+            </p>
+          ) : null}
           </div>
           </div>
         ) : (
@@ -685,6 +837,25 @@ function OpinionPage() {
                       </Link>
                     ) : null}
                     {/*
+                      DHG-2: a claims row keeps Repair claims as its primary and
+                      also offers "Publish anyway". The server treats the claims
+                      appendix as a warning the editor may accept, so the first
+                      press asks for the warning (the panel below repeats its
+                      sentence) and the second press -- "I accept these claims are
+                      unreviewed" -- publishes and records the override.
+                    */}
+                    {claims && r.draft_id && r.finished_at && !r.error && !r.published_slug ? (
+                      <InkButton
+                        tone="quiet"
+                        disabled={publish.isPending}
+                        onClick={() => publish.mutate({ draftId: r.draft_id! })}
+                      >
+                        {publish.isPending && publish.variables?.draftId === r.draft_id
+                          ? "Publishing…"
+                          : "Publish anyway"}
+                      </InkButton>
+                    ) : null}
+                    {/*
                       Unit CA, note 1. A finished piece offered Read it / Edit
                       / Delete and nothing else, and "Publish to the paper"
                       lived only inside the panel Read it opens -- so an editor
@@ -702,19 +873,47 @@ function OpinionPage() {
                       The panel has no confirm step and neither does this: the
                       press is the confirmation, exactly as it is up there.
                       `publishEditorial` still refuses a piece whose claims
-                      appendix is incomplete, so the claims row keeps Repair
-                      claims as its primary and draws no Publish at all.
+                      appendix is incomplete on a bare press, so the claims row
+                      keeps Repair claims as its primary and offers "Publish
+                      anyway" (DHG-2, above) instead of a plain Publish.
                     */}
                     {r.draft_id && r.finished_at && !r.error && !r.published_slug && !claims ? (
-                      <InkButton
-                        tone="solid"
-                        disabled={publish.isPending}
-                        onClick={() => publish.mutate(r.draft_id!)}
-                      >
-                        {publish.isPending && publish.variables === r.draft_id
-                          ? "Publishing…"
-                          : "Publish"}
-                      </InkButton>
+                      <>
+                        {/*
+                          DHD2-12: the empty summary is said on the row BEFORE any press, the same
+                          words and the same "Publish anyway" as the open piece's panel (DHC11).
+                          The press acknowledges the summary warning, so it publishes at once.
+                        */}
+                        {r.dek?.trim() ? null : (
+                          <span className="meta" role="note">
+                            This piece has no summary for readers.{" "}
+                            <InkButton
+                              tone="quiet"
+                              small
+                              disabled={publish.isPending}
+                              onClick={() => publish.mutate({ draftId: r.draft_id!, acknowledgedWarningKeys: ["dek"] })}
+                            >
+                              {publish.isPending && publish.variables?.draftId === r.draft_id
+                                ? "Publishing…"
+                                : "Publish anyway"}
+                            </InkButton>
+                          </span>
+                        )}
+                        {/*
+                          DHD2-13: the row's press is still "Publish" (its words are kept); the
+                          note in front says where it goes, the same words the open piece uses.
+                        */}
+                        <span className="meta">Publish to the paper:</span>{" "}
+                        <InkButton
+                          tone="solid"
+                          disabled={publish.isPending}
+                          onClick={() => publish.mutate({ draftId: r.draft_id! })}
+                        >
+                          {publish.isPending && publish.variables?.draftId === r.draft_id
+                            ? "Publishing…"
+                            : "Publish"}
+                        </InkButton>
+                      </>
                     ) : null}
                     {r.published_slug ? (
                       <Link
@@ -868,6 +1067,18 @@ function OpinionPage() {
                       {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
                     </p>
                   ) : null}
+                  {publishWarning?.draftId === r.draft_id && openId !== r.draft_id ? (
+                    <div className="astra-span">
+                      <OpinionPublishWarnings
+                        warnings={publishWarning.warnings}
+                        busy={publish.isPending}
+                        onPublishAnyway={() => publish.mutate({
+                          draftId: publishWarning.draftId,
+                          acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+                        })}
+                      />
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -896,13 +1107,29 @@ function OpinionPage() {
                   }
                   if (piece.data) {
                     return (
-                      <InkButton
-                        tone="solid"
-                        disabled={publish.isPending}
-                        onClick={() => publish.mutate(openId)}
-                      >
-                        {publish.isPending ? "Publishing…" : "Publish to the paper"}
-                      </InkButton>
+                      <>
+                        {/* DHC11: the empty summary is said on screen before the press, not only after it. */}
+                        {piece.data.dek?.trim() ? null : (
+                          <div className="mt-3 border border-rule bg-paper-2 p-4" role="note">
+                            <p className="text-sm text-ink">This piece has no summary for readers.</p>
+                            <button
+                              type="button"
+                              className="btn mt-3"
+                              disabled={publish.isPending}
+                              onClick={() => publish.mutate({ draftId: openId })}
+                            >
+                              {publish.isPending ? "Publishing…" : "Publish anyway"}
+                            </button>
+                          </div>
+                        )}
+                        <InkButton
+                          tone="solid"
+                          disabled={publish.isPending}
+                          onClick={() => publish.mutate({ draftId: openId })}
+                        >
+                          {publish.isPending ? "Publishing…" : "Publish to the paper"}
+                        </InkButton>
+                      </>
                     );
                   }
                   return null;
@@ -914,6 +1141,16 @@ function OpinionPage() {
             }
             sub="Read it here, and publish it from here when it is ready. Edit opens the full editor for changes."
           />
+          {publishWarning?.draftId === openId ? (
+            <OpinionPublishWarnings
+              warnings={publishWarning.warnings}
+              busy={publish.isPending}
+              onPublishAnyway={() => publish.mutate({
+                draftId: publishWarning.draftId,
+                acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+              })}
+            />
+          ) : null}
           {piece.isPending ? (
             <ListSkeleton />
           ) : !piece.data ? (
@@ -973,6 +1210,34 @@ function OpinionPage() {
         </section>
       ) : null}
     </DeskShell>
+  );
+}
+
+function OpinionPublishWarnings({
+  warnings,
+  busy,
+  onPublishAnyway,
+}: {
+  warnings: { key: string; sentence: string }[];
+  busy: boolean;
+  onPublishAnyway: () => void;
+}) {
+  /* DHG-2: the claims warning's confirm uses the Story page's own words. */
+  const claimsWarning = warnings.some((warning) => warning.key === "editorial-sources");
+  const confirmWords = claimsWarning ? "Publish anyway — I accept these claims are unreviewed" : "Publish anyway";
+  return (
+    <div className="mt-3 border border-rule bg-paper-2 p-4" role="alert">
+      {warnings.map((warning) => (
+        <p key={warning.key} className="text-sm text-ink">
+          {warning.sentence}
+        </p>
+      ))}
+      <div className="mt-3">
+        <button type="button" className="btn" disabled={busy} onClick={onPublishAnyway}>
+          {busy ? "Publishing…" : confirmWords}
+        </button>
+      </div>
+    </div>
   );
 }
 

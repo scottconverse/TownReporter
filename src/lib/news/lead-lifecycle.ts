@@ -91,10 +91,27 @@ export async function setLeadStatusForEditor(
   if (draftedWarning) return draftedWarning;
 
   if (data.status === "killed") {
+    // DHC06: the first kill remembers the status the lead held before it, so
+    // Undo and "Bring back" put it back. DHC09: a kill on a lead that is already
+    // killed keeps the first kill record (its time, its status, its reason) and
+    // only adds the new note to the reason, after a " · " separator (DHD2-8).
+    // DHD2-3: a kill with no reason typed keeps the reason the lead already has,
+    // and the first kill remembers that reason so Undo can put it back.
     await sql`
-      update leads set status = 'killed', killed_at = now(),
-              kill_reason = ${reason || null},
-              kill_reason_url = ${data.killReasonUrl?.trim() || null}
+      update leads set status = 'killed',
+              kill_prior_status = case when status = 'killed' then kill_prior_status else status end,
+              kill_prior_reason = case when status = 'killed' then kill_prior_reason else kill_reason end,
+              killed_at = case when status = 'killed' then killed_at else now() end,
+              kill_reason = case
+                when ${reason || null}::text is null then kill_reason
+                when status <> 'killed' then ${reason || null}::text
+                when coalesce(btrim(kill_reason), '') = '' then ${reason || null}::text
+                else kill_reason || ' · Killed again: ' || ${reason || null}::text
+              end,
+              kill_reason_url = case
+                when status = 'killed' then coalesce(kill_reason_url, ${data.killReasonUrl?.trim() || null}::text)
+                else ${data.killReasonUrl?.trim() || null}::text
+              end
       where id = ${data.id} and newsroom_id = ${newsroomId}
     `;
     return { ok: true as const };
@@ -115,10 +132,42 @@ export async function resolveLeadDuplicateForEditor(
   const { context: ctx, newsroomId } = normalizeContext(context);
   await ensureAuditEventsSchema(sql as never);
   if (data.action === "not-a-duplicate") {
+    const [lead] = await sql<{ status: string; has_draft: boolean; has_published: boolean }>`
+      select leads.status,
+        exists (select 1 from drafts where drafts.lead_id = leads.id and drafts.newsroom_id = ${newsroomId} and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')) as has_draft,
+        exists (select 1 from articles where articles.lead_id = leads.id and articles.newsroom_id = ${newsroomId} and articles.status = 'published') as has_published
+      from leads where id = ${data.id} and newsroom_id = ${newsroomId}
+    `;
+    if (!lead) return { ok: false as const, error: "That lead is no longer on the desk." };
+
+    const publishedWarning = lead.status === "published" || lead.has_published
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-duplicate-new-published",
+          "This lead has a published story. Moving it to New will leave that story published.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (publishedWarning) return publishedWarning;
+    const draftedWarning = lead.status === "drafted" || lead.has_draft
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-duplicate-new-drafted",
+          "This lead has a written draft. Moving it to New will keep the saved draft.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (draftedWarning) return draftedWarning;
+
+    // DHD2-6: the duplicate kill reason goes with the duplicate call. A reason
+    // the editor wrote in their own words stays.
     const rows = await sql<{ id: number }>`
       update leads
       set possible_duplicate_of = null, dup_kind = null,
-          status = case when status = 'held' then 'new' else status end
+          status = 'new',
+          kill_reason = case when kill_reason like 'Duplicate of %' then null else kill_reason end
       where id = ${data.id} and newsroom_id = ${newsroomId}
       returning id
     `;
@@ -215,4 +264,66 @@ async function reopenPrior(sql: AuditSqlTag, newsroomId: number, id: number) {
     returning prior.id as id
   `;
   return { ok: true as const, action: "reopen-prior" as const, priorId: rows[0]?.id ?? null };
+}
+
+/** The way back from a kill: an Undo, or a Bring back from the Killed pile. */
+export interface LeadRestoreRequest {
+  id: number;
+  status?: "new" | "held" | "drafted";
+  /**
+   * Bring back keeps the kill record (its time and its reason). An Undo does
+   * not: it takes the kill off the lead, so the lead is as it was before the press.
+   */
+  keepRecord?: boolean;
+}
+
+/**
+ * The way back from a kill (`restoreKilledLead` in desk.ts is the thin wrapper).
+ *
+ * With no status asked for, the lead goes back to the status it held when the
+ * kill was pressed (`kill_prior_status`). `drafted` is allowed only when the
+ * lead still has a draft; a lead remembered as drafted whose draft is gone
+ * comes back as `new`, and an explicit ask for `drafted` with no draft is refused
+ * before anything is written.
+ *
+ * An Undo (no `keepRecord`) also clears what the kill wrote: `killed_at`, the
+ * kill's reason (back to the reason the lead had before, `kill_prior_reason`)
+ * and its reason link. A Bring back keeps `killed_at` and the kill's reason, so
+ * the lead's history line still says when it was killed and why.
+ */
+export async function restoreKilledLeadForEditor(
+  sql: AuditSqlTag,
+  context: LeadLifecycleContext | number,
+  data: LeadRestoreRequest,
+) {
+  const { newsroomId } = normalizeContext(context);
+  const [current] = await sql<{ prior: string | null }>`
+    select kill_prior_status as prior from leads
+    where id = ${data.id} and newsroom_id = ${newsroomId} and status = 'killed'
+  `;
+  if (!current) return { ok: false as const, error: "That lead is not killed." };
+  const remembered = current.prior === "held" || current.prior === "drafted" ? current.prior : "new";
+  let back: "new" | "held" | "drafted" = data.status ?? remembered;
+  if (back === "drafted") {
+    const [draft] = await sql<{ id: number }>`
+      select id from drafts where lead_id = ${data.id} and newsroom_id = ${newsroomId} limit 1
+    `;
+    if (!draft) {
+      if (data.status === "drafted") return { ok: false as const, error: "That lead has no draft to go back to." };
+      back = "new";
+    }
+  }
+  const keep = data.keepRecord === true;
+  const rows = await sql<{ id: number }>`
+    update leads set status = ${back},
+      kill_reason = case when ${keep}::boolean then kill_reason else kill_prior_reason end,
+      kill_reason_url = case when ${keep}::boolean then kill_reason_url else null end,
+      killed_at = case when ${keep}::boolean then killed_at else null end,
+      kill_prior_status = null,
+      kill_prior_reason = null
+    where id = ${data.id} and newsroom_id = ${newsroomId} and status = 'killed'
+    returning id
+  `;
+  if (!rows.length) return { ok: false as const, error: "That lead is not killed." };
+  return { ok: true as const, status: back };
 }

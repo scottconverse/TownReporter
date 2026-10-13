@@ -37,8 +37,9 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { confirmSectionAndWaitForPublishable, openStoryDetails } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
+import { verifyLeadCompareActions } from "./lead-compare-actions.mjs";
 import {
   SERVER_FN_HEADER,
   awaitServerFnCall,
@@ -811,6 +812,15 @@ async function main() {
     [email],
   );
   const newsroomId = owner.rows[0].newsroom_id;
+  await verifyLeadCompareActions({
+    page,
+    pool,
+    base,
+    userId: owner.rows[0].user_id,
+    newsroomId,
+    stamp,
+    step,
+  });
   /*
     The assertions below were re-authored for unit CW2 (0.6.81, commit
     f6953ca1), which moved the review onto the Checks tab's drawn list. Three
@@ -1155,6 +1165,11 @@ async function main() {
     return input instanceof HTMLSelectElement && !input.disabled;
   });
   step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  // This directly seeded manual draft has no model section choice. Choose
+  // its saved section explicitly before testing claim acceptance and Publish.
+  await openStoryDetails(page);
+  await page.locator("#story-topic-select").selectOption("community");
+  await page.waitForFunction(() => !document.getElementById("story-topic-select")?.disabled);
   await page.getByRole("button", { name: "Publish anyway — I accept these claims are unreviewed", exact: true }).click();
   await page.waitForFunction(() => {
     const accept = [...document.querySelectorAll("#publish-blockers button")]

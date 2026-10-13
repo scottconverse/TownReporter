@@ -19,6 +19,8 @@
 import { printedDupChip, openLeads, type DupAiVerdictFields } from "./desk-copy.ts";
 import type { NewsroomPlace } from "./lead-match.ts";
 import { cleanListWindow, type ListFilterWindow } from "./list-window.ts";
+import { defaultModelEffort, type ModelEffort } from "./provider-registry.ts";
+import type { DraftBatchRuntime } from "./draft-batch.ts";
 
 /**
  * The drawn tab set (README "3. Queue"), named here because the server has to
@@ -59,6 +61,7 @@ export type QueueLead = {
   newsworthiness: number | null;
   created_at: string;
   last_resurfaced_at?: string | null;
+  killed_at?: string | null;
 } & DupAiVerdictFields;
 
 /** A printed story, as `nearDuplicate` reads it. */
@@ -192,10 +195,14 @@ export function queueSelect<T extends QueueLead>(
  * The Queue's three orders.
  *
  * "Best" is the score the scanner gave, and on the Killed tab it means
- * something else: what keeps coming back belongs on top there, which is the
- * whole point of stamping a resurfaced lead instead of quietly hiding it.
- * Leads never resurfaced (`last_resurfaced_at` null) sort after ones that
- * have, oldest kill first within that group.
+ * something else: the newest kill first, so a lead killed today is on the
+ * first page whether or not it came back. A came-back lead keeps its
+ * "seen again" stamp in the row; it no longer pushes new kills off the page.
+ * Kills with no `killed_at` sort last.
+ *
+ * On the Killed tab "Newest first" and "Oldest first" are the kill time too,
+ * not the filing time: a lead filed in September and killed today is the
+ * newest kill, and the pile's labels say what the rows are sorted by.
  */
 export function queueSort<T extends QueueLead>(
   leads: readonly T[],
@@ -206,15 +213,75 @@ export function queueSort<T extends QueueLead>(
     sort === "newest"
       ? Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
       : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
-  if (sort === "best" && filter === "killed") {
+  if (filter === "killed") {
+    const killTime = (lead: T) => (lead.killed_at ? Date.parse(lead.killed_at) : null);
+    const newestFirst = sort !== "oldest";
     return [...leads].sort((a, b) => {
-      const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
-      const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
-      if (at !== bt) return bt - at;
-      return b.id - a.id;
+      const at = killTime(a);
+      const bt = killTime(b);
+      // A kill with no time goes last in either direction. Among those, the
+      // filing time follows the chosen direction, so the two orders still differ
+      // instead of falling back to one fixed order.
+      if (at === null || bt === null) {
+        if (at !== null) return -1;
+        if (bt !== null) return 1;
+        const ac = Date.parse(a.created_at);
+        const bc = Date.parse(b.created_at);
+        return newestFirst ? bc - ac || b.id - a.id : ac - bc || a.id - b.id;
+      }
+      if (at !== bt) return newestFirst ? bt - at : at - bt;
+      return newestFirst ? b.id - a.id : a.id - b.id;
     });
   }
   return [...leads].sort(
     sort === "best" ? (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0) : byAge,
   );
+}
+
+/**
+ * Whether the Queue may keep the rows it has on screen while the next page is
+ * in flight (DHE1-6).
+ *
+ * The screen keeps the last rows so a typed search does not blank the table.
+ * A tab, a sort or a section press is different: the rows on screen are then
+ * another tab's leads or another order, under the new pill and the new
+ * "Oldest first". The walk pressed Killed and saw Open leads under the Killed
+ * pill, and the Newest and Oldest captures were the same text for that reason.
+ * So the old rows stay only while the tab, the section and the sort are the
+ * ones they were read for. A missing previous query keeps nothing.
+ */
+export function queueKeepsRowsWhileLoading(
+  from: { filter?: unknown; section?: unknown; sort?: unknown } | undefined,
+  to: { filter: unknown; section: unknown; sort: unknown },
+): boolean {
+  return (
+    from !== undefined &&
+    from.filter === to.filter &&
+    from.section === to.section &&
+    from.sort === to.sort
+  );
+}
+
+/*
+  The Queue's checkbox column as one rule (walk D, DHD1-3). A tick on one row
+  adds or removes that row and nothing else. Only the header box sets the
+  whole shown list at once, and it sets exactly the leads on screen.
+*/
+export function queueRowTick(picked: readonly number[], leadId: number, selected: boolean): number[] {
+  return selected ? [...picked.filter((id) => id !== leadId), leadId] : picked.filter((id) => id !== leadId);
+}
+
+export function queueSelectAllShown(shownIds: readonly number[], checked: boolean): number[] {
+  return checked ? [...shownIds] : [];
+}
+
+/**
+ * DHE1-10: the bulk strip's "Model for these stories" and the "Draft the
+ * selected leads" dialog are one batch runtime and one effort. Both pickers
+ * take their pick through this, so the effort always follows the model and the
+ * two controls cannot disagree.
+ */
+export function batchRuntimePick(choice: string): { runtime: DraftBatchRuntime; effort: ModelEffort | null } {
+  const runtime = choice as DraftBatchRuntime;
+  return { runtime, effort: defaultModelEffort(runtime) };
 }

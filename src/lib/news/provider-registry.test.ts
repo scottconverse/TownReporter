@@ -15,7 +15,11 @@ import {
   enabledAutomaticLadder,
   defaultModelEffort,
   modelEffort,
+  modelEffortLabel,
   modelEffortsFor,
+  automaticEffortNote,
+  pickerShownEffort,
+  recordedModelEffort,
   opinionAutomaticLadder,
   plannerModelFor,
   providerEnabled,
@@ -131,6 +135,13 @@ describe("model-specific thinking effort", () => {
     );
     assert.equal(defaultModelEffort("local-model", "qwen3.8-27b"), "none");
     assert.equal(defaultModelEffort("local-model", "qwen3.5:397b-cloud"), "none");
+    // Test walk 1 (Oct 12): LM Studio names models with a publisher folder in
+    // front. These are the exact loaded names; each must still run thinking off.
+    for (const loaded of ["qwen/qwen3.8-27b", "halo/qwen3.8-27b-q6-fast", "study/qwen3.8-27b-q6"]) {
+      assert.deepEqual(modelEffortsFor("local-model", loaded), ["none"], loaded);
+      assert.equal(defaultModelEffort("local-model", loaded), "none", loaded);
+    }
+    assert.deepEqual(modelEffortsFor("local-model", "halo/qwen3-coder-30b-a3b-q4km"), [], "another Qwen is not Qwen 3.8");
     assert.equal(
       defaultModelEffort(
         "custom:11111111-1111-4111-8111-111111111111",
@@ -140,7 +151,8 @@ describe("model-specific thinking effort", () => {
     );
     assert.equal(defaultModelEffort("custom:11111111-1111-4111-8111-111111111111"), null);
     assert.equal(defaultModelEffort("grok-oauth"), null);
-    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "max");
+    // Release H decision 1: DeepSeek v4.1 Flash runs at none even when Max is picked.
+    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "none");
     assert.equal(
       modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"),
       "none",
@@ -253,33 +265,24 @@ describe("the provider registry is the one description of a writing model", () =
         "codex-frontier",
         "codex-balanced",
         "codex-luna",
+        "gemini-flash",
+        "gemini-pro",
         "claude-fable",
         "claude-frontier",
         "claude-sonnet",
         "claude-haiku",
         "local-model",
-        // Unit U29: the owner's 2026-09-30 decision made DeepSeek v4.1 Flash
-        // Opinion's first Automatic rung, and "keep the picker regardless" is
-        // why it is a NAME in Opinion's menu as well.
+        // The shared picker names DeepSeek anywhere ordinary writing can run it.
         "deepseek-flash",
       ],
     );
-    /*
-      Everything Opinion offers, Story and Dark offer too -- with the one
-      exception the owner asked for, and it is not an Opinion-only capability:
-      DeepSeek is the first rung of the DESK's ladder, so Story, Scan and Dark
-      Desk already run it. They reach it through Automatic; Opinion's menu also
-      names it. Nothing Story or Dark can do is missing from Opinion.
-    */
-    for (const entry of providersFor("opinion")) {
-      if (entry.id === "deepseek-flash") continue;
-      assert.ok(entry.offeredFor.story && entry.offeredFor.dark);
-    }
+    // Every chat surface can name DeepSeek, including its forced runtime.
+    // OCR still requires vision support.
     const deepseek = providerEntry("deepseek-flash")!;
     assert.deepEqual(
       SURFACES.filter((surface) => deepseek.offeredFor[surface]),
-      ["opinion"],
-      "the DeepSeek rung is nameable on Opinion and nowhere else",
+      ["story", "scan", "follow-up", "opinion", "dark", "forced"],
+      "the shared picker offers DeepSeek anywhere ordinary chat work can run",
     );
     assert.ok(automaticLadder().includes("deepseek-flash"), "and it is the desk's first rung too");
   });
@@ -293,24 +296,23 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders Automatic with DeepSeek first and Codex Sol 6.1 (balanced) last", () => {
+  it("orders Automatic with DeepSeek first and Gemini after balanced Codex", () => {
     // 0.6.63, Unit Y item 1, on the owner's measured blind research test:
     // DeepSeek v4.1 Flash 30.9, Qwen3.6-35B 15.8, Terra 15.3.
     const ladder = automaticLadder();
-    assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced"]);
+    assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
     for (const id of ladder) {
       assert.ok(providerEntry(id), `ladder names ${id}, which is not in the registry`);
     }
-    // The rungs are not menu options, so they are the ladder minus the story
-    // picker. This asserts the ladder is a superset of the story list's
-    // ordering rather than its reverse.
+    // DeepSeek is the named rung in the shared Story picker. The other named
+    // ladder provider is the non-selectable local rung.
     assert.deepEqual(
       ladder.filter((id) => providersFor("story").some((entry) => entry.id === id)),
-      ["codex-balanced"],
+      ["deepseek-flash", "codex-balanced", "gemini-flash"],
     );
     assert.deepEqual(
-      ladder.slice(0, 2),
-      automaticLadder().filter((id) => !providersFor("story").some((entry) => entry.id === id)),
+      ladder.filter((id) => !providersFor("story").some((entry) => entry.id === id)),
+      ["qwen-local"],
     );
   });
 
@@ -380,7 +382,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
     // endpoint), which this test's environment does not have, so the only
     // rung left standing is Codex. Naming the endpoints makes them stand.
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), []);
+      assert.deepEqual(enabledAutomaticLadder(), ["gemini-flash"]);
       assert.deepEqual(
         withEnvValue(
           {
@@ -389,14 +391,14 @@ describe("the Automatic ladder is derived, not typed out", () => {
           },
           () => enabledAutomaticLadder(),
         ),
-        ["deepseek-flash", "qwen-local"],
+        ["deepseek-flash", "qwen-local", "gemini-flash"],
       );
       // The static list is unchanged: it is read at module load by ai.ts, and
       // the probe loop already copes with a rung that turns out to be gone.
-      assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced"]);
+      assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
     });
     withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), []);
+      assert.deepEqual(enabledAutomaticLadder(), ["gemini-flash"]);
     });
   });
 
@@ -413,7 +415,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
         },
         () => enabledAutomaticLadder(),
       ),
-      ["qwen-local"],
+      ["qwen-local", "gemini-flash"],
     );
   });
 });
@@ -677,5 +679,58 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
 
   it("has no planner substitution -- a local server has never heard of another provider's model", () => {
     assert.equal(plannerModelFor("local-model"), "");
+  });
+});
+
+describe("DeepSeek v4.1 Flash runs with effort none, and the receipt says so", () => {
+  it("a local-model run of deepseek-v4.1-flash:cloud with no pick records none", () => {
+    assert.equal(recordedModelEffort("local-model", null, "deepseek-v4.1-flash:cloud"), "none");
+    assert.equal(recordedModelEffort("local-model", undefined, "deepseek-v4.1-flash:cloud"), "none");
+  });
+
+  it("the picker and Models read the same label for that model: None — fastest", () => {
+    assert.equal(modelEffortLabel("none", "deepseek-v4.1-flash:cloud"), "None — fastest");
+    assert.equal(modelEffortLabel("none", "deepseek-flash"), "None — fastest");
+  });
+
+  it("Qwen models that default to thinking off keep their own wording", () => {
+    assert.equal(modelEffortLabel("none", "qwen3.8"), "Off — no extra thinking");
+  });
+});
+
+describe("Automatic never shows a false Medium (Release H)", () => {
+  it("Automatic with no pick shows no single effort, so the picker cannot print Medium", () => {
+    assert.equal(defaultModelEffort("auto"), null);
+    assert.equal(pickerShownEffort("auto", null, null), null);
+  });
+
+  it("a DeepSeek rung reached through Automatic records none even when the editor picked medium", () => {
+    assert.equal(modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"), "none");
+  });
+});
+
+describe("Automatic's effort line names each model, not one Medium (Release H)", () => {
+  it("with no pick it names each model's default and DeepSeek's always-off rule", () => {
+    const note = automaticEffortNote(null);
+    assert.match(note, /each model's own default/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+    assert.doesNotMatch(note, /Medium/);
+  });
+
+  it("with a pick it names the pick and still says DeepSeek ignores it", () => {
+    const note = automaticEffortNote("medium");
+    assert.match(note, /^Thinking effort: Medium — balanced where a model offers it/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+  });
+});
+
+describe("DeepSeek v4.1 Flash always runs with thinking off", () => {
+  // Decision 1 (Release H): a DeepSeek rung runs at "none" even when the
+  // editor picked another effort, so the receipt never says otherwise.
+  it("a picked High or Max still runs at none on the DeepSeek rung", () => {
+    assert.equal(modelEffort("deepseek-flash", "high"), "none");
+    assert.equal(modelEffort("deepseek-flash", "max"), "none");
+    assert.equal(modelEffort("deepseek-flash", "medium"), "none");
+    assert.equal(modelEffort("local-model", "high", "deepseek-v4.1-flash:cloud"), "none");
   });
 });

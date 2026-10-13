@@ -2,6 +2,7 @@ import { evidenceReviewToken, type EvidenceDecision } from "./draft-evidence.ts"
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
+import { assertOwner } from "./desk-auth";
 import { audit } from "./ops";
 import { latestJob, runLooksStalled } from "./jobs";
 import { jobProgressView, type JobProgressView } from "./job-progress.ts";
@@ -43,6 +44,8 @@ export type EditorialRow = {
   created_at: string;
   finished_at: string | null;
   headline: string | null;
+  /** DHD2-12: the draft's summary, so the row can say before a press that it is empty. */
+  dek?: string | null;
   words: number | null;
   published_slug: string | null;
   /** Latest durable desk job stage for an open request (for live progress UI). */
@@ -84,9 +87,9 @@ export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
     await ensureEditorialRequestSchema();
     const sql = await getSql();
-    const [row] = await sql<{ source_text: string; asked_for: string; error: string | null; finished_at: string | null; draft_id: number | null;
+    const [row] = await sql<{ source_text: string; asked_for: string; research_scope: string; error: string | null; finished_at: string | null; draft_id: number | null;
     }>`
-      select source_text, asked_for, error, finished_at, draft_id from editorial_requests
+      select source_text, asked_for, research_scope, error, finished_at, draft_id from editorial_requests
       where id=${requestId} and newsroom_id=${owned(context)} limit 1
     `;
     if (!row || !row.finished_at || !row.error || row.draft_id !== null) return { ok: false as const, error: "That failed request has no restorable material." };
@@ -95,7 +98,7 @@ export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
     }>`select count(*) as count from story_documents where editorial_request_id=${requestId} and newsroom_id=${owned(context)}`;
     const attachmentCount = Number(docs?.count ?? 0);
     if (!row.source_text && !attachmentCount) return { ok: false as const, error: "This older request was saved before full-paste recovery existed; its missing text cannot be reconstructed." };
-    return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, attachmentCount };
+    return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, researchScope: row.research_scope === "supplied" ? "supplied" as const : "public" as const, attachmentCount };
   });
 
 export const opinionReadiness = createServerFn({ method: "GET" })
@@ -103,6 +106,27 @@ export const opinionReadiness = createServerFn({ method: "GET" })
   .validator((choice?: string) => opinionModelChoice(choice))
   .handler(async ({ context, data: choice }) => {
     return checkOpinionReadiness(choice, {}, owned(context));
+  });
+
+export const getPaperEditorialVoice = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    assertOwner(context.role);
+    const { getPaperVoiceText } = await import("./voice.server.ts");
+    return getPaperVoiceText();
+  });
+
+export const savePaperEditorialVoice = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((value: unknown) =>
+    editorialText
+      .refine((text) => text.length <= 200_000, "The voice must be text under 200,000 characters.")
+      .parse(value),
+  )
+  .handler(async ({ context, data }) => {
+    assertOwner(context.role);
+    const { savePaperVoiceText } = await import("./voice.server.ts");
+    return savePaperVoiceText(data);
   });
 
 export const listEditorials = createServerFn({ method: "GET" })
@@ -118,6 +142,7 @@ export const listEditorials = createServerFn({ method: "GET" })
              r.draft_id, r.error,
              r.created_at, r.finished_at,
              d.headline,
+             d.dek,
              d.integrity_notes,
              d.research_json,
              case when d.body is null then null
@@ -198,7 +223,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelChoiceExplicit?: boolean; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; researchScope?: "public" | "supplied"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
       editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
@@ -211,7 +236,10 @@ export const startEditorial = createServerFn({ method: "POST" })
       askedFor: data.askedFor,
       articleSlug: data.articleSlug,
       modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
+      voiceMode: data.voiceMode,
+      researchScope: data.researchScope,
       documentIds: data.documentIds,
       retryRequestId: data.retryRequestId,
       override: data.override,
@@ -441,6 +469,10 @@ export async function performPublishEditorial(
       };
     }
 
+    /* The two warnings that stand for "these claims were not reviewed". */
+    const unreviewedClaimsOverride = warnings.some(
+      (w) => w.key === "editorial-sources" || w.key === "evidence-stale",
+    );
     const baseSlug = slugify(d.headline);
     const printed = await (async () => {
       const tx = sql;
@@ -452,17 +484,47 @@ export async function performPublishEditorial(
         if (!clash[0]) break;
         candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
       }
+      /* THU-10: the same public AI line the news path stores. A piece the
+         editor pasted in has no model body, so it earns no AI line; one that
+         went to paper over the claims warnings is not "approved". */
+      const [pasted] = await tx<{ pasted: boolean }>`
+        select exists (
+          select 1 from editorial_extras
+          where draft_id = ${draftId} and newsroom_id = ${owned(context)}
+            and source_kind = 'written-by-the-editor'
+        ) as pasted
+      `;
+      const { disclosureForPublishedStory } = await import("./ai-disclosure.ts");
+      const disclosure = disclosureForPublishedStory({
+        text: null,
+        modelBody: pasted?.pasted ? null : d.model_body,
+        researchJson: d.research_json,
+        publishedBody: d.body,
+        publishedWithUnreviewedClaims: unreviewedClaimsOverride,
+      });
       const [article] = await tx<{ id: number }>`
           insert into articles (
           user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
-          published_at, form, origin_draft_id
+          published_at, form, origin_draft_id, disclosure_text
         )
         values (
           ${context.userId}, ${owned(context)}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
           ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
-          ${d.form || "editorial"}, ${draftId}
+          ${d.form || "editorial"}, ${draftId}, ${disclosure}
         ) returning id
         `;
+      if (unreviewedClaimsOverride) {
+        /* The trail row the public reader line looks for (THT-17). */
+        const { auditWithSql } = await import("./ops.ts");
+        await auditWithSql(
+          tx,
+          context.userId,
+          "publish-unreviewed-claims",
+          `Article ${article.id}: editorial published over its unreviewed claims`,
+          owned(context),
+          { kind: "articles", id: article.id },
+        );
+      }
       return { slug: candidate, id: article.id };
     })();
 

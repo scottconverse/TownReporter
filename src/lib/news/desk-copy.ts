@@ -899,11 +899,25 @@ function providerSignInCopy(raw: string, again: string): string {
   }
 }
 
+/**
+ * The line under a failed draft that left nothing on the page. Only a lead
+ * that came from a meeting says "meeting"; any other lead gets the general
+ * words the story page uses for a draft that did not finish (THT-4).
+ */
+export function draftFailedNotSavedWords(isMeetingLead: boolean): string {
+  return isMeetingLead
+    ? "The meeting draft failed and was not saved. Review the error above, then try Draft with AI again."
+    : "The draft did not finish and was not saved. Review the error above, then try Draft with AI again.";
+}
+
 /** Workbench draft errors. Not scan copy, not Dark Desk “Keep digging”. */
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
   if (t.startsWith("Custom provider ") || /: (?:Google|Provider) says:/.test(t)) return t;
+  if (/invalid input syntax for type integer/i.test(t)) {
+    return "The meeting draft failed while saving the meeting record. The draft was not saved. Try Draft with AI again.";
+  }
   /*
     A dumped boundary check is not draft copy and nothing below would recognize
     it: every pattern here is about what a writing model said, and this is what
@@ -2290,6 +2304,8 @@ export const COMPARE_CURRENT_LABEL = "This lead";
 export const COMPARE_PRIOR_LABEL = "The lead it matched";
 export const MOVE_TO_NEW_LABEL = "Not a duplicate — move to New";
 export const KILL_THIS_ONE_LABEL = "Same story — kill this one";
+/** DHD2-8: the same press on a lead that is already killed adds a duplicate note; it does not kill again. */
+export const ALREADY_KILLED_DUPLICATE_LABEL = "Already killed — add duplicate note";
 export const REOPEN_PRIOR_LABEL = "Newer facts — reopen the old one";
 
 /** Unit AK item 5: after "Not a duplicate — move to New". */
@@ -2348,6 +2364,26 @@ export function comparePressNote(
 export const KILLED_LEAD_HEADING = "This lead was killed";
 export const REOPEN_LABEL = "Reopen";
 
+/** The story workbench must not turn a fallback topic into a chosen section. */
+export function storyLeadSectionLabel(sectionChosen: boolean, sectionName: string): string {
+  return sectionChosen ? sectionName : "Section not chosen";
+}
+
+/**
+ * Walk E2, DHE2-1: a lead that is already printed names the section it printed
+ * in (the article's topic), not "Section not chosen". Unpublished stories keep
+ * the label they always had.
+ */
+export function storyHeaderSectionLabel(input: {
+  published: boolean;
+  publishedSection: string | null;
+  sectionChosen: boolean;
+  sectionName: string;
+}): string {
+  if (input.published && input.publishedSection?.trim()) return input.publishedSection.trim();
+  return storyLeadSectionLabel(input.sectionChosen, input.sectionName);
+}
+
 /** Unit AK item 2: the plain-words label on a finding filed HELD against a
  * killed lead because it carries facts the killed lead did not have. */
 export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";
@@ -2392,6 +2428,28 @@ export function killRecordLine(input: {
   return input.reopened
     ? "Reopened — no record of when or why it was killed"
     : "Killed before the desk started recording why — no reason was kept";
+}
+
+/**
+ * THT-11: the Queue's "≈ Printed" count is the leads the duplicate check matched
+ * to a story already in print. It is not the number of published stories, so
+ * the tab (as a tooltip and as visible text) says what it counts.
+ */
+export const PRINTED_TAB_NOTE =
+  "≈ Printed counts leads that match a story already in print. It is not every published story.";
+
+/**
+ * THT-21: the line under the bulk Start button. Start runs AI drafts for every
+ * ticked lead, so the line says so in the same words the button uses.
+ */
+export const BULK_START_NOTE = "Starts AI drafts for the ticked leads.";
+
+/**
+ * THT-10: a Queue tab's count while its numbers are still loading. A tab that has
+ * not heard back says "loading", never "0", which an editor would read as empty.
+ */
+export function queueTabCountText(count: number | null): string {
+  return count == null ? "loading" : String(count);
 }
 
 // News and event hosts in the owner's October 9 source research. Subdomains inherit the host label.

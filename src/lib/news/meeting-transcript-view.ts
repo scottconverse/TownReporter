@@ -58,6 +58,12 @@ export type TranscriptView = {
   format: string;
   byteSize: number;
   capturedAt: string;
+  /**
+   * Whether the stored original can be read right now. When it cannot, the page
+   * must not describe the file as checked or valid: the SHA-256 is only the
+   * value recorded at capture.
+   */
+  originalAvailable: boolean;
   lines: TranscriptViewLine[];
 };
 
@@ -76,7 +82,7 @@ export type TranscriptView = {
  *   anywhere -- so that a probe cannot use this route to learn that another
  *   newsroom's artifact is there.
  */
-export type TranscriptRefusalReason = "path-from-request" | "other-newsroom";
+export type TranscriptRefusalReason = "path-from-request" | "other-newsroom" | "original-missing";
 
 export class TranscriptViewRefused extends Error {
   readonly reason: TranscriptRefusalReason;
@@ -92,6 +98,42 @@ export class TranscriptViewRefused extends Error {
 /** The desk page that shows a stored transcript. */
 export function transcriptViewPath(artifactId: number): string {
   return `/desk/transcript/${Math.trunc(artifactId)}`;
+}
+
+/** What the editor reads when the stored original cannot be found or opened. */
+export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
+  "The original file is missing from this computer. The text transcript is still here.";
+
+/**
+ * The integrity line the page prints while the stored original cannot be read.
+ * It says the file was not checked, never that it is valid: with no file there
+ * is nothing to check the recorded SHA-256 against.
+ */
+export const TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE =
+  "Integrity: not checked (the original file is missing).";
+
+export type TranscriptOriginalDownload =
+  | { ok: true; blob: Blob }
+  | { ok: false; message: string };
+
+/**
+ * Fetch the stored original before the browser saves it, so a missing or
+ * unreadable file is said on the page instead of becoming a broken download.
+ */
+export async function fetchTranscriptOriginal(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TranscriptOriginalDownload> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { credentials: "same-origin" });
+  } catch {
+    return { ok: false, message: "The original file could not be reached. Try again." };
+  }
+  if (response.ok) return { ok: true, blob: await response.blob() };
+  if (response.status === 404) return { ok: false, message: TRANSCRIPT_ORIGINAL_MISSING_MESSAGE };
+  const text = (await response.text().catch(() => "")).trim();
+  return { ok: false, message: text || "The original file could not be downloaded." };
 }
 
 /** The route that serves the stored artifact's own bytes, under its own name. */

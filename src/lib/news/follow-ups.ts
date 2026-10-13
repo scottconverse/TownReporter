@@ -386,7 +386,7 @@ export async function performCreateAiFollowUp(
     values (
       ${context.userId}, ${owned(context)}, ${input.leadId ?? null}, ${input.articleId ?? null}, ${investigationId},
       ${AGENT_METHOD_LABELS[input.agentKind]}, ${what}, 'active',
-      ${input.agentKind}, ${JSON.stringify(effort == null ? targets : { targets, modelEffort: effort })}, ${input.schedule}, ${modelChoice},
+      ${input.agentKind}, ${JSON.stringify(effort == null && !input.modelChoiceExplicit ? targets : { targets, modelEffort: effort, ...(input.modelChoiceExplicit ? { modelChoiceExplicit: true } : {}) })}, ${input.schedule}, ${modelChoice},
       'waiting', ${nextRunAt(input.schedule)?.toISOString() ?? null}
     )
     returning id
@@ -446,7 +446,7 @@ export async function performUpdateAiFollowUp(
   `;
   const rows = await sql`
     update follow_ups
-    set what = ${what}, agent_kind = ${input.agentKind}, targets_json = ${JSON.stringify(effort == null ? targets : { targets, modelEffort: effort })},
+    set what = ${what}, agent_kind = ${input.agentKind}, targets_json = ${JSON.stringify(effort == null && !input.modelChoiceExplicit ? targets : { targets, modelEffort: effort, ...(input.modelChoiceExplicit ? { modelChoiceExplicit: true } : {}) })},
         schedule = ${input.schedule}, model_choice = ${modelChoice},
         lead_id = coalesce(${input.leadId ?? null}, lead_id),
         article_id = coalesce(${input.articleId ?? null}, article_id),

@@ -47,6 +47,7 @@ import {
   type ProviderOverrides,
 } from "./provider-registry.ts";
 import {
+  isCloudLocalModelId,
   pickLoadedLocalModelAcrossServers,
   refreshLocalCatalog,
   type LocalCatalog,
@@ -206,7 +207,11 @@ export async function readProviderOverrides(
     };
   }
   const explicitScoped = scope ? await rawScopedLocalModel(newsroomId, scope) : null;
-  const stored = explicitScoped ?? out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  /*
+    A screen's scoped read must not inherit an old UNSCOPED cloud pick as if the
+    editor had chosen it for this screen (see `legacyPickForScope`).
+  */
+  const stored = explicitScoped ?? legacyPickForScope(out[LOCAL_MODEL_PROVIDER_ID]?.localModel, scope);
   /*
     The live catalog, fetched at most once per call and never allowed to fail
     the read: this is a budgets lookup every draft/scan/dig makes, and discovery
@@ -304,6 +309,7 @@ export async function readProviderOverrides(
  */
 export type LocalModelChoice = {
   override: { baseUrl: string; id: string } | null;
+  storedPick?: { baseUrl: string; id: string } | null;
   /**
    * Unit BB: where `override` came from, so the picker can say so in words
    * and `probeProvider` can tell "Use whatever is loaded" (which refuses with
@@ -332,9 +338,33 @@ async function rawStoredLocalModel(
     where newsroom_id = ${newsroomId} and provider_id = ${LOCAL_MODEL_PROVIDER_ID}
   `;
   const row = rows[0];
-  return row?.local_model_base_url && row.local_model_id
-    ? { baseUrl: row.local_model_base_url, id: row.local_model_id }
-    : null;
+  return legacyPickForScope(
+    row?.local_model_base_url && row.local_model_id
+      ? { baseUrl: row.local_model_base_url, id: row.local_model_id }
+      : null,
+    scope,
+  ) ?? null;
+}
+
+/**
+ * The pick an old UNSCOPED `provider_settings` row (written before every screen
+ * had its own choice) contributes to a SCOPED read.
+ *
+ * Release H, THT-1/THT-2/H06/DHG-3: on dev that row named
+ * `deepseek-v4.1-flash:cloud`, so a screen with no choice of its own read it as
+ * the editor's stored pick and showed a cloud model under "Local model" while
+ * LM Studio had a model loaded. A cloud model is never what "Local model" means
+ * on this machine unless the editor picked it for that screen, so it does not
+ * carry over; a legacy pick for a model that runs here still does, and an
+ * unscoped read (no `scope`) still sees the row exactly as before. The editor's
+ * own scoped cloud pick is untouched -- it is read from the scoped table.
+ */
+function legacyPickForScope(
+  legacy: { baseUrl: string; id: string } | null | undefined,
+  scope: LocalModelScope | undefined,
+): { baseUrl: string; id: string } | null | undefined {
+  if (!scope || !legacy) return legacy;
+  return isCloudLocalModelId(legacy.id) ? null : legacy;
 }
 
 async function rawScopedLocalModel(newsroomId: number, scope: LocalModelScope) {
@@ -614,12 +644,18 @@ export async function saveLocalModel(
   return { ok: true };
 }
 
+/** Saved mode alongside the actual model a run resolves now. */
+export async function readDeskLocalModelChoice(newsroomId: number, scope?: LocalModelScope): Promise<LocalModelChoice> {
+  const resolved = await resolveLocalModelChoice(newsroomId, scope);
+  return { ...resolved, storedPick: await rawStoredLocalModel(newsroomId, scope) };
+}
+
 export const getLocalModelChoice = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((raw: unknown) => cleanModelScope((raw as { scope?: unknown } | null)?.scope))
   .handler(async ({ context, data }): Promise<LocalModelChoice> => {
     const me = await requireEditor(context.userId);
-    return resolveLocalModelChoice(me.newsroomId, data);
+    return readDeskLocalModelChoice(me.newsroomId, data);
   });
 
 export const saveLocalModelFn = createServerFn({ method: "POST" })

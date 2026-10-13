@@ -36,7 +36,7 @@ test("a job still writing prints its own stage text and how long it has been at 
     deskDraftElapsed("2026-09-26T10:00:00.000Z", Date.parse("2026-09-26T10:02:18.000Z")),
   );
   assert.equal(state.key, "running");
-  assert.equal(state.label, "Researching the editorial · 2:18");
+  assert.equal(state.label, "Writing · 2:18");
   assert.equal(state.running, true);
   assert.equal(deskDraftAction(state), "Watch");
 });
@@ -44,8 +44,8 @@ test("a job still writing prints its own stage text and how long it has been at 
 test("a queued job with no stage yet still prints words, never an empty chip", () => {
   const state = deskDraftState({ ...quiet, job_status: "queued", job_stage: "" });
   assert.equal(state.key, "running");
-  assert.equal(state.label, "Working…");
-  assert.equal(deskDraftState({ ...quiet, job_status: "queued" }).label, "Working…");
+  assert.equal(state.label, "Queued");
+  assert.equal(deskDraftState({ ...quiet, job_status: "queued" }).label, "Queued");
 });
 
 test("a failed job outranks every other fact about the row", () => {
@@ -123,8 +123,24 @@ test("a lead filed by hand has a draft row and no prose, so it never reads ready
   assert.equal(filed.needsYou, false, "an unwritten lead is not the editor's to fix");
   assert.equal(filed.running, false);
   assert.equal(deskDraftAction(filed), "Start story");
-  // A redraft that has not written anything yet is still a job to watch.
-  assert.equal(deskDraftState({ ...quiet, has_body: false, job_status: "queued" }).key, "running");
+  // A queued redraft still has the producer's empty placeholder body and no
+  // readiness verdict until prose exists. The row chip must handle this shape.
+  const queued = deskDraftState({
+    ...quiet,
+    has_body: false,
+    story_readiness: {
+      version: 1,
+      state: "not-ready",
+      openCount: 0,
+      totalCount: 0,
+      reason: "No draft has been written.",
+    },
+    job_status: "queued",
+    job_stage: "Queued",
+  });
+  assert.equal(queued.key, "running");
+  assert.equal(queued.label, "Queued");
+  assert.equal(queued.readiness, undefined);
   assert.equal(
     deskDraftState({ ...quiet, has_body: false, job_status: "failed" }).key,
     "failed",
@@ -211,5 +227,5 @@ test("empty drafts say No draft yet even with a Ready memo", () => {
     job_stage: "Writing draft",
   });
   assert.equal(running.key, "running");
-  assert.equal(running.label, "Writing draft");
+  assert.equal(running.label, "Writing");
 });

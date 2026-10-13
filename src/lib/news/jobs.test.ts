@@ -854,10 +854,10 @@ describe("desk jobs", () => {
  * editorial stand-in, and the 5-second poll below times out.
  */
 describe("job lanes (ENG-105)", () => {
-  it("laneForKind puts editorial alone and everything else together", () => {
+  it("laneForKind isolates editorial and story drafts", () => {
     assert.equal(laneForKind("editorial"), "editorial");
     assert.equal(laneForKind("scan"), "default");
-    assert.equal(laneForKind("draft"), "default");
+    assert.equal(laneForKind("draft"), "draft");
     assert.equal(laneForKind("dark"), "default");
   });
 

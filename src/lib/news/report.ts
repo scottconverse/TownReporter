@@ -10,7 +10,7 @@ import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provide
 import type { OcrOptions } from "./ingest.ts";
 import { aiEvidenceReadiness, judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
 import { runDraftReply } from "./draft-reply.ts";
-import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
+import { draftLooksCutOff, CUT_OFF_WARNING, EMPTY_DRAFT_ERROR } from "./draft-completeness.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
@@ -45,13 +45,14 @@ import { sanitizePublicUrls } from "./schema.ts";
 import { usableLeadSources } from "./result-quality.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { appendEditorChecks, cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 import { ungroundedDraftSpecifics, type DraftGroundingRow } from "./draft-specifics.ts";
 import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
+import { dekOrFallback } from "./dek-fallback.ts";
 export { stripReporterNotebook } from "./strip-draft.ts";
 export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
@@ -121,6 +122,8 @@ export type StoryClaim = {
 };
 
 export type ResearchMemo = {
+  /** Written only when the public research model returned readable work. */
+  publicAiResearchCompleted?: true;
   aiEvidenceReview?: AiEvidenceReview;
   storyReadiness?: import("./story-readiness.ts").StoryReadiness & { version: 1 };
   nameCheck?: NameCheck;
@@ -189,7 +192,7 @@ export type ReportChat = (
   user: string,
   maxTokens?: number,
   modelChoice?: EffectiveProviderChoice,
-  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number },
+  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number; onRetry?: () => void | Promise<void> },
 ) => Promise<ChatResult>;
 
 export type WriterDraftCheckpoint = {
@@ -355,6 +358,7 @@ If the named company issued a press release and it is in the evidence, their job
 
 Headline: the actual news. Specific nouns, active verbs, a number/location/deadline when useful. No agency-speak.
 One line, about ten to fourteen words: the reader knows what happened and to whom without opening the story. No questions, no colon-stacked two-part headline unless the second half is a separate fact, and never hedge in a headline — a "may" or "could" there is a story the reporting did not establish.
+Reader summary: the headline and dek are for readers only. Never put a fact-check note about missing information in either field, including "the notice does not state", "is not stated", "did not say", "not specified", or "unclear from the notice". Put that note in integrity_notes or unanswered. Keep substantive reporting about what the city has or has not decided in the body.
 Lede: the most important new fact immediately. A reader who stops after paragraph one knows what happened and why it matters.
 Nut graf: within the first few paragraphs, why someone in ${p.city} should care.
 Body: details, impact, money, people affected, history, disagreement or uncertainty, what happens next. Order of reader value, not the order of the press release.
@@ -365,9 +369,9 @@ Each paragraph must add information. Never restate the same fact in consecutive 
 Ban filler: "This development marks…", "The announcement comes as…", "Residents are encouraged to…", "This initiative underscores…", "In a move that…", "It remains to be seen…" unless the sentence contains actual reporting.
 Explain government terms on first use (consent agenda, RFP, ordinance).
 Sentences: one fact each, most under 25 words and none over 40. A sentence still growing after two clauses is two sentences — split it and give the second one its own fact. A reader on a phone should never meet a sentence they have to read twice.
-Certainty: never make a claim more certain than the source. State a fact flatly only when the evidence states it flatly. When the evidence itself is uncertain — a "may", "might" or "could" in the source, a plan, a proposal, a condition, an unstated year — keep it uncertain and ATTRIBUTE it to its source ("the city says", "according to the agency") or cut it; never upgrade it to a fact. A hedge that comes from the source is the source's own uncertainty, not filler, and removing it changes the fact.
+Certainty: never make a claim more certain than the source. State a fact flatly only when the evidence states it flatly. When the evidence itself is uncertain — a "may", "might" or "could" in the source, a plan, a proposal, a condition — keep it uncertain and ATTRIBUTE it to its source ("the city says", "according to the agency") or cut it; never upgrade it to a fact. A hedge that comes from the source is the source's own uncertainty, not filler, and removing it changes the fact.
 Names and labels: use the source's own words for every name, place and label — never a more specific or more loaded one. If the source says "a secret society", write "a secret society" and do not supply a name it did not use. A general statement in the evidence ("many programs also provide Early Head Start") is not a fact about the story's subject.
-Caveats: keep every caveat, limit and date the source gives — "may not be exhaustive", "is not clear whether", "does not state", "not representative", and any unstated year. A caveat in the evidence belongs in the story, never dropped. If the source gives no year for a deadline or event, do not present it as current: say the year is unstated, or attribute the dated claim to its source.
+Caveats: keep every caveat, limit and date the source gives — "may not be exhaustive", "is not clear whether", "does not state", "not representative". A caveat in the evidence belongs in the story, never dropped. Years: when the evidence gives a month and day with no year, the year is the next time that date comes on or after the source's own date (or the story date when the source has none); write the date as a newspaper would, with that year or with no year. Never write that a source "does not specify the year", "does not state the year", or that the year is unstated or unclear — it makes the paper look careless and treats the reader as dumb. The one exception: a story written in December about a January or February date whose year the evidence truly leaves open; then name the year meant and why.
 The story is about the city, never about the reporting. Do not describe the search, the capture, the feed, or what was reviewed — "the public materials reviewed" and "the available records" name something the reader cannot see. Do not write "${p.name} has not yet opened X" in the body; that sentence is reporting notes. An open question is a fact about the city ("the council has not set a date"), not a note about what was looked at.
 If something important is unknown, say so — as an open question, never as a claim that the thing does not exist. Do not fill the hole with generic language.
 
@@ -387,7 +391,7 @@ When the evidence is another newsroom's reporting:
 
 Return ONLY JSON with keys:
 headline, dek, body, topic, source_urls (array of URLs actually used — exact document URLs, never a homepage stand-in unless the homepage is the evidence),
-integrity_notes (what the editor should verify),
+integrity_notes (what the editor should verify: at most 8 short notes, one per distinct open check, never repeated),
 memory_entities,
 form,
 found (null, or {text, source_urls, locators} for something TownReporter itself located in a captured record — every URL must be one you actually used),
@@ -402,7 +406,9 @@ Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the 
 export const REPORT_WRITE_SYSTEM = reportWriteSystem(PAPER);
 
 export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Reconcile the draft against the supplied evidence, then edit. The draft is not evidence; its assertions and links are claims to check. Retain supported facts and useful writing, remove or qualify unsupported assertions, and record unresolved checks in integrity_notes. Do not add facts absent from the evidence.
+The headline and dek are for readers only. Keep missing-fact notes such as "does not state", "is not stated", "did not say", "not specified", and "unclear from the notice" out of both fields; put them in integrity_notes or unanswered. Keep substantive reporting about what the city has or has not decided in the body.
 Research questions and unknowns are hypotheses from an earlier pass, not evidence. When the supplied evidence answers one, remove it from unanswered and integrity_notes or narrow it to only what the evidence leaves unresolved. Preserve questions and unknowns the evidence does not answer.
+integrity_notes is a short list for the human editor: at most 8 notes, one sentence each, one note per distinct open check. Never write one note per sentence of the draft, never restate a note in other words, and stop listing as soon as the distinct open checks are covered. Then finish the JSON.
 ${EVIDENCE_RECONCILIATION_RULES}
 Checklist:
 1. What's the actual news? Is it in the lede?
@@ -418,10 +424,10 @@ Checklist:
 11. Delete any sentence claiming a document does not exist, was not published, was not obtained, or is unverified. Not having opened a document is not evidence about the world; move the ask to unanswered.
 12. A supplied excerpt establishes what that excerpt discusses. It does not establish that a different policy, benefit, event or action did not exist elsewhere. Phrase scope narrowly ("this discussion addressed X") unless the evidence affirmatively supports the negative claim.
 13. Split any sentence over 40 words. A sentence that long is two facts and a clause, and the clause belongs in neither.
-14. Never make a claim more certain than the evidence. Delete a hedge only when the evidence states the fact flatly elsewhere; when the evidence is itself uncertain — a "may", "might" or "could" from the source, a plan, a proposal, an unstated year — keep it uncertain and attribute it to its source ("the city says", "according to the agency") or cut it. A hedge that comes from the source is the source's own uncertainty, not filler, and removing it changes the fact.
+14. Never make a claim more certain than the evidence. Delete a hedge only when the evidence states the fact flatly elsewhere; when the evidence is itself uncertain — a "may", "might" or "could" from the source, a plan, a proposal — keep it uncertain and attribute it to its source ("the city says", "according to the agency") or cut it. A hedge that comes from the source is the source's own uncertainty, not filler, and removing it changes the fact.
 15. Delete any sentence that narrates the reporting instead of the city: "the public materials reviewed", "the available records", "the captured feed", and any "TownReporter has not yet opened X". An open question stays, phrased as a fact about the city. That paragraph is reporter homework, and the desk never prints it.
 16. Every name, place and label must use the source's own words — never a more specific or more loaded one. If the source says "a secret society", it does not become a name the source did not use. A general statement in the evidence ("many programs also provide Early Head Start") is not a fact about the story's subject: do not attach it to a subject the evidence did not name.
-17. Keep every caveat, limit and date the evidence gives — "may not be exhaustive", "is not clear whether", "does not state", "not representative", and any unstated year. If the evidence gives no year for a deadline or event, do not present it as current: say the year is unstated, or attribute the dated claim to its source.
+17. Keep every caveat, limit and date the evidence gives — "may not be exhaustive", "is not clear whether", "does not state", "not representative". Years: when the evidence gives a month and day with no year, the year is the next time that date comes on or after the source's own date (or the story date when the source has none); write the date as a newspaper would, with that year or with no year. Never write that a source "does not specify the year", "does not state the year", or that the year is unstated or unclear — it makes the paper look careless and treats the reader as dumb. The one exception: a story written in December about a January or February date whose year the evidence truly leaves open; then name the year meant and why.
 Factual vocabulary that appears in the sources is not plagiarism. Near-verbatim copying is.
 Return ONLY JSON with the same keys as the draft: headline, dek, body, topic, source_urls, integrity_notes, memory_entities, form, found, unanswered, claims, document_claims, reporting_trail.`;
 
@@ -1432,7 +1438,7 @@ export async function reportAndDraft(
     }
     const timeoutMs = Math.min(limits.callMs, Math.max(6_000, remaining - 2_000));
     const attempt = (retry?: string) => providerChat([system, retry].filter(Boolean).join("\n\n"), user, maxTokens, effectiveModelChoice, { ...options, timeoutMs });
-    return options?.draftReply ? runDraftReply(attempt, options.minimumWords) : attempt();
+    return options?.draftReply ? runDraftReply(attempt, options.minimumWords, { onRetry: options.onRetry }) : attempt();
   };
   const chat = timedChat(nameReserve);
   const nameChat = timedChat(0);
@@ -1573,6 +1579,7 @@ ${opts.documentEvidence ? `\nUploaded document evidence:\n${opts.documentEvidenc
 ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):\n${promptExtraEvidence}` : ""}`;
 
   let research: ResearchJson | null = null;
+  let publicAiResearchCompleted = false;
   if (timeLeft() > 8_000) {
     await deps.onStage?.("Planning the reporting");
     /*
@@ -1587,6 +1594,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       label: "The research model",
     });
     research = researchReply.ok ? researchReply.value : null;
+    publicAiResearchCompleted = !suppliedOnly && researchReply.ok;
   }
   if (meetingFocus) {
     // The research model may identify follow-ups, but it cannot silently
@@ -1802,7 +1810,12 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
         built.packet,
         2200,
         effectiveModelChoice,
-        { timeoutMs: limits.callMs, draftReply: true, minimumWords: requestedBrief ? 20 : 0 },
+        {
+          timeoutMs: limits.callMs,
+          draftReply: true,
+          minimumWords: requestedBrief ? 20 : 0,
+          onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
+        },
       ),
       onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
       read: (text) => {
@@ -1819,6 +1832,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       if (!write.partialText) return { error: write.error };
       const partial = coerceDraft(write.partialText, {headline: opts.lead.headline, dek: opts.lead.why, topic: opts.lead.topic});
       partial.integrity_notes = [partial.integrity_notes, CUT_OFF_WARNING].filter(Boolean).join("\n");
+      if (!partial.body.trim() || !partial.headline.trim()) return { error: EMPTY_DRAFT_ERROR };
       return {coerced: partial, parsed: parseJsonBlock<Record<string, unknown>>(write.partialText) ?? {}, body: partial.body};
     }
     const coerced = write.value;
@@ -1843,13 +1857,17 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
         };
       });
     const checkpointClaims = parseClaims(parsed.claims).filter(claim=>checkpointUrls.includes(claim.url));
+    const checkpointSummary = cleanMissingFactNotes(coerced.headline, coerced.dek);
     await deps.onWriterDraft?.({
-      headline: coerced.headline,
-      dek: coerced.dek,
+      headline: checkpointSummary.headline,
+      dek: checkpointSummary.dek,
       body: passBody,
       topic: opts.lead.topic,
       source_urls: checkpointUrls,
-      integrity_notes: [coerced.integrity_notes, retainedNotes, "NAME CHECK: Not yet completed. This saved writer checkpoint has not had its names checked against written sources."].filter(Boolean).join("\n"),
+      integrity_notes: appendEditorChecks(
+        [coerced.integrity_notes, retainedNotes, "NAME CHECK: Not yet completed. This saved writer checkpoint has not had its names checked against written sources."].filter(Boolean).join("\n"),
+        checkpointSummary.notes,
+      ),
       form: parsed.form,
       found: checkpointFindings,
       unanswered: parsed.unanswered,
@@ -1923,6 +1941,8 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     const bodyWords = passBody.trim().split(/\s+/).filter(Boolean).length;
     if (requestedBrief && bodyWords > 350)
       coerced.integrity_notes = [coerced.integrity_notes, `Requested brief not met (${bodyWords} words). This draft was retained for editing rather than discarded.`].filter(Boolean).join("\n");
+    // Decision 1: a blank headline or body is a failed draft, never a saved one.
+    if (!passBody.trim() || !coerced.headline.trim()) return { error: EMPTY_DRAFT_ERROR };
     return { coerced, parsed, body: passBody };
   };
 
@@ -2224,14 +2244,21 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     ),
   };
 
+  const readerSummary = cleanMissingFactNotes(coerced.headline, coerced.dek);
+  const readerDek = readerSummary.dek ||
+    (readerSummary.notes.length ? dekOrFallback("", body) || readerSummary.headline : "");
+  const finalIntegrityNotes = appendEditorChecks(
+    [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
+    readerSummary.notes,
+  );
   return {
-    headline: coerced.headline,
-    dek: coerced.dek,
+    headline: readerSummary.headline,
+    dek: readerDek,
     body,
     topic: coerced.topic,
     source_urls: used,
     citation_status: citationStatus,
-    integrity_notes: [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
+    integrity_notes: finalIntegrityNotes,
     memory_entities: coerced.memory_entities,
     form,
     provenance,
@@ -2241,6 +2268,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     claims,
     documentClaims,
     research_memo: {
+      ...(publicAiResearchCompleted ? { publicAiResearchCompleted: true } : {}),
       aiEvidenceReview,
       storyReadiness: draftLooksCutOff(body, requestedBrief ? 20 : 0) ? {version:1,state:"not-ready",openCount:0,totalCount:0,reason:CUT_OFF_WARNING} : aiEvidenceReadiness(aiEvidenceReview),
       nameCheck: names.check,

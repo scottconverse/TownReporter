@@ -256,9 +256,18 @@ async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntr
       colon or a hyphen before it -- runs on Ollama's hosted service, never
       on this computer.
     */
-    cloud: /[:.-]cloud$/i.test(id),
+    cloud: isCloudLocalModelId(id),
     contextLength: metadata[i]?.contextLength ?? null,
   }));
+}
+
+/**
+ * True for an Ollama id that is routed to Ollama's hosted service (`name:cloud`
+ * or a versioned `model-1.2-cloud`), never run on this computer. Shared with
+ * the pick resolver so "is this a cloud model" has one answer.
+ */
+export function isCloudLocalModelId(id: string): boolean {
+  return /[:.-]cloud$/i.test(id);
 }
 
 async function probeServer(

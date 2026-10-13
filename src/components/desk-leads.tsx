@@ -1,3 +1,4 @@
+import { deskWarning } from "../lib/news/desk-warning.ts";
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -80,7 +82,7 @@ export function LeadRowView({
    * shows saving/saved/failed in place, because a press that silently does
    * nothing is what this unit was opened about.
    */
-  onKillAsDuplicate?: () => Promise<void>;
+  onKillAsDuplicate?: () => Promise<unknown>;
   /**
    * Remove the lead entirely.
    *
@@ -117,7 +119,7 @@ export function LeadRowView({
    * the screen owns because the mutation is the screen's.
    */
   backPending?: boolean;
-  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
+  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null, modelChoiceExplicit?: boolean) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
   batchSelected?: boolean;
@@ -206,10 +208,16 @@ export function LeadRowView({
     (see first-run-picker-default.ts).
   */
   const modelChoiceTouched = useRef(false);
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "story",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || storyDraftAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -304,7 +312,7 @@ export function LeadRowView({
               onClick={() => {
                 setDupKill("saving");
                 void Promise.resolve(onKillAsDuplicate()).then(
-                  () => setDupKill("saved"),
+                  result => setDupKill(deskWarning(result) ? "idle" : (result && typeof result === "object" && "ok" in result && result.ok === false) ? "failed" : "saved"),
                   () => setDupKill("failed"),
                 );
               }}
@@ -321,7 +329,7 @@ export function LeadRowView({
             onClick={() => {
               setDupKill("saving");
               void Promise.resolve(onKillAsDuplicate()).then(
-                () => setDupKill("saved"),
+                result => setDupKill(deskWarning(result) ? "idle" : (result && typeof result === "object" && "ok" in result && result.ok === false) ? "failed" : "saved"),
                 () => setDupKill("failed"),
               );
             }}
@@ -372,7 +380,7 @@ export function LeadRowView({
           <InkButton
             small
             disabled={drafting}
-            onClick={() => onDraft(modelChoice, modelEffort)}
+            onClick={() => onDraft(modelChoice, modelEffort, modelChoiceTouched.current)}
             ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${editorTitle(lead.headline)} with ${modelChoiceLabel(modelChoice)}`}
           >
             {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
@@ -633,7 +641,17 @@ export function LeadRowView({
         </span>
         <LeadSourceEvidenceCount sourceUrls={lead.source_urls} notesJson={lead.notes_json} />
       </span>
-      <span className="queue-filed">{formatAge(lead.created_at)}</span>
+      <span className="queue-filed">
+        {formatAge(lead.created_at)}
+        {lead.status === "killed" ? (
+          <>
+            <br />
+            <span className="queue-killed-on">
+              Killed {lead.killed_at ? formatShortDate(lead.killed_at) : "(kill date not recorded)"}
+            </span>
+          </>
+        ) : null}
+      </span>
       <div className="lead-actions row-acts queue-acts">
         {/*
           FB6, item 5: the way back belongs ON THE ROW.
@@ -656,11 +674,34 @@ export function LeadRowView({
             </InkButton>
           ) : null
         ) : held ? (
-          onBack ? (
-            <InkButton tone="quiet" small pending={backPending} pendingLabel="Releasing…" onClick={onBack}>
-              Release
-            </InkButton>
-          ) : null
+          <>
+            {onBack ? (
+              <InkButton tone="quiet" small pending={backPending} pendingLabel="Releasing…" onClick={onBack}>
+                Release
+              </InkButton>
+            ) : null}
+            {/*
+              DHD2-4: a held row showed "Release" and icons but no named Kill, so
+              the fast kill had no text door on held leads. The same press as the
+              open row's Kill (`onKillNow`), with the words on it. Added beside
+              Release; nothing the held row showed is taken away.
+            */}
+            {onKillNow ? (
+              // THT-8: the wrapper names the row, so X on this focused button kills this row.
+              <span data-triage-kill={lead.id} style={{ display: "contents" }}>
+                <InkButton
+                  tone="quiet-danger"
+                  small
+                  pending={killPending}
+                  pendingLabel="Killing…"
+                  onClick={onKillNow}
+                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                >
+                  Kill
+                </InkButton>
+              </span>
+            ) : null}
+          </>
         ) : closed ? null : (
           <>
             <Link
@@ -689,16 +730,19 @@ export function LeadRowView({
               using the dialog (Today) shows exactly what it showed before.
             */}
             {onKillNow ? (
-              <InkButton
-                tone="quiet-danger"
-                small
-                pending={killPending}
-                pendingLabel="Killing…"
-                onClick={onKillNow}
-                ariaLabel={`Kill the lead: ${lead.headline}`}
-              >
-                Kill
-              </InkButton>
+              // THT-8: the wrapper names the row, so X on this focused button kills this row.
+              <span data-triage-kill={lead.id} style={{ display: "contents" }}>
+                <InkButton
+                  tone="quiet-danger"
+                  small
+                  pending={killPending}
+                  pendingLabel="Killing…"
+                  onClick={onKillNow}
+                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                >
+                  Kill
+                </InkButton>
+              </span>
             ) : null}
           </>
         )}

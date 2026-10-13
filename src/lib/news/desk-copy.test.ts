@@ -15,12 +15,17 @@ import {
   killedAsDuplicateNote,
   killRecordLine,
   KILL_THIS_ONE_LABEL,
+  BULK_START_NOTE,
   MOVE_TO_NEW_LABEL,
+  PRINTED_TAB_NOTE,
+  queueTabCountText,
   movedToNewNote,
   printedDuplicateLine,
   REOPEN_PRIOR_LABEL,
   reopenedPriorNote,
   DEVELOPING_LABEL,
+  storyLeadSectionLabel,
+  storyHeaderSectionLabel,
   editorError,
   editorActionError,
   editorDraftError,
@@ -2033,6 +2038,21 @@ describe("Unit AK: duplicate and kill wording", () => {
     );
   });
 
+  it("THT-10: a Queue tab that is still loading says so, never 0", () => {
+    assert.equal(queueTabCountText(null), "loading");
+    assert.equal(queueTabCountText(0), "0");
+    assert.equal(queueTabCountText(301), "301");
+  });
+
+  it("THT-11: the Printed count says it is a duplicate-match count, not every published story", () => {
+    assert.match(PRINTED_TAB_NOTE, /counts leads that match a story already in print/);
+    assert.match(PRINTED_TAB_NOTE, /not every published story/);
+  });
+
+  it("THT-21: the Start line says it starts AI drafts for the ticked leads", () => {
+    assert.equal(BULK_START_NOTE, "Starts AI drafts for the ticked leads.");
+  });
+
   it("names the Compare view's three presses in plain words", () => {
     // Item 5's labels are the brief's, verbatim -- pinned so a later copy edit
     // has to be deliberate, and so the side-by-side view cannot grow a press
@@ -2060,6 +2080,37 @@ describe("Unit AK: duplicate and kill wording", () => {
     assert.equal(
       reopenedPriorNote("  Juvenile altercation  "),
       "Reopened Juvenile altercation — it is back on the desk as New.",
+    );
+  });
+
+  it("names the Story section only after the editor has chosen it", () => {
+    assert.equal(storyLeadSectionLabel(false, "Council"), "Section not chosen");
+    assert.equal(storyLeadSectionLabel(true, "Infrastructure"), "Infrastructure");
+  });
+
+  it("names the section a published story printed in, not 'Section not chosen' (DHE2-1)", () => {
+    /*
+      Walk E2, DHE2-1: lead 468 printed under COUNCIL and the Story header still
+      read "Section not chosen". Once the article exists, its topic is the answer.
+    */
+    assert.equal(
+      storyHeaderSectionLabel({ published: true, publishedSection: "Council", sectionChosen: false, sectionName: "Council" }),
+      "Council",
+    );
+    assert.equal(
+      storyHeaderSectionLabel({ published: true, publishedSection: "County Region", sectionChosen: true, sectionName: "Infrastructure" }),
+      "County Region",
+    );
+  });
+
+  it("keeps the unpublished header exactly as it was (DHE2-1)", () => {
+    assert.equal(
+      storyHeaderSectionLabel({ published: false, publishedSection: null, sectionChosen: false, sectionName: "Council" }),
+      "Section not chosen",
+    );
+    assert.equal(
+      storyHeaderSectionLabel({ published: false, publishedSection: null, sectionChosen: true, sectionName: "Infrastructure" }),
+      "Infrastructure",
     );
   });
 
@@ -2278,4 +2329,14 @@ it("recognizes government locality hosts without trusting commercial US domains"
     assert.equal(kindFromSourceUrl(`https://${host}/records`), "official");
   for (const host of ["shop.us", "longmont.us", "shop.co.us", "ci.longmont.co.us.example.com"])
     assert.equal(kindFromSourceUrl(`https://${host}/records`), "unclassified");
+});
+
+describe("failed draft words on the story page (THT-4)", () => {
+  it("says 'meeting' only for a meeting lead", async () => {
+    const { draftFailedNotSavedWords } = await import("./desk-copy.ts");
+    assert.match(draftFailedNotSavedWords(true), /^The meeting draft failed/);
+    const general = draftFailedNotSavedWords(false);
+    assert.doesNotMatch(general, /meeting/i);
+    assert.match(general, /^The draft did not finish and was not saved/);
+  });
 });

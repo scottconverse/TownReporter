@@ -542,15 +542,16 @@ async function theReaderGetsTheTextAsWritten(chosen) {
     must(hrefs.includes(url), `the cited page ${url} is not a working link under Sources`);
   }
   const printed = await page.locator("body").innerText();
+  // Scott, Oct 12 2026: no AI wording on the paper.
   must(
-    printed.includes(OUTSIDE_AI_LINE),
-    "the disclosure line the editor chose is not on the published page",
+    !printed.includes(OUTSIDE_AI_LINE),
+    "the old outside-AI line printed on the published page",
   );
   must(
     !printed.includes(DESK_AI_LINE),
     "the desk's own AI line printed over a story this paper's AI did not write",
   );
-  step("the published story carries the report's own words, its cited pages and the honest line");
+  step("the published story carries the report's own words, its cited pages and no AI line");
 }
 
 /**

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { moduleUrl as sharedModuleUrl, noJobModelAssignmentUrl } from "./dom-harness.mjs";
 
 // Render the real LeadRowView component (src/components/desk-leads.tsx) --
 // specifically the "seen again ×N" resurfaced badge added for a killed lead
@@ -15,6 +16,7 @@ import ts from "typescript";
 // uses, so this test exercises the real badge markup without a router, a
 // paper context provider, or a live server.
 function moduleUrl(source, fileName, imports = {}) {
+  imports = { "@/components/use-job-model-assignment": noJobModelAssignmentUrl, ...imports };
   let output = ts.transpileModule(source, {
     fileName,
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
@@ -283,6 +285,7 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
     "desk-leads.tsx",
     {
+      "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
@@ -915,8 +918,11 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
     await readFile(new URL("../src/components/desk-lead-compare.tsx", import.meta.url), "utf8"),
     "desk-lead-compare.tsx",
     {
+      "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
+      "@/components/desk-toast": deskToastStub,
+      "@/components/fast-kill": inlineModule("export const KILL_TOAST_MS = 15000;"),
       "@/components/states": statesStub,
       "@/lib/paper": paperStub,
       "@/lib/news/desk-copy": deskCopy,
@@ -1038,7 +1044,7 @@ test("the Compare view explains a disabled reopen instead of offering it mutely"
   assert.match(tag, /disabled/, "a live lead's reopen press must be disabled");
 });
 
-test("the Compare view hides the kill press for a lead that is already killed or published", () => {
+test("Compare keeps the kill press for killed leads and hides it for published stories", () => {
   for (const status of ["killed", "published"]) {
     const { current, prior } = compareSides({ current: { status } });
     const html = renderToStaticMarkup(
@@ -1049,8 +1055,14 @@ test("the Compare view hides the kill press for a lead that is already killed or
         onKillThis: async () => ({ ok: true }),
       }),
     );
-    assert.doesNotMatch(html, /Same story — kill this one/);
-    assert.doesNotMatch(html, /aria-label="Same story/);
+    if (status === "killed") {
+      // DHD2-8: on a lead that is already killed the press reads as what it does now.
+      assert.match(html, />Already killed — add duplicate note</);
+      assert.match(html, /aria-label="Already killed — add duplicate note: /);
+    } else {
+      assert.doesNotMatch(html, /Same story — kill this one/);
+      assert.doesNotMatch(html, /aria-label="Same story/);
+    }
   }
 });
 
@@ -1160,6 +1172,20 @@ test("a reopened lead's record says the kill was undone instead of forgetting it
   assert.match(html, /role="note">Reopened — it was killed/);
   // A lead that is back on the desk is not offered a second reopen.
   assert.doesNotMatch(html, />Reopen</);
+});
+
+// FA04: a reopened lead that was never drafted has no draft headline to show,
+// so its Story page must open on the lead's own title, not the killed heading.
+test("a reopened undrafted lead's Story page headline is the lead's own title, never 'This lead was killed'", () => {
+  const html = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: { ...compareSides().prior, status: "new", headline: "Police investigate a fight reported in northwest Longmont" },
+      reopened: true,
+      formatDate: fixedDate,
+    }),
+  );
+  const heading = html.match(/<h2 id="lead-killed-heading"[^>]*>([^<]*)<\/h2>/);
+  assert.equal(heading?.[1], "Police investigate a fight reported in northwest Longmont");
 });
 
 // A stub that disagrees with the real parser would make every source

@@ -55,6 +55,7 @@ type RedditScanResult = Extract<Awaited<ReturnType<typeof scanTipSubreddit>>, { 
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { useDarkModelChoice } from "@/components/dark-model-choice";
 import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
@@ -271,18 +272,22 @@ function DarkPage() {
     remembered on the investigation, so "Keep digging" on a file that was
     started on Codex stays on Codex rather than quietly changing author.
   */
-  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
-  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
-  const [fileModelChoice, setFileModelChoice] = useState<StoryModelChoice>("auto");
-  const [fileModelEffort, setFileModelEffort] = useState<ModelEffort | null>(null);
+  const {
+    model: modelChoice,
+    effort: modelEffort,
+    setModel: setModelChoice,
+    setEffort: setModelEffort,
+    pick: pickModelChoice,
+    touched: modelChoiceTouched,
+    assignment: darkAssignment,
+  } = useDarkModelChoice();
   const ocrModelChoice = useFirstRunPickerDefault("ocr") ?? "auto";
   const ocrModelEffort = defaultModelEffort(ocrModelChoice);
   const darkDefaultModel = useFirstRunPickerDefault("dark");
-  const modelChoiceTouched = useRef(false);
   useFirstRunPickerSeed({
     surface: "dark",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || darkAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -290,6 +295,7 @@ function DarkPage() {
   });
   const pickedFor = useRef<number | null>(null);
   const fileModelTouchedFor = useRef<number | null>(null);
+  const fileModelExplicitFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
@@ -343,14 +349,21 @@ function DarkPage() {
       pickedFor.current = openId;
       return;
     }
-    if (last == null && darkDefaultModel == null) return;
+    if (last == null && darkAssignment.isPending) return;
+    const assignedDefault = darkAssignment.hasAssignment
+      ? darkAssignment.resolution.providerId as StoryModelChoice
+      : darkDefaultModel;
+    if (last == null && assignedDefault == null) return;
     pickedFor.current = openId;
-    const remembered = darkModelChoice(last ?? darkDefaultModel);
-    setFileModelChoice(remembered);
-    setFileModelEffort(last == null
-      ? defaultModelEffort(remembered)
+    const remembered = darkModelChoice(last ?? assignedDefault);
+    setModelChoice(remembered);
+    setModelEffort(last == null
+      ? darkAssignment.hasAssignment
+        ? darkAssignment.resolution.effort
+        : defaultModelEffort(remembered)
       : validatedModelEffort(remembered, detail.data.run?.model_effort));
-  }, [openId, detail.data, darkDefaultModel]);
+    fileModelExplicitFor.current = last == null ? null : openId;
+  }, [openId, detail.data, darkDefaultModel, darkAssignment.isPending, darkAssignment.hasAssignment, darkAssignment.resolution.providerId, darkAssignment.resolution.effort, setModelChoice, setModelEffort]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
   useEffect(() => {
@@ -421,7 +434,7 @@ function DarkPage() {
     that ran. An untouched effort arrives as null and resolves to the surface
     default, which is what this round ran at before the select existed.
   */
-  const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null } | null>(null);
+  const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null; explicit: boolean } | null>(null);
   /*
     Unit U25, B4: stop a running dig.
 
@@ -464,8 +477,8 @@ function DarkPage() {
       firstRoundPick.current = null;
       return continueInvestigation({
         data: picked
-          ? { id, modelChoice: picked.choice, modelEffort: picked.effort }
-          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort },
+          ? { id, modelChoice: picked.choice, modelEffort: picked.effort, modelChoiceExplicit: picked.explicit }
+          : { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id },
       });
     },
     onSuccess: (res) => {
@@ -568,7 +581,7 @@ function DarkPage() {
   });
 
   const challengeCase = useMutation({
-    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (result, id) => {
       if (openId !== id) return;
       if (!result.ok) {
@@ -731,7 +744,7 @@ function DarkPage() {
   }, [reddit.isPending, redditLabel]);
 
   const writeBrief = useMutation({
-    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
+    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         showNotice(res?.error ? `No brief: ${editorError(res.error) || "the request did not finish."}` : "No brief written.");
@@ -893,8 +906,17 @@ function DarkPage() {
       <DarkFileDialog
         open={startOpen}
         defaultLimit={darkSettings.data?.defaultLimitKey ?? "standard"}
-        defaultModel={modelChoiceTouched.current ? modelChoice : darkDefaultModel ?? modelChoice}
-        defaultEffort={modelChoiceTouched.current ? modelEffort : defaultModelEffort(darkDefaultModel ?? modelChoice)}
+        defaultModel={modelChoice}
+        defaultEffort={modelEffort}
+        defaultModelExplicit={modelChoiceTouched.current}
+        shared={{
+          model: modelChoice,
+          effort: modelEffort,
+          onModelChoice: (choice) => {
+            pickModelChoice(choice);
+          },
+          onModelEffort: setModelEffort,
+        }}
         seed={seedFromImport || undefined}
         prefill={startPrefill}
         onClose={() => {
@@ -916,15 +938,17 @@ function DarkPage() {
               round agree on what is running.
             */
             const effort = validatedModelEffort(picked, run.modelEffort) ?? defaultModelEffort(picked);
-            firstRoundPick.current = { choice: picked, effort };
+            firstRoundPick.current = { choice: picked, effort, explicit: run.modelChoiceExplicit === true };
             fileModelTouchedFor.current = id;
-            setFileModelChoice(picked);
-            setFileModelEffort(effort);
+            fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
+            setModelChoice(picked);
+            setModelEffort(effort);
           } else {
             const choice = darkDefaultModel ?? modelChoice;
             fileModelTouchedFor.current = id;
-            setFileModelChoice(choice);
-            setFileModelEffort(defaultModelEffort(choice));
+            fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
+            setModelChoice(choice);
+            setModelEffort(defaultModelEffort(choice));
           }
           const signalId = pendingSignalId.current;
           pendingSignalId.current = null;
@@ -948,15 +972,13 @@ function DarkPage() {
           <DarkDialsPanel
             modelChoice={modelChoice}
             onModelChoice={(choice) => {
-              modelChoiceTouched.current = true;
-              setModelChoice(choice);
-              setModelEffort(defaultModelEffort(choice));
+              pickModelChoice(choice);
             }}
             modelEffort={modelEffort}
             onModelEffort={setModelEffort}
             modelDisabled={digging || busyStart}
           />
-          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} modelDefault={darkDefaultModel ?? undefined} />
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
         </div>
       </section>
       <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>
@@ -1231,16 +1253,16 @@ function DarkPage() {
               challengePending={challengeCase.isPending}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
-              modelChoice={fileModelChoice}
+              modelChoice={modelChoice}
               onModelChoice={(choice) => {
                 fileModelTouchedFor.current = openId;
-                setFileModelChoice(choice);
-                setFileModelEffort(defaultModelEffort(choice));
+                fileModelExplicitFor.current = openId;
+                pickModelChoice(choice);
               }}
-              modelEffort={fileModelEffort}
+              modelEffort={modelEffort}
               onModelEffort={(effort) => {
                 fileModelTouchedFor.current = openId;
-                setFileModelEffort(effort);
+                setModelEffort(effort);
               }}
               ocrModelChoice={ocrModelChoice}
               ocrModelEffort={ocrModelEffort}
@@ -1634,6 +1656,7 @@ function InvestigationWorkspace({
         targets: input.targets,
         leadId: input.leadId,
         modelChoice: input.modelChoice,
+        modelChoiceExplicit: input.modelChoiceExplicit,
           modelEffort: input.modelEffort,
       },
     }),
@@ -1934,6 +1957,7 @@ function InvestigationWorkspace({
 
       <ModelPicker
         scope="dark"
+        label="Digging model for this file"
         layout="stacked"
         value={modelChoice}
         onChange={onModelChoice}

@@ -13,7 +13,7 @@ import { useReader } from "@/components/reader-context";
 import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
-import { thisWeekDates } from "@/lib/news/story-dates-public";
+import { newestStories } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
 import { headlineWithTag, opinionHeadlineDisplay } from "@/lib/news/editorial";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
@@ -155,11 +155,12 @@ export const Route = createFileRoute("/")({
       data: { topic: "opinion", page: 1, oldest: false, limit: 1 },
     });
     /*
-      "This week". The dated items printed stories carry for the next seven
-      days; see `story-dates.ts`. It is read here rather than in the opinion
-      query because it sweeps the whole paper, not one section.
+      "This week": the paper's newest printed stories, from the last seven days
+      (or the newest of all when none is that recent), leaving out the lead;
+      see `listNewestStories`. It is read here rather than in the opinion query
+      because it sweeps the whole paper, not one section.
     */
-    const week = await thisWeekDates();
+    const week = await newestStories({ data: { skipSlug: page.stories[0]?.slug ?? "" } });
     /*
       The lead column's own rows under the button (unit CN, item 1(b)). Read
       here rather than in the component because the river has to leave them
@@ -294,9 +295,9 @@ function Home() {
   */
   const regionRows = (initial.region?.length ?? 0) >= 2 ? initial.region! : [];
   /*
-    "This week". The loader server-renders it and the panel takes the rows
-    already split into the weekday and day columns; see `story-dates.ts` for
-    where a dated item comes from and why a short panel is the honest read.
+    "This week". The loader server-renders the newest stories and the panel
+    takes the rows already split into the weekday and day columns; see
+    `listNewestStories` for which stories and in what order.
   */
   const week = storyDateRows(initial.week);
   /*
@@ -536,12 +537,10 @@ function Home() {
                   ) : null}
                 </div>
                 {/*
-                  No dated items, no panel: the lead runs the full width instead
-                  and no sentence explains the absence (unit BX). A panel whose
-                  only content is a note about why it has nothing to say tells
-                  the reader about the newsroom's filing, not about their town.
-                  The rule underneath is unchanged -- a date prints only when a
-                  published story reports it (`story-dates.ts`).
+                  No other published story, no panel: the lead runs the full width
+                  instead and no sentence explains the absence (unit BX). A panel
+                  whose only content is a note about why it has nothing to say
+                  tells the reader about the newsroom's filing, not about their town.
                 */}
                 {week.length ? <DatesPanel title="This week" items={week} /> : null}
               </section>

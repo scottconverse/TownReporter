@@ -119,6 +119,14 @@ async function sectionOnTheButton(page: Page): Promise<{ name: string; key: stri
     );
   }
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
+  const section = page.locator("#story-topic-select");
+  if ((await section.inputValue()) === "") {
+    const key = await section.locator("option").evaluateAll(options =>
+      options.find(option => (option as HTMLOptionElement).value && !(option as HTMLOptionElement).disabled)?.getAttribute("value"),
+    );
+    assert.ok(key, "the fixture desk has a section an editor can choose");
+    await section.selectOption(key);
+  }
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll("button")].some(
@@ -371,6 +379,7 @@ describe("two editors on one story", () => {
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
       await editorPage.getByLabel("Story", { exact: true }).waitFor();
+      await sectionOnTheButton(editorPage);
 
       /*
       Publish is deliberately two-step (arm, then confirm) -- one unconfirmed

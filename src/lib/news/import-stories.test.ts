@@ -187,10 +187,10 @@ describe("parseFinishedStories on the real civic-scanner report", () => {
     }
   });
 
-  it("defaults a detected civic-scanner report to the outside-AI disclosure line", () => {
+  it("a detected civic-scanner report prints no AI line (Scott, Oct 12: no AI wording on the paper)", () => {
     assert.equal(
       disclosureLine(stories[0]!.disclosureKey),
-      "An outside AI research tool wrote this from public records; an editor reviewed it.",
+      "",
     );
   });
 });
@@ -316,7 +316,7 @@ describe("small helpers", () => {
   });
 
   it("names the outside-AI and person disclosure lines, and leaves other wording to the editor", () => {
-    assert.match(disclosureLine("outside-ai"), /outside AI research tool/);
+    assert.equal(disclosureLine("outside-ai"), "");
     assert.match(disclosureLine("person"), /A person wrote this/);
     assert.equal(disclosureLine("other", "  Written with a helper.  "), "Written with a helper.");
   });

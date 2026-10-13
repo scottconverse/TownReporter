@@ -85,6 +85,20 @@ describe("Headline dialog", () => {
     assert.equal(auto.modelChoice, "auto");
   });
 
+  it("opens with the saved headline assignment and sends its effort", () => {
+    const assigned = headlineInitial(CURRENT, "claude-haiku", "low");
+    assert.equal(assigned.model, "claude-haiku");
+    assert.equal(assigned.effort, "low");
+    assert.deepEqual(
+      headlineSuggestRequest(assigned),
+      {
+        headline: CURRENT,
+        modelChoice: "claude-haiku",
+        modelEffort: "low",
+      },
+    );
+  });
+
   it("saves the typed line first, then Keep mine, then the chosen suggestion", () => {
     const chosen = state({ suggestions: SUGGESTED, choice: SUGGESTED[0]! });
     assert.equal(headlineChoice(chosen), SUGGESTED[0]!);

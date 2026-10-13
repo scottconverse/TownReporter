@@ -103,11 +103,11 @@ describe("cardsFromReport on the real civic-scanner report", () => {
     }
   });
 
-  it("defaults a detected outside-AI report to the outside-AI disclosure line", () => {
+  it("a detected outside-AI report prints no AI line (Scott, Oct 12)", () => {
     assert.ok(cards().every((c) => c.disclosureKey === "outside-ai"));
     assert.equal(
       cardDisclosure(stories()[0]!),
-      "An outside AI research tool wrote this from public records; an editor reviewed it.",
+      "",
     );
   });
 });

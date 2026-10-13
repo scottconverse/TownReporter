@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  NO_MODEL_IN_TIME,
   failOverAndRetry,
   failOverOperationAndRetry,
+  rungTimeoutMs,
   runPinnedCallWithFailover,
   storyProviderFailure,
   type DraftInput,
@@ -32,9 +34,8 @@ import { modelChoiceLabel } from "./model-choice.ts";
  * rather than assertions being relaxed:
  *
  *  - A hop only ever goes FORWARD (`planAutomaticFailover` slices the ladder
- *    after `current`), so a row sitting on Codex Terra -- the last rung -- has
- *    no rung to hop to and stays put. Tests that want a hop now start the row
- *    on DeepSeek.
+ *    after `current`). DeepSeek advances to Local model; balanced Codex
+ *    advances to Gemini Flash since Release H.
  *  - The fake probe answers about the rung it was handed instead of returning
  *    one hardcoded provider. The old constant probe ("Claude Sonnet") silently
  *    disagreed with the ladder the moment the ladder changed, and a test that
@@ -59,10 +60,8 @@ const LIVE_401 =
   "Codex error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 const LIVE_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
 
-/** Job 41's own row as it was recorded, which sat on Codex Terra. The ladder's
- * last rung has no rung after it, so a failover test overrides `model_choice`
- * to an earlier rung; the default is kept because it is the row this file's
- * docstring is about. */
+/** Job 41's recorded balanced Codex choice. Tests override it when they need
+ * to exercise the earlier rungs or all of the remaining ladder. */
 function job(overrides: Partial<DeskJob> = {}): DeskJob {
   return {
     id: 41,
@@ -164,6 +163,70 @@ describe("runPinnedCallWithFailover", () => {
     assert.equal(result.snapshot, snapshot);
     assert.deepEqual(result.result, { ok: false, error: refusal });
   });
+
+  it("does not walk a failed ladder again on a retry in the same draft run", async () => {
+    const tried = new Set<string>();
+    const calls: string[] = [];
+    const first = { modelChoice: "deepseek-flash" };
+    const failing = async (snapshot: { modelChoice: string }) => {
+      calls.push(snapshot.modelChoice);
+      return { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT };
+    };
+    const options = {
+      source: "editor" as const,
+      exhaustLadder: true,
+      tried,
+      run: failing,
+      probe: readyProbe(),
+      resolve: async (choice: string) => ({ modelChoice: choice }),
+      onSwitch: async () => {},
+    };
+
+    const once = await runPinnedCallWithFailover({ ...options, snapshot: first });
+    const callsAfterFirst = calls.length;
+    const retry = await runPinnedCallWithFailover({ ...options, snapshot: once.snapshot });
+
+    assert.ok(callsAfterFirst >= 1);
+    assert.equal(calls.length, callsAfterFirst, "the retry must not re-run a rung that already failed");
+    assert.equal(retry.result.ok, false);
+    assert.match(retry.result.error ?? "", /already failed/);
+  });
+
+  it("stops without switching once the draft run has no time for another model", async () => {
+    const switches: string[] = [];
+    const snapshot = { modelChoice: "codex-balanced" };
+
+    const result = await runPinnedCallWithFailover({
+      snapshot,
+      source: "editor",
+      exhaustLadder: true,
+      run: async () => ({ ok: false as const, error: NO_MODEL_IN_TIME }),
+      outOfTime: () => true,
+      probe: readyProbe(),
+      resolve: async () => {
+        throw new Error("no time left, so no fallback may be resolved");
+      },
+      onSwitch: async ({ nextChoice }) => {
+        switches.push(nextChoice);
+      },
+    });
+
+    assert.deepEqual(switches, []);
+    assert.equal(result.result.error, NO_MODEL_IN_TIME);
+  });
+});
+
+describe("rungTimeoutMs", () => {
+  it("gives each model its own limit, never the leftover of an earlier model", () => {
+    const deadlineAt = 100_000;
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 150_000, deadlineAt, now: 0 }), { timeoutMs: 100_000 });
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 20_000, deadlineAt, now: 0 }), { timeoutMs: 20_000 });
+  });
+
+  it("refuses a call when the run has under the shortest real limit left, instead of sending 1 ms", () => {
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 150_000, deadlineAt: 100_000, now: 99_999 }), { refused: true });
+    assert.deepEqual(rungTimeoutMs({ requestedMs: 1, deadlineAt: 100_000, now: 0 }), { refused: true });
+  });
 });
 
 describe("failOverAndRetry", () => {
@@ -204,6 +267,29 @@ describe("failOverAndRetry", () => {
       noteWritten,
       "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed",
       "the durable failover_note must carry the same 'sign-in lapsed' wording as the stage",
+    );
+  });
+
+  it("the failover note names the effort the failed DeepSeek rung actually ran at, not the job's medium", async () => {
+    let noteWritten = "";
+
+    await failOverAndRetry({
+      job: job({ model_choice: "deepseek-flash" }),
+      error: LIVE_401,
+      draftInput: { ...draftInput, modelEffort: "medium" },
+      runReport: async () => successfulDraft,
+      probe: readyProbe(),
+      setModelChoice: async () => {},
+      setStage: async () => {},
+      setFailoverNote: async (_id, note) => {
+        noteWritten = note;
+      },
+    });
+
+    assert.equal(
+      noteWritten,
+      "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed (DeepSeek v4.1 Flash ran at effort none)",
+      "DeepSeek v4.1 Flash runs with thinking off, so the receipt must say none, not the requested medium",
     );
   });
 
@@ -314,15 +400,11 @@ describe("failOverAndRetry", () => {
     });
 
     assert.ok("error" in result);
-    /*
-      A row on the ladder's FIRST rung has two rungs after it, so the walk
-      probes both -- each exactly once, in ladder order -- and the message names
-      the last one Automatic tried. The pre-0.6.63 fixture saw a single probe
-      because Codex Terra was the last rung and only Claude Sonnet followed it.
-    */
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next, but it was not ready/);
-    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready on this machine\./);
+    /* A failed first rung probes all three later rungs once, in order.
+       The message names Gemini Flash, the final rung that was tried. */
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash"], "each later rung is probed once");
+    assert.match(result.error, /Automatic tried Gemini 3\.8 Flash \(Pro plan\) next, but it was not ready/);
+    assert.match(result.error, /Gemini 3\.8 Flash \(Pro plan\) is not ready on this machine\./);
   });
 });
 
@@ -451,9 +533,9 @@ describe("Story provider failure and stage failover", () => {
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next/);
-    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready/);
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash"], "each later rung is probed once");
+    assert.match(result.error, /Automatic tried Gemini 3\.8 Flash \(Pro plan\) next/);
+    assert.match(result.error, /Gemini 3\.8 Flash \(Pro plan\) is not ready/);
     assert.doesNotMatch(result.error, /Opinion request/);
   });
 });

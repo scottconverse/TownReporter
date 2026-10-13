@@ -694,6 +694,19 @@ export function darkProblem(state: DarkFileState): Problem {
 }
 
 /**
+ * The state the dialog draws and sends. With a `shared` page model (the Dark
+ * Desk's "Digging model"), the page's model and effort are the only copy: the
+ * dialog shows them and the file opens with them, so the pick on screen is the
+ * pick that runs.
+ */
+export function darkFileWithShared(
+  state: DarkFileState,
+  shared?: { model: string; effort: string | null },
+): DarkFileState {
+  return shared ? { ...state, model: shared.model, effort: shared.effort } : state;
+}
+
+/**
  * What "Open the file" sends, and the second call it makes.
  *
  * Two existing server functions, in the order the desk already uses them: the
@@ -950,8 +963,12 @@ export function holdInitial(): HoldState {
 }
 
 /** `current` is the headline the story has now, which the dialog was opened for. */
-export function headlineInitial(current: string): HeadlineState {
-  return { choice: "keep", written: "", current, suggestions: [], model: "auto", effort: null };
+export function headlineInitial(
+  current: string,
+  model = "auto",
+  effort: string | null = null,
+): HeadlineState {
+  return { choice: "keep", written: "", current, suggestions: [], model, effort };
 }
 
 /* --------------------------------------------------------- More ▾ (lead) -- */

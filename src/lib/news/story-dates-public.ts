@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { listStoryDates, listThisWeekDates } from "./story-dates.server.ts";
+import { listNewestStories, listStoryDates, listThisWeekDates } from "./story-dates.server.ts";
 
 /**
  * The two dated-item reads, as server functions.
@@ -14,6 +14,11 @@ import { listStoryDates, listThisWeekDates } from "./story-dates.server.ts";
 export const thisWeekDates = createServerFn({ method: "POST" }).handler(() =>
   listThisWeekDates(),
 );
+
+/** "This week" on the front page: the paper's newest printed stories, leaving out the lead. */
+export const newestStories = createServerFn({ method: "POST" })
+  .validator(z.object({ skipSlug: z.string().max(300) }))
+  .handler(({ data }) => listNewestStories(data.skipSlug));
 
 /** "Dates in this story": the dates the one printed story carries. */
 export const articleDates = createServerFn({ method: "POST" })

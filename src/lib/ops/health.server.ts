@@ -186,14 +186,14 @@ async function checkJobs(): Promise<HealthCheck[]> {
     // Name what a queued job in each lane is actually behind -- the running
     // kind(s) occupying that SAME lane's concurrency, never the other lane's.
     const waitNotes: string[] = [];
-    for (const lane of ["editorial", "default"] as const) {
+    for (const lane of ["editorial", "default", "draft"] as const) {
       const laneQueued = rows.some((r) => r.lane === lane && r.status === "queued");
-      if (!laneQueued) continue;
+      if (!laneQueued || lane === "draft") continue;
       const laneRunningKinds = runningRows.filter((r) => r.lane === lane).map((r) => r.kind);
       waitNotes.push(
         laneRunningKinds.length
-          ? `${lane} queue waiting on ${laneRunningKinds.join(", ")}`
-          : `${lane} queue waiting for its turn`,
+          ? `${lane === "editorial" ? "Opinion" : "Background work"} waiting on ${laneRunningKinds.map(kind => kind === "dark" ? "a Dark Desk dig" : kind === "scan" ? "a scan" : "another job").join(", ")}`
+          : `${lane === "editorial" ? "Opinion" : "Background work"} waiting for a worker`,
       );
     }
 

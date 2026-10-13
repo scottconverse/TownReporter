@@ -1,6 +1,11 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
 import { providerErrorDetail, providerResponseDetail, providerHttpError } from "./provider-error-detail.ts";
+const ollamaCloudServer = createServerOnlyFn(() => import("./ollama-cloud-readiness.server.ts"));
+async function recordOllamaCloudCall(endpoint: string, model: string, status: number, detail: unknown, apiKey?: string | null) {
+  (await ollamaCloudServer()).recordOllamaCloudCall(endpoint, model, status, detail, apiKey);
+}
+const geminiServer = createServerOnlyFn(() => import("./ai-gemini-cli.server.ts"));
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
@@ -114,6 +119,7 @@ export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
+  | ({ kind: "gemini-cli" } & CodexConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -225,8 +231,8 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * Only for entries with a `ladderRank`; everything else keeps the gateway it has
  * always had.
  */
-function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmConfig | null {
-  const baseUrl = providerEndpoint(entry);
+function rungGateway(entry: ProviderEntry, resolvedModel?: string | null, pinnedLocal?: LocalModelOverride): LlmConfig | null {
+  const baseUrl = pinnedLocal?.baseUrl ?? providerEndpoint(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
   const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
@@ -237,7 +243,7 @@ function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmCo
     purpose: no resolved model, no gateway, no call -- which is how "never
     request a model that is not loaded" is enforced rather than remembered.
   */
-  const model = resolvedModel || providerModel(entry);
+  const model = resolvedModel || pinnedLocal?.id || providerModel(entry);
   if (!model) return null;
   return {
     apiKey: apiKey || "not-needed",
@@ -393,6 +399,7 @@ function explicitProvider(
     entry.kind === "local" && Boolean(localOverride) && env("TOWNREPORTER_LOCAL") !== "0";
   if (!entry.enabled() && !resolvedLocalIsEnabled) return null;
 
+  if (entry.kind === "gemini-cli") return { kind: "gemini-cli", model, label: entry.label };
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
   if (entry.kind === "openai") {
@@ -409,7 +416,7 @@ function explicitProvider(
     const llm =
       entry.ladderRank === undefined
         ? localGateway(localOverride)
-        : rungGateway(entry, rungModel);
+        : rungGateway(entry, rungModel, localOverride ?? undefined);
     return llm ? { kind: "openai", ...llm } : null;
   }
 
@@ -713,6 +720,17 @@ export async function probeProvider(
   scope?: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
+  // The legacy internal Local rung must honor the writing desk's saved pick.
+  // Unconfigured callers keep the existing LM Studio rung behavior.
+  if (choice === "qwen-local" && scope && newsroomId !== undefined) {
+    const { readDeskLocalModelChoice } = await import("./provider-settings.ts");
+    if ((await readDeskLocalModelChoice(newsroomId, scope)).storedPick) {
+      const picked = await probeProvider("local-model", newsroomId, adapters, scope, exactLocalModel);
+      return !picked.ok && picked.error === LOCAL_MODEL_NOTHING_LOADED
+        ? { ...picked, skippedRungs: [LOCAL_MODEL_NOTHING_LOADED] }
+        : picked;
+    }
+  }
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
     if (!resolved.ok) return resolved;
@@ -778,9 +796,10 @@ export async function probeProvider(
     const failures: string[] = [];
     const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
-      const result = await probeProvider(rung, newsroomId, adapters);
+      const result = await probeProvider(rung, newsroomId, adapters, scope);
       if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
       if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+      else if (result.error === LOCAL_MODEL_NOTHING_LOADED) skippedRungs.push(result.error);
       else failures.push(result.error);
     }
     const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
@@ -829,6 +848,11 @@ export async function probeProvider(
   if (choice === "local-model" && !localOverride && provider.kind === "openai") {
     // Environment-configured local gateways also need an exact queue snapshot.
     localOverride = { baseUrl: provider.baseUrl, id: provider.model };
+  }
+  if (provider.kind === "gemini-cli") {
+    const { probeGeminiCli } = await geminiServer();
+    const result = await probeGeminiCli(provider.label);
+    return result.ok ? { ...result, choice: storyModelChoice(choice) } : result;
   }
   if (provider.kind === "codex") {
     const { probeCodex } = await codexServer();
@@ -1081,6 +1105,10 @@ export async function grokChat(
       reasoningEffort: opts?.reasoningEffort,
     });
   }
+  if (provider.kind === "gemini-cli") {
+    const { geminiChat } = await geminiServer();
+    return geminiChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
+  }
   if (provider.kind === "codex") {
     const { codexChat } = await codexServer();
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
@@ -1093,8 +1121,18 @@ export async function grokChat(
     temperature: 0.2,
     // Gemini shares its output budget with thinking; the 2,200-token writer
     // request measured 85 visible tokens. Reserve room for a complete draft.
-    max_tokens: custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)
-      ? Math.max(maxTokens, 16_384) : maxTokens,
+    // DeepSeek v4.1 Flash needs the same room even with thinking off (effort
+    // None): dev walk D1, Oct 12 2026, job 335 -- the 2,200-token writer request
+    // was cut off (finish reason: length) and the draft fell back to Codex Sol.
+    // Codex and Claude never applied this cap, so DeepSeek was the only writer
+    // held to it.
+    // The loopback Local model needs it too: the writer (2,200) and edit (1,800)
+    // stage caps are smaller than the full-JSON reply they ask for (a measured
+    // 2,629-token draft on lead 448), so Local was cut off on the same lead
+    // DeepSeek was (Oct 12 2026, job 336). A cap is a ceiling, not a target.
+    max_tokens: (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl))
+      || isDeepSeekFlashModel(model) || isLoopbackEndpoint(llm.baseUrl)
+      ? Math.max(maxTokens, DRAFT_OUTPUT_TOKEN_FLOOR) : maxTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -1159,6 +1197,7 @@ export async function grokChat(
       return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
     retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
+    await recordOllamaCloudCall(llm.baseUrl, model, res.status, rejectedBody, llm.apiKey);
     if (timeoutMs < 30_000 || remaining() <= 1_000) {
       return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
     }
@@ -1188,6 +1227,7 @@ export async function grokChat(
   try { responseText = await res.text(); } catch (err) {
     return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
   }
+  if (!res.ok) await recordOllamaCloudCall(llm.baseUrl, model, res.status, responseText, llm.apiKey);
   try {
     body = JSON.parse(responseText) as typeof body;
   } catch {
@@ -1223,6 +1263,7 @@ export async function grokChat(
     };
   }
   if (body.error) {
+    await recordOllamaCloudCall(llm.baseUrl, model, 500, body, llm.apiKey);
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
     // reflect an Authorization header; retain its message after redacting the key.
@@ -1233,6 +1274,32 @@ export async function grokChat(
       error: `${failureLabel} API error${detail ? `: ${detail}` : ""}`,
       meta: openAiMeta(body),
     };
+  }
+  // A DeepSeek reply that runs to the output ceiling with thinking off is a
+  // repetition loop, not a long answer: the Oct 12 2026 edit-stage call wrote
+  // the same "The release does not state ..." note ~370 times (81k characters
+  // at 16,384 tokens), while the same request re-run finished in 1,420 tokens.
+  // The loop is intermittent, so one retry at a warmer temperature breaks it
+  // here and keeps the draft on DeepSeek, instead of paying Local and Codex for
+  // it. Only when the deadline leaves room for a second full attempt.
+  const firstAttemptMs = Date.now() - startedAt;
+  if (
+    body.choices?.[0]?.finish_reason === "length" &&
+    isDeepSeekFlashModel(model) &&
+    remaining() >= Math.max(15_000, firstAttemptMs)
+  ) {
+    try {
+      const again = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ...payload, temperature: LOOP_RETRY_TEMPERATURE }),
+        signal: AbortSignal.timeout(remaining()),
+      });
+      const againBody = again.ok ? (JSON.parse(await again.text()) as typeof body) : null;
+      if (againBody && !againBody.error && againBody.choices?.[0]?.finish_reason !== "length") body = againBody;
+    } catch {
+      // Keep the first reply; the ladder reports the cut-off honestly.
+    }
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
@@ -1267,6 +1334,7 @@ export async function grokChat(
     }
     return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
   }
+  await recordOllamaCloudCall(llm.baseUrl, model, res.status, "");
   return { ok: true, text, meta: openAiMeta(body) };
 }
 
@@ -1289,6 +1357,26 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
  * field would select provider default and can re-enable thinking.
  */
+/** Output room every stage of a DeepSeek or Local draft call gets at minimum. */
+export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
+
+/** Temperature of the one retry after a DeepSeek reply hit the output ceiling. */
+const LOOP_RETRY_TEMPERATURE = 0.7;
+
+/** The model runs on this machine (LM Studio, local Ollama): 127.0.0.1, localhost, ::1. */
+function isLoopbackEndpoint(baseUrl: string): boolean {
+  try {
+    return /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** DeepSeek v4.1 Flash on Ollama, by its exact model id. */
+function isDeepSeekFlashModel(model: string): boolean {
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+}
+
 function reasoningEffortFor(
   baseUrl: string,
   model: string,
@@ -1303,8 +1391,12 @@ function reasoningEffortFor(
   if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
   const declared = openAiCompatibleModelEfforts(model);
   if (requested) {
-    if (!declared.includes(requested)) return undefined;
-    return requested;
+    if (declared.includes(requested)) return requested;
+    // DeepSeek v4.1 Flash is always Off (Scott's standing rule). A stray effort
+    // Automatic carried in, such as "medium", becomes Off here; it must not fall
+    // to provider default, where thinking spends the output budget.
+    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+    return deepSeekFlash && declared.includes("none") ? "none" : undefined;
   }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
   if (override && REASONING_EFFORTS.has(override)) {

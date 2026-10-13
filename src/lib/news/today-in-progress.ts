@@ -1,4 +1,5 @@
 export type TodayWorkRow = {
+  id?: number;
   leadId: number;
   kind: string;
 };
@@ -7,7 +8,13 @@ export function todayInProgressJobs<T extends TodayWorkRow>(
   rows: T[],
   closedLeadIds: ReadonlySet<number>,
 ): T[] {
-  return rows.filter(
+  const latest = new Map<number, T>();
+  for (const row of rows) {
+    if (row.kind !== "draft" && row.kind !== "reconcile") continue;
+    const prior = latest.get(row.leadId);
+    if (!prior || (row.id ?? 0) > (prior.id ?? 0)) latest.set(row.leadId, row);
+  }
+  return [...latest.values()].filter(
     (row) =>
       row.leadId > 0 &&
       (row.kind === "draft" || row.kind === "reconcile") &&

@@ -40,6 +40,7 @@ test("walk 4: the warned publish reaches the atomic server even when cached life
       draft: {
         id: 8,
         headline: "Council votes",
+        model_headline: "Council votes",
         dek: "A plan",
         body: "Council approved the plan.",
         topic: "government",

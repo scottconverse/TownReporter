@@ -68,3 +68,4 @@ it("firstSentenceForDek returns empty for empty, null or undefined body", () => 
   assert.equal(firstSentenceForDek(undefined), "");
   assert.equal(firstSentenceForDek("   "), "");
 });
+

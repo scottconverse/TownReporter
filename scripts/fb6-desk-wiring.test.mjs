@@ -60,6 +60,7 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
       "@/lib/news/job-progress": jobProgress, "@/components/scoped-actions": jobProgress,
       "@tanstack/react-query": reactQuery,
       "./job-card-state": stateUrl,
+      "@/components/model-picker": inline("export const ModelPicker = () => null;"),
     },
   );
   const { DeskJobCard } = await import(cardUrl);

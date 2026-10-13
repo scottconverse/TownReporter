@@ -3,7 +3,7 @@ import { resolveSectionKey } from "./sections.server.ts";
 import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
 import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
@@ -12,6 +12,7 @@ import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { markRemovedCaptures, removedCapturesFor } from "./evidence.ts";
 import { publicSlug, publicTopic } from "./request-input.ts";
+import { disclosureForReader } from "./ai-disclosure.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
@@ -39,7 +40,7 @@ function samePublicUrl(left: string, right: string): boolean {
 export async function publicArticleForReaders<T extends ArticleRow>(
   row: T,
 ): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
-  const article = publicArticle(row);
+  const article = await publicArticleWithEditorChecks(row);
   const removed = await removedCapturesFor(article.provenance.map((item) => item.version_id));
   const provenance = markRemovedCaptures(article.provenance, removed);
   return { ...article, provenance, provenance_json: JSON.stringify(provenance) };
@@ -50,13 +51,7 @@ export async function publicArticleForReaders<T extends ArticleRow>(
 export function publicArticle<T extends ArticleRow>(
   row: T,
 ): T & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
-  const u = unpackStoredDraft({
-    headline: row.headline,
-    dek: row.dek,
-    body: row.body,
-    topic: row.topic,
-  });
-  u.body = stripReporterNotebook(u.body);
+  const { u } = readerText(row);
   const publicUrls = parseUrlList(row.source_urls);
   let provenance: ProvenanceItem[] = [];
   try {
@@ -96,6 +91,65 @@ export function publicArticle<T extends ArticleRow>(
     provenance,
     findings,
   };
+}
+
+function readerText<T extends ArticleRow>(row: T) {
+  const u = unpackStoredDraft({
+    headline: row.headline,
+    dek: row.dek,
+    body: row.body,
+    topic: row.topic,
+  });
+  const summary = cleanMissingFactNotes(u.headline, u.dek);
+  u.headline = summary.headline;
+  u.dek = summary.dek;
+  u.body = stripReporterNotebook(u.body);
+  return { u, missingFactNotes: summary.notes };
+}
+
+/** Keep a print-time cleanup visible in the private editor checks, without delaying readers on a failed write. */
+export async function rememberMissingFactNotesForArticle(
+  articleId: number,
+  notes: readonly string[],
+  newsroomId = DEFAULT_NEWSROOM_ID,
+): Promise<void> {
+  const uniqueNotes = [...new Set(notes.map((note) => note.trim()).filter(Boolean))];
+  if (!Number.isSafeInteger(articleId) || articleId <= 0 || !uniqueNotes.length) return;
+  try {
+    const sql = await getSql();
+    for (const note of uniqueNotes) {
+      await sql`
+        update drafts as d
+        set integrity_notes = case
+          when btrim(coalesce(d.integrity_notes, '')) = '' then ${note}
+          else btrim(d.integrity_notes) || E'\\n' || ${note}
+        end
+        where d.id = (
+          select editor_draft.id
+          from drafts as editor_draft
+          join articles as article on article.lead_id = editor_draft.lead_id
+          where article.id = ${articleId}
+            and article.newsroom_id = ${newsroomId}
+            and editor_draft.newsroom_id = ${newsroomId}
+          order by editor_draft.updated_at desc, editor_draft.id desc
+          limit 1
+        )
+        and position(lower(${note}) in lower(coalesce(d.integrity_notes, ''))) = 0
+      `;
+    }
+  } catch (err) {
+    console.error("[paper] summary editor check note failed", err);
+  }
+}
+
+async function publicArticleWithEditorChecks<T extends ArticleRow>(
+  row: T,
+): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
+  const { missingFactNotes } = readerText(row);
+  const rowRoom = (row as T & { newsroom_id?: number }).newsroom_id;
+  const newsroomId = Number.isSafeInteger(rowRoom) && Number(rowRoom) > 0 ? Number(rowRoom) : DEFAULT_NEWSROOM_ID;
+  await rememberMissingFactNotesForArticle(row.id, missingFactNotes, newsroomId);
+  return publicArticle(row);
 }
 
 /**
@@ -147,8 +201,8 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       order by published_at desc
       limit 30
-    `.then((rows) =>
-      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    `.then(async (rows) =>
+      collapsePrintedDuplicates(await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance),
     );
     } catch (err) {
       console.error("[paper] listPublishedArticles failed", err);
@@ -157,50 +211,90 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
   },
 );
 
+/** The public story page's data. Split from the server function so a test can read what a reader is shown. */
+export async function loadPublishedArticle(slug: string) {
+  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
+  try {
+    const sql = await getSql();
+    const rows = await sql<ArticleRow & {
+      routine_notice: boolean;
+      origin_model_body: string | null;
+      origin_research_json: string | null;
+      origin_pasted: boolean;
+      published_unreviewed: boolean;
+    }>`
+    select articles.id, articles.slug, articles.headline, articles.dek, articles.body,
+           articles.topic, articles.source_urls, articles.status, articles.published_at,
+           articles.provenance_json, articles.form, articles.found_note, articles.unanswered,
+           articles.disclosure_text,
+           origin.model_body as origin_model_body,
+           origin.research_json as origin_research_json,
+           /* A piece the editor pasted into the Opinion desk keeps its text in
+              model_body, but no model wrote it (FC04). */
+           pasted.draft_id is not null as origin_pasted,
+           /* Whether a fixed-template routine notice printed this row. The
+              reader-facing disclosure line depends on it, and it cannot be
+              inferred from the article's own columns: a routine notice is
+              published with the same form as a reported story. */
+           exists(
+             select 1 from routine_notice_publications r
+             where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
+           ) as routine_notice,
+           /* THT-17: the trail row the publish path writes when a piece went
+              to paper over claims nobody reviewed ("Publish anyway"). The
+              reader line must not say an editor approved such a piece. */
+           exists(
+             select 1 from audit_events a
+             where a.action = 'publish-unreviewed-claims' and a.subject_kind = 'articles'
+               and a.subject_id = articles.id and a.newsroom_id = articles.newsroom_id
+           ) as published_unreviewed
+    from articles
+    left join drafts as origin
+      on origin.id = articles.origin_draft_id and origin.newsroom_id = articles.newsroom_id
+    left join editorial_extras as pasted
+      on pasted.draft_id = origin.id and pasted.newsroom_id = articles.newsroom_id
+        and pasted.source_kind = 'written-by-the-editor'
+    where articles.slug = ${slug} and articles.status = 'published' and articles.newsroom_id = ${DEFAULT_NEWSROOM_ID}
+    limit 1
+  `;
+    if (!rows[0]) return null;
+    /*
+      Unit U11b2: `publicArticleForReaders` marks the cited captures whose
+      excerpt has been taken down, so "Current source" stops being a link
+      when the link was removed with it and the captured-version link says
+      what it opens. See that function for why the flags are joined here
+      rather than stored in `provenance_json`.
+    */
+    const { origin_model_body, origin_research_json, origin_pasted, published_unreviewed, ...articleRow } = rows[0];
+    const article = await publicArticleForReaders({
+      ...articleRow,
+      disclosure_text: disclosureForReader({
+        text: articleRow.disclosure_text,
+        modelBody: origin_model_body,
+        researchJson: origin_research_json,
+        publishedBody: articleRow.body,
+        publishedWithUnreviewedClaims: published_unreviewed,
+        pastedByEditor: origin_pasted,
+      }),
+    });
+    const corrs = await sql<{ body: string; created_at: string }>`
+      select body, created_at from corrections
+      where article_id = ${rows[0].id}
+      order by created_at asc
+    `;
+    return {
+      ...article,
+      corrections: corrs.map((c) => ({ date: c.created_at, body: c.body })),
+    };
+  } catch (err) {
+    console.error("[paper] getPublishedArticle failed", err);
+    return null;
+  }
+}
+
 export const getPublishedArticle = createServerFn({ method: "GET" })
   .validator((slug: string) => publicSlug.parse(slug))
-  .handler(async ({ data: slug }) => {
-    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
-    try {
-      const sql = await getSql();
-      const rows = await sql<ArticleRow & { routine_notice: boolean }>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered, disclosure_text,
-             /* Whether a fixed-template routine notice printed this row. The
-                reader-facing disclosure line depends on it, and it cannot be
-                inferred from the article's own columns: a routine notice is
-                published with the same form as a reported story. */
-             exists(
-               select 1 from routine_notice_publications r
-               where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
-             ) as routine_notice
-      from articles
-      where slug = ${slug} and status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
-      limit 1
-    `;
-      if (!rows[0]) return null;
-      /*
-        Unit U11b2: `publicArticleForReaders` marks the cited captures whose
-        excerpt has been taken down, so "Current source" stops being a link
-        when the link was removed with it and the captured-version link says
-        what it opens. See that function for why the flags are joined here
-        rather than stored in `provenance_json`.
-      */
-      const article = await publicArticleForReaders(rows[0]);
-      const corrs = await sql<{ body: string; created_at: string }>`
-        select body, created_at from corrections
-        where article_id = ${rows[0].id}
-        order by created_at asc
-      `;
-      return {
-        ...article,
-        corrections: corrs.map((c) => ({ date: c.created_at, body: c.body })),
-      };
-    } catch (err) {
-      console.error("[paper] getPublishedArticle failed", err);
-      return null;
-    }
-  });
+  .handler(({ data: slug }) => loadPublishedArticle(slug));
 
 export const listPublishedByTopic = createServerFn({ method: "GET" })
   .validator((topic: string) => publicTopic.parse(topic))
@@ -216,8 +310,8 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID} and topic = ${topic}
       order by published_at desc
       limit 30
-    `.then((rows) =>
-      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    `.then(async (rows) =>
+      collapsePrintedDuplicates(await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance),
     );
     } catch (err) {
       console.error("[paper] listPublishedByTopic failed", err);
@@ -267,7 +361,7 @@ export const searchPublished = createServerFn({ method: "GET" })
              or (${wide} and body ilike ${like}))
       order by published_at desc
       limit 30
-    `.then((rows) => rows.map(publicArticle).map(withoutProvenance));
+    `.then(async (rows) => (await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance));
     } catch (err) {
       console.error("[paper] searchPublished failed", err);
       return [] as PublicListArticle[];

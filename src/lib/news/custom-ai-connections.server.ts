@@ -190,7 +190,7 @@ export async function testConnection(
       signal: AbortSignal.timeout(20_000),
       body: JSON.stringify({
         model: connection.modelId,
-        messages: [{ role: "user", content: "Reply with TOWNREPORTER_OK." }],
+        messages: [{ role: "user", content: "In one sentence, explain why a town publishes meeting minutes." }],
         max_tokens: 128,
       }),
     });
@@ -206,10 +206,21 @@ export async function testConnection(
     const body = await response.json();
     const capabilities = inferCapabilities(body);
     const answered = hasAssistantText(body);
+    const reportedModel = typeof body.model === "string" ? body.model : "not reported";
+    const content = body.choices?.find((choice: { message?: { content?: unknown } }) =>
+      typeof choice?.message?.content === "string" && choice.message.content.trim(),
+    )?.message?.content ?? "";
+    const redact = (value: string) => apiKey ? value.replaceAll(apiKey, "[redacted]") : value;
+    const excerpt = redact(String(content)).replace(/\s+/g, " ").trim().slice(0, 300);
+    const identityNote = reportedModel !== "not reported" && reportedModel !== connection.modelId
+      ? " Returned ID differs; it may be an alias or a different model."
+      : "";
     return {
       ok: answered,
       message: answered
-        ? "Connection succeeded; chat completions are available."
+        ? "Connection succeeded; chat completions are available. " +
+          "Instruction compliance, model identity, and tools are not independently verified. " +
+          `Requested: ${redact(connection.modelId)}. Reported: ${redact(reportedModel)}.${identityNote} Response: ${excerpt}`
         : "The server replied, but did not return assistant text.",
       capabilities,
       latencyMs: Date.now() - started,

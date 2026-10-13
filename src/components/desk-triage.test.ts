@@ -5,6 +5,7 @@ import {
   isInteractiveTarget,
   isTypingTarget,
   movedIndex,
+  rowKillIdOf,
   TRIAGE_LEGEND,
   triageAction,
   triageOverlayOpen,
@@ -240,6 +241,16 @@ describe("N4 — the keys stand down on a control the editor is standing on", ()
       assert.equal(triageAction(key("x", { target })), null, `X was claimed on ${html}`);
       assert.equal(triageAction(key("j", { target })), null, `J was claimed on ${html}`);
     }
+  });
+
+  it("THT-8: X on a focused row Kill button kills that row, and no other key gets through", () => {
+    const { document } = parseHTML("<span data-triage-kill='465'><button>Kill</button></span>");
+    const button = document.querySelector("button");
+    assert.equal(rowKillIdOf(button), "465");
+    assert.deepEqual(triageAction(key("x", { target: button })), { kind: "kill", rowId: "465" });
+    assert.equal(triageAction(key("Enter", { target: button })), null);
+    assert.equal(triageAction(key("j", { target: button })), null);
+    assert.equal(rowKillIdOf(element("<button>Kill</button>")), null);
   });
 
   it("stands down entirely while a dialog or an open menu is over the list", () => {

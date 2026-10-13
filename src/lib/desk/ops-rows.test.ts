@@ -28,6 +28,7 @@ import type { HealthCheck } from "../ops/health.ts";
 import type { ProviderStatus } from "../news/provider-login.ts";
 import type { ProviderTimeSetting } from "../news/provider-settings.ts";
 import type { LocalCatalog } from "../news/local-models.ts";
+import type { ProviderAvailability } from "../news/writer-bar.ts";
 
 /*
   Unit CX2: the row a Server card prints, asserted against the read behind it.
@@ -507,6 +508,22 @@ describe("Server card rows (CX2)", () => {
     /* Called with no read this is the editor's ladder: a rung with no chip,
        not a rung with a "Not set" where the desk has an answer. */
     assert.ok(lines.every((line) => line.chip === undefined));
+  });
+
+  it("Writing models: cloud usage warnings replace Ready and show Ollama's words in the row", () => {
+    const reason = "Ollama says: you (sconverse) have reached your monthly usage limit. Add credit at ollama.com/settings, or the desk moves to the next model.";
+    const availability = Object.assign({ "deepseek-flash": false, "local-model": false }, {
+      reasons: { "deepseek-flash": reason, "local-model": reason },
+    }) as unknown as ProviderAvailability;
+    const lines = writingModelLines({ times: [], statuses: [], availability,
+      catalog: { servers: [], checkedAt: 0, defaultModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" } },
+    });
+    for (const name of ["DeepSeek v4.1 Flash", "Local model"]) {
+      const line = lines.find(row => row.name === name)!;
+      assert.equal(line.chip?.source, "words");
+      if (line.chip?.source === "words") assert.equal(line.chip.label, "Warning");
+      assert.match(line.note, /you \(sconverse\).*Add credit at ollama.com\/settings/);
+    }
   });
 
   it("Writing models: a login rung wears the login's own chip, handed through untouched", () => {

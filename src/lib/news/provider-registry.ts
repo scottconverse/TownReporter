@@ -43,8 +43,9 @@
  * not that it is a different wire format.
  */
 export type ProviderKind =
-  | "claude-code"
+  "claude-code"
   | "codex"
+  | "gemini-cli"
   | "openai"
   | "anthropic"
   | "local";
@@ -92,20 +93,19 @@ export const PICKER_PROVIDER_IDS = [
   "codex-frontier",
   "codex-balanced",
   "codex-luna",
+  "gemini-flash",
+  "gemini-pro",
   "claude-fable",
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
   "local-model",
   /*
-    `deepseek-flash` is the one id in BOTH lists (unit U29, owner decision
-    2026-09-30). It is Automatic's first rung everywhere -- see `ladderRank` on
-    its entry -- and Opinion's model menu now offers it BY NAME as well, which
-    is what puts its id here. Story, Scan and Dark Desk keep reaching it the
-    way they always have, through Automatic; the forced surfaces (a batch, a
-    meeting redraft, OCR, a transcript) do not offer it at all, because a run
-    that has to name ONE runtime up front may not name a rung
-    (`validateForcedRuntime`).
+    `deepseek-flash` is also Automatic's first rung everywhere (unit U29,
+    owner decision 2026-09-30). It is a named choice on the shared Story, Scan,
+    Follow-up, Opinion, Dark Desk and forced-runtime pickers. Its named forced
+    snapshot preserves the DeepSeek transport. OCR excludes it because this
+    model does not provide vision support.
   */
   "deepseek-flash",
 ] as const;
@@ -138,7 +138,7 @@ export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
 
   These are the ids Automatic may pin on a job (0.6.63, Unit Y item 1: DeepSeek
   v4.1 Flash, then the local model on this computer, then Codex Terra). They are
-  INTERNAL ids -- no menu shows them -- but a job still has to be able to hold
+  ladder ids; DeepSeek is also a named picker choice. A job must hold either
   one, because `planAutomaticFailover` returns `storyModelChoice(rung)` and a
   value this type rejected would silently degrade to "auto" and re-probe the
   ladder from the top. `automaticLadder()` is the runtime source of truth for
@@ -152,10 +152,9 @@ export type AutomaticRungId = (typeof AUTOMATIC_RUNG_IDS)[number];
 
   Unit U29 (owner decision 2026-09-30): an id can now be in this list AND in
   `PICKER_PROVIDER_IDS`. `deepseek-flash` is Automatic's first rung on every
-  surface -- which is what makes it internal, and what keeps it out of a
-  batch's runtime (`validateForcedRuntime` refuses a rung) -- and it is also a
-  name Opinion's model menu offers. Being internal is about who RESOLVES the
-  id, not about whether one menu may print it; `configured` and `qwen-local`
+  surface, and is also a named runtime for ordinary and forced jobs. The
+  internal list records which ids Automatic can resolve; it does not exclude
+  a provider from named pickers. `configured` and `qwen-local`
   are still offered nowhere.
 */
 export const INTERNAL_PROVIDER_IDS = ["configured", ...AUTOMATIC_RUNG_IDS] as const;
@@ -374,6 +373,7 @@ export const DISCOVERED_LOCAL_ADDRESSES: readonly string[] = [
 export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
   "claude-code": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   codex: { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
+  "gemini-cli": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   // A measured four-hour council-meeting draft takes about 20 minutes across
@@ -493,6 +493,40 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       drafting". Terra stays a named pick on every surface.
     */
     ladderRank: 3,
+  },
+  {
+    id: "gemini-flash",
+    label: "Gemini 3.8 Flash (Pro plan)",
+    detail: "Uses the Gemini program signed in to your Google Pro plan",
+    optionDetail: "",
+    kind: "gemini-cli",
+    model: "gemini-3.8-flash-medium",
+    envOverrides: {},
+    budget: KIND_BUDGETS["gemini-cli"],
+    plannerModel: "gemini-3.8-flash-medium",
+    enabled: () => true,
+    offeredFor: { ...EVERY_SURFACE, ocr: false },
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+    ladderRank: 4,
+  },
+  {
+    id: "gemini-pro",
+    label: "Gemini 3.1 Pro (Pro plan)",
+    detail: "Uses the Gemini program signed in to your Google Pro plan",
+    optionDetail: "",
+    kind: "gemini-cli",
+    model: "gemini-3.1-pro-high",
+    envOverrides: {},
+    // A complete Pro-High story response measured 152.9s with agy. Keep a
+    // 300s call ceiling and reserve so normal research leaves room for it;
+    // Flash retains the shorter shared Gemini CLI budget above.
+    budget: { wallMs: 660_000, callMs: 300_000, reserveMs: 300_000 },
+    plannerModel: "gemini-3.1-pro-high",
+    enabled: () => true,
+    offeredFor: { ...EVERY_SURFACE, ocr: false },
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
   },
   {
     id: "claude-fable",
@@ -742,21 +776,21 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       (Boolean(env("TOWNREPORTER_DEEPSEEK_BASE_URL")) || localDiscoveryReachable),
     offSwitchEnv: "TOWNREPORTER_DEEPSEEK",
     /*
-      Opinion's menu, and nowhere else (unit U29, owner decision 2026-09-30:
-      "use deepseek ... keep the picker regardless").
-
-      Story, Scan and Dark Desk already run this model through Automatic, and
-      their menus are unchanged -- an editor there picks "Automatic" and the
-      ladder resolves to this rung. Opinion gets it BY NAME because Opinion's
-      Automatic has its own ladder and its own picker, and the owner's choice
-      was that an editor writing an editorial can select the model Automatic
-      will try first.
-
-      `forced: false` on purpose: a batch, a meeting redraft, OCR or a
-      transcript must name a runtime an editor can hold, and a rung is not one
-      (`validateForcedRuntime` refuses it).
+      Named everywhere the shared chat-model picker runs this provider:
+      Story, Scan, Follow-up, Opinion and Dark Desk. It remains an Automatic
+      rung as well, so every ordinary work surface can show and run the same
+      exact model by name. Forced jobs pin its own endpoint and model; OCR
+      requires a vision-capable model and does not offer this text provider.
     */
-    offeredFor: { ...NO_SURFACE, opinion: true },
+    offeredFor: {
+      ...NO_SURFACE,
+      story: true,
+      scan: true,
+      "follow-up": true,
+      opinion: true,
+      dark: true,
+      forced: true,
+    },
     ladderRank: 1,
     // The one rung both ladders share, and first on each: the desk researches
     // and drafts with it, and Opinion does too.
@@ -851,9 +885,11 @@ const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 
 function defaultsToThinkingOff(model: string | undefined | null): boolean {
   const id = model?.trim() ?? "";
-  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
-    || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
-    || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id);
+  return (
+    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
+    || /^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
+    || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)
+  );
 }
 
 /**
@@ -864,6 +900,9 @@ function defaultsToThinkingOff(model: string | undefined | null): boolean {
  * measured accepting `reasoning_effort: "none"` and returning answer content,
  * while omitting the field spent the whole output budget on reasoning. No
  * unmeasured Qwen effort levels are offered.
+ * LM Studio names a model with its publisher folder in front
+ * ("qwen/qwen3.8-27b", "halo/qwen3.8-27b-q6-fast"); that name is still Qwen 3.8
+ * (Test walk 1, Oct 12: the folder broke the match, so the draft thought and ran out of room).
  */
 export function openAiCompatibleModelEfforts(
   model: string | undefined | null,
@@ -872,7 +911,7 @@ export function openAiCompatibleModelEfforts(
   if (/^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)) {
     return DEEPSEEK_V4_1_FLASH_EFFORTS;
   }
-  if (/^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
+  if (/^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
   if (/^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)) return QWEN_3_5_CLOUD_EFFORTS;
   // Gemini's OpenAI-compatible endpoint does not declare the same effort
   // vocabulary for the saved 2.5 preset. Use its provider default safely.
@@ -880,14 +919,20 @@ export function openAiCompatibleModelEfforts(
   return [];
 }
 
+/** The one label source for an effort: every picker, Models, and receipts use it.
+ * DeepSeek v4.1 Flash reads "None — fastest" whatever provider id reaches it;
+ * the Off wording stays only for the Qwen models that default to thinking off. */
 export function modelEffortLabel(
   effort: ModelEffort,
-  model?: string | null,
-): string {
-  if (effort === "none" && defaultsToThinkingOff(model)) {
+  model?: string | null): string {
+  if (effort === "none" && defaultsToThinkingOff(model) && !isDeepSeekFlashModel(model)) {
     return "Off — no extra thinking";
   }
   return MODEL_EFFORT_LABELS[effort];
+}
+
+function isDeepSeekFlashModel(model: string | undefined | null): boolean {
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model?.trim() ?? "");
 }
 
 /** Effort values accepted by TownReporter's transport for this choice.
@@ -920,6 +965,22 @@ export function modelEffortsForModel(model: string | undefined | null): readonly
   return [];
 }
 
+/*
+  DeepSeek V4.1 Flash always runs with thinking off. Every rung that reaches
+  it -- Automatic's first rung, a fallback, or an explicit pick -- gets "none",
+  whatever effort the editor picked. Its Ollama transport distinguishes an
+  explicit Off from an omitted effort, which means provider default. The
+  entry's own declared list is DeepSeek's, so its own model id counts even
+  when no exact model was passed or the server reports another id.
+*/
+function forcesThinkingOff(id: string | undefined | null, exactModel?: string | null): boolean {
+  const entry = providerEntry(id);
+  return (
+    modelEffortsFor(id, exactModel).includes("none") &&
+    (defaultsToThinkingOff(exactModel) || (entry?.efforts?.includes("none") ?? false))
+  );
+}
+
 export function defaultModelEffort(
   id: string | undefined | null,
   exactModel?: string | null,
@@ -927,20 +988,50 @@ export function defaultModelEffort(
   const entry = providerEntry(id);
   const choices = modelEffortsFor(id, exactModel);
   if (!choices.length) return null;
-  // DeepSeek V4.1 Flash defaults to an explicit Off. Its Ollama transport
-  // distinguishes that from an omitted effort, which means provider default.
-  if (
-    choices.includes("none") &&
-    defaultsToThinkingOff(exactModel)
-  ) {
-    return "none";
-  }
-  if (id !== "auto" && (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code"))) {
+  if (forcesThinkingOff(id, exactModel)) return "none";
+  // Automatic has no single effort: each rung runs at its own default (DeepSeek:
+  // none, Codex/Claude: their provider default). Saying "Medium" here was false,
+  // so Automatic (no registry entry) returns null like any unknown choice.
+  if (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli")) {
     return null;
   }
   return entry?.defaultEffort && choices.includes(entry.defaultEffort)
     ? entry.defaultEffort
     : "medium";
+}
+
+/** The effort a picker shows: the editor's pick when this model offers it,
+ * otherwise the model's own default (DeepSeek: None). */
+export function pickerShownEffort(
+  id: string | undefined | null,
+  exactModel: string | null | undefined,
+  effort: ModelEffort | null | undefined,
+  options: readonly ModelEffort[] = modelEffortsFor(id, exactModel),
+): ModelEffort | null {
+  // DeepSeek always runs at none, so the picker must show none, not the pick.
+  if (forcesThinkingOff(id, exactModel)) return "none";
+  return effort && options.includes(effort) ? effort : defaultModelEffort(id, exactModel);
+}
+
+/** What an Automatic run does with thinking, named per model. Automatic has no
+ * single effort (see defaultModelEffort), so the control says what each model
+ * does instead of printing one false "Medium". DeepSeek ignores the pick. */
+export function automaticEffortNote(pick: ModelEffort | null | undefined): string {
+  const rest = pick
+    ? `${modelEffortLabel(pick, null)} where a model offers it`
+    : "each model's own default";
+  return `Thinking effort: ${rest} (DeepSeek v4.1 Flash always runs with thinking off)`;
+}
+
+/** An effort a saved snapshot may still carry. A DeepSeek snapshot saved before
+ * its effort was forced to none holds its old pick, which the model still lists:
+ * that value is legal, and modelEffort canonicalizes it to none. */
+export function storedEffortIsLegal(
+  id: string | undefined | null,
+  stored: unknown,
+  exactModel?: string | null,
+): boolean {
+  return typeof stored === "string" && modelEffortsFor(id, exactModel).includes(stored as ModelEffort);
 }
 
 export function modelEffort(
@@ -960,10 +1051,25 @@ export function modelEffort(
       ? (value as ModelEffort)
       : null;
   }
+  if (forcesThinkingOff(id, exactModel)) return "none";
   const choices = modelEffortsFor(id, exactModel);
   return typeof value === "string" && choices.includes(value as ModelEffort)
     ? (value as ModelEffort)
     : defaultModelEffort(id, exactModel);
+}
+
+/** The effort a run records in its receipt. A local model whose exact id declares
+ * its own levels resolves through them, so no pick means that model's default
+ * (DeepSeek v4.1 Flash: none). Other choices keep `modelEffort` unchanged. */
+export function recordedModelEffort(
+  id: string | undefined | null,
+  value: unknown,
+  exactModel?: string | null,
+): ModelEffort | null {
+  if (id === "local-model" && exactModel && modelEffortsFor(id, exactModel).length) {
+    return modelEffort(id, value, exactModel);
+  }
+  return modelEffort(id, value);
 }
 
 /** Every entry a given picker should offer, registry order, Automatic aside. */

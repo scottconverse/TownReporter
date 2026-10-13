@@ -12,7 +12,13 @@ import {
   readTranscriptOriginal,
   resolveTranscriptArtifact,
 } from "./meeting-transcript-view.server.ts";
-import { TranscriptViewRefused, transcriptPlainText } from "./meeting-transcript-view.ts";
+import * as transcriptDownloadModule from "./meeting-transcript-view.server.ts";
+import {
+  TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE,
+  TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
+  TranscriptViewRefused,
+  transcriptPlainText,
+} from "./meeting-transcript-view.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "co-transcript-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -130,6 +136,21 @@ describe("meeting transcript view", () => {
     assert.equal(original.storagePath, file.path);
   });
 
+  it("FC12 downloads the original transcript with its stored name and format type", () => {
+    const helpers = transcriptDownloadModule as unknown as Record<string, unknown>;
+    const mimeType = helpers.transcriptOriginalMimeType;
+    const contentDisposition = helpers.transcriptOriginalContentDisposition;
+    assert.equal(typeof mimeType, "function", "the original format selects a download media type");
+    assert.equal(typeof contentDisposition, "function", "the download preserves its original file name");
+    if (typeof mimeType !== "function" || typeof contentDisposition !== "function") return;
+
+    assert.equal((mimeType as (name: string) => string)("meeting-council.srv3"), "application/xml");
+    assert.equal((mimeType as (name: string) => string)("captions.csv"), "text/csv");
+    const header = (contentDisposition as (name: string) => string)("council résumé.srv3");
+    assert.match(header, /filename="council r_sum_.srv3"/);
+    assert.match(header, /filename\*=UTF-8''council%20r%C3%A9sum%C3%A9.srv3/);
+  });
+
   it("refuses to serve bytes that no longer match the hash recorded on the row", async () => {
     const file = artifactFile("transcript-moved.srv3", "the file was replaced after capture");
     const { sql } = fakeSql([
@@ -150,6 +171,63 @@ describe("meeting transcript view", () => {
     );
     assert.equal(attachmentFilename('odd"name\\here.srv3'), "oddnamehere.srv3");
     assert.equal(attachmentFilename(""), "transcript");
+  });
+
+  it("DHF-4 says a missing original is missing with a 404 and the words the editor reads", async () => {
+    const { sql } = fakeSql([
+      {
+        id: 6,
+        video_id: "gone-1",
+        storage_path: join(scratch, "never-written.srv3"),
+        sha256: "d".repeat(64),
+        format: "srv3",
+        byte_size: 100,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    await assert.rejects(
+      () => readTranscriptOriginal(sql, { newsroomId: 1, artifactId: 6 }),
+      (error: unknown) =>
+        error instanceof TranscriptViewRefused &&
+        error.status === 404 &&
+        error.message === TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
+    );
+  });
+
+  it("DHH-5 says a missing original is not checked, never valid, and keeps the recorded hash", async () => {
+    const { sql } = fakeSql([
+      {
+        id: 60,
+        video_id: "gone-60",
+        storage_path: join(scratch, "missing-60.srv3"),
+        sha256: "e".repeat(64),
+        format: "srv3",
+        byte_size: 100,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 60 });
+    assert.equal(view.originalAvailable, false);
+    assert.equal(view.sha256, "e".repeat(64));
+    assert.match(TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE, /not checked/);
+    assert.doesNotMatch(TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE, /valid/i);
+  });
+
+  it("DHH-5 reports an original that is on disk as available", async () => {
+    const file = artifactFile("present-63.srv3", "<transcript/>");
+    const { sql } = fakeSql([
+      {
+        id: 63,
+        video_id: "here-63",
+        storage_path: file.path,
+        sha256: file.sha256,
+        format: "srv3",
+        byte_size: file.bytes.length,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 63 });
+    assert.equal(view.originalAvailable, true);
   });
 
   it("prints every stored segment in order, with the artifact facts", async () => {

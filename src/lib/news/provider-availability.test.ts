@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { computeProviderAvailability, getProviderAvailability } from "./provider-availability.server.ts";
-import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
+import { PICKER_PROVIDER_IDS, setLocalDiscoveryReachable } from "./provider-registry.ts";
+import { recordOllamaCloudCall } from "./ollama-cloud-readiness.server.ts";
+import { testOllamaCloudWarnings } from "./provider-availability.server.ts";
 
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
@@ -39,6 +41,31 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
  * is correct without needing a browser to render the `<select>`.
  */
 describe("provider availability for the picker", () => {
+  it("warns both names for an exhausted cloud model and clears only after a successful explicit connection test", async () => {
+    setLocalDiscoveryReachable(true);
+    const url = "http://127.0.0.1:11434/v1";
+    const model = "deepseek-v4.1-flash:cloud";
+    const words = "you (sconverse) have reached your monthly usage limit";
+    recordOllamaCloudCall(url, model, 429, words);
+    const deps = {
+      refreshLocalCatalog: async () => undefined,
+      resolveLocal: async () => ({ baseUrl: url, id: model }),
+      probeProvider: async () => ({ ok: true as const, choice: "claude-sonnet" as const, label: "Claude Sonnet" }),
+    };
+    let availability = await getProviderAvailability(1, deps);
+    for (const id of ["deepseek-flash", "local-model"]) {
+      assert.equal(availability[id], false);
+      assert.match(availability.reasons![id], /Ollama says: you \(sconverse\).*Add credit at ollama.com\/settings/);
+    }
+    await testOllamaCloudWarnings(async () => new Response(JSON.stringify({ data: [{ id: model }] })));
+    availability = await getProviderAvailability(1, deps);
+    assert.equal(availability["deepseek-flash"], false, "a catalog response cannot prove usage is available");
+    await testOllamaCloudWarnings(async () => new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] })));
+    availability = await getProviderAvailability(1, deps);
+    assert.equal(availability.reasons?.["deepseek-flash"]?.includes("Ollama says:"), undefined);
+    assert.equal(availability.reasons?.["local-model"]?.includes("Ollama says:"), undefined);
+    setLocalDiscoveryReachable(false);
+  });
   it("reports Haiku's actual signed-out state before a draft press", async () => {
     const availability = await getProviderAvailability(1, {
       refreshLocalCatalog: async () => undefined,

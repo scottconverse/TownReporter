@@ -11,7 +11,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { FirstRunModelCard } from "@/components/first-run-model";
-import { StoryReadinessChip } from "@/components/story-readiness-chip";
+import {
+  DraftItemBoundary,
+  DraftItemUnavailable,
+  DraftStateChip,
+} from "@/components/draft-item-boundary";
 import { Busy, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -24,14 +28,15 @@ import {
   leadOrigin,
 } from "@/components/desk-chrome-utils";
 import { useDeskMutation } from "@/components/desk-action";
+import { killPress, killUndoPress, restoreStatus, KillReasonChips, KILL_TOAST_MS, type KillUndoPress, type RestoreStatus } from "@/components/fast-kill";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus } from "@/lib/news/desk";
-import { draftLead, runScan, setLeadStatus } from "@/components/scoped-actions";
+import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus, setLeadStatus, restoreKilledLead } from "@/lib/news/desk";
+import { draftLead, runScan } from "@/components/scoped-actions";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 /*
   Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
@@ -85,11 +90,12 @@ import {
   deskDraftElapsed,
   deskDraftState,
   tonightDrafts,
-  type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { draftItemLabel } from "@/lib/news/draft-item";
 import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
@@ -341,9 +347,19 @@ function DeskHome() {
     now, so a failure carries whatever the server said and a refusal
     (`{ok:false}`) is reported rather than passing as a success.
   */
+  /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
+  const undoOptimistic = leadStatusOptimistic(qc);
+  const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
+  const undoKill = useDeskMutation({
+    mutationFn: (input: KillUndoPress) => restoreKilledLead({ data: input }),
+    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Undoing…", done: () => "Undone: the lead is back on the Queue.",
+  });
   const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean }) =>
-      setLeadStatus({ data: { id: input.id, status: input.status } }),
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string; headline?: string }) =>
+      setLeadStatus({ data: { id: input.id, status: input.status, override: input.override, killReason: input.killReason, killReasonUrl: input.killReasonUrl } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take -- see `desk-lead-status.ts` for why
@@ -352,7 +368,12 @@ function DeskHome() {
     */
     ...leadStatusOptimistic(qc),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
+    /*
+      DHD2-5: a Today Kill names the lead it killed. The toast never says a draft
+      was saved -- a kill does not save one.
+    */
     done: (_result, input) =>
       input.release
         ? "Released."
@@ -360,7 +381,9 @@ function DeskHome() {
           ? "Undone: the lead is back on the Queue."
           : input.status === "held"
             ? "The lead is on hold, off the Queue until you release it."
-            : "The lead moved to Killed, and its row keeps an Undo.",
+            : input.headline?.trim()
+              ? `Killed ${input.headline.trim()}.`
+              : "The lead moved to Killed, and its row keeps an Undo.",
     /*
       L4 of the batch-6 pre-merge audit. The Kill sentence above names an Undo,
       and a killed row is exactly the one that may not be on screen to offer it
@@ -374,9 +397,12 @@ function DeskHome() {
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new" });
+              if (input.status === "killed") await undoKill.mutateAsync(killUndoPress(input.id, input.restore));
+              else await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
             },
           },
+    chips: (_result, input) => input.status === "killed" ? <KillReasonChips leadId={input.id} save={(request) => setStatus.mutate({ ...request.data, override: input.override, restore: input.restore, headline: input.headline })} /> : null,
+    duration: (_result, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -403,6 +429,13 @@ function DeskHome() {
   });
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const scanModelTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: scanModelTouched,
+    setChoice: (choice) => setScanModel(choice),
+    setEffort: setScanModelEffort,
+  });
   /*
     FB6, item 3: `Run scan now` was a LAZY BAR and a SILENT FAIL (FB0-Report
     Table B). The button swapped its own word to "Scanning…" and that was the
@@ -412,7 +445,7 @@ function DeskHome() {
     `["desk-jobs"]` query every other card on this desk already reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort, modelChoiceExplicit: scanModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -467,10 +500,16 @@ function DeskHome() {
     first-run-picker-default.ts).
   */
   const storyModelTouched = useRef(false);
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: storyModelTouched,
+    setChoice: (choice) => setStoryModel(choice),
+    setEffort: setStoryModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "story",
     current: storyModel,
-    touched: () => storyModelTouched.current,
+    touched: () => storyModelTouched.current || storyDraftAssignment.hasAssignment,
     apply: (choice) => {
       setStoryModel(choice);
       setStoryModelEffort(defaultModelEffort(choice));
@@ -592,6 +631,7 @@ function DeskHome() {
           documentIds: storyDocuments.map((d) => d.id),
           modelChoice: storyModel,
           modelEffort: storyModelEffort,
+          modelChoiceExplicit: storyModelTouched.current,
           researchScope: storyScope,
           sectionKey: storySection || undefined,
         },
@@ -809,14 +849,33 @@ function DeskHome() {
   const deskJobs = useDeskJobs();
   const draftRows = drafts.data ?? [];
   const nowMs = useNowMs(
-    draftRows.some((r) => r.job_status === "running" || r.job_status === "queued") ||
+    draftRows.some((r) => r?.job_status === "running" || r?.job_status === "queued") ||
       Boolean(deskJobs.data?.some((s) => s.status === "running" || s.status === "queued")),
   );
-  const draftStates: DeskDraftState[] = draftRows.map((row) =>
-    deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
-  );
+  const draftStateResults = draftRows.map((row, index) => {
+    try {
+      const state = deskDraftState(
+        { ...row, story_readiness: row.story_readiness ?? null },
+        deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs),
+      );
+      return { row, index, state, reason: null };
+    } catch (error) {
+      return {
+        row,
+        index,
+        state: null,
+        reason: error instanceof Error ? error.message.split("\n")[0] : "Unreadable draft data",
+      };
+    }
+  });
+  const readableDrafts = draftStateResults.filter((result) => result.state !== null);
+  const draftStates = readableDrafts.map((result) => result.state);
+  const unreadableDrafts = draftStateResults.filter((result) => result.state === null);
   const writingNow = draftStates.filter((s) => s.running).length;
-  const edition = tonightDrafts(draftRows, draftStates);
+  const edition = tonightDrafts(
+    readableDrafts.map((result) => result.row),
+    draftStates,
+  );
   const { readyToCheck, readyToPrint } = edition;
   /*
     Running now: open jobs, every kind, newest first. Open jobs only -- a job
@@ -936,7 +995,7 @@ function DeskHome() {
       same one "Write draft" sends, so one page cannot have two answers.
     */
     mutationFn: (leadId: number) =>
-      draftLead({ data: { leadId, modelChoice: storyModel, modelEffort: storyModelEffort } }),
+      draftLead({ data: { leadId, modelChoice: storyModel, modelEffort: storyModelEffort, modelChoiceExplicit: storyModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
@@ -1007,15 +1066,12 @@ function DeskHome() {
         if (lead) startDraft.mutate(lead.id);
         break;
       case "hold":
-        // The drawn dialog, not the bare write: H and the row's Hold H are the
-        // same press, and it asks for the reason the desk learns from.
-        if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
+        // H is the row's Hold press, including its explicit warning retry.
+        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
         break;
       case "kill":
-        // Unit BW, item 2: X and the row's Kill button are the same press, so
-        // both open the drawn dialog. The reason the desk learns from is what
-        // this key was missing when it wrote the status outright.
-        if (lead) setKillLead({ id: lead.id, headline: lead.headline });
+        // X is the row's fast Kill, with Undo and optional reason chips.
+        if (lead) setStatus.mutate({ ...killPress(lead.id, restoreStatus(lead.status)), headline: lead.headline });
         break;
       case "undo":
         if (lead) setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
@@ -1122,7 +1178,7 @@ function DeskHome() {
     Undo stays on the row (the dialog's own doc puts it there): a killed lead is
     dimmed with its way back, which is what the drawing of Today asks for.
   */
-  const [killLead, setKillLead] = useState<{ id: number; headline: string } | null>(null);
+  const [killLead, setKillLead] = useState<{ id: number; headline: string; status: string } | null>(null);
 
   // These initial reads populate controls throughout Today, including the
   // recent-story links above The wire. Presenting the ready heading before
@@ -1398,21 +1454,33 @@ function DeskHome() {
             All drafts
           </Link>
         </div>
-        {tonightRows.length === 0 ? (
+        {tonightRows.length === 0 && unreadableDrafts.length === 0 ? (
           <p className="wire-sum">
             No story is through its checks yet. A draft arrives here once it is written; its chips
             say which checks have run on it.
           </p>
         ) : (
           <div className="today-edition-rows">
-            {tonightRows.map(({ row, state }) => {
-              return (
-                <div className="today-edition-row" key={row.id}>
-                  <div className="today-edition-what">
-                    <span className="today-edition-sec">
-                      {sectionName(row.topic) || "No section"}
-                    </span>
-                    {/*
+            {unreadableDrafts.map(({ row, index, reason }) => (
+              <DraftItemUnavailable
+                key={draftItemLabel(row, index)}
+                item={draftItemLabel(row, index)}
+                reason={reason ?? "Unreadable draft data"}
+              />
+            ))}
+            {tonightRows.map(({ row, state }, index) => (
+              <DraftItemBoundary
+                key={row.id ?? `today-${index}`}
+                item={draftItemLabel(row, index)}
+              >
+                {() => {
+                  return (
+                    <div className="today-edition-row" key={row.id ?? `today-${index}`}>
+                      <div className="today-edition-what">
+                        <span className="today-edition-sec">
+                          {sectionName(row.topic) || "No section"}
+                        </span>
+                        {/*
                       UI1b-3: the headline is a HEADING, not a bare link
                       floating in a div. The design system allows one plain
                       form -- an underlined link inside a sentence, a list
@@ -1420,42 +1488,44 @@ function DeskHome() {
                       and this is the list title of the row. Same shape as the
                       today-card above, which has always wrapped its link in
                       an h3.
-                    */}
-                    <h3 className="hl-head">
-                      <Link
-                        to="/desk/story/$leadId"
-                        params={{ leadId: String(row.lead_id) }}
-                        className="today-edition-hl hl-link"
-                      >
-                        {editorTitle(row.headline)}
-                      </Link>
-                    </h3>
-                  </div>
-                  {/*
+                        */}
+                        <h3 className="hl-head">
+                          <Link
+                            to="/desk/story/$leadId"
+                            params={{ leadId: String(row.lead_id) }}
+                            className="today-edition-hl hl-link"
+                          >
+                            {editorTitle(row.headline)}
+                          </Link>
+                        </h3>
+                      </div>
+                      {/*
                     The checks are their own column, not a tail on the
                     headline: the drawing lines them up down the middle of the
                     panel so two drafts' chips can be compared at a glance.
                   */}
-                  <span className="today-edition-chips">
-                    <StoryReadinessChip readiness={state.readiness!} />
-                  </span>
-                  {/*
+                      <span className="today-edition-chips">
+                        <DraftStateChip state={state} />
+                      </span>
+                      {/*
                     The one next-action button on the row, in the draft's own
                     vocabulary (lib/news/desk-drafts.ts) -- the same word the
                     Drafts screen puts on the same draft.
                   */}
-                  <div className="today-edition-act">
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(row.lead_id) }}
-                      className="btn"
-                    >
-                      {deskDraftAction(state)}
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="today-edition-act">
+                        <Link
+                          to="/desk/story/$leadId"
+                          params={{ leadId: String(row.lead_id) }}
+                          className="btn"
+                        >
+                          {deskDraftAction(state)}
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }}
+              </DraftItemBoundary>
+            ))}
           </div>
         )}
       </section>
@@ -2142,6 +2212,18 @@ function DeskHome() {
                                   {held ? "Release" : "Undo"} <kbd>U</kbd>
                                 </InkButton>
                                 {held ? (
+                                  /*
+                                    Walk E2, DHE2-4: a held lead had no Kill on Today.
+                                    Same press as the open row's Kill, with its Undo.
+                                  */
+                                  <InkButton
+                                    tone="quiet-danger"
+                                    onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
+                                  >
+                                    Kill <kbd>X</kbd>
+                                  </InkButton>
+                                ) : null}
+                                {held ? (
                                   <DeskMoreMenu
                                     ariaLabel={`More actions for ${l.headline}`}
                                     items={[
@@ -2151,7 +2233,7 @@ function DeskHome() {
                                         </Link>
                                       ) },
                                       { label: "Kill with a reason", danger: true,
-                                        onSelect: () => setKillLead({ id: l.id, headline: l.headline }) },
+                                        onSelect: () => setKillLead({ id: l.id, headline: l.headline, status: l.status }) },
                                     ]}
                                   />
                                 ) : null}
@@ -2167,13 +2249,13 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet"
-                                  onClick={() => setHoldLead({ id: l.id, headline: l.headline })}
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
                                 >
                                   Hold <kbd>H</kbd>
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => setKillLead({ id: l.id, headline: l.headline })}
+                                  onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>
@@ -2461,7 +2543,11 @@ function DeskHome() {
                 scope="scan"
                 label="Model for this scan"
                 value={scanModel}
-                onChange={setScanModel}
+                onChange={(choice) => {
+                  scanModelTouched.current = true;
+                  setScanModel(choice);
+                  setScanModelEffort(defaultModelEffort(choice));
+                }}
                 effort={scanModelEffort}
                 onEffortChange={setScanModelEffort}
               />
@@ -2704,6 +2790,8 @@ function DeskHome() {
       {killLead ? (
         <KillDialog
           leadId={killLead.id}
+          leadStatus={killLead.status}
+          onRestored={() => qc.invalidateQueries({ queryKey: ["leads"] })}
           open
           onOpenChange={(open) => {
             if (!open) setKillLead(null);

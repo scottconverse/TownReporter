@@ -64,6 +64,27 @@ for (const recovered of [true, false]) it(`retries an unreadable Sol draft with 
   else assert.match((result as { error: string }).error, /unreadable JSON/);
 });
 
+it("never returns a blank-headline draft as a saved draft, even with a full body", async () => {
+  const paper = { name: "Test Paper", city: "Longmont", state: "Colorado" };
+  const url = "https://city.example/meeting";
+  const lead = { id: 64, headline: "City announces meeting", why: "Residents can attend.", topic: "government", status: "new", source_urls: JSON.stringify([url]), evidence: "", newsworthiness: 1, created_at: "2026-10-10" } as LeadRow;
+  const blankHeadline = { headline: "", dek: lead.why, body: "The city announced a public meeting for residents.", topic: lead.topic, source_urls: [url], unanswered: [] };
+  const result = await reportAndDraft({ userId: "blank-headline", lead, urls: [url], memory: [], researchScope: "supplied", modelChoice: "codex-balanced" }, {
+    paper: async () => paper,
+    ingest: async () => ({ url, title: "Meeting notice", text: blankHeadline.body, extras: [] }),
+    capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+    hydrate: async () => [],
+    chat: async (system) => {
+      if (system.startsWith(reportWriteSystem(paper))) return { ok: true, text: JSON.stringify(blankHeadline) };
+      if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
+      if (system.includes('"fetch_urls"')) return { ok: true, text: JSON.stringify({ news: lead.headline, form: "brief" }) };
+      return { ok: true, text: JSON.stringify(blankHeadline) };
+    },
+  });
+  assert.ok("error" in result, "a draft with no headline must fail, not save");
+  assert.match((result as { error: string }).error, /empty draft/);
+});
+
 it("supplies the configured topic key to writing and reconciliation as authoritative metadata", async () => {
   const sourceUrl = "https://schools.example/notices/benefits";
   const packets: { system: string; user: string }[] = [];
@@ -125,6 +146,9 @@ it("supplies the configured topic key to writing and reconciliation as authorita
   assert.ok(!("error" in result));
   const modelPackets = packets.filter((packet) => !packet.system.includes('"fetch_urls"'));
   assert.equal(modelPackets.length, 2);
+  assert.match(modelPackets[0]!.system, /headline and dek are for readers only/i);
+  assert.match(modelPackets[0]!.system, /Put that note in integrity_notes or unanswered/i);
+  assert.match(modelPackets[1]!.system, /headline and dek are for readers only/i);
   for (const packet of modelPackets) {
     assert.match(packet.user, /EDITORIAL METADATA \(authoritative, not evidence\)/);
     assert.match(packet.user, /Topic key: "schools"/);

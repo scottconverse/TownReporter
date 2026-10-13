@@ -356,3 +356,24 @@ describe("one reader for every kind", () => {
     await sql`delete from leads where id = ${leadId}`;
   });
 });
+
+
+it("FB16 reads the actual local blocker and elapsed wait for the story and Health cards", async () => {
+  const newsroomId = 98587;
+  const sql = await getSql();
+  const scan = await enqueueJob({newsroomId,userId:"fb16-reader",kind:"scan",subjectId:1,modelChoice:"local-model",kick:false});
+  const draft = await enqueueJob({newsroomId,userId:"fb16-reader",kind:"draft",subjectId:2,modelChoice:"local-model",kick:false});
+  try {
+    await sql`update desk_jobs set status='running',started_at=now(),updated_at=now() where id=${scan.id}`;
+    await sql`update desk_jobs set created_at=now()-interval '90 seconds' where id=${draft.id}`;
+    const view = (await readDeskJobs(newsroomId)).find(row=>row.id===draft.id);
+    assert.equal(view?.status,"queued");
+    assert.match(view?.step ?? "",/Waiting for the local model, which is busy with the .* scan\. Waited 1:3[0-9]\./);
+    assert.match(view?.step ?? "",/finish time is not known/);
+    await sql`update desk_jobs set status='completed',finished_at=now() where id=${scan.id}`;
+    const free = (await readDeskJobs(newsroomId)).find(row=>row.id===draft.id);
+    assert.match(free?.step ?? "",/Waiting for a writing worker to pick up/);
+  } finally {
+    await sql`delete from desk_jobs where newsroom_id=${newsroomId}`;
+  }
+});

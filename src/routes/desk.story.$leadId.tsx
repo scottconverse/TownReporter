@@ -1,5 +1,7 @@
+import { useDeskMutation } from "@/components/desk-action";
+import { resolveLeadDuplicate as resolveLeadDuplicateRaw, setLeadStatus as setLeadStatusRaw } from "@/lib/news/desk";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
-import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -23,11 +25,13 @@ import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/com
 import { PublishConfirmation } from "@/components/publish-confirmation";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
+import { KILL_TOAST_MS, restoreStatus } from "@/components/fast-kill";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
+import { transcriptSourceName, transcriptToPickFromFailure } from "@/lib/news/meeting-transcript-alignment-copy";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -46,7 +50,7 @@ import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { editorTitle } from "@/lib/news/desk-copy";
+import { draftFailedNotSavedWords, editorTitle } from "@/lib/news/desk-copy";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
@@ -63,14 +67,18 @@ import {
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
   acknowledgeUncheckedStory,
+  confirmDraftTopic,
   overrideNamedOutlet,
   reverifyPublishedStory,
   rewritePublishedStory,
   saveDraft,
   saveReportingNotes,
+  restoreKilledLead,
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
+  LIVE_STORY_CHANGE_KEY,
+  LIVE_STORY_CHANGE_SENTENCE,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { failureSummary } from "@/lib/news/pull-outcome";
@@ -96,14 +104,18 @@ import {
   editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
+  killedAsDuplicateNote,
+  movedToNewNote,
   initialStoryTopic,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
+  storyHeaderSectionLabel,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
@@ -117,10 +129,12 @@ import {
   retiredModelChoiceNote,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
-import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { automaticEffortNote, defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { providerAvailability } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { getModelAssignmentsFn, MODEL_ASSIGNMENTS_QUERY_KEY } from "@/lib/news/model-assignments-settings";
+import { resolveJobModel } from "@/lib/news/model-assignments";
 /*
   The Writer / Effort bar's own lines (unit CW): the readiness dot, the
   last-draft line and the save line under the Story label. Each is derived,
@@ -128,8 +142,12 @@ import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
   module's own note on what "model availability" is about.
 */
 import {
-  lastDraftLine,
+  draftFallbackAttribution,
+  runningWriterSentence,
+  modelAndResearchLabel,
+  lastDraftInHand,
   lastDraftWhen,
+  requestedModelChoice,
   readinessDot,
   saveState,
   writerIsReady,
@@ -151,7 +169,7 @@ import { RedraftDialog } from "@/components/dialogs/RedraftDialog";
 import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialog";
 import { AddToStoryDialog, HeadlineDialog } from "@/components/dialogs";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
-import { jobProgressView } from "@/lib/news/job-progress";
+import { cancelStoryJob, jobProgressView } from "@/lib/news/job-progress";
 /*
   Civic reporting (editor UI). `ReportingPackagePanel` draws the structured
   package the runner filed for this lead beside the editable copy, and
@@ -165,6 +183,7 @@ import { assessCheckedDraftResult, assessRefreshedCheckedDraft, draftFieldsMatch
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
+import { sectionPickerLabel } from "@/lib/news/section-types";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -290,6 +309,15 @@ function StoryPage() {
     scripted publish gets are the same ground, and neither is a decision nobody
     made.
   */
+  const modelAssignments = useQuery({
+    queryKey: MODEL_ASSIGNMENTS_QUERY_KEY,
+    queryFn: () => getModelAssignmentsFn(),
+    staleTime: 30_000,
+  });
+  const headlineAssignment = resolveJobModel({
+    jobKey: "headlines",
+    assignments: modelAssignments.data?.ok ? modelAssignments.data.assignments : [],
+  });
   const [area, setArea] = useState<string>(HOME_AREA);
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
@@ -309,15 +337,6 @@ function StoryPage() {
     effect is the one that sticks. The owner's own touch always wins too (see
     first-run-picker-default.ts).
   */
-  useFirstRunPickerSeed({
-    surface: "story",
-    current: modelChoice,
-    touched: () => modelChoiceTouched.current,
-    apply: (choice) => {
-      setModelChoice(choice);
-      setModelEffort(defaultModelEffort(choice));
-    },
-  });
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.
@@ -414,6 +433,15 @@ function StoryPage() {
     would otherwise happen silently.
   */
   const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
+  /*
+    DHG-3: the "Suggest headlines" press runs the model its own picker shows.
+    Until the editor picks, that is the "Headline suggestions" job's model from
+    Server -> Models "Who does what" (headlineAssignment); a pick replaces both
+    the model and its effort for this press and the dialog's.
+  */
+  const [headlinePick, setHeadlinePick] = useState<{ model: StoryModelChoice; effort: ModelEffort | null } | null>(null);
+  const headlineModel = (headlinePick?.model ?? headlineAssignment.providerId) as StoryModelChoice;
+  const headlineEffort = headlinePick ? headlinePick.effort : headlineAssignment.effort;
   const [headlineNote, setHeadlineNote] = useState("");
 
   const [liveWarning, setLiveWarning] = useState<{
@@ -509,6 +537,23 @@ function StoryPage() {
     refetchOnReconnect: true,
   });
 
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+    preserveCurrent: Boolean(data?.job),
+  });
+  useFirstRunPickerSeed({
+    surface: "story",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current || storyDraftAssignment.hasAssignment || Boolean(data?.job),
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
+
   const meetingTranscriptChoices = data?.meetingTranscriptChoices ?? [];
   const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence({ ...state, revision: data?.evidenceToken }), [data?.evidenceToken]);
   const selectedMeetingArtifactId = selectedMeetingTranscriptArtifactId
@@ -576,7 +621,16 @@ function StoryPage() {
         if (choice === receipt.requestedRuntime && receipt.requestedCustomModelLabel) return receipt.requestedCustomModelLabel as string;
       } catch { /* Legacy receipt; use the connection list when it arrives. */ }
     }
-    return modelChoiceLabel(choice, "story", connection);
+    const label = modelChoiceLabel(choice, "story", connection);
+    // DHC03: a local run names the exact model it pinned, read from the job
+    // receipt (the same receipt the Last draft line already reads).
+    if (choice === "local-model" && choice === data?.job?.model_choice) {
+      try {
+        const exactModel = JSON.parse(data?.job?.result_json ?? "{}").localModel?.id;
+        if (typeof exactModel === "string" && exactModel) return `${label} (${exactModel})`;
+      } catch { /* Legacy receipt; the plain label stays. */ }
+    }
+    return label;
   };
 
   const previousJobError =
@@ -584,6 +638,8 @@ function StoryPage() {
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
   const draftProblem = msg || previousJobError;
+  /* DHE1-4: a draft that names an aligned transcript to pick gets a press for it. */
+  const transcriptPick = draftProblem ? transcriptToPickFromFailure(draftProblem, meetingTranscriptChoices) : null;
 
   /*
     The writer row's derived words (unit CW).
@@ -612,12 +668,53 @@ function StoryPage() {
     The Reporting package shows its own run status; until the page has a
     truthful reporting receipt line, suppress this stale attribution.
   */
-  const lastDraft = civicReportingDraft
-    ? ""
-    : lastDraftLine({
-        modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
-        when: lastDraftWhen(data?.job?.finished_at),
-      });
+  const lastDraft = lastDraftInHand({
+    hasDraft: Boolean(data?.draft),
+    civicReporting: civicReportingDraft,
+    jobStatus: data?.job?.status,
+    modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
+    finishedAt: data?.job?.finished_at,
+  });
+  const requestedDraftModelChoice = data?.job
+    ? requestedModelChoice(data.job.result_json, data.job.model_choice)
+    : "";
+  const fallbackAttribution = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed"
+    ? draftFallbackAttribution({
+        pickedModel: storyModelLabel(requestedDraftModelChoice),
+        writerModel: storyModelLabel(data.job.model_choice),
+        failoverNote: data.job.failover_note,
+      })
+    : undefined;
+  /*
+    FW1: the picker and `requestedDraftModelChoice` name what the editor asked for.
+    While the job runs, the writer is the row's runtime (the same model the progress
+    card shows), so the Writer bar names it next to the pick, and the switch chip
+    says from what and why. Nothing here replaces the pick: both are shown.
+  */
+  const runningWriter = data?.job && (data.job.status === "running" || data.job.status === "queued")
+    ? storyModelLabel(data.job.model_choice)
+    : "";
+  const pickedWriterLabel = storyModelLabel(requestedDraftModelChoice);
+  const runningWriterLine = runningWriter && runningWriter !== pickedWriterLabel
+    ? `Writer: ${runningWriter} · picked: ${pickedWriterLabel}`
+    : "";
+  /* THU-7: the button names the model that wrote the saved draft. */
+  const savedDraftWriter = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed" && data.job.model_choice
+    ? storyModelLabel(data.job.model_choice)
+    : "";
+  const modelAndResearchText = modelAndResearchLabel({
+    runningLine: runningWriterLine,
+    pickerModel: storyModelLabel(modelChoice),
+    requestedModel: pickedWriterLabel,
+    writerModel: savedDraftWriter,
+  });
+  const runningSwitchSentence = runningWriter
+    ? runningWriterSentence({
+        pickedModel: pickedWriterLabel,
+        writerModel: runningWriter,
+        failoverNote: data?.job?.failover_note,
+      })
+    : undefined;
 
   useEffect(() => {
     if (!modelResearchOpen) return;
@@ -654,6 +751,17 @@ function StoryPage() {
     const d = data?.draft;
     if (!d) {
       if (data?.lead && !topicTouched) setTopic(initialStoryTopic(data.lead.topic));
+      /*
+        A printed story can have no draft row. The box then has to start from
+        the paper too, or its summary, headline and text stay empty on every
+        load and an edit to the summary has nothing to save from.
+      */
+      if (data?.articleId && appliedFp.current === "") {
+        setHeadline(data.articleHeadline ?? "");
+        setDek(data.articleDek ?? "");
+        setBody(stripReporterNotebook(data.articleBody ?? ""));
+        appliedFp.current = `article|${data.articleId}`;
+      }
       return;
     }
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
@@ -711,10 +819,18 @@ function StoryPage() {
 
   useEffect(() => {
     if (!waitingSince) return;
+    /*
+      The failed job is ours when it is the one the press returned. The press
+      can lose the race: the poll can show the failed job before the press's
+      success handler has recorded its id. Then any failed job that is NOT the
+      one open at press time is ours, so the wait ends instead of "Working…"
+      staying on the button for good (DHC14).
+    */
     if (
       data?.job?.status !== "failed" ||
-      expectedDraftJobId.current == null ||
-      data.job.id !== expectedDraftJobId.current
+      (expectedDraftJobId.current != null
+        ? data.job.id !== expectedDraftJobId.current
+        : data.job.id === priorDraftJobId.current)
     )
       return;
     expectedDraftJobId.current = null;
@@ -722,7 +838,11 @@ function StoryPage() {
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
-    setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
+    setMsg(
+      /^Cancelled by the editor/i.test(data.job.error ?? "")
+        ? "Stopped. No draft was saved."
+        : (editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish."),
+    );
   }, [data?.job, waitingSince]);
 
   /*
@@ -751,7 +871,7 @@ function StoryPage() {
 
   useEffect(() => {
     if (!data?.job || modelChoiceTouched.current) return;
-    const remembered = rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source);
+    const remembered = rememberedStoryModelChoice(requestedDraftModelChoice || data.job.model_choice, data.job.model_choice_source);
     setModelChoice(remembered);
     try {
       const receipt = JSON.parse(data.job.result_json || "{}") as { modelEffort?: unknown };
@@ -759,7 +879,7 @@ function StoryPage() {
     } catch {
       setModelEffort(defaultModelEffort(remembered));
     }
-  }, [data?.job]);
+  }, [data?.job, requestedDraftModelChoice]);
 
   /*
     0.6.63 (Unit Y item 4): a job row that still holds the retired Grok choice
@@ -788,7 +908,7 @@ function StoryPage() {
       is what every other press on this screen passes, so the order and the
       arguments of `saveReportingNotes` then `draftLead` are unchanged.
     */
-    mutationFn: async (input: string | { fromLedger: true } | undefined) => {
+    mutationFn: async (input: string | { fromLedger?: boolean; transcriptArtifactId?: number } | undefined) => {
       /*
         WR1 phase 2: one press, two sources. A string (or nothing) means the
         ordinary Draft/Redraft, reading the tape and the packet; `{fromLedger}`
@@ -803,10 +923,12 @@ function StoryPage() {
       await saveReportingNotes({
         data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
-      const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
+      const pickedArtifactId = typeof input === "object" && input !== null ? input.transcriptArtifactId : undefined;
+      const meetingArtifactId = pickedArtifactId ?? selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
+      const modelChoiceExplicit = modelChoiceTouched.current || Boolean(data?.job?.model_choice);
       if (fromLedger)
-        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
-      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId, override: writerAction.override } });
+        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId, override: writerAction.override } });
     },
     onMutate: (input) => {
       setMsg("");
@@ -831,18 +953,33 @@ function StoryPage() {
         if (pressWasRewrite.current) setRewriteDone(true);
         else setRedraftDone(true);
       }
+      /*
+        A refused press (including Cancel on its warning) created no job. Drop
+        the local working state before refreshing the story: that refresh can
+        take longer than the consent round trip, and must not keep Redraft
+        disabled after the editor has cancelled. A timeout can still mean the
+        server created a job, so it keeps the existing wait-for-job behavior.
+      */
+      const refusedWithoutJob = !answered(res) || (!res.ok && !looksLikeDraftTimeout(res.error));
+      if (refusedWithoutJob) {
+        setWaitingSince(null);
+        setSlowWait(false);
+      }
+      /*
+        The progress card (and its Cancel) reads the desk-jobs list, which only
+        re-polls every 30 s while nothing is open. A press that just queued a
+        draft must refresh it now, or the editor has no Cancel on screen for
+        the first half minute of a run (Walk H FG2 / DHH-4).
+      */
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (!answered(res)) {
-        setWaitingSince(null);
-        setSlowWait(false);
         setMsg(NO_ANSWER);
         return;
       }
       if (res.ok) return;
       if (looksLikeDraftTimeout(res.error)) return;
-      setWaitingSince(null);
-      setSlowWait(false);
       /*
         A refusal that arrives with a `kind` came from the provider
         preflight, which already knows exactly what is missing and what to
@@ -878,6 +1015,19 @@ function StoryPage() {
     },
   });
 
+  /*
+    Stop for the draft this page is waiting on. It is the same server call the
+    progress card's Cancel makes; it sits in the writer bar so that a press of
+    "Draft anyway" (which starts the next ready model at once) always has a way
+    out right where it was pressed.
+  */
+  const stopDraft = useMutation({
+    mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
+    onSettled: async () => {
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+    },
+  });
   const draftMeetingReview = useMutation({
     mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string; override?: string[] }) => {
       if (!data?.draft?.id || !data.evidenceToken || !data.draftMeetingEvidence?.currentArtifactId) {
@@ -944,7 +1094,14 @@ function StoryPage() {
   }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
 
   const saveTopic = useMutation({
-    mutationFn: (nextTopic: string) => saveLeadTopic({ data: { leadId: id, topic: nextTopic } }),
+    mutationFn: async (nextTopic: string) => {
+      if (data?.draft) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+        return confirmed;
+      }
+      return saveLeadTopic({ data: { leadId: id, topic: nextTopic } });
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       setMsg("Saved.");
@@ -961,6 +1118,10 @@ function StoryPage() {
     mutationFn: async () => {
       const notesProblem = await saveNotesQuietly();
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      if (topicTouched) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+      }
       return { notesProblem };
     },
     onSuccess: async ({ notesProblem }) => {
@@ -1021,6 +1182,14 @@ function StoryPage() {
     record rather than a side effect of printing -- and `performPublish` refuses
     without it, which is what makes it a gate instead of a suggestion.
   */
+  /*
+    DHI-8, DHJ-3: "Publish anyway — I accept these claims are unreviewed" does
+    what it says. The press records the acceptance, and when the record is
+    written it goes straight on to the same confirm the plain Publish press
+    opens (the confirm's own button repeats the words). The ref is set by that
+    press only, so the other ways to record an acceptance stay a record.
+  */
+  const confirmAfterAccept = useRef(false);
   const acceptUnreviewed = useMutation({
     /*
       Unit U24b: the press carries the REVIEW TOKEN the editor was looking at,
@@ -1039,7 +1208,10 @@ function StoryPage() {
         press and takes the accent; the refusal is a failure and takes the
         danger edge, so the reason is never painted as the next step.
       */
+      const goOn = confirmAfterAccept.current;
+      confirmAfterAccept.current = false;
       if (res.ok) setAcceptedUnreviewed(true);
+      if (res.ok && goOn) setConfirmingPublish(true);
       announceToDesk(
         res.ok
           ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
@@ -1048,6 +1220,7 @@ function StoryPage() {
       );
     },
     onError: (err) => {
+      confirmAfterAccept.current = false;
       announceToDesk(
         editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
           "Could not record that acceptance.",
@@ -1482,7 +1655,7 @@ function StoryPage() {
         result: await publishLead({
           data: {
             leadId: id,
-            topic: topic.trim(),
+            topic: sectionReady ? topic.trim() : undefined,
             area,
             /* The warnings the editor was SHOWN and accepted, snapshotted at
                the confirm press. The server treats an unacknowledged warning it
@@ -1583,7 +1756,14 @@ function StoryPage() {
   */
   const suggest = useMutation({
     mutationFn: () =>
-      suggestHeadlines({ data: { leadId: id, headline: headline.trim() || undefined } }),
+      suggestHeadlines({
+        data: {
+          leadId: id,
+          headline: headline.trim() || undefined,
+          modelChoice: headlineModel,
+          modelEffort: headlineEffort,
+        },
+      }),
     onSuccess: (res) => {
       if (!answered(res)) {
         setHeadlineNote(NO_ANSWER);
@@ -1596,7 +1776,9 @@ function StoryPage() {
       setHeadlineSuggestions(res.options);
       setHeadlineNote(
         res.options.length
-          ? ""
+          ? res.model
+            ? `Suggested by ${res.model}.`
+            : "Suggestions ready. The provider did not report which model ran."
           : "The story model offered no headlines this time. Your headline is exactly as you left it.",
       );
     },
@@ -1680,7 +1862,7 @@ function StoryPage() {
 
   const reverifyLive = useMutation({
     mutationFn: (override?: string[]) =>
-      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort } }),
+      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice) } }),
     onSuccess: async (res) => {
       if (res && res.ok === false) {
         if ("warning" in res) {
@@ -1704,7 +1886,7 @@ function StoryPage() {
   });
 
   const rewriteLive = useMutation({
-    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort}}),
+    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice)}}),
     onSuccess: async res => {
       if (!res.ok) {
         if ("warning" in res) {setLiveWarning({kind: "rewrite", ...res.warning}); return;}
@@ -1730,40 +1912,68 @@ function StoryPage() {
     [liveWarning?.kind, reverifyLive, rewriteLive, draftMeetingReview, saveLiveChange],
   );
 
-  /*
-   * Unit AK items 5 and 6: the Compare view's three presses and the Reopen on
-   * a killed lead's page.
-   *
-   * These are plain callbacks rather than useMutation()s because each one has
-   * to hand a result back to the panel that pressed it -- "did that land?" is
-   * the whole point of the press, and a fire-and-forget mutation cannot answer.
-   * Every branch below returns `{ ok: false, error }` with a sentence, so a
-   * refusal from the desk is shown, not swallowed.
-   */
   const afterLeadChange = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: ["lead", id] });
     await qc.invalidateQueries({ queryKey: ["leads"] });
   }, [qc, id]);
 
-  const moveToNew = useCallback(async () => {
-    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate" } });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: res.error };
-    await afterLeadChange();
-    return { ok: true };
-  }, [id, afterLeadChange]);
+  const moveToNewMutation = useDeskMutation({
+    mutationFn: (input: { id: number; action: "not-a-duplicate"; headline: string; override?: string[] }) =>
+      resolveLeadDuplicateRaw({ data: { id: input.id, action: input.action, override: input.override } }),
+    warningAction: "Move to New",
+    pending: "Moving to New…",
+    done: (_result, input) => input.override?.length ? movedToNewNote(input.headline) : "",
+    after: afterLeadChange,
+    failedLead: "Could not move that lead to New. ",
+  });
+  const moveToNew = useCallback(
+    () => moveToNewMutation.mutateAsync({ id, action: "not-a-duplicate", headline: data?.lead.headline ?? "" }),
+    [data?.lead.headline, id, moveToNewMutation],
+  );
 
+  const storyStatus = useDeskMutation({
+    mutationFn: (input: {
+      id: number;
+      status: "killed" | "new";
+      killReason?: string;
+      duplicateOf?: string;
+      override?: string[];
+      restore?: ReturnType<typeof restoreStatus>;
+    }) => setLeadStatusRaw({ data: {
+      id: input.id,
+      status: input.status,
+      killReason: input.killReason,
+      override: input.override,
+    } }),
+    warningAction: (input) => input.status === "killed" ? "Kill" : "Reopen",
+    pending: "Saving…",
+    done: (_res, input) => input.status === "killed"
+      ? input.duplicateOf ? killedAsDuplicateNote(input.duplicateOf) : "The lead moved to Killed."
+      : "The lead is open again.",
+    undo: (_res, input) => input.status === "killed" ? {
+      label: "Undo",
+      run: async () => {
+        const undone = await restoreKilledLead({ data: { id: input.id, status: input.restore } });
+        if (!answered(undone)) throw new Error(NO_ANSWER);
+        if (!undone.ok) throw new Error(undone.error || "The lead could not be restored.");
+        await afterLeadChange();
+      },
+    } : null,
+    duration: (_res, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
+    after: afterLeadChange,
+    failedLead: "Could not change that lead. ",
+  });
   const killAsDuplicateOfPrior = useCallback(async () => {
     const prior = data?.lead.possible_duplicate;
     if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
-    const res = await setLeadStatus({
-      data: { id, status: "killed", killReason: duplicateKillReason(prior.headline) },
+    return await storyStatus.mutateAsync({
+      id,
+      status: "killed",
+      killReason: duplicateKillReason(prior.headline),
+      duplicateOf: prior.headline,
+      restore: restoreStatus(data?.lead.status),
     });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: "The desk refused that kill." };
-    await afterLeadChange();
-    return { ok: true };
-  }, [data, id, afterLeadChange]);
+  }, [data, id, storyStatus]);
 
   const reopenPrior = useCallback(async () => {
     const res = await resolveLeadDuplicate({ data: { id, action: "reopen-prior" } });
@@ -1774,12 +1984,8 @@ function StoryPage() {
   }, [id, afterLeadChange]);
 
   const reopenThisLead = useCallback(async () => {
-    const res = await setLeadStatus({ data: { id, status: "new" } });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: "The desk refused that reopen." };
-    await afterLeadChange();
-    return { ok: true };
-  }, [id, afterLeadChange]);
+    return await storyStatus.mutateAsync({ id, status: "new" });
+  }, [id, storyStatus]);
 
   /*
     Unit BH2 decision 6. The two decisions of the comparison, named once. The
@@ -2059,11 +2265,18 @@ function StoryPage() {
       - a person already confirmed this exact section for this saved version:
         yes, without a second press.
   */
-  const sectionChosenByModel = Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
+  const sectionChosenByModel = Boolean(data.draft?.model_headline?.trim()) && Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
   const sectionAlreadyConfirmed =
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
+  /* Walk E2, DHE2-1: a printed lead names the section it printed in. */
+  const storyHeaderSection = storyHeaderSectionLabel({
+    published: onPaper,
+    publishedSection: data.articleTopic ? sectionName(data.articleTopic) : null,
+    sectionChosen: sectionReady,
+    sectionName: sectionNameNow,
+  });
   /*
     ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
 
@@ -2214,6 +2427,18 @@ function StoryPage() {
   }
   const mergedBlockers = [...mergedBlockerByKey.values()];
   const publishConfirm = publishConfirmation(mergedBlockers, sectionNameNow);
+  /*
+    DHD2-2 / DHD2-11: a warning's "... anyway" press publishes on its FIRST press.
+    The press is the answer to the warnings it names, so it sends the keys the
+    page drew and clears the last refusal. Used by the no-section "Publish anyway
+    in <section>" press and by the held and killed cards' "Publish anyway".
+  */
+  const publishAnyway = () => {
+    setConfirmingPublish(false);
+    setPublishRefusal("");
+    setRefusedWarnings([]);
+    publish.mutate(publishConfirm.acknowledgedWarningKeys);
+  };
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
@@ -2406,6 +2631,7 @@ function StoryPage() {
           `performPublish` refuses without this record, so the press is the gate
           -- and the record names who accepted, when, and which draft version.
         */
+        confirmAfterAccept.current = true;
         acceptUnreviewed.mutate();
         return;
       case "acknowledge-unchecked":
@@ -2414,6 +2640,9 @@ function StoryPage() {
         return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView?.({ block: "center" });
+        return;
+      case "publish-now":
+        publishAnyway();
         return;
     }
   };
@@ -2609,7 +2838,7 @@ function StoryPage() {
           plain words; the raw lines stay inside for support.
         */}
       <div className="astra-wb-context">
-        <span>Story from lead · {sectionNameNow}</span>
+        <span>Story from lead · {storyHeaderSection}</span>
         <StoryReadinessChip readiness={draftReadiness} />
         {data.draft && draftReadiness.state !== "ready" ? <span className="meta">{draftReadiness.reason}</span> : null}
         {/*
@@ -3000,7 +3229,7 @@ function StoryPage() {
               aria-controls="story-model-research"
               onClick={() => setModelResearchOpen((open) => !open)}
             >
-              Model & research · {storyModelLabel(modelChoice)}
+              Model & research · {modelAndResearchText}
             </button>
             <button
               className="btn quiet"
@@ -3012,6 +3241,11 @@ function StoryPage() {
               Thinking effort
             </button>
             {lastDraft ? <span className="astra-wb-last">{lastDraft}</span> : null}
+            {fallbackAttribution ? (
+              <span className="astra-wb-last" role="status">
+                {fallbackAttribution}
+              </span>
+            ) : null}
             {retiredModelNote ? (
               <p className="note" role="status">
                 {retiredModelNote}
@@ -3047,6 +3281,9 @@ function StoryPage() {
                   disabled={waiting || reconcileActive || savePending}
                   compact
                 />
+                {modelChoice === "auto" ? (
+                  <p className="model-picker-help" role="status">{automaticEffortNote(modelEffort)}</p>
+                ) : null}
                 <DraftScopePicker
                   value={researchScope}
                   onChange={setResearchScope}
@@ -3153,6 +3390,19 @@ function StoryPage() {
                 page. It renders only when the error really is that.
               */}
               <ProviderSignInButton detail={draftProblem} />
+              {transcriptPick && !locked ? (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={draft.isPending}
+                  onClick={() => {
+                    setSelectedMeetingTranscriptArtifactId(transcriptPick.artifactId);
+                    draft.mutate({ transcriptArtifactId: transcriptPick.artifactId });
+                  }}
+                >
+                  {`Pick ${transcriptSourceName(transcriptPick)} (transcript ${transcriptPick.artifactId}) and draft again`}
+                </button>
+              ) : null}
               {canChooseAnotherModel ? (
                 <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
                   Choose another model
@@ -3221,9 +3471,12 @@ function StoryPage() {
                   </InkButton>
                 ) : null}
                 {onPaper ? (
+                  <p className="note">{LIVE_STORY_CHANGE_SENTENCE}</p>
+                ) : null}
+                {onPaper ? (
                   <InkButton
                     disabled={saveLiveChange.isPending || !data.articleId}
-                    onClick={() => saveLiveChange.mutate(undefined)}
+                    onClick={() => saveLiveChange.mutate([LIVE_STORY_CHANGE_KEY])}
                   >
                     {saveLiveChange.isPending ? "Saving…" : "Save changes"}
                   </InkButton>
@@ -3265,6 +3518,26 @@ function StoryPage() {
                   headline, and what a printed story shows is the article's own
                   field, saved by "Save headline" above.
                 */}
+                {/*
+                  DHG-3 / H06: the headline job has ONE pick. While the Headline
+                  dialog is open it draws its own row from this same state, so
+                  this row steps aside rather than sit behind it as a second
+                  control; it is back, showing the same pick, when the dialog
+                  closes.
+                */}
+                {headlineOpen ? null : (
+                  <ModelPicker
+                    scope="story"
+                    label="Model for suggestions"
+                    layout="stacked"
+                    compact
+                    value={headlineModel}
+                    effort={headlineEffort}
+                    onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
+                    onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
+                    disabled={suggest.isPending || waiting}
+                  />
+                )}
                 <button
                   type="button"
                   className="btn"
@@ -3409,6 +3682,10 @@ function StoryPage() {
             />
             {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton> : null}
             </>
+          ) : draftProblem ? (
+            <p className="meta" role="alert" style={{ marginTop: 14 }}>
+              {draftFailedNotSavedWords(Boolean(data?.lead.meeting_video_id || data?.lead.meeting_artifact_id))}
+            </p>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
               No draft yet. Draft with AI writes a first pass from the lead and its sources; you
@@ -3533,7 +3810,7 @@ function StoryPage() {
                 jobState === "recovering"
                   ? "Recovering…"
                   : data.job?.failover_note
-                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                    ? runningSwitchSentence ?? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
                     : data.draft?.body
                       ? "Redrafting…"
                       : "Drafting…"
@@ -3575,6 +3852,15 @@ function StoryPage() {
               )}
                   </ActionButton>
                 </div>
+                {waiting && (data.job?.status === "queued" || data.job?.status === "running") ? (
+                  <InkButton
+                    tone="quiet"
+                    disabled={stopDraft.isPending || data.job.cancel_requested === true}
+                    onClick={() => data.job && stopDraft.mutate(data.job.id)}
+                  >
+                    {stopDraft.isPending ? "Stopping…" : "Stop"}
+                  </InkButton>
+                ) : null}
                 <PaperSetupGateNote gate={paperGate} />
               </>
             ) : null}
@@ -3772,7 +4058,7 @@ function StoryPage() {
                 <Field label="Topic">
                   <select
                     id="story-topic-select"
-                    value={topic}
+                    value={sectionReady ? topic : ""}
                     onChange={(e) => {
                       setTopic(e.target.value);
                       /* A person moved it. See `topicTouched`. */
@@ -3781,13 +4067,18 @@ function StoryPage() {
                         leadTopicChoice.current = e.target.value;
                         setMsg("");
                         saveTopic.mutate(e.target.value);
+                      } else if (e.target.value === topic && !hasUnsavedDraftEdits) {
+                        // Choosing the existing suggestion changes no draft fields,
+                        // so Save edits cannot record this explicit choice.
+                        saveTopic.mutate(e.target.value);
                       }
                     }}
                     disabled={locked || saveTopic.isPending}
                   >
+                    <option value="" disabled>Choose a section</option>
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
-                        {sectionName(t)}
+                        {sectionPickerLabel(t, sectionName(t))}
                       </option>
                     ))}
                     {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (
@@ -4002,10 +4293,19 @@ function StoryPage() {
         */}
                   <PublishConfirmation
                     blockers={blockers}
-                    sectionName={sectionNameNow}
+                    sectionName={sectionReady ? sectionNameNow : `${sectionNameNow} (no section was chosen)`}
                     refusedWarnings={refusedWarnings}
                     publishing={publish.isPending}
-                    onCancel={() => setConfirmingPublish(false)}
+                    claimsAccepted={acceptedUnreviewed}
+                    onCancel={() => {
+                      setConfirmingPublish(false);
+                      announceToDesk(
+                        acceptedUnreviewed
+                          ? `Nothing was published. Your acceptance of the unreviewed claims is recorded; press Publish in ${sectionNameNow} when you are ready.`
+                          : "Nothing was published.",
+                        "ok",
+                      );
+                    }}
                     onConfirm={() => {
                       setConfirmingPublish(false);
                       /* The last answer is about to be replaced by this
@@ -4031,10 +4331,35 @@ function StoryPage() {
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
                     disabled={publish.isPending || !publishConfirm.enabled}
-                    onAct={() => setConfirmingPublish(true)}
+                    onAct={() => {
+                      if (!sectionReady) {
+                        openStoryDetails();
+                        requestAnimationFrame(() => document.getElementById("story-topic-select")?.focus());
+                        return;
+                      }
+                      setConfirmingPublish(true);
+                    }}
                   >
-                    {`Publish in ${sectionNameNow}`}
+                    {sectionReady
+                      ? `Publish in ${sectionNameNow}`
+                      : `No section chosen. Pick one, or publish in ${sectionNameNow} anyway.`}
                   </ActionButton>
+                  {/*
+                    Warn, never block (Scott, Oct 10): with no section chosen the
+                    editor can still print. The server files it under the lead's
+                    own section, as before this page asked for a choice.
+                  */}
+                  {!sectionReady ? (
+                    <ActionButton
+                      tone="quiet"
+                      phase={publish.isPending ? "working" : "idle"}
+                      workingLabel="Publishing…"
+                      disabled={publish.isPending || !publishConfirm.enabled}
+                      onAct={publishAnyway}
+                    >
+                      {`Publish anyway in ${sectionNameNow}`} (no section was chosen)
+                    </ActionButton>
+                  ) : null}
                   {/*
           The fold used to print a count of failures -- "13 provider or page
           failures" -- which is our bookkeeping and told the editor nothing
@@ -4143,6 +4468,9 @@ function StoryPage() {
         */}
       <KillDialog
         leadId={id}
+        leadStatus={data.lead.status}
+        hasDraft={Boolean(data.draft?.body?.trim())}
+        onRestored={afterLeadChange}
         open={killOpen}
         onOpenChange={setKillOpen}
         onKilled={afterLeadChange}
@@ -4176,6 +4504,15 @@ function StoryPage() {
       <HeadlineDialog
         leadId={id}
         current={headline}
+        defaultModel={headlineModel}
+        defaultEffort={headlineEffort}
+        model={headlineModel}
+        effort={headlineEffort}
+        modelPicked={headlinePick !== null}
+        onModelChange={(choice) => setHeadlinePick({ model: choice as StoryModelChoice, effort: defaultModelEffort(choice) })}
+        onEffortChange={(effort) =>
+          setHeadlinePick({ model: headlineModel, effort: (effort as ModelEffort | null) })
+        }
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {

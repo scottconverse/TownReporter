@@ -1,3 +1,5 @@
+import { cleanMissingFactNotes } from "./strip-draft.ts";
+
 /**
  * The one line under a headline never goes missing.
  *
@@ -86,9 +88,13 @@ export function firstSentenceForDek(body: string | null | undefined): string {
  * The dek to print: the stored one, trimmed, or the first sentence of the
  * body when the stored one is empty or whitespace-only.
  *
+ * Scott, Oct 13 2026, on deks: "Leave it as is." A dek that repeats the
+ * headline still prints, as on the live paper.
+ *
  * The single call every render spot makes -- never `story.dek` directly.
  */
 export function dekOrFallback(dek: string | null | undefined, body: string | null | undefined): string {
   const clean = String(dek ?? "").trim();
-  return clean || firstSentenceForDek(body);
+  const summary = clean || firstSentenceForDek(body);
+  return cleanMissingFactNotes("", summary).dek;
 }

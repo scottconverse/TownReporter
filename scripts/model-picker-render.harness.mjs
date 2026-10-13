@@ -19,7 +19,11 @@ function moduleUrl(source, fileName, imports = {}) {
   transpiled and injected too: a data: URL cannot resolve a relative import.
 */
 const registryUrl = moduleUrl(
-  await readFile(new URL("../src/lib/news/provider-registry.ts", import.meta.url), "utf8"),
+  await readFile(
+    process.env.FM3C_REGISTRY_SOURCE ??
+      new URL("../src/lib/news/provider-registry.ts", import.meta.url),
+    "utf8",
+  ),
   "provider-registry.ts",
 );
 const registry = await import(registryUrl);
@@ -67,6 +71,12 @@ let connections = [];
 let localChoice = { override: null, notice: null, catalog: { servers: [], defaultModel: null, checkedAt: 0 } };
 export function __setLocalChoice(data) { localChoice = data; }
 export function __setConnections(data) { connections = data; }
+// DHE1-1: a saved-connections query that has not answered yet (no data, pending).
+let connectionsPending = false;
+export function __setConnectionsPending(pending) { connectionsPending = pending; }
+// H06: the local-model catalog has not answered yet (first paint, a fresh dialog).
+let catalogPending = false;
+export function __setCatalogPending(pending) { catalogPending = pending; }
 export function __setAvailability(data) { current = data; }
 
 /*
@@ -81,8 +91,11 @@ export function __setRole(next) { role = next; }
 export const myDesk = async () => ({ ok: true, role, newsroomId: 1, claimed: true });
 export const useQuery = ({ queryKey }) => {
   if (queryKey[0] === "local-model-choice") return { data: localChoice };
-  if (queryKey[0] === "local-model-catalog") return { data: localChoice.catalog };
-  if (queryKey[0] === "custom-ai-connections") return { data: connections };
+  if (queryKey[0] === "local-model-catalog")
+    return catalogPending
+      ? { data: undefined, isLoading: true, isPending: true }
+      : { data: localChoice.catalog, isLoading: false, isPending: false };
+  if (queryKey[0] === "custom-ai-connections") return connectionsPending ? { data: undefined, isPending: true } : { data: connections, isPending: false };
   if (queryKey[0] === "my-desk") return { data: { ok: true, role, newsroomId: 1, claimed: true } };
   return { data: current };
 };
@@ -124,27 +137,42 @@ export function announceOnly() {}`,
   "desk-chrome-utils-stub.ts",
 );
 
-const { ModelPicker } = await import(
-  moduleUrl(
-    await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
-    "model-picker.tsx",
-    {
-      "@/lib/news/model-choice": choices,
-      "@/lib/news/writer-bar": writerBarUrl,
-      "@/lib/news/provider-registry": registryUrl,
-      "@/lib/news/provider-availability": availabilityStubUrl,
-      "@/lib/news/provider-availability-key": availabilityStubUrl,
-      "@/lib/news/provider-settings": availabilityStubUrl,
-      "@/lib/news/custom-ai-settings": availabilityStubUrl,
-      "@/lib/news/claim": availabilityStubUrl,
-      "@tanstack/react-query": availabilityStubUrl,
+const modelPickerUrl = moduleUrl(
+  await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
+  "model-picker.tsx",
+  {
+    "@/lib/news/desk-local-model": moduleUrl(
+      await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
+      "desk-local-model.ts",
+    ),
+    "@/lib/news/model-choice": choices,
+    "@/lib/news/writer-bar": writerBarUrl,
+    "@/lib/news/provider-registry": registryUrl,
+    "@/lib/news/provider-availability": availabilityStubUrl,
+    "@/lib/news/provider-availability-key": availabilityStubUrl,
+    "@/lib/news/provider-settings": availabilityStubUrl,
+    "@/lib/news/custom-ai-settings": availabilityStubUrl,
+    "@/lib/news/claim": availabilityStubUrl,
+    "@tanstack/react-query": availabilityStubUrl,
 
-      "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
-      react: import.meta.resolve("react"),
-      "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-    },
-  )
+    "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
+    react: import.meta.resolve("react"),
+    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+  },
 );
+const { ModelPicker, LocalModelSelect } = await import(modelPickerUrl);
 
 const writerBar = await import(writerBarUrl);
-export { ModelPicker, availabilityStub, registry, choiceModule, writerBar };
+export {
+  ModelPicker,
+  LocalModelSelect,
+  modelPickerUrl,
+  availabilityStubUrl,
+  registryUrl,
+  choices as modelChoiceUrl,
+  writerBarUrl,
+  availabilityStub,
+  registry,
+  choiceModule,
+  writerBar,
+};

@@ -206,9 +206,18 @@ export async function writeEditorial(
   input: WriteEditorialInput,
   deps: EditorialWriterDeps = {},
 ): Promise<WriteEditorialResult> {
+  const assignment = await (
+    await import("./job-model-runtime.server.ts")
+  ).resolveRequestedJobModel(input.newsroomId, "opinion", input.modelChoice, input.modelEffort);
+  input = {
+    ...input,
+    modelChoice: opinionModelChoice(assignment.providerId),
+    modelEffort: assignment.effort,
+  };
   const cfg = await getPaperConfig(input.newsroomId);
   input = {
     ...input,
+    researchScope: input.researchScope === "supplied" ? "supplied" : "public",
     paper: {
       name: cfg.name,
       city: cfg.city,
@@ -322,7 +331,7 @@ export async function writeEditorial(
   };
 
   return orchestrateEditorial(input, {
-    findVoiceFile,
+    findVoiceFile: () => findVoiceFile(input.voiceMode),
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
       const resolveClaudeCode =
         deps.resolveClaudeCode ?? (await import("./ai.ts")).resolveClaudeCode;
@@ -338,7 +347,8 @@ export async function writeEditorial(
       if (!entry || entry.kind !== "claude-code") {
         return { ok: false, error: "The selected Claude model is unavailable." };
       }
-      if (completedResearch === null) {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      if (!suppliedOnly && completedResearch === null) {
         const research = await chat({
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
@@ -352,7 +362,9 @@ export async function writeEditorial(
       }
       await reportStage(editorialInput)("Writing the editorial");
       return chat({
-        system: "",
+        system: suppliedOnly
+          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          : "",
         systemPromptFile: found.voice.path,
         /*
           UNIT U31 -- THE WRITER RESEARCHES AND WRITES IN ONE RUN.
@@ -374,13 +386,15 @@ export async function writeEditorial(
           logged (see `voice.server.ts`), and the path is validated before it
           is read.
         */
-        allowedTools: EDITORIAL_TOOLS,
+        allowedTools: suppliedOnly ? [] : EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: completedResearch,
+          research: completedResearch ?? "",
+          suppliedMaterial: editorialInput.sourceText,
+          researchScope: editorialInput.researchScope,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
@@ -394,7 +408,8 @@ export async function writeEditorial(
       if (!entry || entry.kind !== "codex") {
         return { ok: false, error: "The selected Codex model is unavailable." };
       }
-      if (completedResearch === null) {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      if (!suppliedOnly && completedResearch === null) {
         const research = await codexChat({
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
@@ -408,7 +423,9 @@ export async function writeEditorial(
       }
       await reportStage(editorialInput)("Writing the editorial");
       return codexChat({
-        system: "",
+        system: suppliedOnly
+          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          : "",
         systemPromptFile: found.voice.path,
         /*
           UNIT U31 -- the writer gets its web search back (U12b took it away).
@@ -422,13 +439,15 @@ export async function writeEditorial(
           the restored capability a property a test can hold instead of a
           default the installed CLI is free to change.
         */
-        webSearch: true,
+        webSearch: !suppliedOnly,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: completedResearch,
+          research: completedResearch ?? "",
+          suppliedMaterial: editorialInput.sourceText,
+          researchScope: editorialInput.researchScope,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
@@ -460,7 +479,7 @@ export async function writeEditorial(
       by accident.
     */
     runLocalPair: async ({ input: editorialInput, researchPack }) => {
-      const voice = await readVoiceTextForLocalModel();
+      const voice = await readVoiceTextForLocalModel(editorialInput.voiceMode);
       if (!voice.ok) return voice;
       const choice = opinionModelChoice(editorialInput.modelChoice);
       const entry = providerEntry(choice);
@@ -477,10 +496,10 @@ export async function writeEditorial(
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
       const localModel = isLocalPick
-        ? editorialInput.localModel ?? await import("./provider-settings.ts")
+        ? (editorialInput.localModel ?? (await import("./provider-settings.ts")
           .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
           .then((r) => r.override)
-          .catch(() => undefined)
+          .catch(() => undefined)))
         : undefined;
       // The exact model this call is sent to, which is what an effort level
       // is validated against: the resolved local pick, or the rung's own
@@ -519,28 +538,32 @@ export async function writeEditorial(
         says it: the desk searched and read, and the writing pack carries the
         counts, the captures' URLs and their capture ids.
       */
-      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      const desk = suppliedOnly ? null : await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice,
         ...(localModel ? { localModel } : {}),
         exactModel,
       });
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
-        voice.text,
+        suppliedOnly
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: desk.findings,
+          research: desk?.findings ?? "",
           suppliedMaterial: editorialInput.sourceText,
           suppliedMaterialCap,
-          deskResearch: {
+          researchScope: editorialInput.researchScope,
+          ...(desk ? { deskResearch: {
             searches: desk.searches,
             pages: desk.pages,
             captures: desk.captures,
             window: desk.window,
-          },
+          } } : {}),
         }),
         4_000,
         {
@@ -561,29 +584,33 @@ export async function writeEditorial(
       ran, under the same voice (unit U31).
     */
     runCustomPair: async ({ input: editorialInput, researchPack }) => {
-      const voice = await readVoiceTextForLocalModel();
+      const voice = await readVoiceTextForLocalModel(editorialInput.voiceMode);
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai.ts");
       const chat = deps.grokChat ?? grokChat;
-      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      const desk = suppliedOnly ? null : await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice: opinionModelChoice(editorialInput.modelChoice),
       });
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
-        voice.text,
+        suppliedOnly
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: desk.findings,
+          research: desk?.findings ?? "",
           suppliedMaterial: editorialInput.sourceText,
-          deskResearch: {
+          researchScope: editorialInput.researchScope,
+          ...(desk ? { deskResearch: {
             searches: desk.searches,
             pages: desk.pages,
             captures: desk.captures,
             window: desk.window,
-          },
+          } } : {}),
         }),
         4_000,
         {
@@ -594,13 +621,13 @@ export async function writeEditorial(
           // its transport performs the final model-specific validation.
           reasoningEffort: modelEffort(
             editorialInput.modelChoice,
-            editorialInput.modelEffort,
-          ),
+            editorialInput.modelEffort),
         },
       );
     },
     fileEditorial: (workInput, editorial, choice) =>
-      fileEditorial({ ...workInput, suppliedMaterialCap: materialCaps.get(choice) }, editorial, choice),
+      fileEditorial({ ...workInput, suppliedMaterialCap: materialCaps.get(choice) }, editorial, choice,
+      ),
     timeoutMs: editorialTimeoutMs,
     onTechnicalFallback: async ({ previous, next, reason }) => {
       if (!input.completion) return;
@@ -692,8 +719,10 @@ export async function fileEditorial(
         requestedEffort,
         "checker",
       );
-      await setJobStage(input.completion!.jobId, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-      await setJobFailoverNote(input.completion!.jobId, failoverNoteSentence(nextLabel, previousLabel, reason));
+      await setJobStage(input.completion!.jobId, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+      );
+      await setJobFailoverNote(input.completion!.jobId, failoverNoteSentence(nextLabel, previousLabel, reason),
+      );
       // The request's model_choice is author attribution. A checker-only
       // fallback is recorded on runtimeByStage.checker and must not relabel
       // the already-written editorial as the checker provider's work.
@@ -747,8 +776,7 @@ export async function fileEditorial(
         const nextChoice: EffectiveOpinionModelChoice | null = transport === "codex"
           ? "codex-balanced"
           : transport === "anthropic" || transport === "claude-code"
-            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-            : null;
+            ? /haiku/i.test(model) ? "claude-haiku" : "claude-sonnet": null;
         if (nextChoice) await recordNameSwitch(nextChoice, reason);
       },
       chat: nameChat,
@@ -854,8 +882,13 @@ export async function fileEditorial(
       `model_body` (0119) is the model's own body, hoisted so `body` and
       `model_body` are the same bytes here. The editor's later save on this row
       (`saveOpinionDraft`) rewrites `body` and leaves this column alone.
+
+      A piece the editor pasted in ("written-by-the-editor") was written by a
+      person, so no model body is kept for it (FC04). Its `body` still holds
+      the text.
     */
     const editorialBody = storableText(body);
+    const modelBody = input.sourceKind === "written-by-the-editor" ? null : editorialBody;
     const rows = await sql<{ id: number }>`
       insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json, model_body)
       values (
@@ -868,7 +901,7 @@ export async function fileEditorial(
             ...(lengthCut ? { lengthCut } : {}),
           }),
         )},
-        ${editorialBody}
+        ${modelBody}
       )
       returning id
     `;
@@ -926,6 +959,8 @@ export async function ensureEditorialRequestSchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      voice_mode text not null default 'paper',
+      research_scope text not null default 'public',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
@@ -960,7 +995,8 @@ export async function performEditorialWork(
   // Local jobs are bound to the exact endpoint/model checked before enqueue.
   // Reading uploads and writing the editorial must use the same pinned choice,
   // even if the newsroom preference changes while the job waits in the queue.
-  const queuedLocalModel = pinnedLocalModelForJob(job as Pick<import("./jobs.ts").DeskJob, "model_choice" | "result_json">);
+  const queuedLocalModel = pinnedLocalModelForJob(job as Pick<import("./jobs.ts").DeskJob, "model_choice" | "result_json">,
+  );
   const sql = await getSql();
   const rows = await sql<{
     id: number;
@@ -972,10 +1008,12 @@ export async function performEditorialWork(
     pointers_json: string;
     our_story_json: string | null;
     model_choice: string;
+    voice_mode: string;
+    research_scope: string;
     draft_id: number | null;
   }>`
     select id, subject, source_text, source_kind, source_ref, asked_for, pointers_json, our_story_json,
-           model_choice, draft_id
+           model_choice, voice_mode, research_scope, draft_id
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
   `;
@@ -1124,7 +1162,8 @@ export async function performEditorialWork(
               requestedEffort,
               "documents",
             );
-            await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+            await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+          );
             await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
             await sql`update editorial_requests set model_choice=${nextChoice} where id=${req.id} and newsroom_id=${job.newsroom_id}`;
           },
@@ -1163,6 +1202,8 @@ export async function performEditorialWork(
         sourceKind: req.source_kind,
         sourceRef: req.source_ref,
         modelChoice: activeChoice,
+        voiceMode: req.voice_mode === "neutral" ? "neutral" : "paper",
+        researchScope: req.research_scope === "supplied" ? "supplied" : "public",
         modelEffort: activeEffort,
         requestedModelChoice: requestedChoice,
         requestedModelEffort: requestedEffort,
@@ -1176,7 +1217,8 @@ export async function performEditorialWork(
           newest caller: "Researching with the desk" is an arrival in
           `JOB_STAGE_LISTS.editorial`, and this is what lights it.
         */
-        onStage: progressReporterFor(job as Pick<import("./jobs.ts").DeskJob, "id" | "stages_json">),
+        onStage: progressReporterFor(job as Pick<import("./jobs.ts").DeskJob, "id" | "stages_json">,
+        ),
       }),
   });
 

@@ -20,12 +20,18 @@ import { howRoute, renderArticle } from "./article-page-render.mjs";
   the article's own body renderer.
 */
 
-const AI_LINE =
-  "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
+// Scott, Oct 12 2026: no AI line on the paper. The only line a page can carry is one an editor typed.
+const EDITOR_LINE = "A person wrote this from public records; an editor reviewed it.";
 
-test("an article page states the AI disclosure, in the story column above the records", () => {
-  const html = renderArticle();
-  assert.match(html, new RegExp(AI_LINE.replace(/\./g, "\\.")));
+test("a manual article page does not claim AI found records or wrote its first draft", () => {
+  const html = renderArticle({ disclosure_text: "" });
+  assert.doesNotMatch(html, /AI tools helped/);
+  assert.doesNotMatch(html, /class="ai-disclosure"/);
+});
+
+test("an article page places an editor-typed line above the sources", () => {
+  const html = renderArticle({ disclosure_text: EDITOR_LINE });
+  assert.ok(html.includes(EDITOR_LINE));
   /*
     It closes the story body -- the drawing's last `<p>` inside `<article>` --
     and the records it points at are the band below it. So the order asserted
@@ -38,7 +44,7 @@ test("an article page states the AI disclosure, in the story column above the re
     names the records.
   */
   const bodyIdx = html.indexOf('id="story-body"');
-  const lineIdx = html.indexOf("A person reviewed and edited this story.");
+  const lineIdx = html.indexOf(EDITOR_LINE);
   const sourcesIdx = html.indexOf('id="sources"');
   assert.ok(
     bodyIdx >= 0 && lineIdx > bodyIdx && sourcesIdx > lineIdx,
@@ -46,18 +52,14 @@ test("an article page states the AI disclosure, in the story column above the re
   );
 });
 
-test("a routine-notice roundup does NOT claim AI wrote it, and says what did", () => {
+test("a routine-notice roundup carries no line at all, and no AI wording", () => {
   const html = renderArticle({ routine_notice: true, topic: "council" });
-  assert.doesNotMatch(
-    html,
-    /AI tools helped find records/,
-    "a fixed-template roundup must not carry the story disclosure",
-  );
-  assert.match(html, /A fixed template assembled this routine notice from owner-approved public sources/);
-  assert.match(html, /No AI wrote it/);
+  assert.doesNotMatch(html, /class="ai-disclosure"/);
+  assert.doesNotMatch(html, /\bAI\b/);
 });
 
-test("/how-we-report states the same disclosure sentence, word for word", () => {
+test("/how-we-report has no AI wording", () => {
   const html = renderToStaticMarkup(createElement(howRoute.Route.options.component));
-  assert.match(html, new RegExp(AI_LINE.replace(/\./g, "\\.")));
+  assert.doesNotMatch(html, /\bAI\b/);
+  assert.doesNotMatch(html, /class="ai-disclosure"/);
 });

@@ -31,11 +31,14 @@ const STORY_VALUES = [
   "codex-frontier",
   "codex-balanced",
   "codex-luna",
+  "gemini-flash",
+  "gemini-pro",
   "claude-fable",
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
   "local-model",
+  "deepseek-flash",
 ] as const;
 
 /**
@@ -54,19 +57,23 @@ describe("model choice contract", () => {
         "Codex Sol 6.1",
         "Codex Sol 6.1 (balanced)",
         "Codex Luna",
+        "Gemini 3.8 Flash (Pro plan)",
+        "Gemini 3.1 Pro (Pro plan)",
         "Claude Fable",
         "Claude Opus",
         "Claude Sonnet",
         "Claude Haiku",
         "Local model",
+        "DeepSeek v4.1 Flash",
       ],
     );
   });
-  it("runs Automatic on DeepSeek, then Qwen, then Codex Sol 6.1 (balanced)", () => {
+  it("runs Automatic on DeepSeek, then Local model, then balanced Codex, then Gemini", () => {
     assert.deepEqual([...automaticLadder()], [
       "deepseek-flash",
       "qwen-local",
       "codex-balanced",
+      "gemini-flash",
     ]);
     // Claude Sonnet left the ladder in 0.6.63 (Unit Y item 1) and is a hand
     // pick only; the frontier Codex stays off it as it always has.
@@ -113,28 +120,20 @@ describe("model choice contract", () => {
     assert.match(STORY_MODEL_CHOICES[0].detail, /recommended/i);
   });
 
-  /*
-    UNIT U29 -- OPINION'S PICKER NAMES DEEPSEEK.
-
-    The owner's decision of 2026-09-30 ("use deepseek ... keep the picker
-    regardless") made DeepSeek v4.1 Flash Opinion's first Automatic rung and a
-    nameable choice there. The picker is otherwise the Story list exactly as it
-    was, and this pins both halves: every Story choice is still offered on
-    Opinion, and the ONE addition is the rung -- nothing else moved.
-  */
-  it("offers every Story choice on Opinion, plus the DeepSeek rung by name", () => {
+  /* The shared picker names the same models on every work surface. */
+  it("offers the same named choices on every picker surface", () => {
     const opinionValues = OPINION_MODEL_CHOICES.map((choice) => choice.value);
-    assert.deepEqual(opinionValues, [...STORY_VALUES, "deepseek-flash"]);
-    assert.deepEqual(
-      opinionValues.filter((value) => value !== "deepseek-flash"),
-      STORY_MODEL_CHOICES.map((choice) => choice.value),
-      "Opinion must not lose a single choice Story offers",
-    );
-    // And it is offered on Opinion ONLY: Story's own menu still reaches
-    // DeepSeek the way it always has, through Automatic.
-    assert.ok(!STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
-    assert.ok(!providersFor("dark").some((entry) => entry.id === "deepseek-flash"));
-    assert.ok(!providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
+    assert.deepEqual(opinionValues, STORY_MODEL_CHOICES.map((choice) => choice.value));
+    assert.deepEqual(opinionValues, STORY_VALUES);
+    for (const surface of ["scan", "follow-up", "dark"] as const) {
+      assert.ok(
+        providersFor(surface).some((entry) => entry.id === "deepseek-flash"),
+        `${surface} must offer the shared DeepSeek choice`,
+      );
+    }
+    assert.ok(STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
+    assert.ok(providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
+    assert.ok(!providersFor("ocr").some((entry) => entry.id === "deepseek-flash"));
 
     const deepseek = OPINION_MODEL_CHOICES.find((choice) => choice.value === "deepseek-flash")!;
     assert.equal(deepseek.label, "DeepSeek v4.1 Flash");
@@ -183,9 +182,8 @@ describe("model choice contract", () => {
   it("is selectable as Opinion's assignment in the Models screen", () => {
     assert.ok(jobModelOptions("opinion").some((option) => option.value === "deepseek-flash"));
     assert.ok(isOfferedForJob("opinion", "deepseek-flash"));
-    // A forced job's menu is a different list on purpose: a run that must name
-    // ONE runtime up front may not name a rung.
-    assert.ok(!isOfferedForJob("story-draft", "deepseek-flash"));
+    // Ordinary story writing may name the shared rung; forced OCR still may not.
+    assert.ok(isOfferedForJob("story-draft", "deepseek-flash"));
     assert.ok(!isOfferedForJob("ocr", "deepseek-flash"));
   });
 
@@ -335,7 +333,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
@@ -351,7 +349,7 @@ describe("model choice contract", () => {
     */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -370,7 +368,7 @@ describe("model choice contract", () => {
       reordered or retired rung cannot leave this wording behind.
     */
     const help = modelChoiceHelp("auto", "scan");
-    assert.match(help, /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/);
+    assert.match(help, /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), then Gemini 3\.8 Flash \(Pro plan\)/);
     assert.match(help, /records which one ran/i);
     assert.doesNotMatch(help, /configured gateway/i);
     /*
@@ -384,7 +382,7 @@ describe("model choice contract", () => {
     assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
     assert.match(
       pickerOptionTitle(automatic!),
-      /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/,
+      /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), then Gemini 3\.8 Flash \(Pro plan\)/,
     );
   });
 
@@ -520,7 +518,7 @@ describe("the Writing models panel's ladder sentence", () => {
     const sentence = await orderSentenceFn();
     assert.equal(
       sentence(),
-      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced).",
+      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan).",
     );
   });
 

@@ -358,3 +358,15 @@ test("the full card still wraps its title over as many lines as it needs", () =>
   assert.doesNotMatch(html, /job-card compact/);
   assert.match(html, /<b class="job-card-title">Scanning the watch list<\/b>/);
 });
+
+
+test("a Gemini hop shows the provider's own words and the model now running", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(render({ job: job({ model: "Codex Sol 6.1 (balanced)", failoverNote: "Gemini 3.1 Pro (Pro plan): Google Pro usage limit reached -> Codex Sol 6.1 (balanced)" }) }));
+    assert.match(await page.locator("body").innerText(), /Google Pro usage limit reached/);
+    assert.match(await page.locator("body").innerText(), /Codex Sol 6.1/);
+  } finally { await browser.close(); }
+});

@@ -66,20 +66,34 @@ export function kindCoverage(kind: JobKind): (typeof JOB_KINDS)[number] {
 }
 
 /**
- * Two lanes, not one. Audit finding ENG-105: a single serial drainer meant a
- * 40-minute editorial held `draining` true for the whole run, so a Scan or
- * Draft queued behind it did not start until the editorial finished.
- *
- * `editorial` is its own lane at concurrency 1 -- it is the one kind that is
- * both slow and where running two at once buys nothing (the Opinion desk is
- * one voice, one piece at a time). Everything else shares `default`, so Scan
- * and Draft jobs drain independently of whatever Opinion is doing.
+ * ENG-105 separated long Opinion work. FB16 reserves writing workers too:
+ * scans and Dark Desk digs cannot consume the story draft lane's slots.
+ * Local model admission remains separate from lane capacity.
  */
-export type JobLane = "editorial" | "default";
+export type JobLane = "editorial" | "default" | "draft";
 
 /** Every job kind maps to exactly one lane; this is the only place that decides. */
 export function laneForKind(kind: JobKind): JobLane {
-  return kind === "editorial" ? "editorial" : "default";
+  return kind === "editorial" ? "editorial" : kind === "draft" ? "draft" : "default";
+}
+
+/** Plain queue reason shared by the story card and Health. No invented ETA. */
+export function queuedJobWaitReason(job: DeskJob, running: DeskJob[], now = Date.now()): string {
+  const local = (choice: string) => choice === "local-model" || choice === "qwen-local";
+  const fresh = running.filter(row => row.id !== job.id && row.status === "running" &&
+    !row.cancel_requested && now - new Date(row.updated_at).getTime() < STALE_RUNNING_SECONDS * 1000);
+  const modelBusy = local(job.model_choice) ? fresh.find(row => local(row.model_choice)) : undefined;
+  const sameLane = fresh.filter(row => row.lane === job.lane);
+  const blocker = modelBusy ?? fresh.find(row =>
+    job.kind === "draft" && row.kind === "follow-up" && row.newsroom_id === job.newsroom_id) ??
+    (sameLane.length >= LANE_CONCURRENCY[job.lane] ? sameLane[0] : undefined);
+  const names: Partial<Record<JobKind, string>> = { scan: "scan", dark: "Dark Desk dig", draft: "story draft", editorial: "editorial", "follow-up": "follow-up check" };
+  const time = blocker ? new Date(blocker.started_at ?? blocker.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+  const reason = blocker
+    ? `Waiting for ${modelBusy ? "the local model" : "a writing worker"}, which is busy with the ${time} ${names[blocker.kind] ?? "job"}.`
+    : "Waiting for a writing worker to pick up this draft.";
+  const seconds = Math.max(0, Math.floor((now - new Date(job.created_at).getTime()) / 1000));
+  return `${reason} Waited ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}. The finish time is not known; you can run it on another model.`;
 }
 
 export type DeskJob = {
@@ -132,30 +146,21 @@ export type DeskJob = {
  */
 export const JOB_STALL_SECONDS = 60;
 
-/**
- * How many jobs a lane's drainer will run at once. `editorial` stays at 1 on
- * purpose (see JobLane above). `default` gets 2 so a Draft does not sit
- * behind a slow Scan either -- together with the one editorial slot that is
- * up to 3 jobs open at once, each doing its own `pg` queries against the one
- * pool `db.ts` opens. That pool takes its size from `pg`'s own default
- * (`new Pool({ connectionString })` sets no `max`, so it is 10), and 3
- * concurrent jobs plus ordinary request traffic comfortably fit under that --
- * this is the number to revisit if `max` is ever set explicitly (ENG-104).
- */
-const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2 };
+/** Five open jobs fit the default ten-connection pool. Local work has one admission slot across lanes. */
+const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2, draft: 2 };
 
 /**
- * One `draining` flag per lane, shared by every bundled copy of this module in
+ * Occupied worker slots per lane, shared by every bundled copy of this module in
  * the process. The background entry and SSR entry can each bundle jobs.ts;
- * module-local flags let both copies open a full lane and bypass its limit.
+ * Module-local counters would let both copies open a full lane and bypass its limit.
  * `Symbol.for` keeps the ownership record common without making a cross-process
  * scheduler claim -- separate server processes still coordinate only through
  * the existing database claim tokens and stale-run recovery.
  */
-const JOB_DRAINING_KEY = Symbol.for("townreporter:job-lane-draining");
+const JOB_DRAINING_KEY = Symbol.for("townreporter:job-lane-workers");
 const jobGlobal = globalThis as typeof globalThis &
-  Record<symbol, Record<JobLane, boolean> | undefined>;
-const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: false, default: false });
+  Record<symbol, Record<JobLane, number> | undefined>;
+const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: 0, default: 0, draft: 0 });
 
 export async function ensureJobsSchema(sql?: Sql) {
   const runner = sql ?? (await getSql());
@@ -199,11 +204,11 @@ export async function ensureJobsSchema(sql?: Sql) {
     // The same column + backfill + index as migrations/0019_job_lanes.sql, for
     // the same reason the 0017 index is declared twice: this covers the
     // embedded PGLite path where migrations do not run.
-    // `jobs.test.ts` asserts the two definitions agree. Audit finding ENG-105.
+    // Migration 0146 moves existing story jobs; this also covers embedded databases.
     `alter table desk_jobs add column if not exists lane text`,
     `update desk_jobs
-    set lane = case when kind = 'editorial' then 'editorial' else 'default' end
-    where lane is null`,
+    set lane = case when kind = 'editorial' then 'editorial' when kind = 'draft' then 'draft' else 'default' end
+    where lane is null or (kind = 'draft' and lane = 'default')`,
     `create index if not exists desk_jobs_lane_idx
       on desk_jobs (lane, status, id asc)`,
     /*
@@ -725,9 +730,8 @@ export async function setJobModelRuntime(
 }
 
 /**
- * Drain one lane. Each lane has its own `draining` flag, so a caller already
- * draining `editorial` does not block a caller trying to drain `default` --
- * that independence is the entire point of ENG-105's fix. Within a lane,
+ * Drain the free slots in one lane. Later presses can use an idle slot even
+ * while a sibling worker is still inside a long job. Within a lane,
  * `LANE_CONCURRENCY[lane]` workers run in parallel, each looping the same
  * "claim one, run it, look for the next" shape the original single-lane
  * drainer used.
@@ -741,64 +745,82 @@ export async function setJobModelRuntime(
  * that one update, exactly as it did before lanes existed.
  */
 async function drainLane(lane: JobLane): Promise<{ ran: number }> {
-  if (draining[lane]) return { ran: 0 };
-  draining[lane] = true;
+  const concurrency = LANE_CONCURRENCY[lane] - draining[lane];
+  if (concurrency <= 0) return { ran: 0 };
+  // Reserve synchronously before the first await, including across bundles.
+  draining[lane] += concurrency;
+  let workersStarted = false;
   let ran = 0;
   try {
     await ensureJobsSchema();
     const sql = await getSql();
-    const concurrency = LANE_CONCURRENCY[lane];
+    workersStarted = true;
     const workers = Array.from({ length: concurrency }, () =>
       (async () => {
-        for (let n = 0; n < 8; n++) {
-          const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
-                   stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
-                   created_at, updated_at, started_at, finished_at
-            from desk_jobs candidate
-            where lane = ${lane}
-              and not coalesce(candidate.cancel_requested, false)
-              and (
-                status = 'queued'
-                or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
-              )
-              and not (
-                candidate.kind = 'follow-up'
-                and exists (
-                  select 1 from desk_jobs draft
-                  where draft.newsroom_id = candidate.newsroom_id
-                    and draft.kind = 'draft' and draft.status in ('queued', 'running')
+        try {
+          for (let n = 0; n < 8; n++) {
+            const next = await sql<DeskJob>`
+              select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
+                     stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
+                     created_at, updated_at, started_at, finished_at
+              from desk_jobs candidate
+              where lane = ${lane}
+                and not coalesce(candidate.cancel_requested, false)
+          and not (
+            candidate.model_choice in ('local-model', 'qwen-local')
+            and exists (
+              select 1 from desk_jobs local_work
+              where local_work.id <> candidate.id
+                and local_work.model_choice in ('local-model', 'qwen-local')
+                and local_work.status = 'running'
+                and not coalesce(local_work.cancel_requested, false)
+                and local_work.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+            )
+          )
+                and (
+                  status = 'queued'
+                  or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
                 )
-              )
-              and not (
-                candidate.kind = 'follow-up'
-                and exists (
-                  select 1 from desk_jobs active_follow_up
-                  where active_follow_up.newsroom_id = candidate.newsroom_id
-                    and active_follow_up.kind = 'follow-up'
-                    and active_follow_up.id <> candidate.id
-                    and active_follow_up.status = 'running'
+                and not (
+                  candidate.kind = 'follow-up'
+                  and exists (
+                    select 1 from desk_jobs draft
+                    where draft.newsroom_id = candidate.newsroom_id
+                      and draft.kind = 'draft' and draft.status in ('queued', 'running')
+                  )
                 )
-              )
-              and not (
-                candidate.kind = 'draft'
-                and exists (
-                  select 1 from desk_jobs active_follow_up
-                  where active_follow_up.newsroom_id = candidate.newsroom_id
-                    and active_follow_up.kind = 'follow-up'
-                    and active_follow_up.status = 'running'
-                    and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+                and not (
+                  candidate.kind = 'follow-up'
+                  and exists (
+                    select 1 from desk_jobs active_follow_up
+                    where active_follow_up.newsroom_id = candidate.newsroom_id
+                      and active_follow_up.kind = 'follow-up'
+                      and active_follow_up.id <> candidate.id
+                      and active_follow_up.status = 'running'
+                  )
                 )
-              )
-            order by id asc
-            limit 1
-          `;
-          if (!next[0]) break;
-          const took = await executeJob(next[0]);
-          if (took) ran += 1;
-          // A lost claim race is not "nothing left" -- loop again rather than
-          // stopping this worker while a sibling worker (or another job
-          // entirely) may still be waiting in this same lane.
+                and not (
+                  candidate.kind = 'draft'
+                  and exists (
+                    select 1 from desk_jobs active_follow_up
+                    where active_follow_up.newsroom_id = candidate.newsroom_id
+                      and active_follow_up.kind = 'follow-up'
+                      and active_follow_up.status = 'running'
+                      and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+                  )
+                )
+              order by id asc
+              limit 1
+            `;
+            if (!next[0]) break;
+            const took = await executeJob(next[0]);
+            if (took) ran += 1;
+            // A lost claim race is not "nothing left" -- loop again rather than
+            // stopping this worker while a sibling worker (or another job
+            // entirely) may still be waiting in this same lane.
+          }
+        } finally {
+          draining[lane] -= 1;
         }
       })(),
     );
@@ -806,20 +828,26 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
   } catch (err) {
     console.error(`[jobs] drain failed (lane=${lane})`, err);
   } finally {
-    draining[lane] = false;
+    if (!workersStarted) draining[lane] -= concurrency;
   }
   return { ran };
 }
 
 /**
- * Finish queued (or stale running) jobs across both lanes. Same process, or
- * a cron wake-up. The two lanes drain concurrently -- that is what makes a
- * queued Scan or Draft start while a 40-minute editorial is still running,
- * instead of waiting for it. Audit finding ENG-105.
+ * Finish queued (or stale running) jobs across all lanes. Draft workers are
+ * reserved for editor writing even while both background workers are busy.
  */
 export async function drainQueuedJobs(): Promise<{ ran: number }> {
-  const [editorial, rest] = await Promise.all([drainLane("editorial"), drainLane("default")]);
-  return { ran: editorial.ran + rest.ran };
+  let ran = 0;
+  // A lane may yield while another owns the local device or newsroom fence.
+  // Revisit it after that work settles, instead of waiting for the next cron.
+  for (let pass = 0; pass < 8; pass++) {
+    const results = await Promise.all([drainLane("draft"), drainLane("editorial"), drainLane("default")]);
+    const count = results.reduce((sum, result) => sum + result.ran, 0);
+    ran += count;
+    if (!count) break;
+  }
+  return { ran };
 }
 
 /**
@@ -860,6 +888,11 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
   */
   const stages = JOB_STAGE_LISTS[job.kind] ?? null;
   const claimed = await withTransaction(async (tx) => {
+    // Admission is atomic across lanes and server entry points. Local servers
+    // share one device; never admit a second local job while it is in use.
+    if (job.model_choice === "local-model" || job.model_choice === "qwen-local") {
+      await tx.query("select pg_advisory_xact_lock($1, $2)", [74162, 1]);
+    }
     if (job.kind === "draft" || job.kind === "follow-up") {
       // The transaction lock makes the conflict read and this row transition
       // one atomic newsroom admission decision across every server process.
@@ -877,6 +910,17 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
           stage_index = 0
       where candidate.id = ${job.id}
         and not coalesce(candidate.cancel_requested, false)
+        and not (
+          candidate.model_choice in ('local-model', 'qwen-local')
+          and exists (
+            select 1 from desk_jobs local_work
+            where local_work.id <> candidate.id
+              and local_work.model_choice in ('local-model', 'qwen-local')
+              and local_work.status = 'running'
+              and not coalesce(local_work.cancel_requested, false)
+              and local_work.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+          )
+        )
         and (
           candidate.status = ${"queued"}
           or (candidate.status = ${"running"} and candidate.updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
@@ -998,6 +1042,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     `;
   } finally {
     clearInterval(beat);
+
   }
   return true;
 }

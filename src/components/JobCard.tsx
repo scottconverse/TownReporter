@@ -1,3 +1,5 @@
+import { ModelPicker } from "@/components/model-picker";
+import { type StoryModelChoice } from "@/lib/news/model-choice";
 import { retryStoryJob } from "@/components/scoped-actions";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -308,6 +310,8 @@ export function DeskJobCard({
   viewLabel?: string;
   cancelLabel?: string;
 }) {
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [queueModel, setQueueModel] = useState<StoryModelChoice>("auto");
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: ["desk-jobs"] });
   const cancel = useMutation({
@@ -315,7 +319,7 @@ export function DeskJobCard({
     onSettled: refresh,
   });
   const retry = useMutation({
-    mutationFn: (nextModel: boolean) => retryStoryJob({ data: { jobId: job.id, nextModel } }),
+    mutationFn: (nextModel: boolean | StoryModelChoice) => retryStoryJob({ data: { jobId: job.id, ...(typeof nextModel === "boolean" ? { nextModel } : { modelChoice: nextModel }) } }),
     onSettled: refresh,
   });
   const failure = cancel.error ?? retry.error;
@@ -343,8 +347,17 @@ export function DeskJobCard({
         onRetry={canRetry ? () => retry.mutate(false) : undefined}
         onRetryNext={canRetry ? () => retry.mutate(true) : undefined}
       />
+      {job.kind === "draft" && job.status === "queued" ? (
+        <div className="job-card-quiet">
+          <button type="button" className="btn" onClick={() => setShowModelPicker(value => !value)}>Run it on another model</button>
+          {showModelPicker ? <div>
+            <ModelPicker value={queueModel} onChange={setQueueModel} compact />
+            <button type="button" className="btn solid" disabled={busy} onClick={() => retry.mutate(queueModel)}>{busy ? "Starting..." : "Run this draft"}</button>
+          </div> : null}
+        </div>
+      ) : null}
       {failure ? <p className="job-card-error">{failure instanceof Error ? failure.message : String(failure)}</p> : null}
-      {retry.data ? <p className="job-card-quiet">Queued on {retry.data.model}.</p> : null}
+      {retry.data ? <p className="job-card-quiet">{retry.data.ok ? `Queued on ${retry.data.model}.` : retry.data.error}</p> : null}
     </div>
   );
 }

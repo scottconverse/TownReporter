@@ -22,7 +22,8 @@ before(() => forceSetupCodeSatisfiedForTests());
 before(async () => {
   await ensurePaperSettingsSchema();
   const sql = await getSql();
-  await sql.query("insert into paper_settings(newsroom_id,onboarded) values(1,true) on conflict (newsroom_id) do update set onboarded=true");
+  await sql.query("insert into paper_settings(newsroom_id,onboarded) values(1,true) on conflict (newsroom_id) do update set onboarded=true",
+  );
 });
 after(() => clearSetupCodeOverrideForTests());
 import {
@@ -37,10 +38,123 @@ import { modelChoiceLabel } from "./model-choice.ts";
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 
+it("Automatic drafting honors the saved Story assignment before readiness and receipts", async () => {
+  const { ensureModelAssignmentsSchema } = await import("./model-assignments-store.ts");
+  await ensureModelAssignmentsSchema();
+  await ensureJobsSchema();
+  const sql = await getSql();
+  await sql.query(
+    "insert into model_assignments(newsroom_id,job_key,rank,provider_id,effort) values(1,'story-draft',0,'deepseek-flash','high') on conflict(newsroom_id,job_key,rank) do update set provider_id=excluded.provider_id,effort=excluded.effort",
+  );
+  try {
+    const [lead] = await sql<{
+      id: number;
+    }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'fm1-assignment','Assignment regression','Why') returning id`;
+    const result = await commitStoryDraftForAuthenticatedEditor(
+      {
+        context: { userId: "fm1-assignment", newsroomId: 1 },
+        leadId: lead.id,
+        modelChoice: "auto",
+      },
+      {
+        probeProvider: async (choice) => {
+          assert.equal(choice, "deepseek-flash");
+          return { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" };
+        },
+        enqueueJob: (options) => enqueueJob({ ...options, kick: false }),
+      },
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail("The saved ready provider must enqueue");
+    const [job] = await sql<{
+      model_choice: string;
+      result_json: string;
+    }>`select model_choice,result_json from desk_jobs where id=${result.jobId}`;
+    assert.equal(job.model_choice, "deepseek-flash");
+    const receipt = JSON.parse(job.result_json);
+    assert.equal(receipt.requestedRuntime, "deepseek-flash");
+    assert.equal(receipt.actualRuntime, "deepseek-flash");
+    // The saved High pick is not what DeepSeek runs at: its rung always records none (Release H).
+    assert.equal(receipt.modelEffort, "none");
+    const [explicitLead] = await sql<{
+      id: number;
+    }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'fm1-explicit-auto','Explicit Automatic','Why') returning id`;
+    const explicit = await commitStoryDraftForAuthenticatedEditor(
+      {
+        context: { userId: "fm1-explicit-auto", newsroomId: 1 },
+        leadId: explicitLead.id,
+        modelChoice: "auto",
+        modelChoiceExplicit: true,
+      },
+      {
+        probeProvider: async (choice) => {
+          assert.equal(choice, "auto");
+          return { ok: true, choice: "codex-balanced", label: "Codex Sol 6.1 (balanced)" };
+        },
+        enqueueJob: (options) => enqueueJob({ ...options, kick: false }),
+      },
+    );
+    assert.equal(explicit.ok, true);
+  } finally {
+    await sql.query("delete from model_assignments where newsroom_id=1 and job_key='story-draft'");
+  }
+});
+
+it("an unavailable saved writer warns and Draft anyway preserves requested and actual providers", async () => {
+  const { ensureModelAssignmentsSchema } = await import("./model-assignments-store.ts");
+  await ensureModelAssignmentsSchema();
+  await ensureJobsSchema();
+  const sql = await getSql();
+  await sql.query(
+    "insert into model_assignments(newsroom_id,job_key,rank,provider_id) values(1,'story-draft',0,'deepseek-flash') on conflict(newsroom_id,job_key,rank) do update set provider_id=excluded.provider_id",
+  );
+  try {
+    const [lead] = await sql<{
+      id: number;
+    }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'fm1-warning','Assignment warning','Why') returning id`;
+    const input = {
+      context: { userId: "fm1-warning", newsroomId: 1 },
+      leadId: lead.id,
+      modelChoice: "auto" as const,
+    };
+    const deps = {
+      probeProvider: async (choice?: string) =>
+        choice === "deepseek-flash"
+          ? { ok: false as const, error: "DeepSeek v4.1 Flash is unavailable: service failed" }
+          : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
+      enqueueJob: (options: Parameters<typeof enqueueJob>[0]) =>
+        enqueueJob({ ...options, kick: false }),
+    };
+    const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
+    assert.equal(warning.ok, false);
+    assert.match(JSON.stringify(warning), /DeepSeek.*If you draft anyway/);
+    const [count] = await sql<{
+      count: number;
+    }>`select count(*) as count from desk_jobs where user_id='fm1-warning'`;
+    assert.equal(Number(count.count), 0);
+    const result = await commitStoryDraftForAuthenticatedEditor(
+      { ...input, override: ["writer-not-ready"] },
+      deps,
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail("Draft anyway must queue the ready fallback");
+    const [job] = await sql<{
+      result_json: string;
+    }>`select result_json from desk_jobs where id=${result.jobId}`;
+    const receipt = JSON.parse(job.result_json);
+    assert.equal(receipt.requestedRuntime, "deepseek-flash");
+    assert.equal(receipt.actualRuntime, "codex-frontier");
+  } finally {
+    await sql.query("delete from model_assignments where newsroom_id=1 and job_key='story-draft'");
+  }
+});
+
 for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) it(`warns for signed-out ${choice}, then records the accepted hop`, async () => {
   const sql = await getSql();
-  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku','Picker regression','Why') returning id`;
-  const input = { context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice };
+  const [lead] = await sql<{ id: number ;
+    }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku','Picker regression','Why') returning id`;
+  const input = { context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice ,
+    };
   const deps = {
     probeProvider: async (pick: string | undefined) => pick === choice
       ? { ok: false as const, error: "Claude Code is signed out. Sign in again." }
@@ -49,12 +163,16 @@ for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claud
   };
   const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
   assert.equal(warning.ok, false);
-  assert.match(JSON.stringify(warning), /Claude is signed out on this server.*If you draft anyway/);
-  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps);
+  assert.match(JSON.stringify(warning), /Claude is signed out on this server.*If you draft anyway/,
+    );
+  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps,
+    );
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  const [job] = await sql<{ failover_note: string; result_json: string }>`select failover_note,result_json from desk_jobs where id=${result.jobId}`;
-  assert.equal(job.failover_note, `${modelChoiceLabel(choice)}: Claude is signed out on this server. Sign in once: run claude auth login on the server. -> Codex Sol 6.1`);
+  const [job] = await sql<{ failover_note: string; result_json: string ;
+    }>`select failover_note,result_json from desk_jobs where id=${result.jobId}`;
+  assert.equal(job.failover_note, `${modelChoiceLabel(choice)}: Claude is signed out on this server. Sign in once: run claude auth login on the server. -> Codex Sol 6.1`,
+    );
   const receipt = JSON.parse(job.result_json);
   assert.equal(receipt.requestedRuntime, choice);
   assert.equal(receipt.actualRuntime, "codex-frontier");
@@ -63,11 +181,14 @@ for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claud
 for (const [error, reason] of [
   ["Claude CLI not found", "Claude Code is not installed on this server."],
   ["Claude Haiku usage limit exceeded", "Claude Haiku hit its usage limit."],
-  ["Claude Haiku is unavailable: local service failed", "Claude Haiku is not ready: Claude Haiku is unavailable: local service failed"],
+  ["Claude Haiku is unavailable: local service failed", "Claude Haiku is not ready: Claude Haiku is unavailable: local service failed",
+  ],
 ]) it(`records the picker readiness reason for ${error}`, async () => {
   const sql = await getSql();
-  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku-reason','Picker reason regression','Why') returning id`;
-  const input = { context: { userId: "picker-haiku-reason", newsroomId: 1 }, leadId: lead.id, modelChoice: "claude-haiku" as const };
+  const [lead] = await sql<{ id: number ;
+    }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku-reason','Picker reason regression','Why') returning id`;
+  const input = { context: { userId: "picker-haiku-reason", newsroomId: 1 }, leadId: lead.id, modelChoice: "claude-haiku" as const ,
+    };
   const deps = {
     probeProvider: async (pick: string | undefined) => pick === "claude-haiku"
       ? { ok: false as const, error }
@@ -77,10 +198,12 @@ for (const [error, reason] of [
   const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
   assert.equal(warning.ok, false);
   assert.ok(JSON.stringify(warning).includes(reason));
-  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps);
+  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps,
+    );
   assert.equal(result.ok, true);
   if (!result.ok) assert.fail("Acknowledged unavailable Haiku must use the ready fallback");
-  const [job] = await sql<{ failover_note: string }>`select failover_note from desk_jobs where id=${result.jobId}`;
+  const [job] = await sql<{ failover_note: string ;
+    }>`select failover_note from desk_jobs where id=${result.jobId}`;
   assert.equal(job.failover_note, `Claude Haiku: ${reason} -> Codex Sol 6.1`);
 });
 
@@ -97,10 +220,12 @@ it("enqueues ready Haiku with the editor's visible model, effort and scope", asy
       return { ok: true, choice: "claude-haiku", label: "Claude Haiku" };
     },
     enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
-  });
+  },
+  );
   assert.equal(result.ok, true);
   if (!result.ok) assert.fail("Ready Haiku must enqueue");
-  const [job] = await sql<{ model_choice: string; model_choice_source: string; research_scope: string; result_json: string }>`
+  const [job] = await sql<{ model_choice: string; model_choice_source: string; research_scope: string; result_json: string ;
+  }>`
     select model_choice,model_choice_source,research_scope,result_json from desk_jobs where id=${result.jobId}`;
   assert.equal(job.model_choice, "claude-haiku");
   assert.equal(job.model_choice_source, "editor");
@@ -161,12 +286,16 @@ async function ensureCommitBoundarySchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      research_scope text not null default 'public',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
       finished_at timestamptz
     )
   `);
+  await sql.query("alter table editorial_requests add column if not exists voice_mode text not null default 'paper'",
+  );
+  await sql.query("alter table editorial_requests add column if not exists research_scope text not null default 'public'");
   await sql.query(`
     create table if not exists leads (
       id serial primary key,
@@ -202,12 +331,14 @@ async function ensureCommitBoundarySchema() {
   `);
   // Section filing guards require their actual sources/article dependencies,
   // plus the topic and queued-snapshot columns absent from this older fixture.
-  const core = await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8");
+  const core = await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8",
+  );
   for (const table of ["sources", "articles"]) {
     const ddl = core.match(new RegExp(`create table if not exists ${table} \\([\\s\\S]*?\\);`));
     assert.ok(ddl, `missing migration-owned ${table} definition`);
     await sql.query(ddl[0]);
-    await sql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
+    await sql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`,
+    );
   }
   await sql.query(`create table if not exists drafts (
     id serial primary key,user_id text not null,newsroom_id integer not null default 1,
@@ -215,14 +346,24 @@ async function ensureCommitBoundarySchema() {
     body text not null default '',topic text not null default 'council',
     source_urls text not null default '[]',form text not null default 'reported'
   )`);
-  await sql.query("alter table drafts add column if not exists topic text not null default 'council'");
+  await sql.query("alter table drafts add column if not exists topic text not null default 'council'",
+  );
   await sql.query("alter table scan_runs add column if not exists section_snapshot text");
   return sql;
 }
 
 describe("authenticated Codex commit boundary", () => {
   const readyOpinionDeps = {
-    checkReadiness: async () => ({ ready: true, why: "", problems: [], effectiveChoice: "auto" as const }),
+    checkReadiness: async () => ({
+      ready: true,
+      modelReady: true,
+      voiceReady: true,
+      voiceProblem: null,
+      modelProblems: [],
+      why: "",
+      problems: [],
+      effectiveChoice: "auto" as const,
+    }),
     ensureEditorialRequestSchema: async () => undefined,
     assertRate: async () => undefined,
     enqueueJob: (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
@@ -240,13 +381,16 @@ describe("authenticated Codex commit boundary", () => {
     await sql.query(`insert into story_documents
       (id,newsroom_id,user_id,editorial_request_id,filename,mime,original,status)
       values($1,1,$2,$3,'minutes.pdf','application/pdf',$4,'uploaded')`,
-      [documentId, userId, old.id, Buffer.from("retained attachment")]);
+      [documentId, userId, old.id, Buffer.from("retained attachment")],
+    );
     const result = await commitOpinionForAuthenticatedEditor({
       context: { userId, newsroomId: 1 }, subject: "", retryRequestId: old.id, modelChoice: "auto",
-    }, readyOpinionDeps);
+    }, readyOpinionDeps,
+    );
     assert.equal(result.ok, true, result.ok ? "" : (result as any).error);
     if (result.ok) {
-      const [doc] = await sql<{ editorial_request_id: number }>`select editorial_request_id from story_documents where id=${documentId}`;
+      const [doc] = await sql<{ editorial_request_id: number ;
+      }>`select editorial_request_id from story_documents where id=${documentId}`;
       assert.equal(doc?.editorial_request_id, result.requestId);
       await sql`delete from desk_jobs where id=${result.jobId}`;
     }
@@ -269,17 +413,21 @@ describe("authenticated Codex commit boundary", () => {
       (id,newsroom_id,user_id,editorial_request_id,filename,mime,original,status) values
       ($1,1,$3,$5,'Opinion desk pasted material.txt','text/plain',$6,'uploaded'),
       ($2,1,$3,$5,'Opinion desk pasted material.txt','text/plain',$4,'uploaded')`,
-      [generatedId, userUploadId, userId, Buffer.from("independent user attachment"), old.id, Buffer.from(oldText)]);
+      [generatedId, userUploadId, userId, Buffer.from("independent user attachment"), old.id, Buffer.from(oldText),
+      ],
+    );
     const result = await commitOpinionForAuthenticatedEditor({
       context: { userId, newsroomId: 1 }, subject: editedText, retryRequestId: old.id, modelChoice: "auto",
-    }, readyOpinionDeps);
+    }, readyOpinionDeps,
+    );
     assert.equal(result.ok, true, result.ok ? "" : (result as any).error);
     if (result.ok) {
       const docs = await sql.query<{ id: string; text: string }>(
         "select id,convert_from(original,'UTF8') as text from story_documents where editorial_request_id=$1 order by id",
         [result.requestId],
       );
-      assert.ok(docs.some((doc) => doc.id === userUploadId && doc.text === "independent user attachment"));
+      assert.ok(docs.some((doc) => doc.id === userUploadId && doc.text === "independent user attachment"),
+      );
       assert.ok(docs.some((doc) => doc.text === editedText));
       assert.ok(!docs.some((doc) => doc.id === generatedId || doc.text === oldText));
       await sql`delete from desk_jobs where id=${result.jobId}`;
@@ -332,6 +480,7 @@ describe("authenticated Codex commit boundary", () => {
         pointers_json text not null default '[]',
         our_story_json text,
         model_choice text not null default 'auto',
+        research_scope text not null default 'public',
         draft_id integer,
         error text,
         created_at timestamptz not null default now(),
@@ -501,7 +650,8 @@ describe("authenticated Codex commit boundary", () => {
             findVoice: async () => ({ ok: true as const, voice: { path: "C:/voice.md" } }),
             probeCandidate: async (candidate) => {
               opinionCandidates.push(candidate);
-              return { ok: false as const, error: 'Claude Code needs you to sign in again. Open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.' };
+              return { ok: false as const, error: "Claude Code needs you to sign in again. Open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.",
+              };
             },
           }),
         enqueueJob: async (opts) => {
@@ -587,6 +737,10 @@ describe("authenticated Codex commit boundary", () => {
       {
         checkReadiness: async () => ({
           ready: true,
+          modelReady: true,
+          voiceReady: true,
+          voiceProblem: null,
+          modelProblems: [],
           why: "",
           problems: [],
           effectiveChoice: "auto" as const,
@@ -629,7 +783,7 @@ describe("authenticated Codex commit boundary", () => {
     carry that choice all the way to both the `editorial_requests` row and
     the queued `desk_jobs` row -- not just trust the fix upstream.
   */
-  it("persists and enqueues an explicit local-model pick, not claude-frontier", async () => {
+  it("persists the Opinion research scope and enqueues the explicit local-model pick", async () => {
     const sql = await ensureCommitBoundarySchema();
     const userId = `opinion-local-model-${Date.now()}-${Math.random()}`;
     const selected = { baseUrl: "https://ollama.example/v1", id: "glm-5.2:cloud" };
@@ -639,6 +793,7 @@ describe("authenticated Codex commit boundary", () => {
         context: { userId, newsroomId: 1 },
         subject: "Longmont should fund a second library branch downtown.",
         modelChoice: "local-model",
+        researchScope: "supplied",
       },
       {
         checkReadiness: (choice) =>
@@ -667,10 +822,11 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(result.modelChoice, "local-model");
     assert.equal(enqueuedChoice, "local-model");
 
-    const [request] = await sql<{ model_choice: string }>`
-      select model_choice from editorial_requests where user_id = ${userId}
+    const [request] = await sql<{ model_choice: string; research_scope: string }>`
+      select model_choice, research_scope from editorial_requests where user_id = ${userId}
     `;
     assert.equal(request?.model_choice, "local-model");
+    assert.equal(request?.research_scope, "supplied");
 
     const [job] = await sql<{ model_choice: string; result_json: string }>`
       select model_choice, result_json from desk_jobs where kind = 'editorial' and user_id = ${userId}
@@ -681,7 +837,8 @@ describe("authenticated Codex commit boundary", () => {
       "the queued job must run the picked local model, not fall back to Claude",
     );
     assert.deepEqual(JSON.parse(job?.result_json ?? "{}").localModel, selected,
-      "the queued job must retain the exact endpoint/model that Opinion preflight approved");
+      "the queued job must retain the exact endpoint/model that Opinion preflight approved",
+    );
     await sql`delete from editorial_requests where user_id = ${userId}`;
   });
 
@@ -700,6 +857,10 @@ describe("authenticated Codex commit boundary", () => {
         {
           checkReadiness: async () => ({
             ready: true,
+            modelReady: true,
+            voiceReady: true,
+            voiceProblem: null,
+            modelProblems: [],
             why: "",
             problems: [],
             effectiveChoice: "auto" as const,

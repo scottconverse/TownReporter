@@ -284,7 +284,7 @@ describe("U24: a killed lead is not on its way anywhere", () => {
     list is hidden only when there is no draft to prepare, whatever the status.
   */
   it("keeps the list on a killed or held draft, and hides it only with no draft", () => {
-    for (const status of ["new", "drafted", "held", "killed", "published"]) {
+    for (const status of ["new", "drafted", "held", "killed"]) {
       assert.equal(showsPublishPrep(status, true), true, `${status} with a draft shows the work`);
       assert.equal(
         showsPublishPrep(status, false),
@@ -292,6 +292,17 @@ describe("U24: a killed lead is not on its way anywhere", () => {
         `${status} with no draft must not show publish-prep work`,
       );
     }
+  });
+
+  it("hides the list on a published story, which has nothing left to publish (DHE2-1)", () => {
+    /*
+      Walk E2, DHE2-1: a published lead's Story page still said "No section has
+      been chosen for this story. Pick a section" and "Before you can publish 3
+      warnings". The story is already in print, so a countdown to a press that
+      cannot happen again is the desk contradicting itself.
+    */
+    assert.equal(showsPublishPrep("published", true), false, "a published story with a draft shows no prep list");
+    assert.equal(showsPublishPrep("published", false), false, "a published story with no draft shows no prep list");
   });
 
   it("gives a killed or held draft a warning that names the one press, not a silent absence", () => {
@@ -415,4 +426,22 @@ describe("U24: claims the evidence check raised and nobody judged", () => {
     );
     assert.match(only?.sentence ?? "", /^2 claims need review \(2 contradicted by the record\)\./);
   });
+});
+
+// guards: DHC05 -- the killed-lead card names the button it presses, and says what that press does before the press.
+it("a killed lead's warning names the Publish anyway button and says the press publishes the draft", () => {
+  const row = publishBlockers(withState({ leadStatus: "killed" })).find((blocker) => blocker.key === "lead-killed");
+  assert.ok(row, "a killed lead produces its warning");
+  assert.equal(row!.action?.label, "Publish anyway");
+  assert.match(row!.sentence, /Publish anyway/, "the sentence names the button the editor presses");
+  assert.match(row!.sentence, /publishes this draft/, "the sentence says the press publishes");
+});
+
+// guards: DHD2-2 -- the held and killed cards' "Publish anyway" press publishes on its first press, so its target is the publish-now press, not a scroll to the bar.
+it("the killed and held cards' Publish anyway press publishes now rather than scrolling to the bar", () => {
+  for (const leadStatus of ["killed", "held"]) {
+    const row = publishBlockers(withState({ leadStatus })).find((blocker) => blocker.action?.label === "Publish anyway");
+    assert.ok(row, `a ${leadStatus} lead's card has a Publish anyway press`);
+    assert.deepEqual(row!.action?.target, { kind: "publish-now" }, `${leadStatus}: the press must publish, not only point at the bar`);
+  }
 });

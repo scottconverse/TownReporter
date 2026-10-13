@@ -36,6 +36,7 @@ import { test } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 import { parseHTML } from "linkedom";
 
 /* ------------------------------------------------------------------ the DOM */
@@ -184,6 +185,7 @@ async function answer(fn, data) {
 export const addCorrection = async ({ data }) => answer("addCorrection", data);
 export const suggestCorrectionWording = async ({ data }) => answer("suggestCorrectionWording", data);
 export const setLeadStatus = async ({ data }) => answer("setLeadStatus", data);
+export const restoreKilledLead = async ({ data }) => answer("restoreKilledLead", data);
 `;
 const deskStubUrl = stub(deskStubSrc);
 const desk = await import(deskStubUrl);
@@ -240,6 +242,9 @@ const dialogPressUrl = moduleUrl(
   "dialog-press.ts",
 );
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
+  "../fast-kill": await sharedModuleUrl("src/components/fast-kill.ts"),
+  "../editor-warning-consent.ts": await sharedModuleUrl("src/components/editor-warning-consent.ts"),
+  "../desk-toast.ts": await sharedModuleUrl("src/components/desk-toast.ts"),
   "@/components/dialog": dialogUrl,
   "@/lib/news/desk": deskStubUrl,
   "@/components/scoped-actions": deskStubUrl,
@@ -521,6 +526,7 @@ test("the happy kill sends the reason, and no link when none was given", async (
       data: {
         id: 7,
         status: "killed",
+        override: undefined,
         killReason: "Matches a story we have already printed.",
         killReasonUrl: undefined,
       },
@@ -528,6 +534,43 @@ test("the happy kill sends the reason, and no link when none was given", async (
   ]);
   assert.equal(killed, 1, "the page is told, so it can refetch the lead");
   assert.equal(document.querySelectorAll(".astra-modal-layer").length, 0, "a landed kill closes");
+  await page.close();
+});
+
+test("DHC04: the first kill of a drafted lead says the draft is kept, and one press kills it", async () => {
+  desk.__reset();
+  const page = await mount(
+    openHost((open, setOpen) =>
+      React.createElement(KillDialog, { leadId: 7, leadStatus: "drafted", open, onOpenChange: setOpen }),
+    ),
+  );
+  assert.match(
+    lastLayer().textContent,
+    /This lead has a written draft that is not printed\. Killing keeps the draft\./,
+  );
+  await page.click(radio("Already printed"));
+  await page.click(button("Kill with this reason"));
+  assert.equal(desk.calls.length, 1, "one press, one kill: no second warning card");
+  assert.deepEqual(desk.calls[0].data.override, ["lead-status-drafted"]);
+  await page.close();
+});
+
+test("DHD2-1: a lead with a saved draft shows the draft warning even when its status reads new", async () => {
+  desk.__reset();
+  const page = await mount(
+    openHost((open, setOpen) =>
+      React.createElement(KillDialog, { leadId: 7, leadStatus: "new", hasDraft: true, open, onOpenChange: setOpen }),
+    ),
+  );
+  assert.match(
+    lastLayer().textContent,
+    /This lead has a written draft that is not printed\. Killing keeps the draft\./,
+    "the first panel names the draft on the Story page path, whatever the status says",
+  );
+  await page.click(radio("Already printed"));
+  await page.click(button("Kill with this reason"));
+  assert.equal(desk.calls.length, 1, "one press, one kill");
+  assert.deepEqual(desk.calls[0].data.override, ["lead-status-drafted"]);
   await page.close();
 });
 
@@ -544,6 +587,7 @@ test("a link is sent with the reason, and is never sent on its own", async () =>
   assert.deepEqual(desk.calls[0].data, {
     id: 7,
     status: "killed",
+    override: undefined,
     killReason: "Outside our coverage area.",
     killReasonUrl: "https://example.test/notice",
   });
@@ -560,7 +604,7 @@ test("'Kill, no reason' kills without a reason at all", async () => {
   assert.equal(button("Kill, no reason").disabled, false, "no reason is allowed");
   await page.click(button("Kill, no reason"));
   assert.deepEqual(desk.calls, [
-    { fn: "setLeadStatus", data: { id: 7, status: "killed", killReason: undefined, killReasonUrl: undefined } },
+    { fn: "setLeadStatus", data: { id: 7, status: "killed", override: undefined, killReason: undefined, killReasonUrl: undefined } },
   ]);
   await page.close();
 });

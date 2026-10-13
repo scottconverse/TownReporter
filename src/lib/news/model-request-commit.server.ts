@@ -1,3 +1,4 @@
+import { resolveRequestedJobModel } from "./job-model-runtime.server.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { siteUrl } from "../paper.ts";
@@ -5,7 +6,8 @@ import { probeProvider } from "./ai.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { assertRate, checkRate, recordDeskRun, audit } from "./ops.ts";
-import { enqueueJob, findOpenJob, kickJobs, requestJobCancel, setJobFailoverNote, setJobStage } from "./jobs.ts";
+import { enqueueJob, findOpenJob, kickJobs, requestJobCancel, setJobFailoverNote, setJobStage ,
+} from "./jobs.ts";
 import { readinessFailureMessage, writerReadinessWarning } from "./writer-bar.ts";
 import { scanPreflight } from "./preflight.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
@@ -18,10 +20,11 @@ import {
   type StoryModelChoice,
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
-import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { recordedModelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
-import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey } from "./sections.server.ts";
+import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey ,
+} from "./sections.server.ts";
 import {
   meetingTranscriptRunConflict,
   meetingTranscriptSelectionRefused,
@@ -29,9 +32,9 @@ import {
   type TopicSection,
 } from "./desk-copy.ts";
 import {
-  defaultMeetingTranscriptArtifactId,
-} from "./meeting-transcript-choice.ts";
-import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
+  defaultMeetingTranscriptArtifactId} from "./meeting-transcript-choice.ts";
+import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover ,
+} from "./automatic-failover.ts";
 import { paperSetupWarning } from "./paper-settings.ts";
 import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
 import { auditOverrides, checkOverride } from "./override.ts";
@@ -66,7 +69,8 @@ export const OPINION_MATERIAL_WARN = 20_000_000;
   Nothing is enqueued, no rate unit is charged and no provider is probed before
   this line.
 */
-async function paperSetupRefusalFor(context: AuthenticatedEditorContext, action: string, override?: readonly string[]) {
+async function paperSetupRefusalFor(context: AuthenticatedEditorContext, action: string, override?: readonly string[],
+) {
   const refusal = await paperSetupWarning(context, override, action);
   if (refusal === null) return null;
   /*
@@ -87,7 +91,8 @@ async function paperSetupRefusalFor(context: AuthenticatedEditorContext, action:
   };
 }
 
-function commitWarning(warning: EditorWarningResult, kind?: "model-conflict", modelChoice?: ReturnType<typeof effectiveStoryModelChoice>, jobId?: number) {
+function commitWarning(warning: EditorWarningResult, kind?: "model-conflict", modelChoice?: ReturnType<typeof effectiveStoryModelChoice>, jobId?: number,
+) {
   return { ...warning, kind, modelChoice, jobId, pending: undefined, detail: "", retryable: true };
 }
 
@@ -149,16 +154,20 @@ async function prepareStoryWriter(
       select name,model_id from custom_ai_connections
       where id=${modelChoice.slice(7)} and newsroom_id=${context.newsroomId}
     `;
-    if (connection) customModelLabel = modelChoiceLabel(modelChoice, "story", { name: connection.name, modelId: connection.model_id });
+    if (connection) customModelLabel = modelChoiceLabel(modelChoice, "story", { name: connection.name, modelId: connection.model_id ,
+      });
   }
   const requestedLabel = customModelLabel ?? modelChoiceLabel(modelChoice);
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
-  let preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, false, false, requestedLabel);
+  let preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, false, false, requestedLabel,
+  );
   if (!preflight.probe.ok && modelChoice !== "auto") {
     const reason = readinessFailureMessage(modelChoice, requestedLabel, preflight.probe.error);
-    const warning = await editorWarning(context, override, "writer-not-ready", writerReadinessWarning(reason), target);
+    const warning = await editorWarning(context, override, "writer-not-ready", writerReadinessWarning(reason), target,
+    );
     if (warning) return commitWarning(warning);
-    preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, true, true, requestedLabel);
+    preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, true, true, requestedLabel,
+    );
   }
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, modelChoice);
@@ -207,6 +216,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     override?: string[];
     leadId: number;
     modelChoice: StoryModelChoice;
+    modelChoiceExplicit?: boolean;
     modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
     meetingArtifactId?: number;
@@ -222,6 +232,18 @@ export async function commitStoryDraftForAuthenticatedEditor(
 ) {
   const refusal = await paperSetupRefusalFor(input.context, "draft this story", input.override);
   if (refusal) return refusal;
+  const assignment = await resolveRequestedJobModel(
+    input.context.newsroomId,
+    "story-draft",
+    input.modelChoice,
+    input.modelEffort,
+    input.modelChoiceExplicit,
+  );
+  input = {
+    ...input,
+    modelChoice: assignment.providerId as typeof input.modelChoice,
+    modelEffort: assignment.effort,
+  };
   const sql = await (deps.getSql ?? getSql)();
   const leads = await sql<{
     id: number; status: string; notes_json?: string; meeting_video_id: string | null;
@@ -234,37 +256,43 @@ export async function commitStoryDraftForAuthenticatedEditor(
   `;
   if (!leads[0]) return { ok: false as const, error: "Lead not found" };
   if (leads[0].status === "killed") {
-    const warning = await editorWarning(input.context, input.override, "lead-killed-draft", "This lead was killed. Drafting it will put it back on the desk.", { kind: "lead", id: input.leadId });
+    const warning = await editorWarning(input.context, input.override, "lead-killed-draft", "This lead was killed. Drafting it will put it back on the desk.", { kind: "lead", id: input.leadId },
+    );
     if (warning) return commitWarning(warning);
   }
 
   let meetingArtifactId: number | null = null;
   let meetingVideoId: string | null = null;
   if (leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id) {
-    const choices = await loadMeetingTranscriptChoices(sql, input.context.newsroomId, leads[0].meeting_video_id);
+    const choices = await loadMeetingTranscriptChoices(sql, input.context.newsroomId, leads[0].meeting_video_id,
+    );
     const requestedArtifactId = input.meetingArtifactId ?? defaultMeetingTranscriptArtifactId(choices)
       ?? (leads[0].meeting_artifact_id == null ? null : Number(leads[0].meeting_artifact_id));
     if (requestedArtifactId != null && !choices.some((choice) => choice.artifactId === requestedArtifactId)) {
-      const [artifact] = await sql<{ id: number; video_id: string }>`select id,video_id from meeting_transcript_artifacts where id=${requestedArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
+      const [artifact] = await sql<{ id: number; video_id: string ;
+      }>`select id,video_id from meeting_transcript_artifacts where id=${requestedArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
       if (!artifact) return { ok: false as const, error: "That transcript is not in this newsroom." };
-      const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", meetingTranscriptSelectionRefused, { kind: "lead", id: input.leadId });
+      const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", meetingTranscriptSelectionRefused, { kind: "lead", id: input.leadId },
+      );
       if (warning) return commitWarning(warning);
       meetingVideoId = artifact.video_id;
     }
     meetingArtifactId = requestedArtifactId;
   } else if (input.meetingArtifactId != null) {
-    const [artifact] = await sql<{ id: number; video_id: string }>`select id,video_id from meeting_transcript_artifacts where id=${input.meetingArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
+    const [artifact] = await sql<{ id: number; video_id: string ;
+    }>`select id,video_id from meeting_transcript_artifacts where id=${input.meetingArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
     if (!artifact) return { ok: false as const, error: "That transcript is not in this newsroom." };
-    const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", noMeetingTranscriptToChoose, { kind: "lead", id: input.leadId });
+    const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", noMeetingTranscriptToChoose, { kind: "lead", id: input.leadId },
+    );
     if (warning) return commitWarning(warning);
     meetingArtifactId = input.meetingArtifactId;
     meetingVideoId = artifact.video_id;
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  const writer = deps.writerPreflight ?? await prepareStoryWriter(
-    input.context, input.modelChoice, input.override, sql, deps, { kind: "lead", id: input.leadId },
-  );
+  const writer = deps.writerPreflight ?? (await prepareStoryWriter(
+    input.context, input.modelChoice, input.override, sql, deps, { kind: "lead", id: input.leadId ,
+    }));
   if (!writer.ok) return writer;
   const { preflight, customModelLabel, effectiveChoice } = writer;
   const providerProbe = preflight.probe;
@@ -274,7 +302,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     ok: false as const, kind: ready.kind, error: ready.guidance,
     detail: ready.detail, retryable: ready.retryable,
   };
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined);
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "draft",
@@ -284,7 +312,8 @@ export async function commitStoryDraftForAuthenticatedEditor(
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
     let restart = false;
     if (persistedChoice !== effectiveChoice || (open.research_scope ?? "public") !== researchScope) {
-      const warning = await editorWarning(input.context, input.override, "model-change-running", `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      const warning = await editorWarning(input.context, input.override, "model-change-running", `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id },
+      );
       if (warning) return commitWarning(warning, "model-conflict", persistedChoice, open.id);
       restart = true;
     }
@@ -292,16 +321,19 @@ export async function commitStoryDraftForAuthenticatedEditor(
       let openArtifactId: number | null = null;
       try { openArtifactId = JSON.parse(open.result_json || "{}").meetingArtifactId ?? null; } catch { /* older receipt */ }
       if (openArtifactId !== meetingArtifactId) {
-        const warning = await editorWarning(input.context, input.override, "transcript-run-conflict", meetingTranscriptRunConflict, { kind: "job", id: open.id });
+        const warning = await editorWarning(input.context, input.override, "transcript-run-conflict", meetingTranscriptRunConflict, { kind: "job", id: open.id },
+        );
         if (warning) return commitWarning(warning);
         restart = true;
       }
     }
-    if (!restart) return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice };
+    if (!restart) return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice ,
+      };
   }
   if (deps.assertRate) await deps.assertRate(input.context.userId, "draft", input.context.newsroomId);
   else if (!deps.ratePreflight) {
-    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false });
+    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false },
+    );
     if (rate) return commitWarning(rate);
   }
   if (open) await requestJobCancel(open.id);
@@ -316,14 +348,15 @@ export async function commitStoryDraftForAuthenticatedEditor(
     resultJson: JSON.stringify({
       ...initialModelRuntimeReceipt({
         requestedRuntime: input.modelChoice,
-        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
         localModel: providerProbe.ok ? providerProbe.localModel : undefined,
         skippedRungs: providerProbe.skippedRungs,
         preflightFailover: preflight.switchReceipt,
       }),
-      ...(customModelLabel ? { requestedCustomModelLabel: customModelLabel, ...(effectiveChoice === input.modelChoice ? { customModelLabel } : {}) } : {}),
+      ...(customModelLabel ? { requestedCustomModelLabel: customModelLabel, ...(effectiveChoice === input.modelChoice ? { customModelLabel } : {}) ,
+          } : {}),
       ...(leads[0].status === "killed" ? { allowKilledLead: true } : {}),
       ...(meetingVideoId ? { meetingVideoId } : {}),
       ...(input.reuseLedger ? { reuseLedger: true } : {}),
@@ -374,6 +407,7 @@ export async function commitScanForAuthenticatedEditor(
     context: AuthenticatedEditorContext;
     override?: string[];
     modelChoice: StoryModelChoice;
+    modelChoiceExplicit?: boolean;
     modelEffort?: ModelEffort | null;
     sectionKey?: string;
     daily?: boolean;
@@ -386,8 +420,21 @@ export async function commitScanForAuthenticatedEditor(
 ) {
   const refusal = await paperSetupRefusalFor(input.context, "start the scan", input.override);
   if (refusal) return refusal;
+  const assignment = await resolveRequestedJobModel(
+    input.context.newsroomId,
+    "scan",
+    input.modelChoice,
+    input.modelEffort,
+    input.modelChoiceExplicit,
+  );
+  input = {
+    ...input,
+    modelChoice: assignment.providerId as typeof input.modelChoice,
+    modelEffort: assignment.effort,
+  };
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "scan"));
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe,
+  );
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
@@ -410,10 +457,11 @@ export async function commitScanForAuthenticatedEditor(
       retryable: true,
     };
   }
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined);
   let sectionSnapshot;
   try {sectionSnapshot=await sectionScanSnapshot(input.context.newsroomId,input.sectionKey);}
-  catch(error) {return {ok:false as const,error:error instanceof Error?error.message:"Invalid section.",detail:"Open Paper setup to review the section and its assigned sources.",retryable:true};}
+  catch(error) {return {ok:false as const,error:error instanceof Error?error.message:"Invalid section.",detail:"Open Paper setup to review the section and its assigned sources.",retryable:true,
+    };}
   /*
     P0-1/P0-2: a Custom scan persists the exact accepted source set BEFORE any
     fetch begins. A pack is resolved to its CURRENT accepted membership here,
@@ -447,7 +495,8 @@ export async function commitScanForAuthenticatedEditor(
     }
   }
   if (input.daily && (customSnapshot || sectionSnapshot))
-    return { ok: false as const, error: "Choose the daily scan or a separate source scope.", retryable: true };
+    return { ok: false as const, error: "Choose the daily scan or a separate source scope.", retryable: true ,
+    };
   const scopeSnapshot = customSnapshot ?? sectionSnapshot;
   await ensureSectionsSchema();
   const open = await (deps.findOpenJob ?? findOpenJob)({
@@ -456,16 +505,20 @@ export async function commitScanForAuthenticatedEditor(
   });
   if (open) {
     const scanSql=await (deps.getSql??getSql)();
-    const [existing]=await scanSql<{section_snapshot:string|null;policy_snapshot:string|null}>`select section_snapshot,policy_snapshot from scan_runs where id=${open.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const [existing]=await scanSql<{section_snapshot:string|null;policy_snapshot:string|null;
+    }>`select section_snapshot,policy_snapshot from scan_runs where id=${open.subject_id} and newsroom_id=${input.context.newsroomId}`;
     const existingKey=existing?.section_snapshot?(JSON.parse(existing.section_snapshot).key??null):null;
-    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true};
+    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true,
+      };
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
     if (persistedChoice !== effectiveChoice) {
-      const warning = await editorWarning(input.context, input.override, "model-change-running", `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      const warning = await editorWarning(input.context, input.override, "model-change-running", `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id },
+      );
       if (warning) return commitWarning(warning, "model-conflict", persistedChoice, open.id);
     } else {
       (deps.kickJobs ?? kickJobs)();
-      return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice };
+      return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice ,
+      };
     }
   }
 
@@ -474,11 +527,13 @@ export async function commitScanForAuthenticatedEditor(
   if (input.daily) {
     const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
     try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId, undefined, true); }
-    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true }; }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true ,
+      }; }
   }
   if (deps.assertRate) await deps.assertRate(input.context.userId, "scan", input.context.newsroomId);
   else {
-    const rate = await checkRate(input.context.userId, "scan", input.context.newsroomId, input.override, { record: false });
+    const rate = await checkRate(input.context.userId, "scan", input.context.newsroomId, input.override, { record: false },
+    );
     if (rate) return commitWarning(rate);
   }
   if (open) {
@@ -488,7 +543,7 @@ export async function commitScanForAuthenticatedEditor(
   }
   const runRows = await sql<{ id: number }>`
     insert into scan_runs (user_id, newsroom_id, section_snapshot, source_snapshot, policy_snapshot, source_coverage)
-    values (${input.context.userId}, ${input.context.newsroomId}, ${scopeSnapshot?JSON.stringify(scopeSnapshot):null},
+    values (${input.context.userId}, ${input.context.newsroomId}, ${scopeSnapshot ? JSON.stringify(scopeSnapshot) : null},
       ${dailyPlan ? JSON.stringify(dailyPlan.prioritySources) : null}, ${dailyPlan ? JSON.stringify(dailyPlan.policy) : null},
       ${JSON.stringify(dailyPlan?.coverage ?? [])}::jsonb) returning id
   `;
@@ -502,13 +557,14 @@ export async function commitScanForAuthenticatedEditor(
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
     resultJson: JSON.stringify(initialModelRuntimeReceipt({
       requestedRuntime: input.modelChoice,
-      requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+      requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined),
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
       skippedRungs: providerProbe.skippedRungs,
       preflightFailover: preflight.switchReceipt,
-    })),
+    }),
+    ),
   });
   if (!deps.assertRate) await recordDeskRun(input.context.userId, "scan", input.context.newsroomId);
   if (preflight.switchReceipt) {
@@ -517,9 +573,11 @@ export async function commitScanForAuthenticatedEditor(
   }
   if (job.subject_id !== runId) {
     await sql`update scan_runs set finished_at=now(),error='Another scan was queued first. This request did not run.' where id=${runId} and newsroom_id=${input.context.newsroomId}`;
-    const [existing]=await sql<{section_snapshot:string|null;policy_snapshot:string|null}>`select section_snapshot,policy_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const [existing]=await sql<{section_snapshot:string|null;policy_snapshot:string|null;
+    }>`select section_snapshot,policy_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
     const existingKey=existing?.section_snapshot?(JSON.parse(existing.section_snapshot).key??null):null;
-    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy was queued first. Wait for it to finish before starting this scan.",detail:"Your requested section scan did not run.",retryable:true};
+    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy was queued first. Wait for it to finish before starting this scan.",detail:"Your requested section scan did not run.",retryable:true,
+      };
   }
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice) {
@@ -579,13 +637,28 @@ export async function commitOpinionForAuthenticatedEditor(
     documentIds?: string[];
     retryRequestId?: number;
     modelChoice: OpinionModelChoice;
+    modelChoiceExplicit?: boolean;
     modelEffort?: ModelEffort | null;
+    voiceMode?: "paper" | "neutral";
+    researchScope?: "public" | "supplied";
 
   },
   deps: OpinionCommitDeps = {},
 ) {
   const refusal = await paperSetupRefusalFor(input.context, "start an editorial", input.override);
   if (refusal) return refusal;
+  const assignment = await resolveRequestedJobModel(
+    input.context.newsroomId,
+    "opinion",
+    input.modelChoice,
+    input.modelEffort,
+    input.modelChoiceExplicit,
+  );
+  input = {
+    ...input,
+    modelChoice: assignment.providerId as typeof input.modelChoice,
+    modelEffort: assignment.effort,
+  };
   /*
     A repeated document is a boundary, not a size the editor may step over: the
     same file cannot be attached twice.
@@ -623,8 +696,11 @@ export async function commitOpinionForAuthenticatedEditor(
   const subject = (sourceText.split(/\r?\n/).find((line) => line.trim())?.trim() || "Editorial from attached documents").slice(0, 400);
 
   const checkReadiness = deps.checkReadiness ?? checkOpinionReadiness;
-  let readiness = await checkReadiness(input.modelChoice, {}, input.context.newsroomId);
-  let opinionPreflight: null | { requested: string; resolved: string; reason: string; note: string; stage: string } = null;
+  const readinessOptions = { requireVoice: input.voiceMode !== "neutral" };
+  let readiness = await checkReadiness(input.modelChoice, {}, input.context.newsroomId, readinessOptions,
+  );
+  let opinionPreflight: null | { requested: string; resolved: string; reason: string; note: string; stage: string ;
+  } = null;
   if (!readiness.ready) {
     const plan = await planAutomaticFailover({
       source: input.modelChoice === "auto" ? "auto" : "editor",
@@ -632,21 +708,25 @@ export async function commitOpinionForAuthenticatedEditor(
       error: readiness.why,
       ladder: OPINION_AUTOMATIC_LADDER,
       probe: async (choice) => {
-        const candidate = await checkReadiness(choice as OpinionModelChoice, {}, input.context.newsroomId);
+        const candidate = await checkReadiness(choice as OpinionModelChoice, {}, input.context.newsroomId, readinessOptions,
+        );
         return candidate.ready
-          ? { ok: true as const, choice: candidate.effectiveChoice, label: modelChoiceLabel(candidate.effectiveChoice) }
+          ? { ok: true as const, choice: candidate.effectiveChoice, label: modelChoiceLabel(candidate.effectiveChoice) ,
+            }
           : { ok: false as const, error: candidate.why };
       },
     });
     if (!plan) return { ok: false as const, error: readiness.why };
-    readiness = await checkReadiness(plan.next as OpinionModelChoice, {}, input.context.newsroomId);
+    readiness = await checkReadiness(plan.next as OpinionModelChoice, {}, input.context.newsroomId, readinessOptions,
+    );
     if (!readiness.ready) return { ok: false as const, error: readiness.why };
     const previousLabel = modelChoiceLabel(input.modelChoice);
     opinionPreflight = {
       requested: input.modelChoice,
       resolved: readiness.effectiveChoice,
       reason: failoverReasonPhrase(previousLabel, plan.reason),
-      note: failoverNoteSentence(modelChoiceLabel(readiness.effectiveChoice), previousLabel, plan.reason),
+      note: failoverNoteSentence(modelChoiceLabel(readiness.effectiveChoice), previousLabel, plan.reason,
+      ),
       stage: `Switched to ${modelChoiceLabel(readiness.effectiveChoice)}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
     };
   }
@@ -657,7 +737,7 @@ export async function commitOpinionForAuthenticatedEditor(
       error: "The selected local model could not be pinned to its exact server and model before enqueueing. Refresh the Local model list and try again.",
     };
   }
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, readiness.localModel?.id);
 
   // OAuth is checked before schema setup or a database handle is requested.
   // A signed-out provider therefore cannot mutate even database metadata, let
@@ -675,7 +755,8 @@ export async function commitOpinionForAuthenticatedEditor(
       [input.retryRequestId, input.context.newsroomId, input.context.userId],
     );
     if (!retryable.length) {
-      return { ok: false as const, error: "That failed request has no retained attachments to restore." };
+      return { ok: false as const, error: "That failed request has no retained attachments to restore." ,
+      };
     }
   }
   const pointers: { what: string; url?: string }[] = [];
@@ -721,11 +802,11 @@ export async function commitOpinionForAuthenticatedEditor(
   const rows = await sql<{ id: number }>`
     insert into editorial_requests
       (user_id, newsroom_id, subject, source_text, source_kind, source_ref, asked_for,
-       pointers_json, our_story_json, model_choice)
+       pointers_json, our_story_json, model_choice, voice_mode, research_scope)
     values (${input.context.userId}, ${input.context.newsroomId}, ${subject}, ${sourceText}, ${sourceKind},
             ${sourceRef}, ${askedFor},
             ${JSON.stringify(pointers)},
-            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice})
+            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice}, ${input.voiceMode === "neutral" ? "neutral" : "paper"}, ${input.researchScope === "supplied" ? "supplied" : "public"})
     returning id
   `;
   const requestId = rows[0]!.id;
@@ -734,18 +815,21 @@ export async function commitOpinionForAuthenticatedEditor(
   if (sourceKind === "paste" && sourceText) {
     const { storeStoryDocument } = await import("./story-documents.server.ts");
     const pasted = await storeStoryDocument(input.context.newsroomId, input.context.userId,
-      "Opinion desk pasted material.txt", "text/plain", new TextEncoder().encode(sourceText));
+      "Opinion desk pasted material.txt", "text/plain", new TextEncoder().encode(sourceText),
+    );
     documentIds.push(pasted.id);
     generatedPasteId = pasted.id;
   }
   if (documentIds.length) {
     const { linkEditorialDocuments } = await import("./story-documents.server.ts");
     try {
-      await linkEditorialDocuments(sql, input.context.newsroomId, input.context.userId, requestId, documentIds);
+      await linkEditorialDocuments(sql, input.context.newsroomId, input.context.userId, requestId, documentIds,
+      );
     } catch (error) {
       if (generatedPasteId) await sql`delete from story_documents where id=${generatedPasteId} and newsroom_id=${input.context.newsroomId} and user_id=${input.context.userId} and lead_id is null and editorial_request_id is null`;
       await sql`delete from editorial_requests where id=${requestId} and newsroom_id=${input.context.newsroomId}`;
-      return { ok: false as const, error: error instanceof Error ? error.message : "Documents could not be attached." };
+      return { ok: false as const, error: error instanceof Error ? error.message : "Documents could not be attached." ,
+      };
     }
   }
   if (input.retryRequestId) {
@@ -762,7 +846,8 @@ export async function commitOpinionForAuthenticatedEditor(
     );
     if (!moved.length && !generatedPasteId) {
       await sql`delete from editorial_requests where id=${requestId} and newsroom_id=${input.context.newsroomId}`;
-      return { ok: false as const, error: "The saved attachments could not be restored. Open the failed request and restore them again." };
+      return { ok: false as const, error: "The saved attachments could not be restored. Open the failed request and restore them again." ,
+      };
     }
   }
   let job: Awaited<ReturnType<typeof enqueueJob>>;
@@ -775,12 +860,13 @@ export async function commitOpinionForAuthenticatedEditor(
       modelChoice: effectiveChoice,
       resultJson: JSON.stringify(initialModelRuntimeReceipt({
         requestedRuntime: input.modelChoice,
-        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, readiness.localModel?.id),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
         localModel: readiness.localModel,
         preflightFailover: opinionPreflight,
-      })),
+      }),
+      ),
     });
     if (opinionPreflight) {
       await setJobStage(job.id, opinionPreflight.stage);
@@ -873,6 +959,7 @@ export async function writeStoryForAuthenticatedEditor(
     documentIds?: string[];
     researchScope?: "public" | "supplied";
     modelChoice?: string;
+    modelChoiceExplicit?: boolean;
     modelEffort?: ModelEffort | null;
     sectionKey?: string;
   },
@@ -886,8 +973,21 @@ export async function writeStoryForAuthenticatedEditor(
   */
   const refusal = await paperSetupRefusalFor(input.context, "draft this story", input.override);
   if (refusal) return refusal;
+  const assignment = await resolveRequestedJobModel(
+    input.context.newsroomId,
+    "story-draft",
+    input.modelChoice,
+    input.modelEffort,
+    input.modelChoiceExplicit,
+  );
+  input = {
+    ...input,
+    modelChoice: assignment.providerId as typeof input.modelChoice,
+    modelEffort: assignment.effort,
+  };
   if ((input.documentIds?.length??0)>20 || new Set(input.documentIds??[]).size!==(input.documentIds?.length??0)) return {ok:false as const,error:"Choose up to 20 different documents."};
-  if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes."};
+  if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes.",
+    };
   /*
     The text is read against THIS newsroom's sections: `topicFromText` prefers
     their names and reporting briefs over its shipped vocabulary, and reports
@@ -928,7 +1028,8 @@ export async function writeStoryForAuthenticatedEditor(
   const headline = storableText(rawHeadline);
   const why = storableText(rawWhy);
   if (headline.length < 8) {
-    const warning = await editorWarning(input.context, input.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: input.context.newsroomId });
+    const warning = await editorWarning(input.context, input.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: input.context.newsroomId },
+    );
     if (warning) return commitWarning(warning);
   }
   let topic = parsed.value.topic;
@@ -940,25 +1041,30 @@ export async function writeStoryForAuthenticatedEditor(
       const key = resolvedSectionKey(sections, input.sectionKey);
       if (key !== input.sectionKey) throw new Error("Choose an active reporting section.");
       if (key === "about" || key === "opinion") {
-        const warning = await editorWarning(input.context, input.override, "lead-publication-section", `This lead will be filed into ${key === "about" ? "About" : "Opinion"}.`, { kind: "newsroom", id: input.context.newsroomId });
+        const warning = await editorWarning(input.context, input.override, "lead-publication-section", `This lead will be filed into ${key === "about" ? "About" : "Opinion"}.`, { kind: "newsroom", id: input.context.newsroomId },
+        );
         if (warning) return { ...commitWarning(warning), leadId: undefined };
       }
       topic = key;
       topicUnchosen = false;
     } catch (error) {
-      return { ok: false as const, error: error instanceof Error ? error.message : "Could not validate the selected section. Reload sections and retry." };
+      return { ok: false as const, error: error instanceof Error ? error.message : "Could not validate the selected section. Reload sections and retry." ,
+      };
     }
   }
 
   const sql = await (deps.getSql ?? getSql)();
   await ensureModelRequestLeadMemoSchema();
   if(input.documentIds?.length){
-    const {ensureStoryDocuments}=await import('./story-documents.server.ts');await ensureStoryDocuments(sql);
-    const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
-    if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing."};
+    const {ensureStoryDocuments}=await import("./story-documents.server.ts");await ensureStoryDocuments(sql);
+    const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId],
+    );
+    if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing.",
+      };
   }
   if (!deps.assertRate) {
-    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false });
+    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false },
+    );
     if (rate) return commitWarning(rate);
   }
   // A consent retry repeats this whole action. Admit the writer before filing
@@ -969,7 +1075,9 @@ export async function writeStoryForAuthenticatedEditor(
     { kind: "newsroom", id: input.context.newsroomId },
   );
   if (!writerPreflight.ok) return { ...writerPreflight, leadId: undefined };
-  const notesJson = packNotes(sanitizeJsonLeaves({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" }));
+  const notesJson = packNotes(sanitizeJsonLeaves({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" ,
+    }),
+  );
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json, topic_unchosen)
@@ -1002,16 +1110,20 @@ export async function writeStoryForAuthenticatedEditor(
   const {linkStoryDocuments,storeStoryDocument}=await import("./story-documents.server.ts");
   const documentIds=[...(input.documentIds??[])];
   if(input.text.length>4000){
-    const stored=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Pasted source text.txt","text/plain",new TextEncoder().encode(input.text));
+    const stored=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Pasted source text.txt","text/plain",new TextEncoder().encode(input.text),
+    );
     documentIds.push(stored.id);
   }
   if(urls.length){
-    const links=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Supplied source links.txt","application/x-townreporter-source-links",new TextEncoder().encode(urls.join('\n')));
+    const links=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Supplied source links.txt","application/x-townreporter-source-links",new TextEncoder().encode(urls.join("\n")),
+    );
     documentIds.push(links.id);
   }
-  await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds);
+  await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds,
+  );
   const commit = await commitStoryDraftForAuthenticatedEditor(
-    { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope, override: input.override },
+    { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope, override: input.override ,
+    },
     { ...deps, ratePreflight: true, writerPreflight },
   );
   return { ...commit, leadId };

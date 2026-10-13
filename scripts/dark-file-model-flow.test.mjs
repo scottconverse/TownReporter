@@ -23,7 +23,8 @@ test("the file model choice runs when the editor keeps investigating", async () 
     assert.ok(keep);
     await React.act(async () => keep.dispatchEvent(new window.Event("click", { bubbles: true })));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(calls.keep, [{ id: 1, modelChoice: "claude-sonnet", modelEffort: null }]);
+    // The file runs with the effort the shared page shows after the pick: the model's default (DHE1-2).
+    assert.deepEqual(calls.keep, [{ id: 1, modelChoice: "claude-sonnet", modelEffort: "medium", modelChoiceExplicit: true }]);
   } finally {
     await React.act(async () => root.unmount());
     container.remove();

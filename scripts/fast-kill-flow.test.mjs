@@ -568,7 +568,8 @@ test("one tap on a reason chip writes that chip's sentence to kill_reason, and t
 test("the presses are values with one meaning each, and an unknown chip writes nothing", () => {
   assert.deepEqual(fastKill.killPress(7), { id: 7, status: "killed", restore: "new" });
   assert.deepEqual(fastKill.killPress(7, "drafted"), { id: 7, status: "killed", restore: "drafted" });
-  assert.deepEqual(fastKill.killUndoPress(7), { id: 7, status: "new" });
+  /* No status: the server puts the lead back where the kill found it (DHC06). */
+  assert.equal(fastKill.killUndoPress(7).status, undefined);
   assert.deepEqual(fastKill.killUndoPress(7, "held"), { id: 7, status: "held" });
   assert.deepEqual(fastKill.killUndoPress(7, "drafted"), { id: 7, status: "drafted" });
 

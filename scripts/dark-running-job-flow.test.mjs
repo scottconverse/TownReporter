@@ -15,7 +15,7 @@ const { jobProgressView } = await import(await moduleUrl("src/lib/news/job-progr
   "../db.ts": transpileToUrl('export const getSql = () => { throw new Error("No database in this card flow"); };', "stub.js"),
   "./desk-auth.ts": transpileToUrl('export const deskMiddleware = {};', "stub.js"),
   "./model-choice.ts": transpileToUrl('export const effectiveStoryModelChoice = x => x; export const storyModelChoice = x => x; export const modelChoiceLabel = () => "Codex Sol 6.1";', "stub.js"),
-  "./jobs.ts": transpileToUrl('export const jobStages = () => []; export const requestJobCancel = () => {};', "stub.js"),
+  "./jobs.ts": transpileToUrl('export const jobStages = () => []; export const requestJobCancel = () => {}; export const queuedJobWaitReason = () => { throw new Error("No queued job in this running-card flow"); };', "stub.js"),
 }));
 test("a running investigation shows its case stages and can be stopped in either card", async () => {
   const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);

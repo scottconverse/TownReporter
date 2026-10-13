@@ -15,6 +15,7 @@ import {
   ensureProviderSettingsSchema,
   readProviderOverrides,
   resolveLocalModelChoice,
+  readDeskLocalModelChoice,
   saveLocalModel,
 } from "./provider-settings.ts";
 
@@ -424,6 +425,23 @@ describe("the local-model pick is the owner's, and its address must be local", (
       ),
       { ok: true },
     );
+  });
+
+  it("reads back the desk sentinel saved from Models without substituting cloud", async () => {
+    const pick = { baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL };
+    await withFetch(fetchWithNoServer, async () => {
+      assert.deepEqual(await saveLocalModel(OWNER_ID, pick, "story"), { ok: true });
+      const read = await readDeskLocalModelChoice(NEWSROOM_ID, "story");
+      assert.deepEqual(read.storedPick, pick);
+      assert.equal(read.override, null);
+      assert.equal(read.source, "loaded");
+    });
+    resetLocalCatalogCacheForTests();
+    await withFetch(fetchWithOllamaOnly(["gemma4:12b"]), async () => {
+      const read = await readDeskLocalModelChoice(NEWSROOM_ID, "story");
+      assert.deepEqual(read.storedPick, pick);
+      assert.deepEqual(read.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
+    });
   });
 
   it("accepts an address this computer's own discovery just found", async () => {

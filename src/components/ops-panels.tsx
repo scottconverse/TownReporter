@@ -1,3 +1,7 @@
+import { DeskJobCard } from "@/components/JobCard";
+import { ModelAssignmentsPanel } from "@/routes/desk.models";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { useDeskJobs } from "@/components/job-card-state";
 /*
   The editors behind the Server screen's cards (unit CX2).
 
@@ -37,7 +41,8 @@ import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
 import { installAction } from "@/lib/ops/install-display";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
-import { inviteEditor, myDesk, myRecoveryCodesStatus, regenerateRecoveryCodes } from "@/lib/news/claim";
+import { cancelMyPendingInvite, inviteEditor, listMyPendingInvites, myDesk, myRecoveryCodesStatus, regenerateRecoveryCodes ,
+} from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { NewsletterMailbox } from "@/components/newsletter-mailbox";
@@ -61,7 +66,6 @@ import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { ProviderStatusCard } from "@/components/provider-status-card";
 import { Chip } from "@/components/status-chip";
-import { LocalModelSelect } from "@/components/model-picker";
 
 /**
  * Color carries no information on its own here.
@@ -212,6 +216,7 @@ export function ReadOnlyCard({ title, children }: { title: string; children: Rea
  * that lies about its state.
  */
 export function HealthPanel() {
+  const jobs = useDeskJobs();
   const [showLogs, setShowLogs] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [confirming, setConfirming] = useState<OpsActionId | null>(null);
@@ -303,6 +308,8 @@ export function HealthPanel() {
         )}
       </section>
 
+      {jobs.data?.filter((job ) => job.kind === "draft" && job.status === "queued").map((job ) => (
+          <DeskJobCard key={job.id} job={job} title={job.headline ?? job.title} />))}
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
@@ -504,6 +511,12 @@ export function WritingModelsPanel({
 }) {
   const [note, setNote] = useState("");
 
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    enabled: known,
+  });
+
   const statuses = useQuery({
     queryKey: ["provider-statuses"],
     queryFn: () => getProviderStatuses(),
@@ -577,6 +590,16 @@ export function WritingModelsPanel({
         it is a fact about the desk, not about this machine's logins.
       */}
       <p className="mt-4 max-w-2xl text-sm text-ink-2">{automaticOrderSentence()}</p>
+      {known ? (
+        <div className="mt-6">
+          <h3 className="font-display text-lg font-semibold">Who does what</h3>
+          <ModelAssignmentsPanel
+            isOwner={isOwner}
+            connections={connections.data ?? []}
+            onNote={setNote}
+          />
+        </div>
+      ) : null}
       {/*
         Unit CX item 4: what an editor who is not the owner sees.
 
@@ -763,10 +786,6 @@ export function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => v
         <InkButton tone="quiet" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
           {refresh.isPending ? "Checking…" : "Refresh"}
         </InkButton>
-      </div>
-      <div className="mt-3 rounded-md border border-rule p-3">
-        <p className="mb-2 text-sm font-semibold">Exact local model for story writing</p>
-        <LocalModelSelect scope="story" />
       </div>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -999,7 +1018,10 @@ export function PaperSetupPanel() {
         is added as real rows on the Sources page, not just stored as a default — each editor gets
         them added once, the first time they visit.
       </p>
-      {current.isPending || setupState.isPending || !setupState.isFetchedAfterMount ? null : setupState.isError || setupState.data === undefined ? (
+      {current.isPending ||
+      setupState.isPending ||
+      !setupState.isFetchedAfterMount ? null : setupState.isError ||
+        setupState.data === undefined ? (
         /*
           Fail closed. "I could not ask whether this paper is set up" is not
           "it is set up": drawing the form with `firstRun={false}` would fill it
@@ -1151,6 +1173,12 @@ async function copyToClipboard(text: string): Promise<boolean> {
  */
 export function InviteAnEditorPanel() {
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const qc = useQueryClient();
+  const pendingInvites = useQuery({
+    queryKey: ["pending-editor-invites"],
+    queryFn: () => listMyPendingInvites(),
+    enabled: me.data?.role === "owner",
+  });
   const paper = useQuery({
     queryKey: ["paper-config-for-invite"],
     queryFn: () => getPaperConfigForEditor(),
@@ -1161,6 +1189,7 @@ export function InviteAnEditorPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedMessage, setCopiedMessage] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState("");
   const mint = useMutation({
     mutationFn: () => inviteEditor({ data: email }),
     onSuccess: (r) => {
@@ -1172,8 +1201,22 @@ export function InviteAnEditorPanel() {
       setCopiedLink(false);
       setCopiedMessage(false);
       setLink(`${window.location.origin}/login?invite=${r.token}`);
+      void qc.invalidateQueries({ queryKey: ["pending-editor-invites"] });
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "That did not mint."),
+  });
+  const cancel = useMutation({
+    mutationFn: (inviteId: number) => cancelMyPendingInvite({ data: inviteId }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setInviteStatus(result.error);
+        return;
+      }
+      setInviteStatus("Invite cancelled. Its link will no longer work.");
+      setLink(null);
+      void qc.invalidateQueries({ queryKey: ["pending-editor-invites"] });
+    },
+    onError: () => setInviteStatus("That invite could not be cancelled. Nothing changed."),
   });
   if (me.data?.role !== "owner") return null;
   const message =
@@ -1239,6 +1282,37 @@ export function InviteAnEditorPanel() {
             ) : null}
           </div>
         ) : null}
+        <div className="mt-6 border-t border-rule pt-4">
+          <h3 className="text-base font-semibold">Pending invites</h3>
+          {inviteStatus ? (
+            <p className="mt-2 text-sm" role="status">{inviteStatus}</p> ) : null}
+          {pendingInvites.isPending ? (
+            <p className="mt-2 text-sm text-muted" role="status">Loading pending invites…</p>
+          ) : pendingInvites.isError ? (
+            <p className="mt-2 text-sm text-rust" role="alert">Pending invites could not be loaded. Check again.</p>
+          ) : pendingInvites.data?.length ? (
+            <ul className="mt-3 space-y-3">
+              {pendingInvites.data.map((invite) => (
+                <li key={invite.id} className="flex flex-wrap items-center justify-between gap-3 border border-rule bg-paper-2 p-3">
+                  <span className="break-all font-medium">{invite.email}</span>
+                  <span className="text-sm text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</span>
+                  <InkButton
+                    tone="quiet"
+                    disabled={cancel.isPending}
+                    onClick={() => {
+                      setInviteStatus("");
+                      cancel.mutate(invite.id);
+                    }}
+                  >
+                    Cancel invite
+                  </InkButton>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-muted">No pending invites.</p>
+          )}
+        </div>
         <p className="text-sm text-muted">
           What happens next: they click the link, set a password, and appear on this page as an
           editor. They cannot invite others or give up the desk.

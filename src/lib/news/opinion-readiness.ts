@@ -130,10 +130,13 @@ export async function checkOpinionReadiness(
   choice: OpinionModelChoice,
   deps: OpinionReadinessDeps = {},
   newsroomId?: number,
+  options: { requireVoice?: boolean } = {},
 ) {
   const problems: string[] = [];
   const voice = await (deps.findVoice ?? defaultVoiceProbe)();
-  if (!voice.ok) problems.push(voice.error);
+  const voiceReady = voice.ok;
+  const voiceProblem = voice.ok ? null : voice.error;
+  if (!voice.ok && options.requireVoice !== false) problems.push(voice.error);
 
   // Automatic may start when any rung of its ladder is ready -- DeepSeek v4.1
   // Flash first, then Codex Sol, then Claude Sonnet (OPINION_AUTOMATIC_LADDER,
@@ -172,6 +175,13 @@ export async function checkOpinionReadiness(
         : choice;
   return {
     ready: problems.length === 0,
+    modelReady: Boolean(selected),
+    voiceReady,
+    voiceProblem,
+    modelProblems: selected ? [] : providerProblems.length ? [
+      ...(choice === "auto" ? [OPINION_MODEL_UNIVERSE] : []),
+      ...providerProblems,
+    ] : [],
     why: problems.join(" "),
     problems,
     effectiveChoice,

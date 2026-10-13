@@ -33,6 +33,61 @@ function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
+/*
+  These phrases are editor checks when they describe what a notice or record
+  leaves unstated. They can help the editor, but they are not reader-facing
+  headline or dek copy. Keep the patterns tied to source material or an
+  explicitly missing date/time/schedule; ordinary reporting about what a city
+  did or did not decide is still news.
+*/
+const MISSING_FACT_NOTE = [
+  /\b(?:notice|announcement|document|materials?|record|source)\b[^.!?]{0,100}\b(?:(?:does not|doesn't|did not|didn't|has not|have not|had not)\s+(?:state|say|specify|identify|list|provide|give|include|name|confirm|mention)|fails?\s+to\s+(?:state|say|specify|identify|list|provide|give|include|name|confirm|mention))\b/i,
+  /\b(?:does not|doesn't|did not|didn't|has not|have not|had not)\s+(?:state|say|specify)\b/i,
+  /\b(?:year|date|time|schedule|start date|end date|deadline|duration|location)\b[^.!?]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|identified|listed|given|provided|included|named|confirmed)|unstated|unspecified|unidentified|unlisted)\b/i,
+  /\bno\s+(?:year|date|time|schedule|start date|end date|deadline|duration|location)\b[^.!?]{0,60}\b(?:is|are|was|were)?\s*(?:stated|specified|identified|listed|given|provided|included|named|confirmed)\b/i,
+  /^\s*not\s+(?:specified|stated|identified|listed|given|provided|included|confirmed)(?:\s+(?:in|from)\s+(?:the\s+)?(?:notice|announcement|document|materials?|record|source|schedule))?\s*[.!?]*$/i,
+  /\b(?:unclear|not clear)\s+from\s+(?:the\s+)?(?:notice|announcement|document|materials?|record|source|schedule)\b/i,
+];
+
+function cleanSummaryField(text: string): { text: string; notes: string[] } {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return { text, notes: [] };
+  const sentences = splitSentences(normalized);
+  const notes = sentences.filter((sentence) => MISSING_FACT_NOTE.some((pattern) => pattern.test(sentence)));
+  if (!notes.length) return { text, notes: [] };
+  const noteSet = new Set(notes);
+  return {
+    text: sentences.filter((sentence) => !noteSet.has(sentence)).join(" "),
+    notes,
+  };
+}
+
+/** Remove missing-fact editor notes from reader-facing fields and retain them for editor checks. */
+export function cleanMissingFactNotes(headline: string, dek: string): {
+  headline: string;
+  dek: string;
+  notes: string[];
+} {
+  const cleanHeadline = cleanSummaryField(headline);
+  const cleanDek = cleanSummaryField(dek);
+  return {
+    headline: cleanHeadline.notes.length ? cleanHeadline.text.replace(/[.!?]+$/, "") : cleanHeadline.text,
+    dek: cleanDek.text,
+    notes: [...new Set([...cleanHeadline.notes, ...cleanDek.notes])],
+  };
+}
+
+/** Add removed summary notes to integrity checks without repeating existing notes. */
+export function appendEditorChecks(existing: string | null | undefined, additions: readonly string[]): string {
+  const current = String(existing ?? "").trim();
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+  const known = normalize(current);
+  const missing = [...new Set(additions.map((note) => note.trim()).filter(Boolean))].filter(
+    (note) => !known.includes(normalize(note)),
+  );
+  return [current, ...missing].filter(Boolean).join("\n");
+}
+
 /**
  * Drop the paper's own backlog from a paragraph. A paragraph that opens on it is
  * homework top to bottom and goes. Inside a sentence, the backlog is either the whole
@@ -84,9 +139,76 @@ export function stripReporterNotebook(body: string): string {
         .join("\n")
         .trim();
       if (!cleaned) return "";
-      return stripProcessNarration(cleaned).trim();
+      return stripYearNotesFromParagraph(stripProcessNarration(cleaned)).trim();
     })
     .filter(Boolean)
     .join("\n\n")
     .trim();
+}
+
+/*
+  Scott, Oct 11 2026: a story never tells readers that a source "does not
+  specify the year". A listing that says "Thursday, Oct. 15" in October means
+  this October; saying otherwise makes the paper look dumb and treats the
+  reader as dumb. The one exception is the turn of the year: a story written
+  in December about a date in January or February, where the year can really
+  be in doubt. There the sentence stays.
+*/
+const YEAR_NOTE =
+  /\b(?:(?:does not|doesn't|did not|didn't|do not|don't|fails? to)\s+(?:state|specify|say|give|list|include|provide|name|identify)\s+(?:the|a|an|which|what)\s+(?:[\w-]+\s+){0,2}year|(?:year|years)\b[^.!?;]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|given|listed|included|provided|named|identified|clear)|unstated|unspecified|unclear)|no\s+year\b[^.!?;]{0,40}\b(?:is\s+|was\s+)?(?:stated|specified|given|listed|provided))/i;
+const TURN_OF_YEAR_DATE = /\b(?:Jan(?:uary)?|Feb(?:ruary)?)\b\.?/;
+const JOINED_TAIL = /,\s+(?:but|though|although|while|yet|and|so)\s+[^,]*$/i;
+
+function capitalizeFirst(text: string): string {
+  return text.replace(/^(["“(]?)([a-z])/, (_m, open: string, ch: string) => `${open}${ch.toUpperCase()}`);
+}
+
+function endSentence(text: string): string {
+  const t = text.trim();
+  return /[.!?]["”'’)]?$/.test(t) ? t : `${t}.`;
+}
+
+/** Drop the clause that tells readers a year is missing; keep the rest of the sentence. */
+function stripYearNoteSentence(sentence: string, writtenOn: Date): string {
+  if (!YEAR_NOTE.test(sentence)) return sentence;
+  if (writtenOn.getMonth() === 11 && TURN_OF_YEAR_DATE.test(sentence)) return sentence;
+  const clauses = sentence.split(/;\s+/);
+  const kept = clauses
+    .map((clause) => {
+      const at = clause.search(YEAR_NOTE);
+      if (at < 0) return clause;
+      const before = clause.slice(0, at);
+      const tail = JOINED_TAIL.exec(before);
+      if (tail && tail.index >= 20) return clause.slice(0, tail.index);
+      return "";
+    })
+    .map((clause) => clause.trim().replace(/[.!?]+$/, ""))
+    .filter(Boolean);
+  if (!kept.length) return "";
+  return endSentence(capitalizeFirst(kept.join("; ")));
+}
+
+function stripYearNotesFromParagraph(paragraph: string, writtenOn: Date = new Date()): string {
+  if (!YEAR_NOTE.test(paragraph)) return paragraph;
+  return paragraph
+    .split("\n")
+    .map((line) =>
+      YEAR_NOTE.test(line)
+        ? splitSentences(line.replace(/[ \t]+/g, " "))
+            .map((sentence) => stripYearNoteSentence(sentence, writtenOn))
+            .filter(Boolean)
+            .join(" ")
+        : line,
+    )
+    .filter((line) => line.trim())
+    .join("\n");
+}
+
+/** Remove "the source does not specify the year" from a story body (Scott's rule). */
+export function stripYearNotes(body: string, writtenOn: Date = new Date()): string {
+  return body
+    .split(/\n{2,}/)
+    .map((p) => stripYearNotesFromParagraph(p, writtenOn).trim())
+    .filter(Boolean)
+    .join("\n\n");
 }

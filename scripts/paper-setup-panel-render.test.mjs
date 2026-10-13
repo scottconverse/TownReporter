@@ -32,6 +32,12 @@ import ts from "typescript";
 */
 
 function moduleUrl(source, fileName, imports = {}) {
+  // Model assignment editing is another Server panel; Paper setup never mounts it.
+  imports = {
+    "@/routes/desk.models": `data:text/javascript;base64,${Buffer.from("export const ModelAssignmentsPanel=()=>null;").toString("base64")}`,
+    "@/lib/news/custom-ai-settings": `data:text/javascript;base64,${Buffer.from("export const getCustomAiConnectionsFn=()=>[];").toString("base64")}`,
+    ...imports,
+  };
   let output = ts.transpileModule(source, {
     fileName,
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
@@ -163,6 +169,8 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/form-error": formErrorStub,
       "@/components/desk-chrome-utils": utilsStub,
       "@/components/paper-setup-form": formModule,
+      "@/components/JobCard": inlineModule("export const DeskJobCard = () => null;"),
+      "@/components/job-card-state": inlineModule("export const useDeskJobs = () => ({data:[]});"),
       "@/components/newsletter-mailbox": inlineModule("export function NewsletterMailbox() { return null; }"),
       "@/lib/auth/use-current-user": names(["useCurrentUserState"]),
       "@/components/states": names(["ListSkeleton"]),
@@ -174,7 +182,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
         `export const TRASH_DAYS = 30;\nexport function listTrash() { return null; }\nexport function purgeTrashItem() { return null; }\nexport function restoreTrashItem() { return null; }`,
       ),
       "@/lib/news/claim": inlineModule(
-        `export function myDesk() { return null; }\nexport function inviteEditor() { return null; }\nexport function myRecoveryCodesStatus() { return null; }\nexport function regenerateRecoveryCodes() { return null; }`,
+        `export function myDesk() { return null; }\nexport function inviteEditor() { return null; }\nexport function listMyPendingInvites() { return null; }\nexport function cancelMyPendingInvite() { return null; }\nexport function myRecoveryCodesStatus() { return null; }\nexport function regenerateRecoveryCodes() { return null; }`,
       ),
       "@/lib/paper-context-state": names(["usePaperDateFormatters"]),
       "@/lib/news/paper-settings": paperSettingsStub,

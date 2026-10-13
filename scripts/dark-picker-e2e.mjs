@@ -114,6 +114,7 @@ async function thePickerIsThere() {
     "Claude Sonnet",
     "Claude Haiku",
     "Local model",
+    "DeepSeek v4.1 Flash",
   ];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(

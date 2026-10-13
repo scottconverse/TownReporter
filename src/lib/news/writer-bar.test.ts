@@ -1,12 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  customConnectionStatus,
+  draftFallbackAttribution,
+  lastDraftInHand,
   lastDraftLine,
   lastDraftWhen,
   readinessDot,
   readinessFailureMessage,
+  requestedModelChoice,
+  runningWriterSentence,
+  switchReasonFromNote,
   saveState,
   writerIsReady,
+  writerUnavailableReason,
 } from "./writer-bar.ts";
 
 /**
@@ -194,4 +201,126 @@ describe("saveState", () => {
 it("keeps known quota and unknown provider messages visible", () => {
   assert.equal(readinessFailureMessage("custom:x", "My provider", "insufficient_quota"), "My provider hit its usage limit.");
   assert.equal(readinessFailureMessage("codex-frontier", "Codex", "Transport refused the request."), "Codex is not ready: Transport refused the request.");
+});
+
+it("uses the picker key-read failure for the API connection status", () => {
+  const connection = {
+    id: "gemini",
+    name: "Gemini",
+    hasApiKey: true,
+    enabled: true,
+    readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting.",
+  };
+  const pickerReason = writerUnavailableReason({
+    choice: "custom:gemini",
+    label: "Gemini",
+    availability: {},
+    customConnection: { enabled: true, modelId: "gemini-3.5-flash", readinessError: connection.readinessError },
+  });
+  const connectionStatus = customConnectionStatus(connection);
+
+  assert.equal(connectionStatus.kind, "unreachable");
+  assert.equal(connectionStatus.label, pickerReason);
+  assert.equal(connectionStatus.label, "Gemini (key) — key can't be read. Fix it in Server -> Connections.");
+});
+
+it("names the picked model, actual writer, and first failure after a fallback chain", () => {
+  assert.equal(
+    requestedModelChoice(
+      JSON.stringify({ requestedRuntime: "gemini-pro", actualRuntime: "codex-balanced" }),
+      "codex-balanced",
+    ),
+    "gemini-pro",
+  );
+  assert.equal(
+    draftFallbackAttribution({
+      pickedModel: "Gemini 3.1 Pro (Pro plan)",
+      writerModel: "Codex Sol 6.1 (balanced)",
+      failoverNote: "Gemini request timed out. -> DeepSeek v4.1 Flash -> DeepSeek v4.1 Flash: Provider says: reply was cut off -> Codex Sol 6.1 (balanced)",
+    }),
+    "You picked Gemini 3.1 Pro (Pro plan). Codex Sol 6.1 (balanced) wrote this draft because Gemini 3.1 Pro (Pro plan) timed out.",
+  );
+  assert.equal(
+    draftFallbackAttribution({
+      pickedModel: "Gemini 3.1 Pro (Pro plan)",
+      writerModel: "Gemini 3.1 Pro (Pro plan)",
+      failoverNote: "Gemini request timed out.",
+    }),
+    undefined,
+  );
+});
+
+describe("running writer and switch reason", () => {
+  it("reads the sentence form of the durable failover note", () => {
+    assert.equal(
+      switchReasonFromNote("This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out"),
+      "Gemini timed out",
+    );
+  });
+
+  it("reads the last hop of a trail note", () => {
+    assert.equal(
+      switchReasonFromNote("Gemini timed out -> Codex Sol 6.1 (balanced) timed out -> DeepSeek v4.1 Flash"),
+      "Codex Sol 6.1 (balanced) timed out",
+    );
+  });
+
+  it("invents no reason when the job recorded none", () => {
+    assert.equal(switchReasonFromNote(""), undefined);
+    assert.equal(switchReasonFromNote(null), undefined);
+  });
+
+  it("says what was picked, who is writing, and why", () => {
+    assert.equal(
+      runningWriterSentence({
+        pickedModel: "Automatic",
+        writerModel: "Codex Sol 6.1 (balanced)",
+        failoverNote: "This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out.",
+      }),
+      "You picked Automatic. Codex Sol 6.1 (balanced) is writing because Gemini timed out.",
+    );
+  });
+
+  it("omits the reason when the job recorded none", () => {
+    assert.equal(
+      runningWriterSentence({ pickedModel: "Automatic", writerModel: "Codex Sol 6.1 (balanced)", failoverNote: "" }),
+      "You picked Automatic. Codex Sol 6.1 (balanced) is writing.",
+    );
+  });
+
+  it("says nothing when the writer is the pick", () => {
+    assert.equal(
+      runningWriterSentence({ pickedModel: "Automatic", writerModel: "Automatic", failoverNote: "" }),
+      undefined,
+    );
+  });
+});
+
+describe("lastDraftInHand: the draft in hand keeps its model after a save message", () => {
+  const finishedAt = "2026-10-12T16:53:00.000Z";
+  it("still names the model after the page shows its own 'Draft saved.' message", () => {
+    assert.match(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "DeepSeek v4.1 Flash", finishedAt }),
+      /^Last draft: DeepSeek v4\.1 Flash, /,
+    );
+  });
+  it("names a local run with its exact model", () => {
+    assert.match(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "Local model (deepseek-v4.1-flash:cloud)", finishedAt }),
+      /^Last draft: Local model \(deepseek-v4\.1-flash:cloud\), /,
+    );
+  });
+  it("says nothing when the latest job failed, because its model and time are not the draft's", () => {
+    assert.equal(lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "failed", modelLabel: "Gemini Flash", finishedAt }), "");
+  });
+  it("says nothing for a civic-reporting draft or when there is no draft", () => {
+    assert.equal(lastDraftInHand({ hasDraft: true, civicReporting: true, jobStatus: "completed", modelLabel: "Gemini Flash", finishedAt }), "");
+    assert.equal(lastDraftInHand({ hasDraft: false, civicReporting: false, jobStatus: "completed", modelLabel: "Gemini Flash", finishedAt }), "");
+  });
+  it("names the fallback writer's attribution for an empty-draft switch", () => {
+    assert.equal(
+      draftFallbackAttribution({ pickedModel: "Codex Sol", writerModel: "Gemini Flash", failoverNote: "This draft moved to Gemini Flash because Codex Sol returned an empty draft." }),
+      "You picked Codex Sol. Gemini Flash wrote this draft because Codex Sol returned an empty draft.",
+    );
+  });
 });

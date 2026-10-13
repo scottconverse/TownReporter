@@ -17,11 +17,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  batchRuntimePick,
   cleanQueueWindow,
   queueCounts,
   queueMatchesSearch,
+  queueKeepsRowsWhileLoading,
   queueNeedle,
+  queueRowTick,
   queueSelect,
+  queueSelectAllShown,
   queueSort,
   QUEUE_FILTERS,
   QUEUE_SORTS,
@@ -176,28 +180,59 @@ test("Newest and Oldest are the filing time, and the id breaks a tie the same wa
   );
 });
 
-test("on the Killed tab, Best is what keeps coming back, not the score", () => {
+test("on the Killed tab, Best is the newest kill first, not the score", () => {
   const rows = [
-    lead({ id: 1, status: "killed", newsworthiness: 99 }),
-    lead({ id: 2, status: "killed", newsworthiness: 1, last_resurfaced_at: "2026-09-05T00:00:00.000Z" }),
-    lead({ id: 3, status: "killed", newsworthiness: 50, last_resurfaced_at: "2026-09-09T00:00:00.000Z" }),
+    lead({ id: 1, status: "killed", newsworthiness: 99, killed_at: "2026-09-01T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", newsworthiness: 1, killed_at: "2026-09-09T10:00:00.000Z" }),
+    lead({ id: 3, status: "killed", newsworthiness: 50, killed_at: "2026-09-05T10:00:00.000Z" }),
   ];
   const out = queueSort(rows, "best", "killed");
   assert.deepEqual(
     out.map((l) => l.id),
-    [3, 2, 1],
+    [2, 3, 1],
   );
 });
 
-test("a killed lead that never came back sorts after one that did, newest kill first", () => {
+test("a lead killed today is on the Killed tab above older kills, even one that came back", () => {
   const rows = [
-    lead({ id: 1, status: "killed" }),
-    lead({ id: 2, status: "killed" }),
-    lead({ id: 5, status: "killed", last_resurfaced_at: "2026-09-05T00:00:00.000Z" }),
+    lead({
+      id: 1,
+      status: "killed",
+      killed_at: "2026-09-05T10:00:00.000Z",
+      last_resurfaced_at: "2026-09-09T10:00:00.000Z",
+    }),
+    lead({ id: 2, status: "killed", killed_at: "2026-10-12T08:00:00.000Z" }),
+    lead({ id: 3, status: "killed", killed_at: null }),
   ];
   assert.deepEqual(
     queueSort(rows, "best", "killed").map((l) => l.id),
-    [5, 2, 1],
+    [2, 1, 3],
+  );
+});
+
+test("on the Killed tab, Newest first is the kill time, not the filing time", () => {
+  // 359 was filed after 437 but killed a fortnight earlier; the pile must put
+  // the 10-12 kill above the 09-30 kill whatever the filing dates say.
+  const rows = [
+    lead({ id: 359, status: "killed", created_at: "2026-10-01T00:00:00.000Z", killed_at: "2026-09-30T09:00:00.000Z" }),
+    lead({ id: 437, status: "killed", created_at: "2026-09-01T00:00:00.000Z", killed_at: "2026-10-12T02:31:00.000Z" }),
+    lead({ id: 452, status: "killed", created_at: "2026-09-15T00:00:00.000Z", killed_at: "2026-10-12T02:29:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "newest", "killed").map((l) => l.id),
+    [437, 452, 359],
+  );
+});
+
+test("on the Killed tab, Oldest first is the kill time, earliest first, kills with no time last", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-01T00:00:00.000Z", killed_at: null }),
+    lead({ id: 2, status: "killed", created_at: "2026-10-01T00:00:00.000Z", killed_at: "2026-10-12T02:31:00.000Z" }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-20T00:00:00.000Z", killed_at: "2026-09-30T09:00:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "oldest", "killed").map((l) => l.id),
+    [3, 2, 1],
   );
 });
 
@@ -293,4 +328,93 @@ test("the counts and the tabs cannot disagree: each tab's length is its own coun
     const shown = queueSelect(rows, PRINTED, { filter, section: "all", sort: "best", needle: "" });
     assert.equal(shown.length, counts[filter], `tab ${filter}`);
   }
+});
+
+test("ticking one row picks that row and no other, and unticking drops only it", () => {
+  assert.deepEqual(queueRowTick([], 7, true), [7]);
+  assert.deepEqual(queueRowTick([3, 7], 9, true), [3, 7, 9]);
+  assert.deepEqual(queueRowTick([3, 7, 9], 7, false), [3, 9]);
+  assert.deepEqual(queueRowTick([3, 9], 7, false), [3, 9], "unticking a row that was never picked changes nothing");
+});
+
+test("the header box picks exactly the leads on screen, and clears them all", () => {
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], true), [1, 2, 3]);
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], false), []);
+  assert.deepEqual(queueSelectAllShown([], true), []);
+});
+
+// DHE1-6 (walk E1): on the Killed pile, "Newest first" and "Oldest first" are the kill time in opposite directions.
+test("Killed pile: Newest first and Oldest first are opposite orders by kill time, not the same list", () => {
+  const rows = [
+    lead({ id: 343, status: "killed", killed_at: "2026-10-01T22:26:00.000Z" }),
+    lead({ id: 443, status: "killed", killed_at: "2026-10-12T04:38:00.000Z" }),
+    lead({ id: 470, status: "killed", killed_at: "2026-10-12T04:47:00.000Z" }),
+  ];
+  assert.deepEqual(queueSort(rows, "newest", "killed").map((l) => l.id), [470, 443, 343]);
+  assert.deepEqual(queueSort(rows, "oldest", "killed").map((l) => l.id), [343, 443, 470]);
+});
+
+// DHE1-10 (walk E1): the bulk strip and the batch dialog share one runtime and effort.
+test("a batch runtime pick sets the model and the effort that model carries, the same way for the strip and the dialog", () => {
+  const pick = batchRuntimePick("deepseek-flash");
+  assert.equal(pick.runtime, "deepseek-flash");
+  assert.equal(pick.effort, "none");
+});
+
+test("DHE1-6: on the Killed tab, Newest and Oldest give opposite orders by kill day", () => {
+  // Filed in the opposite order to the kills, so a sort by filing time would
+  // come out the same as a sort by kill time only by accident.
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-20T10:00:00.000Z", killed_at: "2026-10-10T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-10T10:00:00.000Z", killed_at: "2026-10-12T10:00:00.000Z" }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-15T10:00:00.000Z", killed_at: "2026-10-11T10:00:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "newest", "killed").map((l) => l.id),
+    [2, 3, 1],
+  );
+  assert.deepEqual(
+    queueSort(rows, "oldest", "killed").map((l) => l.id),
+    [1, 3, 2],
+  );
+});
+
+test("DHE1-6: kills with no kill time still differ between Newest and Oldest, and sort last", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-01T10:00:00.000Z", killed_at: null }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-05T10:00:00.000Z", killed_at: null }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-03T10:00:00.000Z", killed_at: "2026-10-01T10:00:00.000Z" }),
+  ];
+  const newest = queueSort(rows, "newest", "killed").map((l) => l.id);
+  const oldest = queueSort(rows, "oldest", "killed").map((l) => l.id);
+  assert.deepEqual(newest, [3, 2, 1]);
+  assert.deepEqual(oldest, [3, 1, 2]);
+});
+
+// DHE1-6 (walk F): the walk pressed Killed and read Open rows under the Killed
+// pill, so Newest and Oldest captured the same text. The order rule above is
+// right; what the screen kept while the Killed page loaded was wrong.
+test("DHE1-6: a tab, section or sort press does not keep the rows of the last query", () => {
+  const killedNewest = { filter: "killed", section: "all", sort: "newest" };
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "open", section: "all", sort: "best" }, killedNewest), false);
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { ...killedNewest, sort: "oldest" }), false);
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { ...killedNewest, section: "Schools" }), false);
+});
+
+test("DHE1-6: the same tab, section and sort keep the rows while a page is fetched", () => {
+  const killedNewest = { filter: "killed", section: "all", sort: "newest" };
+  assert.equal(queueKeepsRowsWhileLoading({ ...killedNewest }, killedNewest), true);
+  assert.equal(queueKeepsRowsWhileLoading(undefined, killedNewest), false);
+});
+
+test("DHE1-6: the Killed pile's two orders read as two lists after a press, not one", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-20T10:00:00.000Z", killed_at: "2026-10-10T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-10T10:00:00.000Z", killed_at: "2026-10-12T10:00:00.000Z" }),
+  ];
+  const newest = queueSort(rows, "newest", "killed").map((l) => l.id);
+  const oldest = queueSort(rows, "oldest", "killed").map((l) => l.id);
+  assert.notDeepEqual(newest, oldest);
+  // Pressing Oldest on the Killed tab must not keep the Newest page on screen.
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { filter: "killed", section: "all", sort: "oldest" }), false);
 });
