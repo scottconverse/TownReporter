@@ -1133,3 +1133,21 @@ describe("one row per event (unit CV, item 1)", () => {
     );
   });
 });
+
+/*
+  FA11 (Oct 11 walk): the front page's This week printed "Residents Get Until
+  to Weigh In on the Rest" -- the date cut out from after "Until".
+*/
+describe("FA11: a date that is the object of 'until' stays in the line", () => {
+  it("does not leave 'Until' hanging", () => {
+    const items = collectStoryDates([{
+      slug: "plan-comments", section: "council", records: [],
+      headline: "Residents Get Until Oct. 20 to Weigh In on the Rest of the Plan",
+      dek: "", published_on: "2026-10-12",
+    }] as never);
+    const row = items.find((item) => item.date === "2026-10-20");
+    assert.ok(row, "the deadline is a row");
+    assert.doesNotMatch(row!.what, /Until to/);
+    assert.match(row!.what, /Until Oct\. 20 to Weigh In/);
+  });
+});

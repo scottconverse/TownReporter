@@ -329,6 +329,9 @@ function clauseStop(text: string): number {
   }
   return -1;
 }
+/** Words that take a date as their object: cutting the date after them leaves a stump (FA11). */
+const DATE_OBJECT_WORDS = new Set(["until", "till", "by", "through", "thru", "before", "after", "since"]);
+
 /** Words a name never begins or ends on: it would be hanging off a sentence. */
 const JOINERS = new Set([
   "a",
@@ -459,8 +462,15 @@ function clauseName(text: string, hit: DateHit): string {
     .slice(0, stop < 0 ? tail.length : stop)
     .split(/\s+/)
     .filter(Boolean);
-  const words = [...left, ...right];
-  if (left.length && right.length) {
+  /*
+    FA11 (Oct 11 walk): cutting the date out of the middle left "Residents Get
+    Until to Weigh In on the Rest" on the front page. When the word before the
+    date needs it as its object and words follow, the date stays in the line.
+  */
+  const needsDate = left.length > 0 && right.length > 0 && DATE_OBJECT_WORDS.has(plain(left[left.length - 1]));
+  const dateWords = needsDate ? text.slice(hit.start, hit.end).split(/\s+/).filter(Boolean) : [];
+  const words = [...left, ...dateWords, ...right];
+  if (left.length && right.length && !needsDate) {
     const at = left.length - 1;
     if (plain(words[at]) === "a" || plain(words[at]) === "an") {
       words[at] = /^[aeiou]/i.test(right[0]) ? "an" : "a";
