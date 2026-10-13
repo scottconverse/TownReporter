@@ -676,3 +676,46 @@ test("H06 / DHH-3: after Suggest 3 more the panel says which model ran, and keep
   assert.match(said, /3 suggestions from deepseek-v4\.1-flash\. Pick one, or type your own\./);
   await page.close();
 });
+
+/*
+  Release H DHI-7: the story screen's "Suggest headlines" press opens this
+  dialog, and with no suggestions yet it starts the first round itself, on the
+  model the row shows. "Suggest 3 more" stays as the editor's own press.
+*/
+function StoryWithSuggestHeadlines({ initial = "deepseek-flash" }) {
+  const [open, setOpen] = React.useState(false);
+  const [pick, setPick] = React.useState({ model: initial, effort: "none" });
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement("button", { type: "button", onClick: () => setOpen(true) }, "Suggest headlines"),
+    React.createElement(HeadlineDialog, {
+      leadId: 7,
+      current: "Council approves the fee rise",
+      open,
+      suggestFirst: true,
+      onClose: () => setOpen(false),
+      onDone: () => {},
+      defaultModel: "auto",
+      model: pick.model,
+      effort: pick.effort,
+      modelPicked: true,
+      onModelChange: (model) => setPick({ model, effort: model === "deepseek-flash" ? "none" : null }),
+      onEffortChange: (effort) => setPick((current) => ({ ...current, effort })),
+    }),
+  );
+}
+
+test("DHI-7: Suggest headlines opens the panel and starts the first round on the screen's model", async () => {
+  actions.__reset();
+  deskCalls.length = 0;
+  const page = await mount(React.createElement(StoryWithSuggestHeadlines));
+  assert.equal(deskCalls.filter((c) => c.fn === "suggestHeadlines").length, 0, "nothing is asked before the press");
+  await page.click(button("Suggest headlines"));
+  const asked = deskCalls.filter((c) => c.fn === "suggestHeadlines");
+  assert.equal(asked.length, 1, "the press starts the first suggestion call without a second press");
+  assert.equal(asked[0].data.modelChoice, "deepseek-flash", "the call uses the model the picker shows");
+  assert.equal(asked[0].data.modelChoiceExplicit, true, "the screen's pick is a real pick");
+  assert.match(lastLayer().textContent, /Suggested by deepseek-v4\.1-flash\./, "the panel reports the model that ran");
+  await page.close();
+});

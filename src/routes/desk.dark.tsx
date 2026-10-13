@@ -293,6 +293,21 @@ function DarkPage() {
       setModelEffort(defaultModelEffort(choice));
     },
   });
+  /*
+    Release H DHI-1: the "Start a file" dialog writes the page's model and effort
+    as the editor picks them (one copy on screen). Cancel must put them back to
+    what they were when the dialog opened; only a file that actually opens keeps
+    the pick.
+  */
+  const startDialogBefore = useRef<{ model: StoryModelChoice; effort: ModelEffort | null; touched: boolean } | null>(null);
+  const startDialogOpened = useRef(false);
+  useEffect(() => {
+    if (!startOpen) return;
+    startDialogOpened.current = false;
+    startDialogBefore.current = { model: modelChoice, effort: modelEffort, touched: modelChoiceTouched.current };
+    // Only the open edge snapshots; a pick made inside the dialog must not reset it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startOpen]);
   const pickedFor = useRef<number | null>(null);
   const fileModelTouchedFor = useRef<number | null>(null);
   const fileModelExplicitFor = useRef<number | null>(null);
@@ -920,12 +935,22 @@ function DarkPage() {
         seed={seedFromImport || undefined}
         prefill={startPrefill}
         onClose={() => {
+          // Cancel (or Escape) puts the page's model back as it was before the
+          // dialog opened. The opened file's own close keeps the pick.
+          const before = startDialogBefore.current;
+          startDialogBefore.current = null;
+          if (before && !startDialogOpened.current) {
+            setModelChoice(before.model);
+            setModelEffort(before.effort);
+            modelChoiceTouched.current = before.touched;
+          }
           setStartOpen(false);
           setSeedFromImport("");
           setStartPrefill(undefined);
           pendingSignalId.current = null;
         }}
         onOpened={(id, run) => {
+          startDialogOpened.current = true;
           // The editor's pick, for the first round: `afterOpen` issues the
           // round in this same tick, before `setModelChoice` can be read.
           const picked = run.modelChoice ? darkModelChoice(run.modelChoice) : null;

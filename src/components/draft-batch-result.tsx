@@ -2,7 +2,7 @@ import { Notice } from "@/components/states";
 import type { DraftBatchItem } from "@/lib/news/draft-batch";
 
 export function DraftBatchResult({ item, headline, redraftLabel, redrafting, onRedraft }: { item: DraftBatchItem; headline: string; redraftLabel?: string; redrafting?: boolean; onRedraft?: () => void }) {
-  const canRedraft = item.status === "completed" || item.status === "failed";
+  const canRedraft = item.status === "completed" || item.status === "failed" || item.status === "cancelled";
   return (
     <div className="lead-row">
       <div className="lead-main">

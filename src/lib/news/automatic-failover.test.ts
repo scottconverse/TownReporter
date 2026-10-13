@@ -14,7 +14,7 @@ it("appends a third Story hop without dropping earlier reasons or duplicating a 
   const second = failoverNoteSentence("Codex Sol 6.1", "DeepSeek v4.1 Flash", "quota");
   const third = failoverNoteSentence("Claude Sonnet", "Codex Sol 6.1", "timeout");
   const history = appendStoryFailoverNote(appendStoryFailoverNote(first, second), third);
-  assert.equal(history, "Claude Haiku sign-in lapsed -> DeepSeek v4.1 Flash reached its usage limit -> Codex Sol 6.1 timed out -> Claude Sonnet");
+  assert.equal(history, "Claude Haiku sign-in lapsed → DeepSeek v4.1 Flash reached its usage limit → Codex Sol 6.1 timed out → Claude Sonnet");
   assert.equal(appendStoryFailoverNote(history, third), history);
 });
 
