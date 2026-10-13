@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   captureStateSentence,
   captureSupportLine,
+  capturedRecordLeadLine,
+  formatCaptureMountainTime,
   groupDisplayCaptures,
   revealOpenedCapture,
 } from "./finding-evidence-display.ts";
@@ -93,6 +95,57 @@ describe("what the captured-version card says", () => {
       capture({ versionId: null, captureEventId: 13, available: false }),
     ]);
     assert.equal(captureSupportLine(eventOnly!), "capture event 13");
+  });
+});
+
+/**
+ * UNIT FA10, walk row A10: the captured-record card opened on a raw GMT string
+ * ("Sat, 11 Oct 2026 17:58:00 GMT"), saved-copy and capture-event numbers,
+ * "Exact draft provenance" and repeated mechanical explanations, so the editor
+ * had to sift through all of it to reach the judgment.
+ *
+ * The lead line now says WHEN the copy was taken in Mountain time, WHAT it is,
+ * and WHAT TO DO with it. Everything below it stays.
+ */
+describe("the captured-record lead line", () => {
+  it("reads a raw GMT capture time in Mountain time", () => {
+    assert.equal(
+      formatCaptureMountainTime("Sat, 11 Oct 2026 17:58:00 GMT"),
+      "Oct. 11, 2026, 11:58 AM",
+      "17:58 GMT is 11:58 in Mountain daylight time, not 17:58",
+    );
+  });
+
+  it("opens on the readable date, the passage and the review action", () => {
+    const line = capturedRecordLeadLine({
+      kind: "passage",
+      title: "Council minutes, item 7",
+      capturedAt: "Sat, 11 Oct 2026 17:58:00 GMT",
+      action: "Read it against the passage and decide whether the finding stands.",
+    });
+    assert.match(line, /^Saved Oct\. 11, 2026, 11:58 AM Mountain time\./);
+    assert.match(line, /Council minutes, item 7/);
+    assert.match(line, /decide whether the finding stands/);
+    assert.doesNotMatch(line, /GMT/, "the raw GMT string is not the lead any more");
+  });
+
+  it("still leads when there is no title, and keeps the original time when it cannot be read", () => {
+    const noTitle = capturedRecordLeadLine({
+      kind: "record",
+      title: null,
+      capturedAt: "2026-10-11T17:58:00Z",
+      action: "Read it and decide whether it stands.",
+    });
+    assert.match(noTitle, /Captured copy\./);
+
+    const unreadable = capturedRecordLeadLine({
+      kind: "record",
+      title: null,
+      capturedAt: "not a date",
+      action: "Read it and decide whether it stands.",
+    });
+    assert.match(unreadable, /^Captured copy\./);
+    assert.doesNotMatch(unreadable, /Saved/);
   });
 });
 

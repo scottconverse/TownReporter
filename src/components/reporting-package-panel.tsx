@@ -18,9 +18,11 @@ import {
   heldLine,
   methodLine,
   packageGaps,
+  packagePlainSummary,
   reportingNotice,
   reportingPackageHistory,
   reportingRunState,
+  warmColdPlainLine,
 } from "@/lib/news/reporting-package-view";
 import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting";
 
@@ -185,12 +187,42 @@ function PackageBody({
 }) {
   const run = reportingRunState(report);
   const gaps = packageGaps(report);
+  /*
+    FC20 (Oct 11 walk row C20): the panel used to open on "Method 2.6.0 -
+    full-pipeline" and "warm 0 / cold 0 actions" with no explanation. This
+    summary is built from the package's own saved fields and says what was
+    read, what was established, what still needs checking and the next press.
+    Every line below it is kept.
+  */
+  const summary = packagePlainSummary(report);
   return (
     <section className="reporting-package" aria-label="Reporting package">
       <header className="reporting-package-head">
         <h2>Reporting package</h2>
-        <p className="meta">{methodLine(report)}</p>
       </header>
+      <section className="reporting-plain-summary" aria-label={summary.heading}>
+        <h3>{summary.heading}</h3>
+        <dl>
+          <div>
+            <dt>What was read</dt>
+            <dd>{summary.read}</dd>
+          </div>
+          <div>
+            <dt>What was established</dt>
+            <dd>{summary.established}</dd>
+          </div>
+          <div>
+            <dt>What still needs checking</dt>
+            <dd>{summary.stillToCheck}</dd>
+          </div>
+          <div>
+            <dt>Next press</dt>
+            <dd>{summary.nextAction}</dd>
+          </div>
+        </dl>
+      </section>
+      <p className="meta">{methodLine(report)}</p>
+      <p className="meta">{warmColdPlainLine(report.actions)}</p>
       <div className={`reporting-run reporting-run-${run.tone}`} role="status">
         <strong>{run.label}</strong>
         <p className="meta">{run.detail}</p>

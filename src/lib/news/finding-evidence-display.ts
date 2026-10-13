@@ -102,6 +102,109 @@ export function captureStateSentence(
 }
 
 /**
+ * The newsroom's own time zone, for reading a captured record (FA10).
+ *
+ * The desk serves one newsroom in Mountain time; a capture timestamp stored as
+ * a raw GMT string is unreadable there -- "Sat, 11 Oct 2026 17:58:00 GMT" makes
+ * an editor do arithmetic against their own clock to know whether the copy is
+ * from today. The readable date is shown FIRST and the raw string is kept
+ * beside it, so nothing is lost.
+ */
+export const NEWSROOM_TIME_ZONE = "America/Denver";
+
+/**
+ * Read a stored capture timestamp as the moment it records.
+ *
+ * WHY THIS IS NOT `new Date(value)`. A capture stored as "Sat, 11 Oct 2026
+ * 17:58:00 GMT" is not read the same way everywhere: this machine's runtime
+ * turns it into 11:58 MOUNTAIN (a bug in the runtime's handling of that
+ * format), while the ISO form of the same moment reads correctly. An editor
+ * comparing the copy's time with the story's clock would be hours out. So the
+ * RFC/GMT form is converted to the ISO form the runtime reads as written, and
+ * anything else is handed to `Date` unchanged.
+ */
+function parseCaptureTimestamp(value: string): Date {
+  const trimmed = value.trim();
+  const gmt = /^(\w{3}),\s+(\d{1,2})\s+(\w{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+GMT$/.exec(
+    trimmed,
+  );
+  if (gmt) {
+    const months = [
+      "jan", "feb", "mar", "apr", "may", "jun",
+      "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    const month = months.indexOf(gmt[3]!.toLowerCase()) + 1;
+    if (month > 0) {
+      const iso = `${gmt[4]}-${String(month).padStart(2, "0")}-${gmt[2]!.padStart(2, "0")}T${gmt[5]}:${gmt[6]}:${gmt[7]}Z`;
+      return new Date(iso);
+    }
+  }
+  let normalized = trimmed.replace(" ", "T");
+  normalized = normalized.replace(/(\.\d{3})\d+/, "$1");
+  normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+  return new Date(normalized);
+}
+
+/**
+ * A captured-record timestamp in Mountain time, in the words an editor reads
+ * back to a source ("Oct. 11, 2026, 11:58 a.m.").
+ *
+ * Returns null for a value that does not carry a real moment, so the caller
+ * keeps the original string instead of printing a fabricated date.
+ */
+export function formatCaptureMountainTime(
+  value: string | null | undefined,
+  timeZone: string = NEWSROOM_TIME_ZONE,
+): string | null {
+  if (!value?.trim()) return null;
+  const date = parseCaptureTimestamp(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  })
+    .format(date)
+    .replace(/^(\w{3}) (\d)/, "$1. $2");
+}
+
+/**
+ * The plain lead line at the top of one captured record (walk row A10).
+ *
+ * WHY. The owner's walk found the record cards opened with a raw GMT string,
+ * saved-copy and capture-event numbers, "Exact draft provenance" and repeated
+ * mechanical explanations, so the editor had to sift through all of it to reach
+ * the one thing they came for. This line says, in order: WHEN the copy was
+ * taken, WHAT it is (the passage, or the record's title), and WHAT TO DO with
+ * it. Every identifier and explanation below the line is kept.
+ */
+export function capturedRecordLeadLine(input: {
+  kind: "passage" | "record";
+  title?: string | null;
+  capturedAt?: string | null;
+  action: string;
+  timeZone?: string;
+}): string {
+  const when = formatCaptureMountainTime(input.capturedAt, input.timeZone);
+  const title = input.title?.trim() || null;
+  const what =
+    input.kind === "passage"
+      ? title
+        ? `Captured copy of “${title}” for the passage below`
+        : "Captured copy for the passage below"
+      : title
+        ? `Captured copy of “${title}”`
+        : "Captured copy";
+  const parts: string[] = [];
+  if (when) parts.push(`Saved ${when} Mountain time.`);
+  parts.push(`${what}. ${input.action}`);
+  return `${parts.join(" ")}`;
+}
+
+/**
  * The ids behind one captured record, for a person to quote (PUB1).
  *
  * "Artifact version 4645 · Capture event 12 (version 4645)" is the desk's

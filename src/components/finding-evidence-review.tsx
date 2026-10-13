@@ -30,6 +30,7 @@ import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import {
   captureStateSentence,
   captureSupportLine,
+  capturedRecordLeadLine,
   groupDisplayCaptures,
   revealOpenedCapture,
 } from "@/lib/news/finding-evidence-display";
@@ -291,11 +292,13 @@ const citedRecordCopy = {
 function CitedRecordChecks({
   variant,
   captures,
+  passage,
   onOpen,
   pending,
 }: {
   variant: "finding" | "claim";
   captures: readonly CaptureRow[];
+  passage?: string | null;
   onOpen: (versionId: number) => void;
   pending: boolean;
 }) {
@@ -308,12 +311,41 @@ function CitedRecordChecks({
         <ul className="mt-2 space-y-3">
           {displayedCaptures.map((group, captureIndex) => {
             const capture = group.capture;
+            const passageText = passage?.trim() || null;
+            const actionable = capture.available && capture.readable && !capture.takenDown;
             return (
               <li
                 key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
                 className="border-l border-rule pl-3 text-sm"
               >
-                <p className="font-medium text-ink">
+                {/*
+                  FA10 (Oct 11 walk row A10): the card used to open on a raw GMT
+                  string and a pile of identifiers, so the editor had to sift.
+                  The lead line now says WHEN the copy was taken (in Mountain
+                  time), WHAT it is, and WHAT TO DO with it. Nothing below is
+                  removed -- the raw capture time, the support ids and the
+                  state sentence all stay.
+                */}
+                <p className="text-muted">
+                  {capturedRecordLeadLine({
+                    kind: variant === "finding" && passageText && actionable ? "passage" : "record",
+                    title: capture.title,
+                    capturedAt: capture.capturedAt,
+                    action:
+                      variant === "finding"
+                        ? "Read it against the passage and decide whether the finding stands."
+                        : "Read it against this returned claim and decide whether it stands.",
+                  })}
+                </p>
+                {variant === "finding" && passageText && actionable ? (
+                  <blockquote className="mt-2 border-l-2 border-rule pl-3 text-ink">
+                    <span className="block text-xs font-medium tracking-[0.14em] text-muted uppercase">
+                      Passage to review
+                    </span>
+                    <span className="whitespace-pre-wrap">{passageText}</span>
+                  </blockquote>
+                ) : null}
+                <p className="mt-1 font-medium text-ink">
                   {capture.title ?? capture.url ?? copy.fallback}
                 </p>
                 <p className="mt-1 text-muted">
@@ -1291,6 +1323,7 @@ export function FindingEvidenceReviewPanel({
           <CitedRecordChecks
             variant="finding"
             captures={finding.captures}
+            passage={finding.finding.excerpt}
             onOpen={(versionId) => captureRead.mutate(versionId)}
             pending={captureRead.isPending}
           />

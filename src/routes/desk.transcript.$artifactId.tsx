@@ -7,6 +7,7 @@ import { getTranscriptView } from "@/lib/news/desk";
 import {
   fetchTranscriptOriginal,
   TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE,
+  TRANSCRIPT_STORAGE_DETAILS_EXPLANATION,
   transcriptByteSize,
   transcriptPlainText,
   transcriptSegmentUrl,
@@ -264,6 +265,12 @@ function TranscriptPage() {
         the server refuses one supplied in the request.
       */}
       <div className="note-sec transcript-file-facts">
+        {/*
+          FC11 (Oct 11 walk row 70-meeting-capture-details): the raw path,
+          SHA-256 and format used to appear above the tape with no reason given.
+          One plain line now says what they are for. Every value below is kept.
+        */}
+        <p className="note-one">{TRANSCRIPT_STORAGE_DETAILS_EXPLANATION}</p>
         <p className="side-label">Stored at</p>
         <p className="transcript-path">{view.storagePath}</p>
         <p className="note-one">

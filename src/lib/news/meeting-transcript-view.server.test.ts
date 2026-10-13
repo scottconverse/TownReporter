@@ -16,6 +16,7 @@ import * as transcriptDownloadModule from "./meeting-transcript-view.server.ts";
 import {
   TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE,
   TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
+  TRANSCRIPT_STORAGE_DETAILS_EXPLANATION,
   TranscriptViewRefused,
   transcriptPlainText,
 } from "./meeting-transcript-view.ts";
@@ -271,5 +272,21 @@ describe("FC08: the meeting date comes from the meeting's own title", () => {
     const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 12 });
     assert.equal(view.meetingDate, "2026-09-21");
     assert.equal(view.postedDate, "2026-09-30");
+  });
+});
+
+/**
+ * FC11, walk row 70-meeting-capture-details: the stored path, SHA-256 and
+ * "srv3" format were printed above the readable tape with no explanation.
+ *
+ * The line the page prints above them is pinned here. The storage facts stay
+ * visible BELOW it -- this is an addition, not a replacement.
+ */
+describe("FC11: the storage facts carry a plain reason", () => {
+  it("says what the path and the fingerprint are for", () => {
+    assert.match(TRANSCRIPT_STORAGE_DETAILS_EXPLANATION, /^Storage details: /);
+    assert.match(TRANSCRIPT_STORAGE_DETAILS_EXPLANATION, /where the saved copy is kept/);
+    assert.match(TRANSCRIPT_STORAGE_DETAILS_EXPLANATION, /fingerprint/);
+    assert.match(TRANSCRIPT_STORAGE_DETAILS_EXPLANATION, /proves the tape was not changed/);
   });
 });
