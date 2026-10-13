@@ -111,6 +111,7 @@ import {
   resolveDraftJobState,
   recoveringDraftCopy,
   storyHeaderSectionLabel,
+  STALE_DUPLICATE_NOTICE,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -2114,6 +2115,15 @@ function StoryPage() {
       : (comparisonExplanation?.reason ??
         "The saved link does not match the current story evidence.")
     : "";
+  /*
+    B02 (2026-10-13): when this page's own check cannot explain the pair, that
+    sentence is the ONE thing the panel should say first, in one short line, so
+    it cannot be read past. The panel keeps its detail sentence too -- nothing is
+    removed -- and every button under it is untouched. Compare still only warns:
+    the editor can still keep the pair, kill the lead, or move it to New.
+  */
+  const comparePairStale = comparePair != null && comparisonExplanation == null;
+  const comparisonLead = comparePairStale ? STALE_DUPLICATE_NOTICE : "";
   const compareShown = comparePair ? (compareOpen ?? true) : false;
   /*
    * Unit AK item 6: a kill leaves a record, and the record outlives the kill --
@@ -2898,6 +2908,7 @@ function StoryPage() {
             onKillThis={killAsDuplicateOfPrior}
             onReopenPrior={reopenPrior}
             matchReason={comparisonReason}
+            staleNotice={comparisonLead}
             formatDate={formatShortDate}
           />
         </div>
