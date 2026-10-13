@@ -1255,6 +1255,12 @@ function StoryPage() {
     },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      /*
+        FB18 (Oct 11 walk): this press saves the fields (above) but, unlike
+        Save, left the "Write it myself" flag up, so the page kept treating the
+        words as unsaved and ignored the confirmation it had just recorded.
+      */
+      if (res.ok) setManualDraft(null);
       announceToDesk(
         res.ok
           ? "Recorded: you confirmed you checked this story against your sources."
