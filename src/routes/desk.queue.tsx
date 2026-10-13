@@ -1141,7 +1141,7 @@ function QueuePage() {
     if (!pending) return;
     lastKill.current = null;
     const restoringId = "desk-restoring-bulk";
-    deskToast("Restoring…", { id: restoringId, duration: Infinity });
+    deskToast("Restoringâ€¦", { id: restoringId, duration: Infinity });
     try {
       await undoBulkKill(pending.promise, (id) => undoKill.mutateAsync(killUndoPress(id, bulkRestores.current[id])));
       deskToast("Undone: the leads are back on the Queue.", { tone: "ok", id: BULK_STATUS_TOAST_ID });
