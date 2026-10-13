@@ -113,6 +113,13 @@ import {
   type ProviderSurface,
 } from "@/lib/news/provider-registry";
 import { customConnectionStatus, geminiReadinessWord } from "@/lib/news/writer-bar";
+import {
+  EFFORT_FIELD_HELP,
+  TEST_ALL_CONNECTIONS_LINE,
+  effortChoiceLabel,
+  setupFieldHelp,
+  testAllCardNote,
+} from "@/lib/news/models-help-copy";
 
 export const Route = createFileRoute("/desk/models")({
   head: () => ({ meta: [{ title: "Models — TownReporter" }] }),
@@ -248,6 +255,14 @@ function ModelsPage() {
           >
             {testAll.isPending ? "Checking…" : "Test all connections"}
           </button>
+        ) : null}
+        {/*
+          FB08: the button's own name promises more than it does, so the plain
+          line beside it says exactly what it checks and points at the per-card
+          Test that does ask a model. The button keeps its name and its result.
+        */}
+        {isOwner ? (
+          <p className="max-w-sm text-sm text-ink-2">{TEST_ALL_CONNECTIONS_LINE}</p>
         ) : null}
         {isOwner ? (
           /*
@@ -700,6 +715,11 @@ function JobRow({
         <div className="model-job-first">
           <div className="model-job-field">
             <span className="model-job-label">First choice</span>
+            {/* FB22: the picker's list mixes API keys, sign-ins and servers
+                under one word ("transport"), so the plain line says so. */}
+            <span className="model-job-label" style={{ fontWeight: "normal" }}>
+              {setupFieldHelp("transport")}
+            </span>
             <ModelPicker
               scope={surface}
               label={`First choice for ${job?.label ?? jobKey}`}
@@ -742,7 +762,9 @@ function JobRow({
                 */
                 efforts.map((effort: ModelEffort) => (
                   <option key={effort} value={effort} title={modelEffortLabel(effort, firstExact)}>
-                    {modelEffortLabel(effort, firstExact)}
+                    {/* FB22: the shared picker's plain words ("Medium — balanced")
+                        beside the raw token, so no owner meets "xhigh" alone. */}
+                    {effortChoiceLabel(effort, firstExact)}
                   </option>
                 ))
               ) : (
@@ -752,6 +774,10 @@ function JobRow({
                 <option value="">Default</option>
               )}
             </select>
+            {/* FB22: one plain line saying what the effort choice means. */}
+            <span className="model-job-label" style={{ fontWeight: "normal" }}>
+              {EFFORT_FIELD_HELP}
+            </span>
           </div>
         </div>
       )}
@@ -971,6 +997,8 @@ function ConnectionsTab({
         note="Uses your existing plan instead of per-use billing. Sign-ins expire; the desk warns 3 days ahead."
         below={
           <>
+            {/* FB22: the group heading says "OAuth" with no plain word for it. */}
+            <span className="block">{setupFieldHelp("oauth")}</span>
             These sign-ins carry per-model time limits, which stay on{" "}
             <a className="inline-link" href="/desk/ops">
               Server settings
@@ -1408,6 +1436,15 @@ function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
               />
             }
           >
+            {/* FB08: a card with no Test button says why and what to do instead.
+                A missing command gets the "cloud" line (there is nothing to ask
+                until it is installed); an installed but unsigned-in card gets
+                the "signin" line. A signed-in card has its own Test above. */}
+            {!status.signedIn ? (
+              <p className="mt-2 text-sm text-ink-2">
+                {testAllCardNote(status.installed ? "signin" : "cloud")}
+              </p>
+            ) : null}
             {/* What this sign-in can actually run: the registry's own entries
                 for that transport, not a typed-out list of model names. */}
             <ProviderModelRows
@@ -1651,6 +1688,9 @@ function LocalServerCard({
         </>
       }
     >
+      {/* FB08: this card has no Test of its own, and the walk looked for one.
+          The plain line says why and what to use instead. */}
+      <p className="text-sm text-ink-2">{testAllCardNote("local")}</p>
       <p className="text-base font-bold">{localServerStatus(server)}</p>
       <div className="flex flex-col">
         {server.models.length === 0 ? (
