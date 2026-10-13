@@ -326,7 +326,7 @@ function CitedRecordChecks({
                   removed -- the raw capture time, the support ids and the
                   state sentence all stay.
                 */}
-                <p className="text-muted">
+                <p className="text-ink">
                   {capturedRecordLeadLine({
                     kind: variant === "finding" && passageText && actionable ? "passage" : "record",
                     title: capture.title,
@@ -339,7 +339,7 @@ function CitedRecordChecks({
                 </p>
                 {variant === "finding" && passageText && actionable ? (
                   <blockquote className="mt-2 border-l-2 border-rule pl-3 text-ink">
-                    <span className="block text-xs font-medium tracking-[0.14em] text-muted uppercase">
+                    <span className="block text-sm font-medium text-ink-2">
                       Passage to review
                     </span>
                     <span className="whitespace-pre-wrap">{passageText}</span>
