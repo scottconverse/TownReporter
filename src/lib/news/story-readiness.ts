@@ -46,8 +46,9 @@ export function liveClaimsOwnReadiness(raw: string | null | undefined): boolean 
 
 /** Apply the current zero-claims decision on both the story page and Drafts. */
 export function readinessWithUncheckedStory(readiness: StoryReadiness, input: Parameters<typeof uncheckedStoryNeedsCheck>[0]): StoryReadiness {
-  if (readiness.state === "checking") return readiness;
+  /* FA06/FC05 (Oct 11 walk): an empty draft still in line is not "checking facts". */
   if (!input.body.trim()) return { ...readiness, state: "not-ready", reason: "No draft yet." };
+  if (readiness.state === "checking") return readiness;
   const unchecked = uncheckedStoryNeedsCheck(input);
   if (unchecked.blocked) return readiness.state === "ready" || readiness.state === "verified" || readiness.state === "not-checked"
     ? { ...readiness, state: "not-checked", reason: unchecked.reason } : readiness;

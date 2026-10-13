@@ -1162,6 +1162,12 @@ describe("Worth a Look presentation", () => {
     );
   });
 
+  it("FA06/FC06: a job waiting in line a long time is not called recovering from a restart", () => {
+    const now = Date.now();
+    const longAgo = new Date(now - 60 * 60 * 1000).toISOString();
+    assert.equal(resolveDraftJobState({ status: "queued", updated_at: longAgo }, now), "drafting");
+  });
+
   it("resolveDraftJobState: a cold heartbeat on a running job reads as recovering, never as a failure prompting a re-click", () => {
     const now = Date.now();
     const staleUpdatedAt = new Date(now - (STALE_RUNNING_SECONDS + 5) * 1000).toISOString();

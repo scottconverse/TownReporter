@@ -82,3 +82,20 @@ describe("ZC0: the zero-claims readiness the desk reaches", () => {
     assert.equal(readinessWithUncheckedStory(filed, { ...input, evidenceCheckedCurrentVersion: true }).state, "ready");
   });
 });
+
+/*
+  FA06/FC05 (Oct 11 walk): a draft still waiting in line has no words, yet the
+  story page called it "Checking facts" because the waiting flag was read
+  before the empty body.
+*/
+describe("FA06/FC05: an empty queued draft", () => {
+  it("reads No draft yet, not Checking facts", () => {
+    const waiting = savedStoryReadiness(null, true);
+    assert.equal(waiting.state, "checking");
+    const shown = readinessWithUncheckedStory(waiting, {
+      recordedClaims: 0, evidenceCheckedCurrentVersion: false, body: "",
+      acknowledgedForVersion: false, exempt: false,
+    } as never);
+    assert.equal(storyReadinessChip(shown).text, "No draft yet");
+  });
+});

@@ -1231,7 +1231,13 @@ export function resolveDraftJobState(
   if (!job) return "idle";
   if (job.status === "completed") return "done";
   if (job.status === "failed") return "failed";
-  if (job.status === "running" || job.status === "queued") {
+  /*
+    FA06/FC06 (Oct 11 walk): a job still waiting in line has no heartbeat to
+    go cold. Calling it "recovering" told the editor the app had restarted
+    while a just-submitted draft sat queued behind a scan.
+  */
+  if (job.status === "queued") return "drafting";
+  if (job.status === "running") {
     const updated = Date.parse(job.updated_at ?? "");
     const stale = Number.isFinite(updated) && nowMs - updated > DRAFT_JOB_STALE_AFTER_SECONDS * 1000;
     return stale ? "recovering" : "drafting";
