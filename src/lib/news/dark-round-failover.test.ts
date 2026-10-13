@@ -333,3 +333,21 @@ describe("terminalPlannerStartupFailure", () => {
     );
   });
 });
+
+/*
+  FC27 (Oct 11 walk): when the backup model also failed, the stop printed only
+  the backup's failure and hid the first model's real cause.
+*/
+it("FC27: a failed synthesis retry names both causes", async () => {
+  const cutOff = "DeepSeek v4.1 Flash: Provider says: reply was cut off because the output token limit was reached (finish reason: length).";
+  const unreachable = "Local model is unreachable. Check that it is running and that this machine is online.";
+  let calls = 0;
+  const out = await runCheckpointedDarkStages({
+    initialChoice: "deepseek-flash" as never,
+    research: async () => ({ hops: 1, plannerStartupFailures: 0, summary: "" }),
+    synthesize: async () => ({ error: calls++ === 0 ? cutOff : unreachable }),
+    failOver: async () => ({ next: "local-model" as never, label: "Local model", switchedBecause: "cut off" }),
+  });
+  assert.ok(out.synth.error?.includes(cutOff), "the first cause stays");
+  assert.ok(out.synth.error?.includes(unreachable), "the retry's cause is named too");
+});

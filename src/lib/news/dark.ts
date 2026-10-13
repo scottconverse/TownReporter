@@ -3125,11 +3125,20 @@ export async function runCheckpointedDarkStages<
 
   let synth = await opts.synthesize(choice);
   if (synth.error && !switched) {
+    const first = synth.error;
     const next = await opts.failOver(synth.error, "synthesis");
     if (next) {
       choice = next.next;
       await opts.setStage?.(`${next.switchedBecause} → ${next.label} retrying synthesis`);
       synth = await opts.synthesize(choice);
+      /*
+        FC27 (Oct 11 walk): the stop printed only the retry's failure ("Local
+        model is unreachable") while the first model's real cause (a reply cut
+        off at the output limit) sat only in the usage detail. Name both.
+      */
+      if (synth.error && synth.error !== first) {
+        synth = { ...synth, error: `${first} Then ${next.label}: ${synth.error}` };
+      }
     }
   }
   return { choice, loop, synth };
