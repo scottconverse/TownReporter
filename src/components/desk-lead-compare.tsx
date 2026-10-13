@@ -19,6 +19,7 @@ import {
   MOVE_TO_NEW_LABEL,
   REOPEN_LABEL,
   REOPEN_PRIOR_LABEL,
+  STALE_DUPLICATE_LABEL,
 } from "@/lib/news/desk-copy";
 
 /**
@@ -64,6 +65,7 @@ export function LeadComparePanel({
   onKillThis,
   onReopenPrior,
   matchReason,
+  staleNotice,
   formatDate,
 }: {
   current: CompareSide;
@@ -72,6 +74,11 @@ export function LeadComparePanel({
   onKillThis?: (override?: string[]) => Promise<CompareResult>;
   onReopenPrior?: () => Promise<CompareResult>;
   matchReason?: string;
+  /** B02 (2026-10-13): the page's own check could not explain this pair. The
+   * sentence is shown first, above the detail line, so the plain statement of
+   * what changed is the panel's main message. Optional and additive: callers
+   * that do not pass it render exactly as before. */
+  staleNotice?: string;
   /** The paper's own date formatter, passed in so the panel renders the same
    * dates as the rest of the desk and can be rendered in a test without the
    * paper-date context. */
@@ -115,10 +122,15 @@ export function LeadComparePanel({
     <section className="lead-compare" aria-labelledby="lead-compare-heading">
       <div className="lead-compare-head">
         <div>
-          <p className="kick">Possible duplicate</p>
+          <p className="kick">{staleNotice ? STALE_DUPLICATE_LABEL : "Possible duplicate"}</p>
           <h2 id="lead-compare-heading">{COMPARE_HEADING}</h2>
         </div>
       </div>
+      {staleNotice ? (
+        <p className="notice" role="status">
+          {staleNotice}
+        </p>
+      ) : null}
       <p className="meta" role="note">
         {matchReason || "This saved link has no matching explanation."}
       </p>

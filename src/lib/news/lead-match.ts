@@ -324,6 +324,77 @@ export function nonStoplistedProperNouns(
 }
 
 /**
+ * B02 (2026-10-13): the runs of neighbouring capitalised words in a headline
+ * that are entirely made of non-furniture names -- one NAME, not several
+ * loose words.
+ *
+ * "Bohn Farm rezoning heads to the planning board" has one run, "bohn farm";
+ * "Safety & Justice Center parking garage" has "safety" and "justice center";
+ * a headline that merely MENTIONS a district has a run too ("st vrain valley
+ * schools schedules"). Adjacency is the whole point: "Bohn" and "Farm" mean
+ * one place because they are written as one name, and two headlines that name
+ * the same run are naming the same thing. See sharesTightName.
+ */
+export function compoundNameRuns(
+  headline: string,
+  place?: NewsroomPlace | null,
+): Set<string> {
+  const names = nonStoplistedProperNouns(headline, place);
+  const out = new Set<string>();
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length && run.every((w) => names.has(w))) out.add(run.join(" "));
+    run = [];
+  };
+  for (const raw of headline.split(/\s+/)) {
+    const word = raw.replace(/[^A-Za-z']/g, "").toLowerCase();
+    if (/^[A-Z][a-zA-Z'&.]*$/.test(raw)) run.push(word);
+    else flush();
+  }
+  flush();
+  return out;
+}
+
+/**
+ * B02 (2026-10-13): do two headlines name the same thing by a multi-word name
+ * written the same way in both?
+ *
+ * The bug this settles. The Queue chipped a St. Vrain Valley Schools open
+ * house as already printed against a Wild Plum Center Head Start story, and
+ * filed the open house as a possible duplicate of a City Council study
+ * session. All three stories share the school district "St. Vrain Valley", and
+ * they share nothing else. The district name is what the old two-shared-names
+ * rule was reading, and it cannot tell that case from the two real ones --
+ * "Bohn Farm" (one farm, two tellings) and "Safety & Justice Center" (one
+ * building) are also exactly two shared names, with no shared subject word.
+ * Measured on the old rule, the true pairs and the false pair are identical:
+ * subjects 0, names 2.
+ *
+ * What does tell them apart is how the name is written. "Bohn Farm" and
+ * "Justice Center" are compound names -- capitalised words that sit next to
+ * each other in BOTH headlines, so both headlines are naming one thing.
+ * "St. Vrain Valley" is not: in the Head Start headline the district is a
+ * locator ("for St. Vrain Valley"), and in the open house headline it is the
+ * front of a longer run ("st vrain valley schools schedules"). Neither writes
+ * the run "st vrain valley", so neither names it as a thing.
+ *
+ * Two headlines that share a compound name are about the same place, person or
+ * organisation, and that is evidence worth a look -- the same weight the old
+ * two-names rule was reaching for, on the evidence that actually carries it.
+ */
+export function sharesTightName(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+): boolean {
+  const runsA = compoundNameRuns(a, place);
+  if (!runsA.size) return false;
+  const runsB = compoundNameRuns(b, place);
+  for (const run of runsA) if (runsB.has(run)) return true;
+  return false;
+}
+
+/**
  * Count of anchors two headlines share. A literal `date:`/`amount:`/`num:`/
  * `noun:` anchor present on both sides counts once. In addition, a bare
  * `month:MM` anchor on either side counts once for every distinct
