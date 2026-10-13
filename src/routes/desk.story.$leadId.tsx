@@ -3165,6 +3165,7 @@ function StoryPage() {
               leadId={id}
               notes={notes}
               hasDraft={Boolean(data.draft)}
+              draftWritten={Boolean(data.draft?.body?.trim())}
               currentDraftId={data.draft ? Number(data.draft.id) : null}
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
@@ -4831,6 +4832,7 @@ function ReportingNotesPane({
   leadId,
   notes,
   hasDraft,
+  draftWritten = hasDraft,
   locked,
   openedExtractionByUrl,
   draftMeetingEvidence,
@@ -4848,6 +4850,8 @@ function ReportingNotesPane({
   leadId: number;
   notes: ReportingNotes;
   hasDraft: boolean;
+  /** FC07 (Oct 11 walk): a draft row with no words yet was not "written before notes were kept". */
+  draftWritten?: boolean;
   locked: boolean;
   /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
   openedExtractionByUrl: Record<string, string | null>;
@@ -5163,7 +5167,7 @@ function ReportingNotesPane({
       {!filled ? (
         <>
           <p className="note-one" style={{ marginTop: small ? 0 : 8 }}>
-            {hasDraft
+            {draftWritten
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
