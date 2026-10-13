@@ -278,7 +278,12 @@ export function jobProgressView(
 ): JobProgressView {
   const kind = row.kind;
   let cutOff = false;
-  try { cutOff = JSON.parse(row.result_json ?? "{}").draftCutOff === true; } catch { /* Legacy receipt. */ }
+  let darkStop = "";
+  try {
+    const receipt = JSON.parse(row.result_json ?? "{}");
+    cutOff = receipt.draftCutOff === true;
+    darkStop = typeof receipt.darkStop === "string" ? receipt.darkStop : "";
+  } catch { /* Legacy receipt. */ }
   let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
   if (typeof row.model_choice === "string" && row.model_choice.startsWith("custom:")) {
     try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
@@ -301,7 +306,12 @@ export function jobProgressView(
           ? `/desk/story/${leadId}`
           : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
-    doneText: kind === "draft" && cutOff ? CUT_OFF_WARNING : DONE_TEXT[kind] ?? "Done",
+    doneText: kind === "draft" && cutOff
+      ? CUT_OFF_WARNING
+      : kind === "dark" && darkStop === "synthesis-failed"
+        /* FC26: the file page's own sentence for this stop (desk-copy.ts). */
+        ? "Could not finish this round. What was found is still on the file."
+        : DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
     /*
       Retry re-runs the request the row describes, so it is only offered for the

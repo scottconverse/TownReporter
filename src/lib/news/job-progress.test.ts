@@ -325,3 +325,15 @@ describe("FC13: the Running box counts queued jobs apart", () => {
     assert.equal(runningHeadLabel([{ status: "running" }] as never), "Running · 1");
   });
 });
+
+describe("FC26: a dig whose case file could not be written", () => {
+  it("does not say Case file ready", async () => {
+    const { jobProgressView } = await import("./job-progress.ts");
+    const base = { id: 1, kind: "dark", status: "completed", subject_id: 7, model_choice: "auto", stage: null, step_text: null,
+      started_at: null, finished_at: null, beat_at: null, updated_at: null, error: null, failover_note: "" };
+    const failed = jobProgressView({ ...base, result_json: JSON.stringify({ darkStop: "synthesis-failed" }) } as never, 0, null);
+    assert.equal(failed.doneText, "Could not finish this round. What was found is still on the file.");
+    const fine = jobProgressView({ ...base, result_json: "{}" } as never, 0, null);
+    assert.equal(fine.doneText, "Case file ready for your decision");
+  });
+});

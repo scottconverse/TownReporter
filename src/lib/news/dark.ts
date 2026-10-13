@@ -135,6 +135,7 @@ import {
   pctFor,
   progressReporterFor,
   runLooksStalled,
+  setJobDarkStop,
   setJobModelChoice,
   setJobModelRuntime,
   setJobFailoverNote,
@@ -3706,6 +3707,7 @@ export async function performDarkRound(job: DeskJob) {
     const stopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
     await persistDarkRunUsage(runId, owned(context), runBudget.snapshot(), stopReason as DarkRunStopReason,
     );
+    if (stopReason === "synthesis-failed") await setJobDarkStop(job.id, stopReason);
     const finishedSummary = briefError ? `${header}\nBrief: ${briefError}` : header;
     await sql`
       update dark_runs

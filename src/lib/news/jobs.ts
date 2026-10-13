@@ -647,6 +647,23 @@ export async function setJobFailoverNote(id: number, note: string) {
 }
 
 /**
+ * FC26 (Oct 11 walk): a dig whose case-file write-up failed still finishes as
+ * "completed", so its card said "Case file ready". The round records how it
+ * stopped in the job's receipt, and the card reads it (job-progress.ts).
+ */
+export async function setJobDarkStop(id: number, stopReason: string) {
+  const sql = await getSql();
+  await sql.query(
+    `update desk_jobs
+       set result_json = (coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb)
+         || jsonb_build_object('darkStop', $2::text))::text,
+           updated_at = now()
+     where id = $1`,
+    [id, stopReason],
+  );
+}
+
+/**
  * Automatic failover (src/lib/news/automatic-failover.ts) rewrites the
  * concrete choice ON the running job when the first provider's login has
  * lapsed mid-run, so a heartbeat, a reclaim, or the editor's own screen all
