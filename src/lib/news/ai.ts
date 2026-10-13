@@ -1126,8 +1126,13 @@ export async function grokChat(
     // was cut off (finish reason: length) and the draft fell back to Codex Sol.
     // Codex and Claude never applied this cap, so DeepSeek was the only writer
     // held to it.
-    max_tokens: (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)) || isDeepSeekFlashModel(model)
-      ? Math.max(maxTokens, 16_384) : maxTokens,
+    // The loopback Local model needs it too: the writer (2,200) and edit (1,800)
+    // stage caps are smaller than the full-JSON reply they ask for (a measured
+    // 2,629-token draft on lead 448), so Local was cut off on the same lead
+    // DeepSeek was (Oct 12 2026, job 336). A cap is a ceiling, not a target.
+    max_tokens: (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl))
+      || isDeepSeekFlashModel(model) || isLoopbackEndpoint(llm.baseUrl)
+      ? Math.max(maxTokens, DRAFT_OUTPUT_TOKEN_FLOOR) : maxTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -1270,6 +1275,32 @@ export async function grokChat(
       meta: openAiMeta(body),
     };
   }
+  // A DeepSeek reply that runs to the output ceiling with thinking off is a
+  // repetition loop, not a long answer: the Oct 12 2026 edit-stage call wrote
+  // the same "The release does not state ..." note ~370 times (81k characters
+  // at 16,384 tokens), while the same request re-run finished in 1,420 tokens.
+  // The loop is intermittent, so one retry at a warmer temperature breaks it
+  // here and keeps the draft on DeepSeek, instead of paying Local and Codex for
+  // it. Only when the deadline leaves room for a second full attempt.
+  const firstAttemptMs = Date.now() - startedAt;
+  if (
+    body.choices?.[0]?.finish_reason === "length" &&
+    isDeepSeekFlashModel(model) &&
+    remaining() >= Math.max(15_000, firstAttemptMs)
+  ) {
+    try {
+      const again = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ...payload, temperature: LOOP_RETRY_TEMPERATURE }),
+        signal: AbortSignal.timeout(remaining()),
+      });
+      const againBody = again.ok ? (JSON.parse(await again.text()) as typeof body) : null;
+      if (againBody && !againBody.error && againBody.choices?.[0]?.finish_reason !== "length") body = againBody;
+    } catch {
+      // Keep the first reply; the ladder reports the cut-off honestly.
+    }
+  }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
   if (body.choices?.[0]?.finish_reason === "length") {
@@ -1326,6 +1357,21 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
  * field would select provider default and can re-enable thinking.
  */
+/** Output room every stage of a DeepSeek or Local draft call gets at minimum. */
+export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
+
+/** Temperature of the one retry after a DeepSeek reply hit the output ceiling. */
+const LOOP_RETRY_TEMPERATURE = 0.7;
+
+/** The model runs on this machine (LM Studio, local Ollama): 127.0.0.1, localhost, ::1. */
+function isLoopbackEndpoint(baseUrl: string): boolean {
+  try {
+    return /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** DeepSeek v4.1 Flash on Ollama, by its exact model id. */
 function isDeepSeekFlashModel(model: string): boolean {
   return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());

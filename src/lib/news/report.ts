@@ -391,7 +391,7 @@ When the evidence is another newsroom's reporting:
 
 Return ONLY JSON with keys:
 headline, dek, body, topic, source_urls (array of URLs actually used — exact document URLs, never a homepage stand-in unless the homepage is the evidence),
-integrity_notes (what the editor should verify),
+integrity_notes (what the editor should verify: at most 8 short notes, one per distinct open check, never repeated),
 memory_entities,
 form,
 found (null, or {text, source_urls, locators} for something TownReporter itself located in a captured record — every URL must be one you actually used),
@@ -408,6 +408,7 @@ export const REPORT_WRITE_SYSTEM = reportWriteSystem(PAPER);
 export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Reconcile the draft against the supplied evidence, then edit. The draft is not evidence; its assertions and links are claims to check. Retain supported facts and useful writing, remove or qualify unsupported assertions, and record unresolved checks in integrity_notes. Do not add facts absent from the evidence.
 The headline and dek are for readers only. Keep missing-fact notes such as "does not state", "is not stated", "did not say", "not specified", and "unclear from the notice" out of both fields; put them in integrity_notes or unanswered. Keep substantive reporting about what the city has or has not decided in the body.
 Research questions and unknowns are hypotheses from an earlier pass, not evidence. When the supplied evidence answers one, remove it from unanswered and integrity_notes or narrow it to only what the evidence leaves unresolved. Preserve questions and unknowns the evidence does not answer.
+integrity_notes is a short list for the human editor: at most 8 notes, one sentence each, one note per distinct open check. Never write one note per sentence of the draft, never restate a note in other words, and stop listing as soon as the distinct open checks are covered. Then finish the JSON.
 ${EVIDENCE_RECONCILIATION_RULES}
 Checklist:
 1. What's the actual news? Is it in the lede?
