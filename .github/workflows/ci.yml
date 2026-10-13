@@ -25,7 +25,7 @@ jobs:
   # Which of the not-required browser walks need to run on this change? A walk runs when its
   # own script (or scripts/lib/, or this workflow) changed. The nightly run and a manual run
   # execute everything, so app code that breaks a walk is caught within a day, not blocking a PR.
-  # The 12 required checks never depend on this job and always run under the same names.
+  # Scott 2026-10-13: no check is required; this job also picks which unit, database and build jobs run.
   changes:
     name: Which browser walks need to run (nightly or manual only)
     runs-on: ubuntu-latest
@@ -61,6 +61,12 @@ jobs:
       run_first_owner_setup_code: ${{ steps.pick.outputs.run_first_owner_setup_code }}
       run_legal_gone_nav: ${{ steps.pick.outputs.run_legal_gone_nav }}
       run_dialogs: ${{ steps.pick.outputs.run_dialogs }}
+      run_static: ${{ steps.pick.outputs.run_static }}
+      run_unit: ${{ steps.pick.outputs.run_unit }}
+      run_db: ${{ steps.pick.outputs.run_db }}
+      run_built: ${{ steps.pick.outputs.run_built }}
+      run_delete_corrections: ${{ steps.pick.outputs.run_delete_corrections }}
+      run_watchdog: ${{ steps.pick.outputs.run_watchdog }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -119,6 +125,27 @@ jobs:
           else
             echo 'run_dialogs=false' >> "$GITHUB_OUTPUT"
           fi
+          # Scott 2026-10-13: zero required checks; CI never blocks a merge. Run only what a
+          # change can break. Nightly and manual runs still run everything.
+          # A change to page text (src/routes or src/components .tsx) gets the 1-minute typecheck only.
+          if [ "$everything" = true ] || [ -z "${BASE:-}" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            files=ALL
+          else
+            files=$(git diff --name-only "$BASE" "$HEAD")
+          fi
+          want() {
+            if [ "$files" = ALL ] || printf '%s\n' "$files" | grep -Eq "$2"; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          want run_static '^(src/|scripts/|package(-lock)?\.json$|tsconfig|vite\.config|\.github/workflows/ci\.yml$)'
+          want run_unit '(^src/.*\.ts$|^src/lib/|^src/server|^scripts/[^/]+\.test\.|^package(-lock)?\.json$|^tsconfig|^\.github/workflows/ci\.yml$)'
+          want run_db '(\.server\.ts$|postgres|/db/|migrat|drizzle|schema|^package(-lock)?\.json$|^\.github/workflows/ci\.yml$)'
+          want run_built '^(package(-lock)?\.json$|vite\.config|app\.config|src/(server|entry|router)|ops/|scripts/smoke-built-server\.mjs$|\.github/workflows/ci\.yml$)'
+          want run_delete_corrections '(correction|trash|delete|\.github/workflows/ci\.yml$)'
+          want run_watchdog '(^ops/|watchdog|^\.github/workflows/ci\.yml$)'
 
   dialog-browser:
     needs: changes
@@ -152,6 +179,8 @@ jobs:
   # on the tests, so they run beside the suite instead of ahead of it.
   static:
     name: Typecheck and lint
+    needs: changes
+    if: needs.changes.outputs.run_static == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -223,6 +252,8 @@ jobs:
   # the others, so a red run still reports every failure it found.
   unit-tests:
     name: Unit suite, shard ${{ matrix.shard }} of 6
+    needs: changes
+    if: needs.changes.outputs.run_unit == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -270,7 +301,8 @@ jobs:
           echo "unit suite shards: $SHARDS_RESULT"
           failed=0
           for result in "$STATIC_RESULT" "$SHARDS_RESULT"; do
-            [ "$result" = "success" ] || failed=1
+            # skipped = not needed for this change (Scott 2026-10-13: selective CI)
+            [ "$result" = "success" ] || [ "$result" = "skipped" ] || failed=1
           done
           if [ "$failed" = "1" ]; then
             echo "the unit gate is not green -- open the job above that is red"
@@ -328,6 +360,8 @@ jobs:
 
   smoke-built:
     name: Built server boots and serves
+    needs: changes
+    if: needs.changes.outputs.run_built == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -473,6 +507,8 @@ jobs:
   # help -- a property no single test file above measures.
   postgres-integration:
     name: Real Postgres, part ${{ matrix.part }} of 4
+    needs: changes
+    if: needs.changes.outputs.run_db == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -1119,6 +1155,8 @@ jobs:
   # ever been driven through a browser.
   delete-corrections:
     name: Delete, trash, and the public corrections feed, in a browser
+    needs: changes
+    if: needs.changes.outputs.run_delete_corrections == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -1255,6 +1293,8 @@ jobs:
   # that equivalence is itself asserted statically in ops-scripts.test.mjs.
   windows-watchdog-recovery:
     name: The watchdog actually brings a dead app back (TEST-003)
+    needs: changes
+    if: needs.changes.outputs.run_watchdog == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     env:

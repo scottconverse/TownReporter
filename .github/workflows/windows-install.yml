@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '47 9 * * *'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -53,14 +55,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          docs_only=false
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          # Scott 2026-10-13: build and install the Windows Setup.exe only when a change can
+          # affect it (installer, ops, packaging, server start), plus nightly and by hand.
+          # The output keeps its old name: true = skip the install for this change.
+          docs_only=true
+          if [ "$EVENT_NAME" = "schedule" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            docs_only=false
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
             files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
-            # Documentation = anything under docs/ and any *.md file, the same two
-            # patterns the old trigger filter used.
-            if [ -n "$files" ] && ! echo "$files" | grep -v -E '^docs/|\.md$' | grep -q .; then
-              docs_only=true
-            fi
+          else
+            files="$(gh api "repos/$REPOSITORY/commits/$GITHUB_SHA" --jq '.files[].filename')"
+          fi
+          if [ "$docs_only" = true ] && { [ -z "${files:-}" ] || echo "$files" | grep -Eq '^(installer/|ops/|package(-lock)?\.json$|vite\.config|app\.config|src/(server|entry)|scripts/(package|build|install|windows)|\.github/workflows/windows-install\.yml$)'; }; then
+            docs_only=false
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only"
