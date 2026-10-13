@@ -69,3 +69,26 @@ describe("meeting draft material", () => {
     );
   });
 });
+
+/*
+  FC08 (Oct 11 walk): a Sept. 21 meeting posted Sept. 30 reached the writer
+  as "(2026-09-30)". The meeting's own title date wins.
+*/
+describe("FC08: the meeting draft gets the meeting's date, not the upload date", () => {
+  it("prints the title's date in the evidence", async () => {
+    const sql = {
+      async query<T>(text: string): Promise<T[]> {
+        if (/from meeting_transcript_artifacts/.test(text)) return [{ id: 7, video_id: "video-1", sha256: "sha-a" }] as T[];
+        if (/from meeting_capture_records/.test(text))
+          return [{ title: "Museum Advisory Board Meeting, September 21, 2026", published: "2026-09-30T03:00:00Z" }] as T[];
+        if (/from meeting_agenda_chunks/.test(text)) return [{ item: "1", title: "Exhibits", start_seconds: 0, segment_indexes: "[0]" }] as T[];
+        if (/from meeting_transcript_segments/.test(text))
+          return [{ segment_index: 0, start_seconds: 0, excerpt: "The board met.", caption_sha256: "sha-a" }] as T[];
+        return [] as T[];
+      },
+    } as unknown as Sql;
+    const result = await loadMeetingDraftMaterial(sql, { newsroomId: 1, artifactId: 7, videoId: "video-1", fallbackTitle: "Fallback" });
+    assert.match(result.evidence, /2026-09-21/);
+    assert.doesNotMatch(result.evidence, /2026-09-30/);
+  });
+});
