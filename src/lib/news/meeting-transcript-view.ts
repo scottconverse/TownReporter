@@ -115,6 +115,17 @@ export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
 export const TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE =
   "Integrity: not checked (the original file is missing).";
 
+/**
+ * The plain reason the storage facts are on the page (walk row FC11).
+ *
+ * WHY. The owner's walk found the long stored path, the SHA-256 and the "srv3"
+ * format printed above the readable tape with no explanation, so they read as
+ * machine noise. This one line says what they are for. Every value below it
+ * stays visible.
+ */
+export const TRANSCRIPT_STORAGE_DETAILS_EXPLANATION =
+  "Storage details: where the saved copy is kept and its fingerprint, which proves the tape was not changed.";
+
 export type TranscriptOriginalDownload =
   | { ok: true; blob: Blob }
   | { ok: false; message: string };

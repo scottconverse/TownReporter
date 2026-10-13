@@ -249,6 +249,101 @@ export function methodLine(report: ReportingPackage): string {
 }
 
 /*
+  The plain summary at the top of the panel (walk row C20).
+
+  WHY. The owner's walk read "Method 2.6.0 - full-pipeline", "warm 0 / cold 0
+  actions", "coverage gate" and "no retained tape" with no explanation, so the
+  panel opened on the method's private vocabulary. This reads the package's OWN
+  fields -- the run note it saved, the actions it filed, the stories it saved,
+  whether its coverage gate passed -- and says, in four lines, what was read,
+  what was established, what still needs checking, and the next press.
+
+  NOTHING IS UPGRADED. A run note that says no tape was scoped is reported as
+  no tape read; an empty ledger is nothing-was-read, never a filled-in one; a
+  gate that did not pass is not called a pass.
+*/
+export type PackagePlainSummary = {
+  /** One word set for a screen-reader heading, and shown as the section note. */
+  heading: string;
+  read: string;
+  established: string;
+  stillToCheck: string;
+  nextAction: string;
+};
+
+/** The two mechanical passes, in ordinary words (walk row C20). */
+export const WARM_PASS_PLAIN = "the first read of the meeting record";
+
+export function warmColdPlainLine(actions: readonly unknown[]): string {
+  return `Warm and cold passes: the meeting record is read twice — first to find the actions (${
+    WARM_PASS_PLAIN
+  }), then again as a check that misses nothing. This run recorded ${
+    actions.length
+  } ${actions.length === 1 ? "action" : "actions"} in both passes together.`;
+}
+
+export function packagePlainSummary(report: ReportingPackage): PackagePlainSummary {
+  const note = report.runNote || "";
+  const noTape = /no retained tape was scoped/i.test(note);
+  const suppliedOnly = /supplied-sources-only/i.test(note);
+  const retainedRead = /read\s+(\d+)\s+retained segments in\s+(\d+)\s+windows/i.exec(note);
+  const storyCount = report.stories.length;
+  const actionCount = report.actions.length;
+
+  let read: string;
+  if (noTape) {
+    read = suppliedOnly
+      ? "No saved meeting recording or transcript was included. The run used only the links supplied with this assignment; no public search was run."
+      : "No saved meeting recording or transcript was included, so there was no tape to read.";
+  } else if (retainedRead) {
+    read = `Read ${retainedRead[1]} saved transcript passages across ${retainedRead[2]} parts of the meeting.`;
+  } else if (actionCount) {
+    read = `${actionCount} ${actionCount === 1 ? "action" : "actions"} read from the meeting record.`;
+  } else {
+    read = "The sources this run used are listed below.";
+  }
+
+  const established =
+    `${storyCount} ${storyCount === 1 ? "story draft" : "story drafts"} saved. ` +
+    (actionCount
+      ? `${actionCount} meeting ${actionCount === 1 ? "action" : "actions"} recorded.`
+      : "No meeting actions were recorded.");
+
+  let stillToCheck: string;
+  if (report.runStatus === "FAILED") {
+    stillToCheck = "The run did not finish, so the record below is incomplete.";
+  } else if (noTape) {
+    stillToCheck = "The meeting record was not read, so the coverage check did not pass.";
+  } else if (!report.coverageComplete || report.runStatus === "PARTIAL") {
+    stillToCheck = "The coverage check did not pass. Review the gaps listed below.";
+  } else {
+    stillToCheck = "The coverage check passed. Review the claims and draft before using them.";
+  }
+
+  const nextAction =
+    report.runStatus === "FAILED"
+      ? "Start the reporting run again from the form above."
+      : noTape
+        ? "Start a follow-up run below and add the official recording or meeting packet link."
+        : !report.coverageComplete
+          ? "Start a follow-up run below to check the gaps listed here."
+          : "Review the linked claims and draft before publishing.";
+
+  return {
+    heading:
+      report.runStatus === "COMPLETE"
+        ? "The reporting run finished"
+        : report.runStatus === "FAILED"
+          ? "The reporting run did not finish"
+          : "The reporting run finished with gaps",
+    read,
+    established,
+    stillToCheck,
+    nextAction,
+  };
+}
+
+/*
   The gaps the panel must state, in one list. Each entry is a thing the package
   does NOT settle, drawn from its own fields -- never invented.
 */

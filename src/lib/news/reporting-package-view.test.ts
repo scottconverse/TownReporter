@@ -7,10 +7,12 @@ import {
   heldLine,
   methodLine,
   packageGaps,
+  packagePlainSummary,
   readinessLabel,
   reportingRunState,
   scoreLine,
   sourceLocator,
+  warmColdPlainLine,
 } from "./reporting-package-view.ts";
 import {
   parseReportingPackage,
@@ -262,5 +264,67 @@ describe("gaps, locators and held rows", () => {
       heldLine({ storyId: "s", headline: "X", reason: "r", nextCheck: "n", unverified: true }),
       /\(unresolved\)/,
     );
+  });
+});
+
+/**
+ * UNIT FC20, walk row C20: the panel opened on "Method 2.6.0 - full-pipeline",
+ * "warm 0 / cold 0 actions", "coverage gate" and "no retained tape" with no
+ * explanation. The summary below is built from the package's own fields, so an
+ * editor reads what was read, what was established, what failed and the next
+ * press in ordinary words -- and the warm/cold line says what those passes are.
+ */
+describe("the plain reporting summary", () => {
+  /** A run note of the shape the walk produced: no tape, nothing read. */
+  const noTapeNote =
+    "The reporting run is PARTIAL: coverage gate did not pass. no retained tape was scoped; " +
+    "warm 0 / cold 0 actions; warm and cold passes agreed; 0 saved story packets; coverage gate did not pass.";
+
+  it("says a no-tape run read nothing, in words, instead of leaving the note to explain it", () => {
+    const summary = packagePlainSummary(
+      report({ runStatus: "PARTIAL", runNote: noTapeNote, coverageComplete: false, actions: [] }),
+    );
+    assert.match(summary.read, /No saved meeting recording or transcript was included/);
+    assert.doesNotMatch(summary.read, /retained segments/, "there were none; do not imply reading");
+    assert.match(summary.stillToCheck, /coverage check did not pass/);
+    assert.match(summary.nextAction, /add the official recording or meeting packet link/i);
+    assert.match(summary.heading, /finished with gaps/);
+  });
+
+  it("counts what was established from the package's own actions and stories", () => {
+    const action: CoverageAction = {
+      actionId: "a1",
+      timestamp: "",
+      agendaItem: "Item 7",
+      motionOrAction: "Approved",
+      outcome: "passed",
+      vote: "5-2",
+      policyStage: "final",
+      evidence: "minutes p.3",
+      disposition: "reported",
+    };
+    const summary = packagePlainSummary(
+      report({ actions: [action], stories: [story({})], coverageComplete: true }),
+    );
+    assert.match(summary.established, /1 story draft saved/);
+    assert.match(summary.established, /1 meeting action recorded/);
+    assert.match(summary.read, /1 action read from the meeting record/);
+  });
+
+  it("does not call a failed run a coverage gap, and names the next press", () => {
+    const summary = packagePlainSummary(
+      report({ runStatus: "FAILED", runNote: "The writer stage crashed.", coverageComplete: false }),
+    );
+    assert.match(summary.stillToCheck, /did not finish/);
+    assert.match(summary.nextAction, /start the reporting run again/i);
+    assert.match(summary.heading, /did not finish/);
+  });
+
+  it("explains the warm and cold passes beside their counts", () => {
+    const line = warmColdPlainLine([]);
+    assert.match(line, /read twice/);
+    assert.match(line, /first read of the meeting record/);
+    assert.match(line, /recorded 0 actions/);
+    assert.match(warmColdPlainLine([{}, {}]), /recorded 2 actions/);
   });
 });
