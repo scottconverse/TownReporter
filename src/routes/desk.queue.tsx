@@ -2174,6 +2174,19 @@ function QueuePage() {
           />
           <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
           {/*
+            FB24 (Oct 11 walk): the bar said "Start 1 story" and this dialog said
+            0 with no reason. Say why the count differs from the bar's.
+          */}
+          {batchPoolPending ? (
+            <p className="meta" role="status">Loading the leads you selected…</p>
+          ) : batchLeadIds.length > selectedBatchLeads.length ? (
+            <p className="meta" role="status">
+              {batchLeadIds.length - selectedBatchLeads.length} of the {batchLeadIds.length} leads you
+              selected {batchLeadIds.length - selectedBatchLeads.length === 1 ? "is" : "are"} not on the desk any more, so
+              {batchLeadIds.length - selectedBatchLeads.length === 1 ? " it is" : " they are"} not in this batch.
+            </p>
+          ) : null}
+          {/*
             DHD1-2: the strip behind has the same "Model for these stories"
             choice. Both read one state, so this line says so on screen.
           */}
