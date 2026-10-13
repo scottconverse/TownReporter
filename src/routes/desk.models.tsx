@@ -1219,18 +1219,27 @@ function ApiKeyConnections({
     },
     onError: () => onNote("That connection could not be removed."),
   });
+  /*
+    FB09 (Oct 11 walk): the answer went only to the page note at the top,
+    off screen from a card far down Connections, so a Test press looked like
+    nothing happened. The same words now also print on the card pressed.
+  */
+  const [cardResult, setCardResult] = useState<Record<string, string>>({});
   const test = useMutation({
     mutationFn: (row: PublicCustomAiConnection) =>
       testCustomAiConnectionFn({ data: { id: row.id } }),
     onSuccess: (res, row) => {
-      onNote(
-        res.ok
-          ? `${row.name}: ${res.message} (${(res.latencyMs / 1000).toFixed(1)} seconds.)`
-          : `${row.name} did not answer: ${res.message}`,
-      );
+      const text = res.ok
+        ? `${row.name}: ${res.message} (${(res.latencyMs / 1000).toFixed(1)} seconds.)`
+        : `${row.name} did not answer: ${res.message}`;
+      onNote(text);
+      setCardResult((all) => ({ ...all, [row.id]: text }));
       refresh();
     },
-    onError: () => onNote("That check did not run."),
+    onError: (_e, row) => {
+      onNote("That check did not run.");
+      setCardResult((all) => ({ ...all, [row.id]: "That check did not run." }));
+    },
   });
   if (connections.isPending) return <ListSkeleton rows={2} />;
   if (connections.isError && !connections.data) {
@@ -1291,6 +1300,11 @@ function ApiKeyConnections({
             }
           >
             <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
+            {test.isPending && test.variables?.id === row.id ? (
+              <p className="text-base" role="status">Testing {row.name}: one short question sent, waiting for the answer…</p>
+            ) : cardResult[row.id] ? (
+              <p className="text-base" role="status">{cardResult[row.id]}</p>
+            ) : null}
           </ConnectionCard>
         );
       })}
