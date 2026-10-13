@@ -277,9 +277,9 @@ export const WARM_PASS_PLAIN = "the first read of the meeting record";
 export function warmColdPlainLine(actions: readonly unknown[]): string {
   return `Warm and cold passes: the meeting record is read twice — first to find the actions (${
     WARM_PASS_PLAIN
-  }), then again as a check that misses nothing. This run recorded ${
+  }), then a second, separate read that does not see the first list, to catch anything missed. This run recorded ${
     actions.length
-  } ${actions.length === 1 ? "action" : "actions"} in both passes together.`;
+  } ${actions.length === 1 ? "action" : "actions"}.`;
 }
 
 export function packagePlainSummary(report: ReportingPackage): PackagePlainSummary {

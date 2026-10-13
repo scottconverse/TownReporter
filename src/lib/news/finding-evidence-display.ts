@@ -115,13 +115,9 @@ export const NEWSROOM_TIME_ZONE = "America/Denver";
 /**
  * Read a stored capture timestamp as the moment it records.
  *
- * WHY THIS IS NOT `new Date(value)`. A capture stored as "Sat, 11 Oct 2026
- * 17:58:00 GMT" is not read the same way everywhere: this machine's runtime
- * turns it into 11:58 MOUNTAIN (a bug in the runtime's handling of that
- * format), while the ISO form of the same moment reads correctly. An editor
- * comparing the copy's time with the story's clock would be hours out. So the
- * RFC/GMT form is converted to the ISO form the runtime reads as written, and
- * anything else is handed to `Date` unchanged.
+ * The RFC/GMT form ("Sat, 11 Oct 2026 17:58:00 GMT") is converted to ISO
+ * explicitly, so the result does not depend on how a runtime parses that
+ * older format; anything else is handed to `Date` after small ISO clean-ups.
  */
 function parseCaptureTimestamp(value: string): Date {
   const trimmed = value.trim();
