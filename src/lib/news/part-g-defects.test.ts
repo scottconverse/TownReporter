@@ -294,3 +294,16 @@ test("walk D1: DeepSeek v4.1 Flash gets the full writer room with thinking off",
     globalThis.fetch = originalFetch;
   }
 });
+
+test("B07: the local row judges the desk's chosen local model, the one its note names", () => {
+  const ollama = "http://127.0.0.1:11434/v1";
+  const read = (servers: unknown[]) => writingModelLines({
+    times: [], statuses: [], availability: {"local-model": true, "qwen-local": true} as never,
+    catalog: {checkedAt: 0, defaultModel: null, servers} as never,
+    localModel: {id: "deepseek-v4.1-flash:cloud", baseUrl: ollama},
+  }).filter(line => line.name === "Local model" && line.chip?.source === "words");
+  const up = read([{kind: "ollama", baseUrl: ollama, reachable: true, models: [{id: "deepseek-v4.1-flash:cloud", loaded: null, cloud: true}]}]);
+  assert.ok(up.length && up.every(line => line.chip?.source === "words" && line.chip.label === "Ready"));
+  const down = read([{kind: "ollama", baseUrl: ollama, reachable: false, models: []}]);
+  assert.ok(down.length && down.every(line => line.chip?.source === "words" && line.chip.label === "Not answering"));
+});

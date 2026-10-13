@@ -658,6 +658,25 @@ function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undef
     }
     if (PROBED_KINDS.has(entry.kind)) return {source:"words",tone:"ready",label:"Ready",help: reason};
   }
+  /*
+    The local row's note names the desk's chosen local model (see
+    `writingModelLines`), so its chip judges that same model on that same
+    server: answering, and in memory or a cloud model.
+  */
+  const chosen = read.localModel;
+  if ((entry.id === "local-model" || entry.id === "qwen-local") && chosen) {
+    const trim = (url: string) => url.replace(/\/+$/, "");
+    const server = read.catalog.servers.find((s) => trim(s.baseUrl) === trim(chosen.baseUrl));
+    const named = server ? (SERVER_WORD[server.kind] ?? server.kind) : "the server";
+    if (!server || !server.reachable) {
+      return {source:"words",tone:"quiet",label:"Not answering",help:`Nothing answered at ${chosen.baseUrl} when the desk last looked. A run moves on to the next model.`};
+    }
+    const model = server.models.find((m) => m.id === chosen.id);
+    if (model && !model.cloud && model.loaded === false) {
+      return {source:"words",tone:"slow",label:"No model loaded",help:`${named} answered at ${chosen.baseUrl}, but ${chosen.id} is not loaded in memory there.`};
+    }
+    return {source:"words",tone:"ready",label:"Ready",help:`${named} is answering at ${chosen.baseUrl} with ${chosen.id}${model?.cloud ? " (cloud)" : ""}.`};
+  }
   const login = LOGIN_FOR_KIND[entry.kind];
   const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
   if (status) return { source: "status", status };
