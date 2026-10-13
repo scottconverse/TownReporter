@@ -2307,6 +2307,9 @@ function InvestigationWorkspace({
                 {f.status === "deferred" ? (
                   <p className="meta">Saved for a later run; this lead was not rejected.</p>
                 ) : null}
+                {f.offSubjectNote ? (
+                  <p className="meta fr-off-subject">{f.offSubjectNote}</p>
+                ) : null}
                 {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
                 <InkButton
                   tone="quiet"

@@ -106,6 +106,7 @@ import {
 } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig, paperSetupWarning } from "./paper-settings.ts";
+import { offSubjectMarkerFor } from "./frontier-relevance.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
@@ -1209,7 +1210,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where i.id = ${id} and i.newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return null;
-    const frontier = await sql<{
+    const frontierRows = await sql<{
       id: number;
       kind: string;
       label: string;
@@ -1225,6 +1226,30 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by priority desc, id desc limit 40
     `;
+    /*
+      B08/FC03: a trail the paper already saved is the editor's record. The
+      earlier fix for these rows dropped every off-subject item out of this
+      list, which took an entry away from the editor -- it is not ported.
+
+      Each saved item is kept and instead carries one plain line saying it does
+      not belong to the question. The row, its label, its reason and its
+      "Follow this lead" button are untouched; the check runs against the same
+      subject and town the desk gates new leads with, so the page and the
+      research loop cannot disagree.
+    */
+    const paperPlace = await getPaperConfig(owned(context)).catch(() => null);
+    const frontierSubject = [inv[0].title, inv[0].ordinary_explanation]
+      .map((value) => String(value ?? ""))
+      .filter(Boolean)
+      .join(" ");
+    const frontierTown = paperPlace?.city ?? "";
+    const frontier = frontierRows.map((row) => ({
+      ...row,
+      offSubjectNote: offSubjectMarkerFor(
+        { label: row.label, why: row.why, status: row.status, closed_reason: row.closed_reason ?? undefined },
+        { subject: frontierSubject, town: frontierTown },
+      ),
+    }));
     const artifacts = await sql<{
       id: number;
       url: string;

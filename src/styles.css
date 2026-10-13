@@ -1763,6 +1763,7 @@
 .desk-ltr .fr-item {padding:9px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .fr-label {font-weight:700;font-size:calc(0.875rem * var(--ts));margin:0}
 .desk-ltr .fr-why {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:2px 0 5px}
+.desk-ltr .fr-off-subject {color:var(--warn);margin:2px 0 0;font-weight:700}
 .desk-ltr .of-block {margin-top:18px;border-top:1px solid var(--line);padding-top:8px}
 .desk-ltr .of-trail {margin-top:16px}
 .desk-ltr .of-trail summary {font-size:calc(0.875rem * var(--ts));font-weight:700;cursor:pointer;color:var(--fg2)}
