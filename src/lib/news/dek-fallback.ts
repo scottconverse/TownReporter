@@ -84,30 +84,17 @@ export function firstSentenceForDek(body: string | null | undefined): string {
   return sentence;
 }
 
-/** Letters and digits only, lowercased: the comparison a dek and headline share. */
-function wordsOnly(text: string): string {
-  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-}
-
 /**
  * The dek to print: the stored one, trimmed, or the first sentence of the
  * body when the stored one is empty or whitespace-only.
  *
- * When the headline is passed and the dek would say it again, word for word
- * (case and punctuation do not count), the reader gets no dek at all rather
- * than a copy of the headline. The editor still sees the dek rule's note about
- * repeating the headline (`dekRuleProblems`), so nothing is hidden from them.
+ * Scott, Oct 13 2026, on deks: "Leave it as is." A dek that repeats the
+ * headline still prints, as on the live paper.
  *
  * The single call every render spot makes -- never `story.dek` directly.
  */
-export function dekOrFallback(
-  dek: string | null | undefined,
-  body: string | null | undefined,
-  headline?: string | null,
-): string {
+export function dekOrFallback(dek: string | null | undefined, body: string | null | undefined): string {
   const clean = String(dek ?? "").trim();
   const summary = clean || firstSentenceForDek(body);
-  const printed = cleanMissingFactNotes("", summary).dek;
-  if (headline && wordsOnly(printed) === wordsOnly(headline)) return "";
-  return printed;
+  return cleanMissingFactNotes("", summary).dek;
 }

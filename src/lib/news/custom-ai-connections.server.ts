@@ -218,7 +218,7 @@ export async function testConnection(
     return {
       ok: answered,
       message: answered
-        ? "Endpoint answered; chat completions are available. " +
+        ? "Connection succeeded; chat completions are available. " +
           "Instruction compliance, model identity, and tools are not independently verified. " +
           `Requested: ${redact(connection.modelId)}. Reported: ${redact(reportedModel)}.${identityNote} Response: ${excerpt}`
         : "The server replied, but did not return assistant text.",

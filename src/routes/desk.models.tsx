@@ -950,7 +950,7 @@ function ConnectionsTab({
         </p>
         <ConnectionGroup
           title="Local & self-hosted"
-          note="Choose a model on this computer or your own server. Cloud models spend credits."
+          note="Runs on this machine or your own servers. Free per use; speed depends on the hardware. Choose a model on this computer or your own server. Cloud models spend credits."
         >
           <LocalServers onNote={onNote} isOwner={false} />
         </ConnectionGroup>
@@ -985,7 +985,7 @@ function ConnectionsTab({
 
       <ConnectionGroup
         title="Local & self-hosted"
-        note="Choose a model on this computer or your own server. Cloud models spend credits."
+        note="Runs on this machine or your own servers. Free per use; speed depends on the hardware. Choose a model on this computer or your own server. Cloud models spend credits."
       >
         <LocalServers onNote={onNote} isOwner={isOwner} />
       </ConnectionGroup>
