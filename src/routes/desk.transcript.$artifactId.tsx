@@ -210,6 +210,7 @@ function TranscriptPage() {
   const heading = view.title ?? "Meeting transcript";
   const meta = [
     view.meetingDate ? `Meeting of ${view.meetingDate}` : null,
+    view.postedDate && view.postedDate !== view.meetingDate ? `Posted ${view.postedDate}` : null,
     `${view.lines.length} caption ${view.lines.length === 1 ? "line" : "lines"}`,
     `video ${view.videoId}`,
   ]

@@ -52,7 +52,10 @@ export type TranscriptView = {
   artifactId: number;
   videoId: string;
   title: string | null;
+  /** FC08 (Oct 11 walk): the date in the meeting's own title, not the upload date. */
   meetingDate: string | null;
+  /** When the video was posted; printed as "Posted", never as the meeting date. */
+  postedDate: string | null;
   storagePath: string;
   sha256: string;
   format: string;
