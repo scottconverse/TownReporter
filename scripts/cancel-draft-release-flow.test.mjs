@@ -30,7 +30,7 @@ test("cancelling queued or running work unlocks its draft at once and keeps acti
   assert.ok(cancel); await React.act(async () => cancel.click());
   assert.equal(await findOpenJob({ newsroomId: room, kind: "draft", subjectId: room }), null);
   const [stopped] = await sql.query("select * from desk_jobs where id=$1", [queued.id]);
-  assert.equal(stopped.status, "failed"); assert.equal(stopped.error, JOB_CANCELLED_REASON); assert.ok(stopped.finished_at);
+  assert.equal(stopped.status, "cancelled"); assert.equal(stopped.error, JOB_CANCELLED_REASON); assert.ok(stopped.finished_at);
   let ran = false; __setJobWorkForTest(async () => { ran = true; });
   try { await executeJob(queued); } finally { __setJobWorkForTest(); }
   assert.equal(ran, false);

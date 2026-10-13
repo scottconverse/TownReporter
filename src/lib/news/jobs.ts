@@ -27,7 +27,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * how many jobs may be *open*, not how many may burn CPU.
  */
 export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "challenge" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up" | "reporting";
-export type JobStatus = "queued" | "running" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 /**
  * Every kind, as a runtime list. The type above is erased, so this is the only
@@ -875,7 +875,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     const sql = await getSql();
     const [cancelled] = await sql<{ status: string; stage: string }>`select status,stage from desk_jobs where id = ${job.id}`;
     // An explicit Cancel has already settled; a previously stopped run was never claimable.
-    return cancelled?.status === "failed" && cancelled.stage === "Cancelled";
+    return (cancelled?.status === "cancelled" || cancelled?.status === "failed") && cancelled.stage === "Cancelled";
   }
   const token = mintClaimToken();
   /*
@@ -1105,7 +1105,7 @@ export function runLooksStalled(opts: {
 }): boolean {
   if (!opts.runOpen) return false;
   if (!opts.job) return true;
-  if (opts.job.status === "completed" || opts.job.status === "failed") return true;
+  if (opts.job.status === "completed" || opts.job.status === "failed" || opts.job.status === "cancelled") return true;
   return jobHeartbeatStale(opts.job, opts.now);
 }
 
@@ -1643,9 +1643,12 @@ export async function setJobStages(id: number, stages: string[] | null) {
 export async function requestJobCancel(id: number) {
   await ensureJobsSchema();
   const sql = await getSql();
+  /* A stopped story draft ends 'cancelled'. Other kinds keep 'failed': their Retry gates read that word. */
   await sql`
     update desk_jobs
-    set cancel_requested = true, status = 'failed', stage = 'Cancelled',
+    set cancel_requested = true,
+        status = case when kind = 'draft' then 'cancelled' else 'failed' end,
+        stage = 'Cancelled',
         error = ${JOB_CANCELLED_REASON}, finished_at = now(), updated_at = now(), claim_token = null
     where id = ${id} and status in ('queued', 'running')
   `;

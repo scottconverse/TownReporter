@@ -590,7 +590,7 @@ export function observedDarkJobFinished(
       job &&
       observed.investigationId === investigationId &&
       observed.jobId === job.id &&
-      (job.status === "completed" || job.status === "failed"),
+      (job.status === "completed" || job.status === "failed" || job.status === "cancelled"),
   );
 }
 
@@ -1230,7 +1230,7 @@ export function resolveDraftJobState(
 ): DraftJobUiState {
   if (!job) return "idle";
   if (job.status === "completed") return "done";
-  if (job.status === "failed") return "failed";
+  if (job.status === "failed" || job.status === "cancelled") return "failed";
   if (job.status === "running" || job.status === "queued") {
     const updated = Date.parse(job.updated_at ?? "");
     const stale = Number.isFinite(updated) && nowMs - updated > DRAFT_JOB_STALE_AFTER_SECONDS * 1000;

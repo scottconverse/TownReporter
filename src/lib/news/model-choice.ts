@@ -47,6 +47,13 @@ export type ModelChoiceOption = {
 export const PICKER_OPTION_TEXT_MAX = 34;
 
 /**
+ * The arrow between hops in a Story job's failover trail ("<reason> → <model>").
+ * Written by appendStoryFailoverNote; read by the writer bar. Older rows use
+ * " -> ", which the reader still accepts.
+ */
+export const FAILOVER_TRAIL_SEPARATOR = " → ";
+
+/**
  * The text a picker option shows.
  *
  * A native `<select>` clips the selected option's text at its content box;
