@@ -112,7 +112,7 @@ function FollowUpsPage() {
       id: number;
       action: "pause" | "resume" | "stop" | "done" | "run-now";
     }) => followUpAction({ data: input }),
-    onSuccess: (_result, input) => {
+    onSuccess: (result, input) => {
       invalidate();
       /*
         Stop says BOTH halves out loud, because they happen at different
@@ -120,16 +120,23 @@ function FollowUpsPage() {
         stops at its next step. The card's chip does the same thing in two
         stages ("Stopping…", then "Stopped") -- see `followUpCardState`.
       */
+      /*
+        FC10 (Oct 11 walk): a Run now press that lands while the desk is busy is
+        queued, not refused. When the server names the job it is queueing behind
+        ("the story draft that is queued"), say that instead of a flat "Run
+        started." -- the old copy named a draft being written while the only
+        running job was a scan.
+      */
       announceToDesk(
         input.action === "run-now"
-          ? "Run started."
+          ? (result && "queuedNotice" in result ? result.queuedNotice : null) ?? "Run started."
           : input.action === "stop"
             ? followUpStoppedNotice()
             : "Follow-up updated.",
       );
     },
-    // The refusals ("A draft is being written right now…") are thrown by the
-    // server on purpose, so the press that could not do anything says why.
+    // A press that could not do anything says why: the row is gone, or it has
+    // been stopped or finished. (The two job fences now queue instead.)
     onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not do that.", "err"),
   });
 
