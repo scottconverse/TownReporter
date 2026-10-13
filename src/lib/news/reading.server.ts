@@ -1293,7 +1293,19 @@ const CSV_COLUMNS = [
   "depth_50",
   "depth_75",
   "depth_100",
+  "counter",
 ] as const;
+
+/*
+  FC09 (Oct 11 walk): the screen's "Page loads" is the daily site counter
+  (`page_views`), which has the history; the hourly rows start when the reading
+  beacon shipped. The export printed only the hourly rows, so its loads did not
+  add up to the screen's. Each row now names its counter, and the daily site
+  counter's rows are in the file: summing `loads` where counter is
+  daily_page_loads gives the screen's Page loads.
+*/
+const HOURLY_COUNTER = "hourly_reading";
+const DAILY_COUNTER = "daily_page_loads";
 
 /**
  * The rows behind the page, as plain CSV. Flat `read_hourly` rows for the
@@ -1325,9 +1337,27 @@ export async function exportReadingCsv(userId: string, range: ReadingRange): Pro
   const [todayRow] = await sql.query<{ today: string }>(
     `select to_char(current_date, 'YYYY-MM-DD') as today`,
   );
+  const dailyRows = await sql.query<{ day: string; loads: number }>(
+    `select to_char(day, 'YYYY-MM-DD') as day, coalesce(sum(count), 0)::int as loads
+     from page_views
+     where newsroom_id = $1 and target = $2 and day >= current_date - $3::int
+     group by day
+     order by day asc`,
+    [newsroomId, SITE_TARGET, days - 1],
+  );
   const lines = [CSV_COLUMNS.join(",")];
   for (const row of rows) {
-    lines.push(CSV_COLUMNS.map((column) => csvCell(row[column] ?? "")).join(","));
+    const cells: Record<string, string | number | null> = { ...row, counter: HOURLY_COUNTER };
+    lines.push(CSV_COLUMNS.map((column) => csvCell(cells[column] ?? "")).join(","));
+  }
+  for (const row of dailyRows) {
+    const cells: Record<string, string | number> = {
+      hour_start: row.day,
+      path: "(whole site)",
+      loads: row.loads,
+      counter: DAILY_COUNTER,
+    };
+    lines.push(CSV_COLUMNS.map((column) => csvCell(cells[column] ?? "")).join(","));
   }
   return {
     fileName: `stats-${range}-${todayRow?.today ?? "today"}.csv`,

@@ -846,11 +846,23 @@ describe("the read-back behind /desk/stats", () => {
       "depth_50",
       "depth_75",
       "depth_100",
+      "counter",
     ]);
-    assert.equal(lines.length, 5, "four rows in range, and no header-only file");
+    const hourly = lines.slice(1).filter((line) => line.endsWith(",hourly_reading"));
+    assert.equal(hourly.length, 4, "four hourly rows in range, and no header-only file");
     for (const line of lines.slice(1)) {
-      assert.equal(line.split(",").length, 13, "every row has every column");
+      assert.equal(line.split(",").length, 14, "every row has every column");
     }
+    /*
+      FC09 (Oct 11 walk): the screen's Page loads is the daily site counter.
+      The file's daily_page_loads rows add up to exactly that number.
+    */
+    const stats = await getReadingStats(userId, "7d");
+    const dailyLoads = lines.slice(1)
+      .filter((line) => line.endsWith(",daily_page_loads"))
+      .reduce((sum, line) => sum + Number(line.split(",")[4]), 0);
+    assert.ok(stats.kpis.pageLoads > 0, "the fixture has daily page loads to compare");
+    assert.equal(dailyLoads, stats.kpis.pageLoads);
     assert.ok(csv.includes(`/articles/${slugA}`));
     assert.ok(csv.includes("depth_100"));
     assert.ok(!csv.includes("99999"), "another paper's reading is not in this editor's export");
