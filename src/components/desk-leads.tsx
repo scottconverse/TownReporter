@@ -895,7 +895,7 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
         </Link>
       ) : lead.possible_duplicate_of ? (
         <span className="chip maybe-same" title="The earlier lead is unavailable.">
-          {savedLinkStale ? `${STALE_DUPLICATE_LABEL} · compare` : "Possible duplicate · unavailable"}
+          {savedLinkStale ? `${STALE_DUPLICATE_LABEL} · unavailable` : "Possible duplicate · unavailable"}
         </span>
       ) : null}
     </div>
