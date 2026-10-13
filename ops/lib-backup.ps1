@@ -457,6 +457,10 @@ function Get-TownReporterFileHash {
   $stream = $null
   $sha = $null
   try {
+    # .NET resolves a relative path against the process directory, not the
+    # PowerShell location promote.ps1 set with Set-Location. Run from another
+    # folder, the open failed, the hash came back '' and `npm ci` was skipped.
+    $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     $bytes = $sha.ComputeHash($stream)
