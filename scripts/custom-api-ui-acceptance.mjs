@@ -206,7 +206,7 @@ try {
 
   page.once("dialog", (dialog) => dialog.accept());
   await row.getByRole("button", { name: "Test connection", exact: true }).click();
-  await section.getByText(/Endpoint answered: Endpoint answered/).waitFor();
+  await section.getByText(/Success: Connection succeeded/).waitFor();
   await section.getByText(/Requested: synthetic-reporter\. Reported: /).waitFor();
   await section.getByText(/responses: not tested; model discovery: not tested/i).waitFor();
   assert.equal(providerRequests.length, 2);

@@ -348,7 +348,7 @@ export function CustomAiConnections({
                 void act(`test-${row.id}`, async () => {
                   const r = await onTest(row.id);
                   setResult(
-                    `${r.ok ? "Endpoint answered" : "Test failed"}: ${r.message} Chat completions: ${capabilityStatus(r.capabilities.chatCompletions)}; responses: ${capabilityStatus(r.capabilities.responses)}; model discovery: ${capabilityStatus(r.capabilities.modelDiscovery)}. (${r.latencyMs} ms)`,
+                    `${r.ok ? "Success" : "Test failed"}: ${r.message} Chat completions: ${capabilityStatus(r.capabilities.chatCompletions)}; responses: ${capabilityStatus(r.capabilities.responses)}; model discovery: ${capabilityStatus(r.capabilities.modelDiscovery)}. (${r.latencyMs} ms)`,
                   );
                 });
               }}

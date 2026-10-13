@@ -340,7 +340,7 @@ function ArticlePage() {
     );
   }
 
-  const dekText = dekOrFallback(article.dek, article.body, article.headline);
+  const dekText = dekOrFallback(article.dek, article.body);
   const sources = parseUrlList(article.source_urls);
   /*
     Every URL the story cites reaches "Sources & public records", including the
