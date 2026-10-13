@@ -119,7 +119,22 @@ export type SearchJudgeInput = {
  * never be recorded as "nothing changed".
  */
 export type SearchJudgeResult =
-  | { ok: true; answers: boolean; url: string; title: string; summary: string }
+  | {
+      ok: true;
+      answers: boolean;
+      url: string;
+      title: string;
+      summary: string;
+      /**
+       * FC25: how many of the results shown were ABOUT THE SUBJECT at all --
+       * regardless of whether they answer the question. Zero means the search
+       * returned nothing on the subject, and a check on nothing is not a
+       * "no change": it is the agent being unable to check. Optional so a stub
+       * written before this field existed still reads as "did not say", which
+       * the caller treats as the old behavior rather than a zero.
+       */
+      relevant?: number;
+    }
   | { ok: false; error: string };
 
 export type FollowUpAgentDeps = {
@@ -360,8 +375,9 @@ const SEARCH_JUDGE_SYSTEM = [
   "You decide whether a set of web search results answers one specific question a local newsroom is following up.",
   "You do not guess and you do not browse. If none of the results answers the question, answer false.",
   "Answer with one JSON object and nothing else:",
-  '{"answers": true|false, "url": "<the single best result URL, or \\"\\">", "title": "<its title>", "summary": "<one sentence, at most 240 characters, saying what it establishes, or why none of them answers it>"}',
+  '{"answers": true|false, "url": "<the single best result URL, or \\"\\">", "title": "<its title>", "summary": "<one sentence, at most 240 characters, saying what it establishes, or why none of them answers it>", "relevant": <how many of the results above are about the question\'s subject at all>}',
   "Only set answers to true when a result actually establishes the fact asked for. A related page, a directory listing or an older story about the same topic is false.",
+  'Set "relevant" to the number of results that are ON THE SUBJECT, even when none of them answers the question -- a page about the questioned subject that is merely older, or a directory listing for it, still counts. A dictionary entry for one word of the question, or a page about something else entirely, does not count. If every result is off the subject, relevant is 0.',
 ].join("\n");
 
 /** The query: the editor's question, as written. Truncated to what a search
@@ -414,6 +430,7 @@ async function judgeSearchHits(input: SearchJudgeInput): Promise<SearchJudgeResu
       url?: unknown;
       title?: unknown;
       summary?: unknown;
+      relevant?: unknown;
     }>(ai.text);
     if (!parsed) {
       handle?.finish({ result: "unreadable" });
@@ -424,12 +441,21 @@ async function judgeSearchHits(input: SearchJudgeInput): Promise<SearchJudgeResu
     handle?.finish({ result: parsed.answers === true && url ? "answers" : "no-answer" });
     // A true with no URL is not usable as a finding: the card links to the
     // result, and a finding nobody can open is not one.
+    //
+    // FC25: `relevant` is carried only when the model actually wrote a number.
+    // A missing or unreadable value stays `undefined`, which the caller reads
+    // as "the judge did not say" and falls back to the old wording -- a `?? 0`
+    // here would invent "nothing was about the subject" from a silent model.
+    const relevantCount = Number.isFinite(parsed.relevant as number)
+      ? Math.max(0, Math.trunc(parsed.relevant as number))
+      : undefined;
     return {
       ok: true,
       answers: parsed.answers === true && url.length > 0,
       url,
       title: typeof parsed.title === "string" ? parsed.title.slice(0, 200) : "",
       summary,
+      relevant: relevantCount,
     };
   } catch (e) {
     handle?.finish({ result: "failed" });
@@ -492,6 +518,29 @@ export async function runSearchAgent(
     return couldNotCheck(`Could not tell whether the results answer it: ${verdict.error}`);
   }
   if (!verdict.answers) {
+    /*
+      FC25: A CHECK ON NOTHING IS NOT A "NO CHANGE".
+
+      On the stand-in editorial day a search follow-up watching a published
+      phishing story ran, and its judge returned `answers: false` -- correctly,
+      the two pages it had been shown were dictionary definitions of the word
+      "full", nothing to do with the Boulder County permit warning. The card
+      then read "Checked · no change", and "Could not check" stayed at zero,
+      because `answers: false` was the ONLY thing this branch asked. The editor
+      was told the story was re-checked and had not moved, when in fact nothing
+      about the story had been read at all.
+
+      The judge already knows the difference and now says it: `relevant` counts
+      the results that were about the subject, whether or not they answer the
+      question. Zero of them about the subject is the agent being unable to
+      check, and it says so in words an editor can act on. A judge that did not
+      write the field leaves `relevant` undefined and keeps the old wording,
+      so nothing that worked before turns into a could-not-check on a missing
+      number.
+    */
+    if (verdict.relevant === 0) {
+      return couldNotCheck("The search found nothing about this story.");
+    }
     return {
       state: "no-change",
       finding: {

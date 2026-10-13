@@ -1843,6 +1843,15 @@ export function resurfacedSummarySentence(input: {
    * the full picture of one run without opening the Queue. Optional for the
    * same reason as `mergedSameScan`. */
   developingFiled?: number;
+  /**
+   * FC18: the headlines this run actually FILED (`fileScanLeads`'s
+   * `filedHeadlines`). The `e.g. '…'` example is only printed when
+   * `firstDiscardedHeadline` is one of these. It exists to prove the
+   * statement it hangs off, and a title the desk discarded proves the
+   * opposite. Optional: a caller that does not pass it gets the example
+   * dropped rather than printed unchecked.
+   */
+  filedHeadlines?: string[];
 }): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
@@ -1885,10 +1894,31 @@ export function resurfacedSummarySentence(input: {
     bits.push(`${filedNew} filed as new`);
   }
   const headline = input.firstDiscardedHeadline?.trim();
-  if (headline) {
+  /*
+    FC18: THE EXAMPLE MUST BE ONE OF THE TITLES THIS RUN FILED.
+
+    The 2026-10-11 walk read "12 filed as new — e.g. 'Longmont Museum Sets
+    Oct. 17 Grand Reopening …'" on a scan whose newest filed set did not
+    contain that headline. `firstDiscardedHeadline` is a candidate the run
+    DISCARDED as a repeat (`fileScanLeads`), so attaching it here named a
+    story the desk had just refused to file, under the count of stories it
+    did file.
+
+    The example only stands when the title is in `filedHeadlines`, and when a
+    title is suppressed the sentence says so in plain words rather than
+    leaving the reader to wonder where the example went.
+
+    A caller that passes NO list (`filedHeadlines` undefined) keeps the old
+    output: the check can only be made against a set it was given, and the
+    real caller (`scanRunSummary`, ./desk.ts) always passes one.
+  */
+  const filed = input.filedHeadlines;
+  const canCheckExample = headline && filed !== undefined;
+  if (headline && (!canCheckExample || filed!.includes(headline))) {
     return `${bits.join("; ")} — e.g. '${headline.slice(0, 120)}'.`;
   }
-  return `${bits.join("; ")}.`;
+  const noExample = headline ? " (No example title was available from the leads this scan filed.)" : "";
+  return `${bits.join("; ")}.${noExample}`;
 }
 
 /**
@@ -2003,7 +2033,20 @@ export function composeScanRunSummary(input: {
     }
     summary = summary ? `${summary} ${tail}` : tail;
   }
-  return summary.slice(0, limit);
+  /*
+    FC18: THE ASSEMBLED NOTE ENDS A SENTENCE.
+
+    `slice(0, limit)` here was the last raw character cut in the chain, and it
+    landed after the join -- so a note whose parts each ended cleanly could
+    still be written back mid-word. The room check above already trims the
+    paragraph to the space the counts leave; this is the backstop for the case
+    where the tail itself is longer than the column, and it cuts on a sentence
+    the same way.
+  */
+  if (summary.length <= limit) return summary;
+  const cut = summary.slice(0, limit);
+  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return stop > 0 ? cut.slice(0, stop + 1).trim() : cut.trim();
 }
 
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {

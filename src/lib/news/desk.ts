@@ -3040,6 +3040,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      filedHeadlines,
       standingPageDropped,
       noEventDropped,
       firstDroppedReason,
@@ -3133,6 +3134,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
+      // FC18: the example title beside "filed as new" has to be one of these.
+      filedHeadlines,
     });
     let editorSummary = String(data.editor_summary ?? "").trim();
     if (leadsCreated === 0 && !editorSummary)

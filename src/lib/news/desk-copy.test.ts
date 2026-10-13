@@ -179,6 +179,58 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
     });
   });
 
+  // FC18: the example title beside "N filed as new" is drawn from the FIRST
+  // DISCARDED candidate -- a story the run matched as a repeat -- so it could be
+  // a title that was never filed. The 2026-10-11 walk read a grand-reopening
+  // headline there that was not in the newest filed set. The example is now
+  // only printed when it is one of the headlines the run actually filed; when
+  // it is not, it is dropped and the note says so in plain words.
+  describe("FC18: the example title must be one of the leads this scan filed", () => {
+    it("keeps the example when the headline was filed", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 1,
+        firstDiscardedHeadline: "Council votes on the library roof repair contract",
+        filedHeadlines: [
+          "Crews start road work on Main Street",
+          "Council votes on the library roof repair contract",
+        ],
+      });
+      assert.match(sentence, /— e\.g\. 'Council votes on the library roof repair contract'\.$/);
+    });
+
+    it("drops the example and says why when the headline was not filed", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 1,
+        firstDiscardedHeadline: "Longmont Museum Sets Oct. 17 Grand Reopening After Nearly $10M Expansion",
+        filedHeadlines: ["Crews start road work on Main Street", "The clerk's office closes Friday"],
+      });
+      assert.doesNotMatch(sentence, /Longmont Museum/, "an unfiled title must not be shown as a filed example");
+      assert.doesNotMatch(sentence, /e\.g\./);
+      assert.match(sentence, /No example title was available from the leads this scan filed\./);
+    });
+
+    it("drops the example when the filed set is empty", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        firstDiscardedHeadline: "Council votes on the library roof repair contract",
+        filedHeadlines: [],
+      });
+      assert.doesNotMatch(sentence, /e\.g\./);
+    });
+
+    it("still prints the example when no filed set is passed (back-compat: the field is optional)", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        firstDiscardedHeadline: "Council votes on the library roof repair contract",
+      });
+      assert.match(sentence, /— e\.g\. 'Council votes on the library roof repair contract'\.$/);
+    });
+  });
+
   // Unit AK item 1: a same-run merge is a change to how many leads exist, so
   // the summary has to say it rather than leave the editor to notice that two
   // AI-returned leads produced one row.
