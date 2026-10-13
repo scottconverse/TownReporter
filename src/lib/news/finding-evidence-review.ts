@@ -15,6 +15,7 @@ import type { CurrentReportingDocumentCheck } from "./reporting-document-check.t
 import { reportingDocumentClaimIdentity } from "./reporting-document-check.ts";
 import type { AiEvidenceReview, AiEvidenceJudgment } from "./evidence-ai.ts";
 import { auditOverrides, checkOverride, isOverrideWarning, type OverrideWarning } from "./override.ts";
+import { nameCheckText } from "./name-check.ts";
 
 /**
  * Audit items 13, 14, 15, 16, 17: the keys a warned evidence decision must
@@ -364,7 +365,29 @@ function assertReadableStoredFindings(raw: unknown): void {
 /** Count the same recorded rows as Checks without resolving their captures. */
 export function recordedDraftClaimCount(draft: DraftRow): number {
   assertReadableStoredFindings(draft.found_note);
-  return parseFindings(draft.found_note).length + storedClaims(draft).length + storedManualClaims(draft).length;
+  return parseFindings(draft.found_note).length + storedClaims(draft).length + storedManualClaims(draft).length
+    + storedDocumentClaimCount(draft);
+}
+
+/*
+  FC23 (Oct 11 walk): an OCR story's Checks said "No claims were recorded /
+  nothing has been checked" while the same draft listed five claims with
+  verified passages from the uploaded PDF. Those claims count, on the same
+  terms the story page shows them (desk-name-check.tsx): rows for the text
+  that is on the draft now.
+*/
+function storedDocumentClaimCount(draft: DraftRow): number {
+  try {
+    const memo = objectMemo(draft.research_json).reportedDocumentClaims as
+      | { checkedText?: unknown; rows?: unknown }
+      | undefined;
+    if (!memo || !Array.isArray(memo.rows)) return 0;
+    if (memo.checkedText !== nameCheckText({ headline: draft.headline ?? "", dek: draft.dek ?? "", body: draft.body ?? "" })) return 0;
+    return memo.rows.filter((row) => row && typeof (row as { fact?: unknown }).fact === "string"
+      && typeof (row as { excerpt?: unknown }).excerpt === "string").length;
+  } catch {
+    return 0;
+  }
 }
 
 function storedClaims(draft: DraftRow): ReportingReviewClaim[] {
