@@ -5291,6 +5291,9 @@ import {
 // pulled into any bundle that imports `desk.ts`. The runtime import is inside
 // the `run-now` handler above, which is the only place it is needed.
 import type { FollowUpRunStart } from "./follow-up-scheduler.ts";
+// FC10: the queue receipt lives with the other follow-up words, in a module a
+// browser can load and a bare node test can import.
+import { followUpQueueNotice } from "./follow-up-copy.ts";
 
 /**
  * The one list read, and it is agent-only (`performListFollowUps` filters on
@@ -5345,16 +5348,18 @@ export const updateAiFollowUp = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => _performUpdateAiFollowUp(context, data));
 
 /**
- * Why a "Run now" press did not start: one sentence per fence, and no silent
- * no-op. The two fences are the brief's rule ("one at a time, never beside a
- * running draft") and the third is a card that has been ended -- Stop has to
- * mean stop, and Resume is the way back.
+ * Why a "Run now" press did not start a new run. Only two cases are left: a
+ * card that has ended (Stop has to mean stop, and Resume is the way back), and
+ * a row that is gone.
+ *
+ * FC10 (Oct 11 walk): the two job fences ("a draft is being written", "another
+ * follow-up is running") used to be refusals here, and the first one was wrong
+ * -- `jobOpen(...,"draft")` matched a QUEUED draft, so a press was turned away
+ * while the only running job was a scan. They are not refusals any more: a
+ * press while the desk is busy is QUEUED (see `followUpQueueNotice`), which is
+ * what the job claim in jobs.ts already enforces.
  */
 const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, string> = {
-  "draft-running":
-    "A draft is being written right now. Follow-ups run one at a time and never alongside a draft — try again once it finishes.",
-  "follow-up-running":
-    "Another follow-up is already running. They run one at a time — try again once it finishes.",
   "not-found": "That follow-up is gone.",
   "not-active": "That follow-up has been stopped or finished. Resume it first if you want it to run again.",
 };
@@ -5394,7 +5399,8 @@ export const followUpAction = createServerFn({ method: "POST" })
       data.id,
     );
     if (!started.started) throw new Error(RUN_START_REFUSALS[started.skipped ?? "not-found"]);
-    return { ok: true as const };
+    // FC10: a press that queued says which job it is behind, when there is one.
+    return { ok: true as const, queuedNotice: followUpQueueNotice(started.queuedBehind) };
   });
 
 /**
