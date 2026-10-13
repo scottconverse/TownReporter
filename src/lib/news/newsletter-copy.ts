@@ -53,7 +53,9 @@ export function testConnectionResultText(ok: boolean, message: string | null | u
 }
 
 /** What a save answers with; never reports the password. */
-export function mailboxSaveResultText(hadNewPassword: boolean): string {
+export function mailboxSaveResultText(hadNewPassword: boolean, passwordStored = true): string {
+  /* FB12 (Oct 11 walk): "kept" was printed when there was no password to keep. */
+  if (!hadNewPassword && !passwordStored) return "Mailbox saved. No password is stored yet.";
   return hadNewPassword
     ? "Mailbox saved. The password is stored on the desk and never shown again."
     : "Mailbox saved. The stored password was kept.";
