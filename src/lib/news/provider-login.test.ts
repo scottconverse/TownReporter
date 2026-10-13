@@ -414,6 +414,42 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
       resetClaudeCliCache();
     }
   });
+  /*
+    FB06 (Oct 11 walk): a Codex found only by the bare PATH name (this PC's
+    Scoop shim) is what every draft runs, but the status read skipped its
+    probe and said "Not installed" while Codex jobs ran.
+  */
+  it("FB06: a Codex reached only by PATH is probed, not called missing", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "tr-codex-path-"));
+    const emptyAppData = mkdtempSync(join(tmpdir(), "tr-appdata-"));
+    const { writeFileSync, chmodSync } = await import("node:fs");
+    const fake = join(ROOT, "scripts/fakes/fake-codex-cli.mjs");
+    if (process.platform === "win32") {
+      writeFileSync(join(bin, "codex.cmd"), `@"${process.execPath}" "${fake}" %*\r\n`);
+    } else {
+      writeFileSync(join(bin, "codex"), `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`);
+      chmodSync(join(bin, "codex"), 0o755);
+    }
+    const sep = process.platform === "win32" ? ";" : ":";
+    const restore = withEnv({
+      CODEX_CLI_PATH: undefined,
+      APPDATA: emptyAppData,
+      PATH: `${bin}${sep}${process.env.PATH ?? ""}`,
+      FAKE_CODEX_SIGNED_IN: "1",
+      FAKE_CODEX_STATE_FILE: undefined,
+      TOWNREPORTER_CODEX: "1",
+      CLAUDE_CLI_PATH: join(ROOT, "scripts/fakes/no-such-cli.mjs"),
+    });
+    try {
+      const codex = (await providerStatuses(NEWSROOM)).find((s) => s.provider === "codex");
+      assert.equal(codex?.installed, true, codex?.detail);
+      assert.equal(codex?.signedIn, true);
+    } finally {
+      restore();
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(emptyAppData, { recursive: true, force: true });
+    }
+  });
   it("only knows two providers", () => {
     assert.equal(isProviderId("claude"), true);
     assert.equal(isProviderId("codex"), true);

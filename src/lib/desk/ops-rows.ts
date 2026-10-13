@@ -639,18 +639,31 @@ function rungWords(
  * happen while `providerTimeSettings` maps the whole registry; the caller
  * draws no chip rather than inventing one.
  */
+/* Kinds whose availability comes from a real probe in getProviderAvailability. */
+const PROBED_KINDS = new Set(["claude-code", "gemini-cli"]);
+
 function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undefined {
+  /*
+    B07/FB05/FB06 (Oct 11 walk): availability's "true" only means "switched on
+    here" for everything it does not probe, so it printed Ready for an LM
+    Studio with nothing in memory and a Codex the login read called missing.
+    A "false" (with its reason) still wins; a "true" stands only for a probed
+    kind. Everything else wears the login's chip or the catalog's words.
+  */
+  const key = entry.id === "qwen-local" ? "local-model" : entry.id;
   if (read.availability) {
-    const ready = read.availability[entry.id === "qwen-local" ? "local-model" : entry.id] !== false;
-    const reason = read.availability.reasons?.[entry.id === "qwen-local" ? "local-model" : entry.id] ?? "";
-    return {source:"words",tone: ready ? "ready" : "slow",label: ready ? "Ready" : reason.startsWith("Ollama says:") ? "Warning" : "Not ready",help: reason};
+    const reason = read.availability.reasons?.[key] ?? "";
+    if (read.availability[key] === false) {
+      return {source:"words",tone:"slow",label: reason.startsWith("Ollama says:") ? "Warning" : "Not ready",help: reason};
+    }
+    if (PROBED_KINDS.has(entry.kind)) return {source:"words",tone:"ready",label:"Ready",help: reason};
   }
   const login = LOGIN_FOR_KIND[entry.kind];
   const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
   if (status) return { source: "status", status };
   const setting = read.times.find((t) => t.providerId === entry.id);
-  if (!setting) return undefined;
-  return rungWords(setting, Boolean(entry.requiresLoadedLocalModel), read.catalog);
+  if (setting) return rungWords(setting, Boolean(entry.requiresLoadedLocalModel), read.catalog);
+  return read.availability ? {source:"words",tone:"ready",label:"Ready",help:""} : undefined;
 }
 
 /**

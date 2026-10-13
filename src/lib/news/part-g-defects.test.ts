@@ -235,22 +235,40 @@ test("part G: cut-off bodies retry once per model, hop through ready models and 
 });
 
 
-test("part G: Server health agrees with picker availability and names a cloud local model", () => {
+test("part G: Server health names a cloud local model", () => {
 
-  const lines = writingModelLines({times:[],statuses:[{provider:"codex",installed:false}] as never,catalog:{servers:[],defaultModel:null,checkedAt:0},availability:{"codex-balanced":true,"local-model":true},localModel:{id:"deepseek-v4.1-flash:cloud",baseUrl:"http://127.0.0.1:11434/v1"}});
+  const lines = writingModelLines({times:[],statuses:[],catalog:{servers:[],defaultModel:null,checkedAt:0},availability:{"local-model":true},localModel:{id:"deepseek-v4.1-flash:cloud",baseUrl:"http://127.0.0.1:11434/v1"}});
 
-  for (const name of ["Codex Sol 6.1 (balanced)","Local model"]) {
+  const row = lines.find(line => line.name === "Local model")!;
 
-    const row = lines.find(line => line.name === name)!;
+  assert.match(row.note,/deepseek-v4.1-flash:cloud.*cloud/); assert.doesNotMatch(row.note,/on this computer/);
 
-    assert.equal(row.chip?.source,"words");
+});
 
-    assert.equal((row.chip as {label:string}).label,"Ready");
-
-    if(name === "Local model") { assert.match(row.note,/deepseek-v4.1-flash:cloud.*cloud/); assert.doesNotMatch(row.note,/on this computer/); }
-
-  }
-
+/*
+  B07/FB05/FB06 (Oct 11 walk): "switched on here" is not "Ready". The Server
+  card printed Ready for a Codex the login read called missing and for an LM
+  Studio with nothing in memory. Each row now wears the real read.
+*/
+test("B07/FB06: Server health does not call a missing Codex or an empty LM Studio Ready", () => {
+  const lm = "http://127.0.0.1:1234/v1";
+  const rung = {providerId:"qwen-local",label:"Local model",enabled:true,switchedOffByOperator:false,endpoint:lm,endpointWatched:true};
+  const codexMissing = {provider:"codex",name:"Codex",installed:false,signedIn:false,disabledByOperator:false,lastTest:null};
+  const read = (loaded: boolean) => writingModelLines({
+    times:[rung] as never,
+    statuses:[codexMissing] as never,
+    catalog:{checkedAt:0,defaultModel:{baseUrl:lm,id:"qwen"},servers:[{kind:"lmstudio",baseUrl:lm,reachable:true,models:[{id:"qwen",label:"qwen",loaded}]}]} as never,
+    availability:{"codex-balanced":true,"local-model":true,"qwen-local":true} as never,
+  });
+  const empty = read(false);
+  const codex = empty.find(line => line.name === "Codex Sol 6.1 (balanced)")!;
+  assert.equal(codex.chip?.source,"status");
+  if (codex.chip?.source === "status") assert.equal(codex.chip.status.installed,false);
+  const localRung = empty.find(line => line.chip?.source === "words" && line.chip.label === "No model loaded");
+  assert.ok(localRung, "an LM Studio with nothing in memory reads No model loaded");
+  assert.ok(!read(false).some(line => line.name === "Local model" && line.chip?.source === "words" && line.chip.label === "Ready" && line.chip.help.includes("loaded")));
+  const full = read(true);
+  assert.ok(full.some(line => line.chip?.source === "words" && line.chip.label === "Ready" && /qwen loaded/.test(line.chip.help)), "a loaded model reads Ready");
 });
 
 
