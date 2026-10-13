@@ -390,7 +390,7 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.deepEqual(JSON.parse(drafts[0]!.source_urls), ["https://longmont.primegov.com/packet"]);
     assert.equal(
       drafts[0]!.disclosure_text,
-      "An outside AI research tool wrote this from public records; an editor reviewed it.",
+      "",
     );
     // The body is imported text, and the draft says so: the evidence-review
     // gate is built for model-written prose beside gathered records, and an

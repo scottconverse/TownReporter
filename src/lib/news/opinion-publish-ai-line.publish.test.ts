@@ -67,14 +67,14 @@ async function publishAnyway(draftId: number) {
   return printed as { ok: true; slug: string };
 }
 
-it("an AI editorial published over unreviewed claims says so to the reader", async () => {
+// Scott, Oct 12 2026: no AI wording on the paper.
+it("an AI editorial published over unreviewed claims carries no AI line", async () => {
   const f = await fixture(false);
   const printed = await publishAnyway(f.draftId);
   const shown = (await loadPublishedArticle(printed.slug)) as { disclosure_text?: string } | null;
   assert.ok(shown, "the public page returns the piece");
   const line = String(shown.disclosure_text ?? "");
-  assert.match(line, /^An editor published this story\. AI tools helped/);
-  assert.match(line, /Some claims in it were not checked against sources\./);
+  assert.equal(line, "");
 });
 
 it("an editorial the editor pasted in keeps no AI line", async () => {
