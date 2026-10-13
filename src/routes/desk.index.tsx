@@ -47,7 +47,6 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
 import { KillDialog } from "@/components/dialogs/KillDialog";
 import {
   cardResultLine,
-  isAgentKind,
   matchesFollowUpFilter,
   parseFinding,
 } from "@/lib/news/follow-up-copy";
@@ -76,6 +75,7 @@ import {
   openLeads,
   parseFailedSources,
   printedDupChip,
+  investigationPileFor,
   pileForStatus,
   scanCountsLine,
   scanZeroWhy,
@@ -693,12 +693,12 @@ function DeskHome() {
     `followUps` query the rail's count above also reads -- see that query's own
     note -- so the two numbers on this page cannot disagree.
   */
-  const waitingOnFollowUp = (followUps.data ?? []).filter(
-    (row) =>
-      isAgentKind(row.agent_kind) &&
-      matchesFollowUpFilter(row, "active") &&
-      row.last_state !== "found",
-  ).length;
+  /*
+    FC14 (Oct 11 walk): this counted every live AI follow-up, including one on
+    a published story, so Today said 1 while Dark Desk's own pile said 0. It is
+    Dark Desk's pile, so it uses Dark Desk's rule (`investigationPileFor`).
+  */
+  const waitingOnFollowUp = invs.filter((row) => investigationPileFor(row) === "waiting").length;
   const printed = published.data ?? [];
 
   /*
