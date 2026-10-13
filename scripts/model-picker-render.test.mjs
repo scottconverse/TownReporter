@@ -489,3 +489,12 @@ test("Gemini Pro plan choices remain selectable with their own setup warning", a
     }
   } finally { availabilityStub.__setAvailability(undefined); await browser.close(); }
 });
+
+// FB23 (Oct 11 walk): the narrow Daily scan sidebar clipped the chosen model's
+// name. With showSelectedValue the full name is printed under the select.
+test("FB23: showSelectedValue prints the full chosen name under the select", () => {
+  const html = renderToStaticMarkup(createElement(ModelPicker, { scope: "scan", value: "auto", onChange() {}, showSelectedValue: true }));
+  assert.match(html, /Selected: Automatic/);
+  const plain = renderToStaticMarkup(createElement(ModelPicker, { scope: "scan", value: "auto", onChange() {} }));
+  assert.doesNotMatch(plain, /Selected: /);
+});
