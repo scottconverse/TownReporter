@@ -207,6 +207,17 @@ export async function fileScanLeads(
   /** The first dropped candidate's headline and the one-line reason, so the
    * scan summary can tell the editor what the pass deliberately left out. */
   firstDroppedReason?: { headline: string; reason: string };
+  /**
+   * FC18: every headline this call actually FILED, in filing order. The scan
+   * summary names one example beside the "filed as new" count, and that
+   * example has to be a title the editor can find in the Queue. Before this,
+   * the only headline to hand was `firstDiscardedHeadline` -- a candidate the
+   * run had just DISCARDED as a repeat -- and the summary printed it under
+   * "filed as new", which is how the 2026-10-11 walk read a grand-reopening
+   * title that was not in the newest filed set. The caller checks its example
+   * against this list rather than trusting that the two agree.
+   */
+  filedHeadlines: string[];
 }> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
@@ -530,6 +541,9 @@ export async function fileScanLeads(
     standingPageDropped,
     noEventDropped,
     firstDroppedReason,
+    // FC18: the rows this call inserted, in order -- the only set a "filed as
+    // new" example may be drawn from.
+    filedHeadlines: insertedThisRun.map((row) => row.headline),
   };
 }
 

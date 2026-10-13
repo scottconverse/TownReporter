@@ -314,6 +314,73 @@ describe("search, on the existing research tools", () => {
     assert.equal(searchQuestionFor("  Were the minutes posted?  "), "Were the minutes posted");
     assert.equal(searchQuestionFor("x".repeat(400)).length, 180);
   });
+
+  /*
+    FC25. On the 2026-10-11 walk a search follow-up watching a published
+    phishing story finished "Checked · no change" with "Could not check" at
+    zero, while its own result said both pages it was shown were dictionary
+    definitions of the word "full", nothing to do with the subject. A check
+    that read nothing about the story has not established that the story did
+    not move.
+  */
+  it("answers could-not-check, not no-change, when no result is about the subject (FC25)", async () => {
+    const outcome = await runSearchAgent(
+      input({ what: "Re-check the Boulder County permit warning story." }),
+      {
+        search: async () =>
+          attempt([
+            hit("https://dictionary.test/full-a", "Full | Definition and meaning"),
+            hit("https://dictionary.test/full-b", "Full meaning, synonyms and usage"),
+          ]),
+        judge: async () => ({
+          ok: true,
+          answers: false,
+          url: "",
+          title: "",
+          summary: "Both pages define the word full.",
+          relevant: 0,
+        }),
+      },
+    );
+    assert.equal(outcome.state, "could-not-check");
+    assert.equal(outcome.finding.reason, "The search found nothing about this story.");
+    assert.equal(outcome.finding.changed, false);
+  });
+
+  it("still says no-change when the results are about the subject but do not answer it (FC25)", async () => {
+    const outcome = await runSearchAgent(
+      input({ what: "Were the September minutes posted?" }),
+      {
+        search: async () => attempt([hit("https://clerk.test/minutes", "September council minutes")]),
+        judge: async () => ({
+          ok: true,
+          answers: false,
+          url: "",
+          title: "",
+          summary: "Older minutes, but not September's.",
+          relevant: 1,
+        }),
+      },
+    );
+    assert.equal(outcome.state, "no-change");
+  });
+
+  it("keeps the old no-change wording when the judge did not report a relevance count (FC25)", async () => {
+    const outcome = await runSearchAgent(
+      input({ what: "Were the September minutes posted?" }),
+      {
+        search: async () => attempt([hit("https://clerk.test/minutes", "September council minutes")]),
+        judge: async () => ({
+          ok: true,
+          answers: false,
+          url: "",
+          title: "",
+          summary: "An older story about the same topic.",
+        }),
+      },
+    );
+    assert.equal(outcome.state, "no-change", "a judge that did not say leaves the old answer alone");
+  });
 });
 
 describe("agenda, on a meeting body's portal", () => {
