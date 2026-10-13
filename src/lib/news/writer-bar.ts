@@ -309,3 +309,30 @@ export function saveState(input: {
   const when = input.when.trim();
   return when ? { label: `Saved ${when}`, tone: "ok" } : { label: "Saved draft", tone: "ok" };
 }
+
+/**
+ * The words on the Story page's "Model & research" button (THU-7).
+ *
+ * The model shown is the model that ran. While a switch is running the
+ * running line says so; once a draft is saved the button names the model that
+ * WROTE it, and when that is not the model the editor picked it keeps the pick
+ * beside it. When the picker has since moved to a different model than the one
+ * that made the draft, it shows the picker as before: it is the next draft's.
+ */
+export function modelAndResearchLabel(input: {
+  runningLine: string;
+  /** The picker's current label. */
+  pickerModel: string;
+  /** The model the editor asked the saved draft's job for. */
+  requestedModel: string;
+  /** The model that wrote the saved draft, or "" when no draft job finished. */
+  writerModel: string;
+}): string {
+  if (input.runningLine) return input.runningLine;
+  const writer = input.writerModel.trim();
+  if (!writer) return input.pickerModel;
+  const requested = input.requestedModel.trim();
+  if (input.pickerModel !== requested && input.pickerModel !== writer) return input.pickerModel;
+  if (writer === requested) return writer;
+  return `${writer} (you picked ${requested}; it fell back)`;
+}

@@ -469,6 +469,10 @@ export async function performPublishEditorial(
       };
     }
 
+    /* The two warnings that stand for "these claims were not reviewed". */
+    const unreviewedClaimsOverride = warnings.some(
+      (w) => w.key === "editorial-sources" || w.key === "evidence-stale",
+    );
     const baseSlug = slugify(d.headline);
     const printed = await (async () => {
       const tx = sql;
@@ -480,17 +484,47 @@ export async function performPublishEditorial(
         if (!clash[0]) break;
         candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
       }
+      /* THU-10: the same public AI line the news path stores. A piece the
+         editor pasted in has no model body, so it earns no AI line; one that
+         went to paper over the claims warnings is not "approved". */
+      const [pasted] = await tx<{ pasted: boolean }>`
+        select exists (
+          select 1 from editorial_extras
+          where draft_id = ${draftId} and newsroom_id = ${owned(context)}
+            and source_kind = 'written-by-the-editor'
+        ) as pasted
+      `;
+      const { disclosureForPublishedStory } = await import("./ai-disclosure.ts");
+      const disclosure = disclosureForPublishedStory({
+        text: null,
+        modelBody: pasted?.pasted ? null : d.model_body,
+        researchJson: d.research_json,
+        publishedBody: d.body,
+        publishedWithUnreviewedClaims: unreviewedClaimsOverride,
+      });
       const [article] = await tx<{ id: number }>`
           insert into articles (
           user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
-          published_at, form, origin_draft_id
+          published_at, form, origin_draft_id, disclosure_text
         )
         values (
           ${context.userId}, ${owned(context)}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
           ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
-          ${d.form || "editorial"}, ${draftId}
+          ${d.form || "editorial"}, ${draftId}, ${disclosure}
         ) returning id
         `;
+      if (unreviewedClaimsOverride) {
+        /* The trail row the public reader line looks for (THT-17). */
+        const { auditWithSql } = await import("./ops.ts");
+        await auditWithSql(
+          tx,
+          context.userId,
+          "publish-unreviewed-claims",
+          `Article ${article.id}: editorial published over its unreviewed claims`,
+          owned(context),
+          { kind: "articles", id: article.id },
+        );
+      }
       return { slug: candidate, id: article.id };
     })();
 

@@ -167,6 +167,28 @@ export async function settleBulkKill(
   return { settled, drafted };
 }
 
+/**
+ * The way back from a bulk Kill, for a press whose writes may still be in
+ * flight (THU-4).
+ *
+ * The Undo toast now shows at the press, before the batch has answered, so
+ * "Undo" and the U key both wait for the batch's own report and put back
+ * exactly the leads that report says were killed -- all of them, once, and
+ * none that the kill refused. A lead whose restore fails is counted, and the
+ * press says how many could not be put back.
+ */
+export async function undoBulkKill(
+  report: Promise<{ undoIds: readonly number[] }>,
+  undoOne: (id: number) => Promise<unknown>,
+): Promise<void> {
+  const { undoIds } = await report;
+  const back = await Promise.allSettled(undoIds.map((id) => undoOne(id)));
+  const failed = back.filter((r) => r.status === "rejected").length;
+  if (failed > 0) {
+    throw new Error(failed === 1 ? "one lead could not be put back" : `${failed} leads could not be put back`);
+  }
+}
+
 /** Each selected lead keeps its own recorded reason in the delete confirmation. */
 export function bulkDeleteReasonLines(
   leads: readonly {

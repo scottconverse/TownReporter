@@ -622,13 +622,15 @@ export function publishConfirmation(
     .find((warning) => warning.key === "claims-unreviewed" && warning.altAction?.target.kind === "accept-unreviewed")
     ?.altAction?.label.replace(/^Publish anyway/, "");
   const words = acceptWords ?? (options.claimsAccepted ? " — I accept these claims are unreviewed" : "");
-  const overrideLabel = `Publish anyway in ${sectionName}${words}`;
+  /* A piece with no section has no "in <section>" to say (THU-10). */
+  const where = sectionName.trim() ? ` in ${sectionName}` : "";
+  const overrideLabel = `Publish anyway${where}${words}`;
   return {
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
     confirmLabel:
-      warnings.length > 0 || words !== "" ? overrideLabel : `Yes, print it in ${sectionName}`,
+      warnings.length > 0 || words !== "" ? overrideLabel : `Yes, print it${where}`,
   };
 }
 
