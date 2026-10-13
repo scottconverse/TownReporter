@@ -145,7 +145,7 @@ export async function followUpBlocker(
     select kind, status from desk_jobs
     where newsroom_id = ${newsroomId}
       and status in ('queued', 'running')
-      and kind in ('draft', 'editorial', 'follow-up')
+      and kind in ('draft', 'follow-up')
     order by (status = 'running') desc, id asc
     limit 1
   `;
