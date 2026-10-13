@@ -392,7 +392,7 @@ function OpinionPage() {
       </div>
     ) : ready.data && !ready.data.modelReady ? (
       <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
-        <b>No writing model is ready yet.</b>
+        <b>This desk cannot write yet.</b>
         <ul className="mt-1 list-disc pl-5">
           {ready.data.modelProblems.map((problem, index) => (
             <li key={`${index}-${problem}`}>{problem}</li>

@@ -196,7 +196,7 @@ export function LocalModelSelect({
     return (
       <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
         <span className="model-picker-label">
-          {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "Local model"}
+          {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "On-device model"}
         </span>
         <span className="model-picker-help">
           {selected
@@ -211,7 +211,7 @@ export function LocalModelSelect({
   return (
     <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
       <label htmlFor={selectId} className="model-picker-label">
-        {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "Local model"}
+        {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "On-device model"}
       </label>
       {catalog.isLoading ? (
         <span className="model-picker-help">Looking for local models on this computer…</span>
