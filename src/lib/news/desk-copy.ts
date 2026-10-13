@@ -18,6 +18,7 @@ export const meetingTranscriptSelectionRefused = "Choose a transcript saved for 
 export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
+import { cutAtSentenceEnd } from "./sentence-stop.ts";
 import * as leadMatchSignals from "./lead-match.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
@@ -2026,10 +2027,8 @@ export function composeScanRunSummary(input: {
   if (tail) {
     const room = Math.max(0, limit - tail.length - 1);
     if (summary.length > room) {
-      const cut = summary.slice(0, room);
-      // Prefer to end the paragraph on a full sentence rather than mid-word.
-      const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
-      summary = (stop >= Math.floor(room / 2) ? cut.slice(0, stop + 1) : cut).trim();
+      // End the paragraph on a full sentence (never on "Oct."), not mid-word (FC18).
+      summary = cutAtSentenceEnd(summary, room);
     }
     summary = summary ? `${summary} ${tail}` : tail;
   }
@@ -2043,10 +2042,7 @@ export function composeScanRunSummary(input: {
     where the tail itself is longer than the column, and it cuts on a sentence
     the same way.
   */
-  if (summary.length <= limit) return summary;
-  const cut = summary.slice(0, limit);
-  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
-  return stop > 0 ? cut.slice(0, stop + 1).trim() : cut.trim();
+  return cutAtSentenceEnd(summary, limit);
 }
 
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {

@@ -112,21 +112,11 @@ export const SCAN_SUMMARY_CHAR_LIMIT = 2000;
 
 /**
  * The longest prefix of `text` that fits `limit` characters and ends a
- * sentence. Falls back to the raw cut only when there is no sentence end to
- * land on -- a single unpunctuated sentence longer than the whole budget --
- * because dropping all of it would hide a paragraph the desk did write.
+ * sentence (never on an abbreviation like "Oct."). Falls back to the raw cut
+ * only when there is no sentence end to land on.
  */
-export function cutAtSentenceEnd(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  const cut = text.slice(0, limit);
-  const stop = Math.max(
-    cut.lastIndexOf(". "),
-    cut.lastIndexOf("! "),
-    cut.lastIndexOf("? "),
-    cut.endsWith(".") || cut.endsWith("!") || cut.endsWith("?") ? cut.length - 1 : -1,
-  );
-  return stop > 0 ? cut.slice(0, stop + 1).trim() : cut.trim();
-}
+import { cutAtSentenceEnd } from "./sentence-stop.ts";
+export { cutAtSentenceEnd };
 
 export function mergeScanBatchResults<
   TLead extends { headline: string; source_urls: string[] },
