@@ -144,6 +144,7 @@ import { resolveJobModel } from "@/lib/news/model-assignments";
 import {
   draftFallbackAttribution,
   runningWriterSentence,
+  modelAndResearchLabel,
   lastDraftInHand,
   lastDraftWhen,
   requestedModelChoice,
@@ -697,6 +698,16 @@ function StoryPage() {
   const runningWriterLine = runningWriter && runningWriter !== pickedWriterLabel
     ? `Writer: ${runningWriter} · picked: ${pickedWriterLabel}`
     : "";
+  /* THU-7: the button names the model that wrote the saved draft. */
+  const savedDraftWriter = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed" && data.job.model_choice
+    ? storyModelLabel(data.job.model_choice)
+    : "";
+  const modelAndResearchText = modelAndResearchLabel({
+    runningLine: runningWriterLine,
+    pickerModel: storyModelLabel(modelChoice),
+    requestedModel: pickedWriterLabel,
+    writerModel: savedDraftWriter,
+  });
   const runningSwitchSentence = runningWriter
     ? runningWriterSentence({
         pickedModel: pickedWriterLabel,
@@ -3218,7 +3229,7 @@ function StoryPage() {
               aria-controls="story-model-research"
               onClick={() => setModelResearchOpen((open) => !open)}
             >
-              Model & research · {runningWriterLine || storyModelLabel(modelChoice)}
+              Model & research · {modelAndResearchText}
             </button>
             <button
               className="btn quiet"

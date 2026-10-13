@@ -54,6 +54,7 @@ import {
   bulkDeleteReasonLines,
   bulkStatusSummary,
   settleBulkKill,
+  undoBulkKill,
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
@@ -220,7 +221,9 @@ function QueuePage() {
     Open list at once, so the cursor is on the next lead by the time U is
     pressed; U reads this instead, so the hint's own promise holds.
   */
-  const lastKill = useRef<{ id: number; restore: RestoreStatus } | null>(null);
+  const lastKill = useRef<{ id: number; restore: RestoreStatus; bulk?: true } | null>(null);
+  /* THU-4: the report of the bulk Kill in flight; its Undo and the U key wait for it. */
+  const bulkKillReport = useRef<{ promise: Promise<{ undoIds: number[] }>; settle: (r: { undoIds: number[] }) => void } | null>(null);
   /* THT-8: each lead's status write that has not answered yet; a restore waits for it. */
   const leadWrites = useRef(createLeadWrites());
   const killLead = (lead: { id: number; status: string }) => {
@@ -905,7 +908,13 @@ function QueuePage() {
         } else if (lastKill.current) {
           // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
           const last = lastKill.current;
-          void undoKill.mutate(killUndoPress(last.id, last.restore));
+          if (last.bulk && bulkKillReport.current) {
+            // THU-4: U puts back every lead the bulk press killed, the same as its toast's Undo.
+            lastKill.current = null;
+            void runBulkKillUndo();
+          } else {
+            void undoKill.mutate(killUndoPress(last.id, last.restore));
+          }
         } else if (lead && lead.status === "killed") {
           /*
             A kill's way back, through the same write the row's own Undo uses --
@@ -1062,6 +1071,7 @@ function QueuePage() {
       }
     },
     onSuccess: (report, input) => {
+      bulkKillReport.current?.settle({ undoIds: report.undoIds });
       setBulkWarnings(report.warnings.length ? { warnings: report.warnings, press: { ...input, completedIds: report.undoIds, previousFailures: report.failures } } : null);
       if (report.warnings.length && !report.done && !report.failures.length) return;
       // The draft warning is still said, on the same line as the count and its Undo.
@@ -1078,10 +1088,15 @@ function QueuePage() {
             ? {
                 label: BULK_STATUS_UNDO_LABEL,
                 run: async () => {
+                  if (input.status === "killed") {
+                    if (lastKill.current?.bulk) lastKill.current = null;
+                    await undoBulkKill(Promise.resolve({ undoIds: report.undoIds }), (id) =>
+                      undoKill.mutateAsync(killUndoPress(id, input.restores?.[id])),
+                    );
+                    return;
+                  }
                   const back = await Promise.allSettled(
-                    report.undoIds.map((id) => input.status === "killed"
-                      ? undoKill.mutateAsync(killUndoPress(id, input.restores?.[id]))
-                      : setStatus.mutateAsync({ id, status: "new", override: input.overrideById?.[id] })),
+                    report.undoIds.map((id) => setStatus.mutateAsync({ id, status: "new", override: input.overrideById?.[id] })),
                   );
                   const failed = back.filter((r) => r.status === "rejected").length;
                   if (failed > 0)
@@ -1096,6 +1111,7 @@ function QueuePage() {
       });
     },
     onError: (error: Error) => {
+      bulkKillReport.current?.settle({ undoIds: [] });
       deskToast(`Could not change those leads. ${deskErrorReason(error, "change those leads")}`, {
         tone: "err",
         id: BULK_STATUS_TOAST_ID,
@@ -1115,14 +1131,52 @@ function QueuePage() {
    * answer ("no reason"), which is the design's fast path.
    */
   const [bulkKillReason, setBulkKillReason] = useState<string | null>(null);
+  /*
+    THU-4: the Undo for a bulk Kill, whether the toast's button or the U key
+    presses it. It waits for the batch's own report, so it works the moment the
+    toast shows, and puts back exactly the leads that press killed.
+  */
+  const runBulkKillUndo = async () => {
+    const pending = bulkKillReport.current;
+    if (!pending) return;
+    lastKill.current = null;
+    const restoringId = "desk-restoring-bulk";
+    deskToast("Restoring…", { id: restoringId, duration: Infinity });
+    try {
+      await undoBulkKill(pending.promise, (id) => undoKill.mutateAsync(killUndoPress(id, bulkRestores.current[id])));
+      deskToast("Undone: the leads are back on the Queue.", { tone: "ok", id: BULK_STATUS_TOAST_ID });
+    } catch (error) {
+      deskToast(`Could not put those leads back. ${deskErrorReason(error, "put those leads back")}`, { tone: "err", id: BULK_STATUS_TOAST_ID });
+    } finally {
+      dismissDeskToast(restoringId);
+    }
+  };
+  const bulkRestores = useRef<Record<number, RestoreStatus>>({});
   const bulkSetStatus = (status: "held" | "killed", reason?: string) => {
     const ids = selectedLeads.map((lead) => lead.id);
     if (ids.length === 0) return;
-    if (status === "killed" && reason !== undefined && reason.trim()) {
-      bulkStatus.mutate({ ids, status, killReason: reason.trim(), restores: Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)])) });
-      return;
+    const restores = Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)]));
+    if (status === "killed") {
+      /*
+        THU-4: the same Undo toast the row Kill shows, at the press and not
+        after the round trip; the batch's report replaces it under the same id.
+      */
+      let settle: (r: { undoIds: number[] }) => void = () => {};
+      const promise = new Promise<{ undoIds: number[] }>((resolve) => { settle = resolve; });
+      bulkKillReport.current = { promise, settle };
+      bulkRestores.current = restores;
+      lastKill.current = { id: ids[0], restore: restores[ids[0]], bulk: true };
+      deskToast(`Killed ${ids.length} lead${ids.length === 1 ? "" : "s"}.`, {
+        tone: "ok",
+        id: BULK_STATUS_TOAST_ID,
+        duration: KILL_TOAST_MS,
+        undo: { label: BULK_STATUS_UNDO_LABEL, run: runBulkKillUndo },
+      });
     }
-    bulkStatus.mutate({ ids, status, restores: Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)])) });
+    bulkStatus.mutate({
+      ids, status, restores,
+      ...(status === "killed" && reason !== undefined && reason.trim() ? { killReason: reason.trim() } : {}),
+    });
   };
   const bulkBusy =
     setStatus.isPending || bulkStatus.isPending || startBatch.isPending || bulkRemove.isPending;

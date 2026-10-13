@@ -6,6 +6,7 @@ import {
   bulkStatusReport,
   bulkStatusSummary,
   settleBulkKill,
+  undoBulkKill,
 } from "./queue-bulk.ts";
 
 /**
@@ -167,5 +168,27 @@ describe("a bulk Kill that meets a written draft (walk D2, D2-a)", () => {
     assert.deepEqual(settled.drafted, []);
     const report = bulkStatusReport({ status: "killed", ids: [452, 437], settled: settled.settled, reason: () => "x" });
     assert.deepEqual(report.undoIds, [452]);
+  });
+});
+
+describe("THU-4: the bulk Kill's Undo waits for the batch and puts back every lead it killed", () => {
+  it("restores exactly the killed leads, once the press has answered", async () => {
+    const calls: number[] = [];
+    let answer!: (r: { undoIds: number[] }) => void;
+    const report = new Promise<{ undoIds: number[] }>((resolve) => { answer = resolve; });
+    const undone = undoBulkKill(report, async (id) => { calls.push(id); });
+    // Pressed before the batch answered: nothing is restored yet.
+    await Promise.resolve();
+    assert.deepEqual(calls, []);
+    answer({ undoIds: [4, 9] });
+    await undone;
+    assert.deepEqual(calls.sort(), [4, 9]);
+  });
+
+  it("says how many leads could not be put back", async () => {
+    await assert.rejects(
+      undoBulkKill(Promise.resolve({ undoIds: [1, 2, 3] }), async (id) => { if (id !== 2) throw new Error("no"); }),
+      /2 leads could not be put back/,
+    );
   });
 });

@@ -316,3 +316,11 @@ describe("DHI-8: the two overrides for unreviewed claims use the same words", ()
     assert.equal(publishConfirmation(withState(patch), "Council").confirmLabel, "Publish anyway in Council");
   });
 });
+
+describe("THU-10: a piece with no section does not read 'in' with nothing after it", () => {
+  it("the claims confirm drops the empty section", () => {
+    const patch = WARNING_STATES.find((state) => state.key === "claims-unreviewed")!.patch;
+    const decision = publishConfirmation(withState(patch), "");
+    assert.equal(decision.confirmLabel, "Publish anyway — I accept these claims are unreviewed");
+  });
+});
