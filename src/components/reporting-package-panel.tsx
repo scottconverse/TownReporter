@@ -224,6 +224,15 @@ function PackageBody({
       {report.held.length ? (
         <section className="reporting-held" aria-label="Held possibilities">
           <h3>Held for later</h3>
+          {/*
+            FC19 (Oct 11 walk): this list is the reporting run's suggestion; it
+            does not move a lead. The filed lead stayed New in the Queue while
+            this said held, so the panel says which one it is.
+          */}
+          <p className="meta">
+            This is the reporting run's suggestion. A lead it filed stays where it is in the Queue
+            until you hold or kill it.
+          </p>
           <ul>
             {report.held.map((held, index) => (
               <li key={`${held.storyId}-${index}`}>
