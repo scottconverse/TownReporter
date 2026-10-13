@@ -28,7 +28,12 @@ const AI_DRAFTED_AND_RESEARCHED_UNCHECKED_LINE = "An editor published this story
 const AI_DRAFTED_UNCHECKED_LINE = "An editor published this story. AI tools helped write the first draft. Some claims in it were not checked against sources. The records we used are listed under Sources.";
 const AI_RESEARCHED_UNCHECKED_LINE = "A person wrote and edited this story. AI tools helped find records. Some claims in it were not checked against sources. The records we used are listed under Sources.";
 
+// The import screen's old "An outside AI tool" preset line. Like the lines above
+// it was never an editor's own words, so a copy saved on an article is dropped.
+const OUTSIDE_AI_IMPORT_LINE = "An outside AI research tool wrote this from public records; an editor reviewed it.";
+
 const DERIVED_LINES = [
+  OUTSIDE_AI_IMPORT_LINE,
   AI_DRAFTED_AND_RESEARCHED_LINE,
   AI_DRAFTED_LINE,
   AI_RESEARCHED_LINE,
@@ -44,73 +49,19 @@ export function isDerivedDisclosureLine(text: string | null | undefined): boolea
   return DERIVED_LINES.includes(text?.trim() ?? "");
 }
 
-function completedPublicAiResearch(value: string | null | undefined): boolean {
-  if (!value) return false;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null
-      && (parsed as Record<string, unknown>).publicAiResearchCompleted === true;
-  } catch {
-    return false;
-  }
+/**
+ * The line a reader sees under a published story. Scott, Oct 12 2026: "NO
+ * reference to AI anywhere in this system except ONE place and I'll write it.
+ * In the about section." So no line is derived from the authoring receipts any
+ * more. Only a line an editor typed (an imported story's own wording) is shown;
+ * a saved AI line from before this change is dropped.
+ */
+export function disclosureForPublishedStory({ text }: PublishedStoryDisclosureInput): string {
+  if (isDerivedDisclosureLine(text)) return "";
+  return text?.trim() ?? "";
 }
 
-/**
- * Derive the public AI line from the two saved receipts of work that actually
- * ran. A saved editor-authored line takes priority; missing receipts make no
- * claim. This also lets old articles fail closed when their originating draft
- * has since been removed.
- */
-export function disclosureForPublishedStory({
-  text,
-  modelBody,
-  researchJson,
-  publishedBody,
-  publishedWithUnreviewedClaims,
-}: PublishedStoryDisclosureInput): string {
-  const chosen = text?.trim();
-  if (chosen) return chosen;
-
-  const aiDrafted = Boolean(modelBody?.trim());
-  const aiResearched = completedPublicAiResearch(researchJson);
-  // Only a body that is still exactly the model's draft counts as approved; any edit keeps the edited line.
-  const approved = aiDrafted && publishedBody?.trim() === modelBody?.trim();
-  if (publishedWithUnreviewedClaims) {
-    if (aiDrafted && aiResearched) return AI_DRAFTED_AND_RESEARCHED_UNCHECKED_LINE;
-    if (aiDrafted) return AI_DRAFTED_UNCHECKED_LINE;
-    if (aiResearched) return AI_RESEARCHED_UNCHECKED_LINE;
-    return "";
-  }
-  if (aiDrafted && aiResearched) return approved ? AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE : AI_DRAFTED_AND_RESEARCHED_LINE;
-  if (aiDrafted) return approved ? AI_DRAFTED_APPROVED_LINE : AI_DRAFTED_LINE;
-  if (aiResearched) return AI_RESEARCHED_LINE;
-  return "";
-}
-
-/**
- * The line a reader sees on a published story. A piece the editor pasted in
- * (`pastedByEditor`) has no model-written draft, so its model body is never an
- * AI receipt, and a stored line this module derived for it (written before
- * FC04 was fixed) is dropped. An editor's own line still stands.
- */
-export function disclosureForReader({
-  text,
-  modelBody,
-  researchJson,
-  publishedBody,
-  publishedWithUnreviewedClaims,
-  pastedByEditor,
-}: PublishedStoryDisclosureInput & { pastedByEditor?: boolean }): string {
-  // A stored derived line (the publish path saved one before D67) is recomputed from the receipts, so the
-  // approved-or-edited wording follows the body a reader is actually shown.
-  const chosen = isDerivedDisclosureLine(text) ? null : text;
-  if (!pastedByEditor) {
-    return disclosureForPublishedStory({ text: chosen, modelBody, researchJson, publishedBody, publishedWithUnreviewedClaims });
-  }
-  return disclosureForPublishedStory({
-    text: chosen,
-    modelBody: null,
-    researchJson,
-    publishedWithUnreviewedClaims,
-  });
+/** The line a reader sees on a published story; see disclosureForPublishedStory. */
+export function disclosureForReader(input: PublishedStoryDisclosureInput & { pastedByEditor?: boolean }): string {
+  return disclosureForPublishedStory(input);
 }

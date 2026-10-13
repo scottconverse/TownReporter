@@ -42,8 +42,7 @@ after(async () => vite.close());
 const NEWSROOM = 98433;
 const USER = "import-disclosure-editor";
 
-const OUTSIDE_AI_LINE =
-  "An outside AI research tool wrote this from public records; an editor reviewed it.";
+const PERSON_LINE = "A person wrote this from public records; an editor reviewed it.";
 
 /**
  * An imported lead and its draft: origin "import", provenance recorded, the
@@ -91,7 +90,7 @@ async function importedFixture(disclosureText: string) {
 }
 
 it("prints the imported story under the line the editor chose, and needs no AI pass", async () => {
-  const { leadId } = await importedFixture(OUTSIDE_AI_LINE);
+  const { leadId } = await importedFixture(PERSON_LINE);
   const ctx = { userId: USER, newsroomId: NEWSROOM };
   const warned = await performPublish(ctx, leadId);
   assert.ok(!warned.ok && warned.warnings?.some(row => row.key === "unchecked"));
@@ -110,7 +109,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
   );
   assert.equal(
     article.disclosure_text,
-    OUTSIDE_AI_LINE,
+    PERSON_LINE,
     "the line the editor chose reaches the published article, word for word",
   );
   assert.equal(

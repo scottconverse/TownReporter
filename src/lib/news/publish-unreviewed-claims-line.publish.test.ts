@@ -88,7 +88,8 @@ async function publicLine(sql: Awaited<ReturnType<typeof getSql>>, leadId: numbe
   return String((shown as { disclosure_text?: string }).disclosure_text ?? "");
 }
 
-it("a piece published over accepted unreviewed claims does not say an editor approved it", async () => {
+// Scott, Oct 12 2026: no AI wording on the paper.
+it("a piece published over accepted unreviewed claims carries no AI line", async () => {
   const f = await fixture(true);
   const ctx = { userId: USER, newsroomId: NEWSROOM };
   const { loadFindingEvidenceReview } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
@@ -99,16 +100,14 @@ it("a piece published over accepted unreviewed claims does not say an editor app
   assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
 
   const line = await publicLine(f.sql, f.leadId);
-  assert.doesNotMatch(line, /approved this story/);
-  assert.match(line, /^An editor published this story\. AI tools helped write the first draft\./);
-  assert.match(line, /Some claims in it were not checked against sources\./);
+  assert.equal(line, "");
 });
 
-it("a piece with nothing unreviewed keeps today's approved line", async () => {
+it("a piece with nothing unreviewed carries no AI line", async () => {
   const f = await fixture(false);
   const ctx = { userId: USER, newsroomId: NEWSROOM };
   const printed = await performPublish(ctx, f.leadId, "council", undefined, {}, ["unchecked"]);
   assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
   const line = await publicLine(f.sql, f.leadId);
-  assert.match(line, /^An editor approved this story for publication\. AI tools helped write the first draft\./);
+  assert.equal(line, "");
 });
