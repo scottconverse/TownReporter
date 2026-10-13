@@ -237,7 +237,7 @@ function TranscriptCitationEvidence({ evidence }: { evidence: DraftMeetingEviden
       ) : (
         <p className="mt-2 text-sm text-muted">
           This draft has transcript material but no persisted citation record, so there is nothing to
-          review here. Publishing stays blocked until it is redrafted from the current recording.
+          review here. Publish still works, with a warning, until it is redrafted from the current recording.
         </p>
       )}
     </div>
