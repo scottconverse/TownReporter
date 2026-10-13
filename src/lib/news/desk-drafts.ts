@@ -138,7 +138,15 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   if (facts.story_readiness !== undefined) {
     const readiness = readinessWithAcceptedClaims(savedStoryReadiness(facts.story_readiness, running), facts.unreviewed_claims ?? 0, facts.unreviewed_claims_accepted_count ?? 0);
     const key = running ? "running" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
-    return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou: readiness.state === "to-check" };
+    /*
+      FC24 (Oct 11 walk): Today's CHECK said 0 while the edition held a story
+      with nine unreviewed claims and one marked Not checked yet. Both wait on
+      the editor, so both count.
+    */
+    const outstanding = Math.max(0, Number(facts.unreviewed_claims) || 0);
+    const accepted = Math.max(0, Number(facts.unreviewed_claims_accepted_count) || 0);
+    const needsYou = readiness.state === "to-check" || readiness.state === "not-checked" || (outstanding > 0 && accepted < outstanding);
+    return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou };
   }
 
   if (failed) return { ...base, key: "failed", label: "Draft failed" };

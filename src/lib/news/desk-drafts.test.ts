@@ -229,3 +229,17 @@ test("empty drafts say No draft yet even with a Ready memo", () => {
   assert.equal(running.key, "running");
   assert.equal(running.label, "Writing");
 });
+
+/*
+  FC24 (Oct 11 walk): Today's CHECK said 0 while the edition held a story with
+  nine unreviewed claims and one marked Not checked yet.
+*/
+test("FC24: unreviewed claims and Not checked yet both wait on the editor", () => {
+  const memo = { version: 1, state: "ready", openCount: 0, totalCount: 0, reason: "Ready to publish." };
+  const claims = deskDraftState({ ...quiet, has_body: true, story_readiness: memo, unreviewed_claims: 9, unreviewed_claims_accepted_count: 0 } as never);
+  assert.equal(claims.needsYou, true);
+  const accepted = deskDraftState({ ...quiet, has_body: true, story_readiness: memo, unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 } as never);
+  assert.equal(accepted.needsYou, false);
+  const notChecked = deskDraftState({ ...quiet, has_body: true, story_readiness: { ...memo, state: "not-checked", reason: "Not checked." } } as never);
+  assert.equal(notChecked.needsYou, true);
+});
