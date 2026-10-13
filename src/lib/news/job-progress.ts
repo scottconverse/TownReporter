@@ -636,3 +636,13 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     }
     return { ok: true, model: label };
   });
+
+/**
+ * The desk header's Running box line. FC13 (Oct 11 walk): it said
+ * "Running · 11" while the work queue said 1 running and 10 queued, so jobs
+ * waiting in line are counted apart.
+ */
+export function runningHeadLabel(jobs: readonly Pick<JobProgressView, "status">[]): string {
+  const queued = jobs.filter((job) => job.status === "queued").length;
+  return `Running · ${jobs.length - queued}${queued ? ` · ${queued} queued` : ""}`;
+}

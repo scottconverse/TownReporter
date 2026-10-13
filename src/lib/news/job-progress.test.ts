@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { runningHeadLabel } from "./job-progress.ts";
 import {
   __setJobWorkForTest,
   clampPct,
@@ -314,5 +315,13 @@ describe("the structured-progress columns are declared the same in both places",
       assert.ok(norm(migration).includes(part), `migration missing: ${part}`);
       assert.ok(norm(code).includes(part), `ensureJobsSchema missing: ${part}`);
     }
+  });
+});
+
+describe("FC13: the Running box counts queued jobs apart", () => {
+  it("one running and ten queued reads that way, not Running · 11", () => {
+    const jobs = [{ status: "running" }, ...Array.from({ length: 10 }, () => ({ status: "queued" }))] as never;
+    assert.equal(runningHeadLabel(jobs), "Running · 1 · 10 queued");
+    assert.equal(runningHeadLabel([{ status: "running" }] as never), "Running · 1");
   });
 });
