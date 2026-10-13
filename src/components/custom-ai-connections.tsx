@@ -12,6 +12,7 @@ import {
   managementActionsLocked,
 } from "@/lib/news/custom-ai-settings";
 import { isGeminiOpenAiEndpoint } from "@/lib/news/provider-model-id";
+import { setupFieldHelp } from "@/lib/news/models-help-copy";
 
 type Props = {
   connections: PublicCustomAiConnection[];
@@ -164,6 +165,7 @@ export function CustomAiConnections({
           Set up Gemini
         </InkButton>
       </div>
+      <p className="meta">{setupFieldHelp("litellm")}</p>
       <p className="meta">
         Using LiteLLM?{" "}
         <a
@@ -185,6 +187,7 @@ export function CustomAiConnections({
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
+          <span className="meta">{setupFieldHelp("connectionName")}</span>
         </Field>
         <Field label="Base URL">
           <input
@@ -195,6 +198,9 @@ export function CustomAiConnections({
             value={form.baseUrl}
             onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
           />
+          <span className="meta">
+            {setupFieldHelp("baseUrl")} {setupFieldHelp("openaiCompatible")}
+          </span>
         </Field>
         <Field
           label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini API key" : "API key (optional)"}
@@ -214,6 +220,7 @@ export function CustomAiConnections({
             value={form.apiKey}
             onChange={(e) => setForm({ ...form, apiKey: e.target.value, removeApiKey: false })}
           />
+          <span className="meta">{setupFieldHelp("apiKey")}</span>
         </Field>
         {editingId && (
           <label className="meta">
@@ -245,6 +252,7 @@ export function CustomAiConnections({
             value={form.modelId}
             onChange={(e) => setForm({ ...form, modelId: e.target.value })}
           />
+          <span className="meta">{setupFieldHelp("modelId")}</span>
         </Field>
         {!!models.length && (
           <Field label="Discovered models">
