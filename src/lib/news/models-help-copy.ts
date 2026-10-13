@@ -44,9 +44,9 @@ export function testAllCardNote(scope: TestAllScope): string {
  */
 export const SETUP_FIELD_HELP = {
   connectionName: "A name for you to recognize it by, such as Gemini or My server.",
-  baseUrl: "The web address of the AI service. It stays the same as what that service gave you.",
+  baseUrl: "The web address of the service. Copy it exactly as that service gives it.",
   apiKey:
-    "The private key from that AI service. It is saved on this server and never shown again.",
+    "The private key from that service. It is saved on this server.",
   modelId: "Model ID: the exact model name your provider uses.",
   context:
     "Context: how much text the model can read at once. Bigger holds more and can cost more.",
@@ -55,7 +55,7 @@ export const SETUP_FIELD_HELP = {
   oauth: "OAuth: a sign-in you already have with the provider, reused instead of a key.",
   openaiCompatible:
     "OpenAI-compatible endpoint: a web address another program offers that speaks the same language as OpenAI.",
-  litellm: "LiteLLM: an optional middle program that passes requests on to other AI services.",
+  litellm: "LiteLLM: an optional middle program that passes requests on to other model services.",
 } as const;
 
 export type SetupFieldKey = keyof typeof SETUP_FIELD_HELP;
@@ -77,4 +77,4 @@ export function effortChoiceLabel(effort: ModelEffort, model?: string | null): s
  * FB22: one plain line for the effort choices themselves.
  */
 export const EFFORT_FIELD_HELP =
-  "Effort: how hard the model thinks for one run. Higher can take longer. The word in brackets is the setting's internal name.";
+  "Effort: how hard the model thinks for one run. Higher can take longer. The word in parentheses is the setting's internal name.";
