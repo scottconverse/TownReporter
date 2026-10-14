@@ -282,6 +282,51 @@ describe("headlineWithTag", () => {
   });
 });
 
+/**
+ * Release J, THV-2 (Scott Oct 14 2026). The editor's assignment travelled to
+ * the model under a source-shaped heading, so the writer was told its own
+ * instructions were source material -- and the public appendix cited the
+ * assignment "in the prompt". Direction is instructions, never evidence; the
+ * pasted material alone keeps its source name.
+ */
+describe("the editor's direction is instructions, not a source", () => {
+  const askedFor = "Argue the tax funds the tracks that serve Longmont.";
+
+  it("labels the direction as never citable, in the gathering pack", () => {
+    const pack = buildEditorialPack({ subject: "The rail tax", pointers: [], askedFor });
+    assert.match(
+      pack,
+      /EDITOR'S DIRECTION \(instructions for this piece; not a source; never cite it\): Argue the tax funds the tracks that serve Longmont\./,
+    );
+    assert.doesNotMatch(pack, /WHAT THE EDITOR ASKED FOR/);
+    assert.doesNotMatch(
+      pack,
+      /THE SUPPLIED DOCUMENT[^\n]*Longmont/,
+      "the direction must not carry the supplied-document name",
+    );
+  });
+
+  it("keeps the supplied document for the material pasted and uploaded", () => {
+    const pack = buildEditorialPack({
+      subject: "The rail tax",
+      sourceText: "Notes on the levy.",
+      pointers: [],
+      askedFor,
+    });
+    // The material keeps its source name and stays citable; only the direction
+    // above is barred from citation.
+    assert.match(pack, /MATERIAL PASTED BY THE EDITOR/);
+    assert.match(pack, /Notes on the levy\./);
+    assert.match(pack, /never cite it/);
+  });
+
+  it("leaves the direction out entirely when the desk asked for nothing", () => {
+    const pack = buildEditorialPack({ subject: "The rail tax", pointers: [], askedFor: "   " });
+    assert.doesNotMatch(pack, /EDITOR'S DIRECTION/);
+    assert.doesNotMatch(pack, /never cite it/);
+  });
+});
+
 describe("the pack hands over leads, not conclusions", () => {
   const pack = buildEditorialPack({
     subject: "Front Range Passenger Rail sales tax",
