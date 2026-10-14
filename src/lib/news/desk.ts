@@ -5199,7 +5199,8 @@ export const setLeadStatus = createServerFn({ method: "POST" })
   });
 
 /**
- * The way back from a kill: put the lead where it was, not where kills usually go.
+ * The way back from a kill or a hold: put the lead where it was, not where these
+ * presses usually send it.
  *
  * Owner, 2026-10-03. The Undo on a kill put every lead back to `new`
  * (`killUndoPress`), so a `drafted` lead an editor killed and took back came back
@@ -5207,14 +5208,20 @@ export const setLeadStatus = createServerFn({ method: "POST" })
  * restore is the one the row held when the Kill was pressed, and for a lead that
  * had been drafted that is `drafted`.
  *
+ * TIA-2 (walk step TIA-2, 2026-10-13) made it the way back from a HOLD too. A
+ * Hold's Undo went through `setLeadStatus`, the ordinary status path, and that
+ * path refuses for any lead with a written draft -- which is the ordinary held
+ * lead. The Undo rolled back, the lead stayed held, and nothing said so. A hold
+ * is undone by the same write a kill is: here.
+ *
  * WHY THIS IS NOT `setLeadStatus`. That input has no `drafted` in it, and should
  * not: `drafted` is written by the desk's own drafting pass and never picked by
  * a screen. The Undo may write it only because it is UN-writing, so the
  * permission lives here, behind two checks the schema cannot make:
  *
- *   - the lead must be KILLED right now. An Undo is the way back from a kill and
- *     nothing else; without this the call would be a general "set any status"
- *     door with a friendly name.
+ *   - the lead must be KILLED or HELD right now. An Undo is the way back from one
+ *     of those two presses and nothing else; without this the call would be a
+ *     general "set any status" door with a friendly name.
  *   - a lead going back to `drafted` must still have its draft (`drafts.lead_id`).
  *     A lead whose draft was thrown away has nothing to go back to, and calling
  *     it drafted would promise a story that no longer exists.
