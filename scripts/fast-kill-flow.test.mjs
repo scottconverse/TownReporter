@@ -149,7 +149,7 @@ const preflightStub = stub(`
   export function looksLikeProviderAuthFailure() { return false; }
   export function providerAuthTarget() { return ""; }
 `);
-const leadMatchStub = stub(`export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }`);
+const leadMatchStub = stub(`export function distinguishingOverlap() { return { subjects: 0, names: 0 }; } export function explainPairMatch() { return null; } export function sharesTightName() { return false; }`);
 
 /*
   The real desk-copy: both the row (killRecordLine, printedDuplicateLine, …) and
