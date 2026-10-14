@@ -1327,18 +1327,26 @@ export const leadStatusInput = z.object({
 });
 
 /**
- * `desk.ts` restoreKilledLead -- the way back from a kill, and the ONE path
- * that may write `drafted`.
+ * `desk.ts` restoreKilledLead -- the way back from a kill or a hold, and the ONE
+ * path that may write `drafted`.
  *
  * `leadStatusInput` above has no `drafted` in it on purpose: a lead becomes
  * drafted through the desk's own drafting pass, and no screen picks that status
  * by hand. A kill's Undo is the exception, and only because it is putting a lead
  * back where it already was -- so it gets its own input rather than widening the
  * one every Hold and Kill goes through. The two conditions a schema cannot state
- * (the lead must be killed right now, and a lead going back to `drafted` must
- * still have its draft) are held by `restoreKilledLead` in `desk.ts`.
+ * (the lead must be killed or held right now, and a lead going back to `drafted`
+ * must still have its draft) are held by `restoreKilledLead` in `desk.ts`.
+ *
+ * `override` joined this input for the Hold's Undo (TIA-2, walk step TIA-2). A
+ * held lead with a written draft is the ordinary case for a Hold, and putting it
+ * back is a status change the published/drafted warnings speak to; the kill path
+ * needs none because `restoreKilledLeadForEditor` writes no warning-gated path.
+ * The keys the editor already approved on the Hold press are carried through, so
+ * the Undo does not ask a second question about the same lead.
  */
 export const leadStatusRestoreInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   // Omitted = back to the status the lead held before its kill (DHC06).
   status: z.enum(["new", "held", "drafted"]).optional(),

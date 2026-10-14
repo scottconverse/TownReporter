@@ -75,6 +75,17 @@ export function effortChoiceLabel(effort: ModelEffort, model?: string | null): s
 
 /**
  * FB22: one plain line for the effort choices themselves.
+ *
+ * TIA-3 (walk step TIA-3, 2026-10-13) removed this line's last sentence -- "The
+ * word in parentheses is the setting's internal name." It was written for the
+ * setup screen, where `effortChoiceLabel` really does print the raw token in
+ * parentheses ("Medium — balanced (medium)"), but the same constant is drawn on
+ * `/desk/models` under the per-job effort selects, and those show plain words
+ * with no parentheses at all (an empty select reads only "Default"). A line that
+ * promises parentheses the editor cannot see is a line that is false on the
+ * screen in front of them, so the sentence is gone and the two that hold
+ * everywhere are kept. `effortChoiceLabel` and the setup screen's own labels are
+ * untouched; nothing an editor presses or reads elsewhere changed.
  */
 export const EFFORT_FIELD_HELP =
-  "Effort: how hard the model thinks for one run. Higher can take longer. The word in parentheses is the setting's internal name.";
+  "Effort: how hard the model thinks for one run. Higher can take longer.";

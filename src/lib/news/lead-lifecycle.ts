@@ -266,7 +266,7 @@ async function reopenPrior(sql: AuditSqlTag, newsroomId: number, id: number) {
   return { ok: true as const, action: "reopen-prior" as const, priorId: rows[0]?.id ?? null };
 }
 
-/** The way back from a kill: an Undo, or a Bring back from the Killed pile. */
+/** The way back from a kill or a hold: an Undo, or a Bring back from the Killed pile. */
 export interface LeadRestoreRequest {
   id: number;
   status?: "new" | "held" | "drafted";
@@ -275,10 +275,13 @@ export interface LeadRestoreRequest {
    * not: it takes the kill off the lead, so the lead is as it was before the press.
    */
   keepRecord?: boolean;
+  /** The keys the editor has already approved, for the warnings a Hold's Undo may raise. */
+  override?: string[];
 }
 
 /**
- * The way back from a kill (`restoreKilledLead` in desk.ts is the thin wrapper).
+ * The way back from a kill or a hold (`restoreKilledLead` in desk.ts is the thin
+ * wrapper).
  *
  * With no status asked for, the lead goes back to the status it held when the
  * kill was pressed (`kill_prior_status`). `drafted` is allowed only when the
@@ -290,20 +293,117 @@ export interface LeadRestoreRequest {
  * kill's reason (back to the reason the lead had before, `kill_prior_reason`)
  * and its reason link. A Bring back keeps `killed_at` and the kill's reason, so
  * the lead's history line still says when it was killed and why.
+ *
+ * THE HOLD'S WAY BACK (TIA-2, walk step TIA-2). A HOLD had no undo of its own:
+ * the toast's Undo re-sent the Hold's own write in reverse (`setLeadStatus` with
+ * `new`), which is the ordinary status path -- so on the ordinary held lead the
+ * WALKER had in front of them, a lead with a written draft, `setLeadStatusForEditor`
+ * raised its drafted warning, refused the write, and the optimistic move rolled
+ * back. The lead stayed held and nothing said so.
+ *
+ * A hold is put back by the same write a kill is, because it is the same shape of
+ * undoing: a lead that is not `new` right now and has to become `new` again,
+ * exactly, with nothing else written on it. This function is therefore that write
+ * made general -- it takes the status a HOLD is undoing from as well as `killed`.
+ * The reasons for the two conditions are unchanged for both:
+ *
+ *   - the lead must be `killed` or `held` right now. An Undo is the way back from
+ *     one of those presses and nothing else; without this the call would be a
+ *     general "set any status" door with a friendly name, and `drafted` would be
+ *     reachable from any row.
+ *   - a lead going back to `drafted` must still have its draft.
+ *
+ * A HOLD IS NOT WRITABLE TO `drafted`, which is why the `held` branch below runs
+ * the same warning gate a Hold does and refuses `drafted` outright: the only
+ * statuses a Hold can be taken back to are `new` (it was an open lead) and
+ * `drafted` (the desk had already drafted it, and a Hold does not remove the
+ * draft). The gate is what keeps the shape of this call from being a way around
+ * the published story or the saved draft; it WARNs and never blocks, and the
+ * keys the editor already approved come in on `override` (TIA-2).
  */
 export async function restoreKilledLeadForEditor(
   sql: AuditSqlTag,
   context: LeadLifecycleContext | number,
   data: LeadRestoreRequest,
 ) {
-  const { newsroomId } = normalizeContext(context);
-  const [current] = await sql<{ prior: string | null }>`
-    select kill_prior_status as prior from leads
-    where id = ${data.id} and newsroom_id = ${newsroomId} and status = 'killed'
+  const { context: ctx, newsroomId } = normalizeContext(context);
+  /*
+    The lead is read twice on purpose. This first read answers the two questions
+    every way back asks -- is it `killed` or `held`, and if killed, where does it
+    go -- and touches nothing else, so the kill path costs exactly what it did
+    before (two tables, no joins). The draft and published facts below are read
+    only for a HELD lead, which is the only status whose warnings are raised here;
+    a query that carried them for every call would make the kill path depend on
+    `drafts` and `articles` being there, which three of this file's own callers
+    do not stand up.
+  */
+  const [current] = await sql<{ prior: string | null; status: string }>`
+    select kill_prior_status as prior, leads.status from leads
+    where id = ${data.id} and newsroom_id = ${newsroomId} and status in ('killed', 'held')
   `;
-  if (!current) return { ok: false as const, error: "That lead is not killed." };
-  const remembered = current.prior === "held" || current.prior === "drafted" ? current.prior : "new";
+  if (!current) return { ok: false as const, error: "That lead is not killed or held." };
+
+  /*
+    A kill remembers where it came from (`kill_prior_status`, DHC06) and is put
+    back there. A hold has nothing to remember and does not need to: the two
+    statuses a Hold can hide are both still visible on the lead -- `drafted` is
+    the status it kept, and `new` is what an open lead answers to -- so the write
+    the press carried (`data.status`) is the answer, and a caller that names
+    nothing gets `new`, where the toast's Undo has always sent it.
+  */
+  const remembered = current.status === "killed"
+    ? current.prior === "held" || current.prior === "drafted" ? current.prior : "new"
+    : "new";
   let back: "new" | "held" | "drafted" = data.status ?? remembered;
+
+  /*
+    HOLDING IS REVERSIBLE AND ONLY INTO AN OPEN LEAD. A held lead taken back goes
+    to `new` or to `drafted`; anything else -- `held` again, which is no way back
+    at all -- is refused rather than written, and the refusal is the desk's
+    ordinary `{ok:false, error}` so the row rolls back and the toast says why.
+  */
+  if (current.status === "held" && back !== "new" && back !== "drafted") {
+    return { ok: false as const, error: "A held lead goes back to New." };
+  }
+
+  if (current.status === "held") {
+    /*
+      The warnings a Hold itself would raise, raised here instead: this write
+      undoes a Hold and is otherwise the same status change. It is the same pair
+      of keys, the same sentences and the same "warn, never block" answer, so an
+      editor who approved the Hold is asked once and not twice (`override`).
+
+      The two facts come from the same expressions `setLeadStatusForEditor`
+      reads, so the same lead raises the same warning here as it did on the way in.
+    */
+    await ensureAuditEventsSchema(sql as never);
+    const [facts] = await sql<{ has_draft: boolean; has_published: boolean }>`
+      select
+        exists (select 1 from drafts where drafts.lead_id = ${data.id} and drafts.newsroom_id = ${newsroomId} and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')) as has_draft,
+        exists (select 1 from articles where articles.lead_id = ${data.id} and articles.newsroom_id = ${newsroomId} and articles.status = 'published') as has_published
+    `;
+    const publishedWarning = facts?.has_published
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-status-published",
+          "This lead has a published story. Changing the lead status will leave that story published.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (publishedWarning) return publishedWarning;
+    const draftedWarning = facts?.has_draft
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-status-drafted",
+          "This lead has a written draft. Changing its status will keep the saved draft.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (draftedWarning) return draftedWarning;
+  }
+
   if (back === "drafted") {
     const [draft] = await sql<{ id: number }>`
       select id from drafts where lead_id = ${data.id} and newsroom_id = ${newsroomId} limit 1
@@ -321,9 +421,9 @@ export async function restoreKilledLeadForEditor(
       killed_at = case when ${keep}::boolean then killed_at else null end,
       kill_prior_status = null,
       kill_prior_reason = null
-    where id = ${data.id} and newsroom_id = ${newsroomId} and status = 'killed'
+    where id = ${data.id} and newsroom_id = ${newsroomId} and status in ('killed', 'held')
     returning id
   `;
-  if (!rows.length) return { ok: false as const, error: "That lead is not killed." };
+  if (!rows.length) return { ok: false as const, error: "That lead is not killed or held." };
   return { ok: true as const, status: back };
 }

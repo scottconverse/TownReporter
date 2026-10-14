@@ -52,6 +52,43 @@ export type RestoreStatus = "new" | "held" | "drafted";
 export type KillPress = { id: number; status: "killed"; restore: RestoreStatus };
 
 /**
+ * The hold, as the same shape.
+ *
+ * A hold has no reason, no chips and no dialog on the row: the press carries the
+ * lead's id and where the toast's own Undo will put it back (`undoHoldPress`).
+ *
+ * `restore` is the status the row held a moment before the Hold -- read off the
+ * row at the press, like a kill's -- and the way back READS it rather than
+ * guessing `new`. Guessing is what the held lead of TIA-2 showed: a lead the desk
+ * had already drafted came back as a fresh one.
+ */
+export type HoldPress = { id: number; status: "held"; restore?: RestoreStatus };
+
+/** The hold press: the lead's id, and where its Undo goes back to. */
+export function holdPress(id: number, restore?: RestoreStatus): HoldPress {
+  return { id, status: "held", restore };
+}
+
+/**
+ * The way back from a hold, as the request the desk's restore write takes.
+ *
+ * Not a `setLeadStatus` call, and that is the whole of TIA-2: the ordinary status
+ * input raises the drafted warning for any lead with a written draft, so the
+ * ordinary held lead -- the one the walker had on screen -- was refused and came
+ * back held with nothing said. `restoreKilledLead` is the write that may undo a
+ * hold: it requires the lead to be held right now, it is not gated on a draft,
+ * and it takes an explicit status so the press can name where it goes back to.
+ *
+ * `status` is omitted when the press had none (a hold on a row that named no
+ * prior status), and the server then answers `new`, where this Undo has always
+ * sent it. `override` carries the keys the editor already approved on the Hold
+ * press, so the same lead is not asked twice about the same draft.
+ */
+export function holdUndoPress(press: HoldPress, override?: string[]): KillUndoPress & { override?: string[] } {
+  return { id: press.id, status: press.restore, override };
+}
+
+/**
  * The way back, as the same shape. `keepRecord` is set only by Bring back (the
  * Killed pile), which keeps the kill's time and reason on the lead; an Undo
  * leaves it unset and takes the kill off the lead.

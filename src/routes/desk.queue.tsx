@@ -71,6 +71,8 @@ import {
   KillReasonChips,
   killPress,
   killUndoPress,
+  holdPress,
+  holdUndoPress,
   bringBackPress,
   restoreStatus,
   type KillReasonRequest,
@@ -217,6 +219,16 @@ function QueuePage() {
   */
   const killedFrom = useRef(new Map<number, RestoreStatus>());
   /*
+    TIA-2: the same memory, for the same reason, on the OTHER press. A Hold has
+    no `RestoreStatus` of its own worth remembering (a held lead is on hold and
+    that IS the answer, so `heldFrom` holds only the ids this screen has held and
+    is a set), but the U key needs to know whether the held lead under the cursor
+    is one THIS screen held a moment ago or one it found that way. The first is
+    the press U is taking back; the second is a released-style press and keeps the
+    drawn behaviour.
+  */
+  const heldFrom = useRef(new Set<number>());
+  /*
     THT-7, THT-9: the last kill this screen pressed. A killed lead leaves the
     Open list at once, so the cursor is on the next lead by the time U is
     pressed; U reads this instead, so the hint's own promise holds.
@@ -232,6 +244,27 @@ function QueuePage() {
     lastKill.current = { id: lead.id, restore };
     return killPress(lead.id, restore);
   };
+  /*
+    TIA-2: the Hold, as a press that carries where it goes back to -- the same
+    shape the Kill has had since 2026-10-03 (`killLead` above), read off the row
+    at the moment of the press because by Undo time the row is held and its prior
+    status is gone. Every Hold this screen makes goes through here, so the toast's
+    Undo and the U key both have a value to read instead of a guess.
+  */
+  const holdLead = (lead: { id: number; status: string }) => {
+    heldFrom.current.add(lead.id);
+    return holdPress(lead.id, holdRestore(lead));
+  };
+  /*
+    Where a held lead goes back to, for a lead that is held NOW. `restoreStatus`
+    reads a row before the press; this reads it after, so the two statuses a Hold
+    can hide are the two it can put back -- `drafted` is still on the lead, and an
+    open lead (whatever opened it) is `new`. A lead whose status is neither is a
+    hold this screen did not make, and it stays where it is rather than being
+    guessed at (`undefined`), which the server answers with `new`.
+  */
+  const holdRestore = (lead: { status: string }): RestoreStatus | undefined =>
+    lead.status === "drafted" ? "drafted" : lead.status === "held" ? "new" : undefined;
   /*
     The way back from a kill, putting the lead where it was (owner, 2026-10-03).
     A `drafted` lead an editor killed came back as `new` with its draft orphaned,
@@ -365,14 +398,27 @@ function QueuePage() {
             label: "Undo",
             run: async (): Promise<void> => {
               /*
-                A released lead goes back to `held`, the same write this Undo
-                always made. A kill's way back is `killUndoPress` carrying the
-                status the row held when the Kill was pressed -- read from the
-                press, not guessed -- and it goes through `undoKill`, the one
-                write that may restore `drafted`; `setStatus` would refuse it.
+                A RELEASED lead goes back to `held` -- that is what a Release
+                takes back, and it goes through `setStatus`, the ordinary write,
+                exactly as it always has.
+
+                A HOLD's Undo does NOT (TIA-2, walk step TIA-2). It used to: it
+                re-sent the Hold's own write reversed, `setStatus` with `new`.
+                That is the ordinary status path, and for the ordinary held lead
+                -- one with a written draft -- the server raises its drafted
+                warning and refuses, `leadStatusOptimistic` rolls the row back,
+                and the walker saw the lead stay held with nothing said. The way
+                back from a hold is now the same write as a kill's: `undoKill`,
+                carrying the status the row held when the Hold was pressed, read
+                from the press and not guessed. A Hold on a row that carried a
+                draft comes back `drafted`; one on an open lead comes back `new`.
               */
-              if (input.release || input.status === "held") {
-                await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
+              if (input.release) {
+                await setStatus.mutateAsync({ id: input.id, status: "held", override: input.override });
+                return;
+              }
+              if (input.status === "held") {
+                await undoKill.mutateAsync(holdUndoPress(holdPress(input.id, input.restore), input.override));
                 return;
               }
               await undoKill.mutateAsync(killUndoPress(input.id, input.restore));
@@ -879,7 +925,9 @@ function QueuePage() {
         });
         break;
       case "hold":
-        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
+        // TIA-2: the same press the row's Hold makes, so the keyboard's H and
+        // the button beside it both leave a way back the Undo can read.
+        if (lead) setStatus.mutate(holdLead(lead));
         break;
       case "kill":
         /*
@@ -899,12 +947,29 @@ function QueuePage() {
       case "undo":
         if (lead && lead.status === "held") {
           /*
-            `release` is what makes a held lead's Undo say "Released." and put it
-            back on hold. A held lead was open before the Hold, and where a
-            released lead goes back to is unchanged here: `held` is the target
-            this Undo has always had.
+            TIA-2, walk step TIA-2. This branch used to be the same write as the
+            toast's "Undo" for a hold -- `setStatus` with `release: true` -- and
+            that write lands on `moveLeadStatusHere` below, which puts a released
+            lead back on hold and says "Released.". A held lead is not a released
+            one (the screen has no release for its own toast's Undo), so it takes
+            the same way back the toast takes: `undoHoldPress`, carrying the
+            status the row held when the Hold was pressed. The keyboard and the
+            button therefore move a held lead to the same place, by the same
+            write, and neither can be the one that stayed put.
           */
-          setStatus.mutate({ id: lead.id, status: "new", release: true });
+          if (heldFrom.current.has(lead.id)) {
+            void undoKill.mutate(
+              holdUndoPress(holdPress(lead.id, holdRestore(lead))),
+            );
+          } else {
+            /*
+              A lead held before this screen knew -- carried in from the Held
+              tab, or held in another tab. `release` is the drawn behaviour this
+              key had and is kept for it: the lead goes back on hold, and the
+              "Released." strip offers the way back from there.
+            */
+            setStatus.mutate({ id: lead.id, status: "new", release: true });
+          }
         } else if (lastKill.current) {
           // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
           const last = lastKill.current;
@@ -1860,7 +1925,12 @@ function QueuePage() {
                     The state is the screen's because the mutation is.
                   */
                   backPending={setStatus.isPending && setStatus.variables?.id === l.id}
-                  onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
+                  /*
+                    TIA-2: a Hold carries where it goes back to, the way the
+                    Kill beside it does. The toast's own Undo reads it, so
+                    "Release" is not the only way off a hold that took.
+                  */
+                  onHold={() => setStatus.mutate(holdLead(l))}
                   onHoldWithReason={() => setHoldFor(l)}
                   onEdit={() => setEditFor(l)}
                   onDarkDesk={() => setDarkFor(l)}
@@ -2339,6 +2409,9 @@ function QueuePage() {
               not one refetch later. There is nothing optimistic about waiting
               for the round trip the dialog already completed.
             */
+            // TIA-2: the dialog holds the lead this screen just held, so the U
+            // key knows the hold it is taking back is this screen's own press.
+            heldFrom.current.add(holdFor.id);
             moveLeadStatusNow(qc, holdFor.id, "held");
             void qc.invalidateQueries({ queryKey: ["leads"] });
           }}
