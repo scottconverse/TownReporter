@@ -360,6 +360,24 @@ function Test-TownReporterDumpComplete {
   return @{ Ok = $false; Reason = "the dump's closing marker is missing, so the file was cut short before pg_dump finished" }
 }
 
+<#
+  A path as the FULL path PowerShell means by it.
+
+  [IO.File]::Open and every other .NET call resolve a relative path against the
+  PROCESS directory, not against the PowerShell location that Set-Location
+  moved. The two are only the same when the script was started from the folder
+  it works in. On 2026-10-10 11:33 PM a promotion started from a deploy
+  wrapper in another folder hashed "package-lock.json" in THAT folder, got
+  nothing, decided there was no lockfile, skipped npm ci, and a release that
+  added a dependency died at the build and rolled back
+  (logs\promote-20261010-233305.log). Every [IO.File] call in this library
+  resolves its path through here first.
+#>
+function Resolve-TownReporterFilePath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+}
+
 # A byte range of a file as text, without loading the whole thing: a dump is
 # about 700 MB and this runs on every one of them, every night.
 function Read-TownReporterFileSlice {
@@ -370,7 +388,7 @@ function Read-TownReporterFileSlice {
   )
   $stream = $null
   try {
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $stream = [IO.File]::Open((Resolve-TownReporterFilePath -Path $Path), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     $start = $Offset
     if ($start -lt 0) { $start = $stream.Length + $start }
     if ($start -lt 0) { $start = 0 }
@@ -439,6 +457,8 @@ function Test-TownReporterOffsiteReady {
 
 <#
   SHA256 of a file as upper-case hex, or '' when it cannot be read at all.
+  A relative path is taken from the PowerShell location, not the process
+  directory -- see Resolve-TownReporterFilePath above.
 
   This calls System.Security.Cryptography directly instead of the Get-FileHash
   cmdlet, and that is not a style choice. Measured on this machine 2026-09-25:
@@ -462,7 +482,7 @@ function Get-TownReporterFileHash {
     # folder, the open failed, the hash came back '' and `npm ci` was skipped.
     $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $stream = [IO.File]::Open((Resolve-TownReporterFilePath -Path $Path), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     $bytes = $sha.ComputeHash($stream)
     return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '').ToUpperInvariant()
   } catch {
@@ -591,7 +611,7 @@ function Read-TownReporterDumpTail {
     [int]$Bytes = 2048
   )
   try {
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $stream = [IO.File]::Open((Resolve-TownReporterFilePath -Path $Path), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     try {
       $length = $stream.Length
       $take = [int][Math]::Min([int64]$Bytes, $length)

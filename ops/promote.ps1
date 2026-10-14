@@ -1235,7 +1235,12 @@ if (Skip-Step 'dbcopy') {
 # 2026-09-26: CommandNotFoundException). lib-backup.ps1 is dot-sourced above
 # and has a module-free SHA256, so use that instead -- a promote that dies on
 # the lockfile hash dies with the paper already stopped.
-$lockBefore = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path "package-lock.json" } else { "" }
+# The FULL path, never "package-lock.json": Test-Path reads the PowerShell
+# location that Set-Location moved, but a .NET file call reads the PROCESS
+# directory. Started from a deploy wrapper in another folder (2026-10-10
+# 11:33 PM), the bare name hashed to '', npm ci was skipped, and the build died.
+$lockFile = Join-Path $app 'package-lock.json'
+$lockBefore = if (Test-Path -LiteralPath $lockFile) { Get-TownReporterFileHash -Path $lockFile } else { "" }
 if (Skip-Step 'ff') {
   # Already at origin/main: the interrupted run fetched and merged, so the
   # before/after comparison cannot answer "did this promotion bring a new
@@ -1273,7 +1278,7 @@ if (Skip-Step 'ff') {
 # too. These two lines are the pair scripts\ci-hash-no-module.ps1 lifts out and
 # runs in a PowerShell 5.1 session that cannot reach Get-FileHash; a step that
 # stopped hashing on one path would quietly take that check with it.
-$lockAfter = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path "package-lock.json" } else { "" }
+$lockAfter = if (Test-Path -LiteralPath $lockFile) { Get-TownReporterFileHash -Path $lockFile } else { "" }
 
 # --- 6. dependencies, unless node_modules is already built from this lockfile
 <#
@@ -1293,7 +1298,19 @@ $lockAfter = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path
   the hash of the lockfile on disk. See Test-PromoteNeedsInstall in
   ops\lib-promote.ps1 -- including why a missing marker means install.
 #>
-$install = Test-PromoteNeedsInstall -App $app -LockHash $lockAfter -ResumeAt "$resumeAt"
+try {
+  $install = Test-PromoteNeedsInstall -App $app -LockHash $lockAfter -ResumeAt "$resumeAt"
+} catch {
+  # A lockfile that is there but cannot be hashed. Building on a guess about
+  # node_modules is how a missing dependency reaches the build, so stop here.
+  # -RestoreBuild $false: the build has not run, .output is still the one
+  # that was serving.
+  $why = $_.Exception.Message
+  Write-PromoteLog $log "the lockfile hash before this run's fast-forward was '$lockBefore' and after it '$lockAfter'"
+  Say "cannot tell whether dependencies need installing; putting the database back and bringing the paper up"
+  $recovered = Invoke-PromoteRolloutFailure -Why $why -RestoreBuild $false
+  Die "$why. $($recovered.Failure)" 'deps' "Check that $lockFile can be read, then run this script again. The backup is at $backupNote"
+}
 $mustInstall = $install.Needed
 Write-PromoteLog $log "the lockfile hash before this run's fast-forward was '$lockBefore' and after it '$lockAfter'"
 Write-PromoteLog $log "node_modules was last installed from '$(Get-PromoteInstalledLockHash -App $app)'; install needed: $mustInstall ($($install.Reason))"
