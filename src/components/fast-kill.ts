@@ -155,6 +155,35 @@ export type LastPress =
   | { kind: "kill"; id: number; restore: RestoreStatus }
   | { kind: "hold"; id: number; restore?: RestoreStatus };
 
+/**
+ * Where a Hold press goes back to, read off the lead's OWN row.
+ *
+ * THU-3's third finding, and the reason the rule is here rather than on the
+ * screen. The Queue's U key holds the lead `shown` names for the cursor -- a
+ * projection with a headline and an id, and NO STATUS. When the key's H stamped
+ * `lastPress` straight from that object it carried `restore: undefined`, so the
+ * way back was sent with no destination and the server had to guess `new`; the
+ * row's own Hold, which reads the lead itself, knew the answer all along.
+ *
+ * So the one Hold any entry point makes reads the status from the LEAD, and this
+ * is that read: the two statuses a Hold can hide are the two it puts back --
+ * `drafted` is still on the lead, and a held lead (this screen holding it a
+ * moment ago, or the row arriving on hold) goes back to `new`. Anything else is
+ * `undefined`, which the server answers with `new`, where a hold's Undo has
+ * always put it.
+ *
+ * `id` is separate from `lead` because the key path has the id before it has the
+ * row: `holdLeadById` looks the row up by id and hands it here.
+ */
+export function holdStamp(id: number, lead: { status?: string } | undefined): LastPress {
+  return { kind: "hold", id, restore: holdStampRestore(lead?.status) };
+}
+
+/** The restore a hold's stamp carries for a lead of this status. */
+export function holdStampRestore(status: string | null | undefined): RestoreStatus | undefined {
+  return status === "drafted" ? "drafted" : status === "held" ? "new" : undefined;
+}
+
 /** The request the U press sends for the press that came last, or null when nothing was pressed. */
 export function undoPressFor(press: LastPress | null | undefined): KillUndoPress | null {
   if (!press) return null;

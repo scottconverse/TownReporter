@@ -73,6 +73,7 @@ import {
   killUndoPress,
   holdPress,
   holdUndoPress,
+  holdStampRestore,
   bringBackPress,
   restoreStatus,
   undoPressFor,
@@ -280,6 +281,24 @@ function QueuePage() {
     return holdPress(lead.id, restore);
   };
   /*
+    THU-3, the walk's own H. The key handler holds the lead `shown` names for
+    the cursor, not the full row -- a projection with the headline and nothing
+    else. Stamping `lastPress` from that object directly is what made the key
+    path silently different from the row's Hold: `holdRestore` reads
+    `lead.status`, the projection has none, so the stamp carried
+    `{restore: undefined}`. `undoPressFor` then built a hold undo with no
+    `status`, and the restore write was sent asking the server to guess -- an
+    Undo that answers nothing on a lead whose draft makes `new` wrong. Every
+    Hold on this screen -- the keyboard's H, the row's own, and the row menu's
+    dialog -- goes through here, so the press the key stamps is the press the
+    row's Hold makes, and `holdRestore` is the one place the status is read.
+  */
+  const holdLeadById = (id: number) => {
+    const lead = leads.find((l) => l.id === id);
+    const row = lead ?? { id, status: "held" };
+    return holdLead(row);
+  };
+  /*
     Where a held lead goes back to, for a lead that is held NOW. `restoreStatus`
     reads a row before the press; this reads it after, so the two statuses a Hold
     can hide are the two it can put back -- `drafted` is still on the lead, and an
@@ -288,7 +307,7 @@ function QueuePage() {
     guessed at (`undefined`), which the server answers with `new`.
   */
   const holdRestore = (lead: { status: string }): RestoreStatus | undefined =>
-    lead.status === "drafted" ? "drafted" : lead.status === "held" ? "new" : undefined;
+    holdStampRestore(lead.status);
   /*
     The way back from a kill, putting the lead where it was (owner, 2026-10-03).
     A `drafted` lead an editor killed came back as `new` with its draft orphaned,
@@ -980,7 +999,9 @@ function QueuePage() {
       case "hold":
         // TIA-2: the same press the row's Hold makes, so the keyboard's H and
         // the button beside it both leave a way back the Undo can read.
-        if (lead) setStatus.mutate(holdLead(lead));
+        // THU-3: `holdLeadById` reads the LEAD's own row for the status, the
+        // projection the key holds has none (see `holdLeadById` above).
+        if (lead) setStatus.mutate(holdLeadById(lead.id));
         break;
       case "kill":
         /*
@@ -1009,8 +1030,7 @@ function QueuePage() {
           at the press, so the key reads the press that actually came last.
         */
         const pressed = lastPress.current;
-        const pressedLead = pressed && pressed.kind === "hold" ? shown.find((l) => l.id === pressed.id) : undefined;
-        if (pressed?.kind === "hold" && (pressedLead || (lead && lead.id === pressed.id))) {
+        if (pressed?.kind === "hold") {
           /*
             TIA-2, walk step TIA-2. The toast's Undo for a hold is `undoHoldPress`,
             carrying the status the row held when the Hold was pressed -- not the
@@ -1020,16 +1040,25 @@ function QueuePage() {
             the toast's Undo, so the key and the button cannot be the one that
             stayed put.
 
-            THU-3: the press that came last is the only question asked first; the
-            request itself is built by `undoPressFor` (fast-kill.ts), the one
+            THU-3, THE WALK'S THIRD FINDING. The branch used to require the held
+            lead to be on screen: `shown.find(...)` or the cursor row. It never
+            is. A hold's optimistic patch (`leadStatusOptimistic`) takes the row
+            off the Open tab in the same paint as the press, and `shown` IS the
+            server's Open page, so by the time U is pressed the search finds
+            nothing, the cursor is on the next row, and the press falls through
+            to the kill branch -- a U that did nothing on a hold, which is what
+            the walk walked into. The stamp is the whole memory a press needs:
+            the lead left the list, not the screen, and the write `undoPressFor`
+            builds goes by id.
+
+            The request itself is built by `undoPressFor` (fast-kill.ts), the one
             place the Kill and the Hold agree on how a press becomes a write, so
-            the key and the toast's Undo cannot drift apart. The restore is the
-            one this screen can still read off the row (`holdRestore`), which the
-            press may not carry.
+            the key and the toast's Undo cannot drift apart. `holdLeadById` read
+            the row's status at the press, so `pressed.restore` is the answer
+            even though the row is gone.
           */
-          const restore = pressedLead && pressedLead.status === "held" ? holdRestore(pressedLead) : pressed.restore;
           lastPress.current = null;
-          const press = undoPressFor({ ...pressed, restore });
+          const press = undoPressFor(pressed);
           if (press) void undoKill.mutate(press);
         } else if (pressed?.kind === "kill" && pressed.bulk && bulkKillReport.current) {
           // THU-4: U puts back every lead the bulk press killed, the same as its toast's Undo.
@@ -2504,6 +2533,16 @@ function QueuePage() {
             // TIA-2: the dialog holds the lead this screen just held, so the U
             // key knows the hold it is taking back is this screen's own press.
             heldFrom.current.add(holdFor.id);
+            /*
+              THU-3, THE WALK'S SECOND FINDING. The row menu's "Hold with a
+              reason" writes through the dialog's own call, which does not touch
+              `lastPress` -- so the menu's Hold was the one hold on this screen
+              the U key could not see, and the walk's U after a menu Hold did
+              nothing at all. `holdLeadById` stamps the same press the row's own
+              Hold and the keyboard's H do, carrying the status the row held
+              before the dialog was opened, so all three leave one way back.
+            */
+            holdLeadById(holdFor.id);
             moveLeadStatusNow(qc, holdFor.id, "held");
             void qc.invalidateQueries({ queryKey: ["leads"] });
           }}
