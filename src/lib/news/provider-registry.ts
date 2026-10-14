@@ -958,6 +958,47 @@ export function modelEffortsFor(
   return [];
 }
 
+/*
+  TIA-4: one surface (the story page's own panel) showed Medium and Extra high
+  while another surface for the same story (the redraft settings panel) showed
+  only None/Low/High/Maximum. Both draw the one shared ModelPicker, so the list
+  an editor sees must not turn on which model the story happened to resolve to.
+
+  This is the ONE shared list every picker offers: the union of every list any
+  offered model declares, in the order MODEL_EFFORT_LABELS prints them, so no
+  option an editor can see today is removed and the missing ones are added
+  everywhere at once. `MODEL_EFFORTS_ORDER` is the single source of truth for
+  that order; the per-provider lists above still decide what a RUN may send,
+  and the transport revalidates the pick against the exact resolved model.
+*/
+export const MODEL_EFFORTS_ORDER: readonly ModelEffort[] = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+export const PICKER_EFFORTS = (
+  ["none", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelEffort[]
+).filter((effort): effort is ModelEffort =>
+  modelEffortListed(
+    effort,
+    DEEPSEEK_V4_1_FLASH_EFFORTS,
+    CODEX_6_EFFORTS,
+    CODEX_56_EFFORTS,
+    CLAUDE_CLI_EFFORTS,
+    AUTOMATIC_EFFORTS,
+    QWEN_3_8_EFFORTS,
+    QWEN_3_5_CLOUD_EFFORTS,
+  ),
+) as readonly ModelEffort[];
+
+function modelEffortListed(effort: ModelEffort, ...lists: readonly (readonly ModelEffort[])[]): boolean {
+  return lists.some((list) => list.includes(effort));
+}
+
 export function modelEffortsForModel(model: string | undefined | null): readonly ModelEffort[] {
   if (!model) return [];
   if (/^gpt-(?:6\.1-sol|6-(?:sol|luna|astra))$/i.test(model)) return CODEX_6_EFFORTS;

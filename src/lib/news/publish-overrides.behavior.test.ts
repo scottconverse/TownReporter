@@ -281,7 +281,7 @@ it("refuses an empty dek, then prints it acknowledged with one audit row", async
         {},
         acknowledged,
       ),
-    refusalMatches: /Add a dek, the one-line summary under the headline, before you publish\./,
+    refusalMatches: /No dek yet\. You can add one, or publish without it\./,
   });
 });
 

@@ -6281,7 +6281,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     if (!draft.dek || !draft.dek.trim()) {
       warnings.push({
         key: "dek",
-        sentence: "Add a dek, the one-line summary under the headline, before you publish.",
+        sentence: "No dek yet. You can add one, or publish without it.",
       });
     }
 

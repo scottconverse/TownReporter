@@ -50,7 +50,8 @@ import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { draftFailedNotSavedWords, editorTitle } from "@/lib/news/desk-copy";
+import { draftNotSavedWords, draftWaitingWords, editorTitle, sharedModelWaitWords } from "@/lib/news/desk-copy";
+import { useDeskJobs } from "@/components/job-card-state";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
@@ -639,6 +640,16 @@ function StoryPage() {
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
   const draftProblem = msg || previousJobError;
+  /*
+    DHI-3: a stop is not a failure. `msg` on the live path already says
+    "Stopped. No draft was saved."; this flag carries the same fact to the
+    reload path, where `msg` is empty and only the job row is left. It is read
+    from the job's own words (the editor's Stop writes JOB_CANCELLED_REASON) so
+    the two paths cannot disagree.
+  */
+  const stoppedByEditor =
+    data?.job?.status === "cancelled" ||
+    /^Cancelled by the editor/i.test(data?.job?.error ?? "");
   /* DHE1-4: a draft that names an aligned transcript to pick gets a press for it. */
   const transcriptPick = draftProblem ? transcriptToPickFromFailure(draftProblem, meetingTranscriptChoices) : null;
 
@@ -898,6 +909,48 @@ function StoryPage() {
     const slow = window.setTimeout(() => setSlowWait(true), 20_000);
     return () => window.clearTimeout(slow);
   }, [waitingSince]);
+
+  /*
+    THV-3: a clock for the wait line, ticking while a draft is being written.
+    The job's own started_at is the origin (`waitingSince`), so the number is
+    the run's elapsed time rather than this page view's. Reuses the page's own
+    1s timer, and only runs while there is something to wait on -- there is no
+    new polling loop.
+  */
+  const [waitNow, setWaitNow] = useState(Date.now());
+  useEffect(() => {
+    if (!waitingSince) return;
+    setWaitNow(Date.now());
+    const timer = window.setInterval(() => setWaitNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [waitingSince]);
+
+  /*
+    THV-1 + THU-8: the desk's own job list -- the same `["desk-jobs"]` query the
+    job card and the shell's Running box already read, so this is the existing
+    reader rather than a second one. It answers the one question this page
+    cannot: is another LIVE draft sitting on the model this one is waiting for.
+  */
+  const deskJobs = useDeskJobs();
+  /*
+    `JobProgressView` carries the RESOLVED model label ("DeepSeek v4.1 Flash"),
+    not the stored choice, so the comparison is label against label -- the two
+    rows can only be said to share a model when the desk would print the same
+    model name for both. `storyModelLabel` is this page's own label rule.
+  */
+  const ownModelLabel = waiting && data?.job ? storyModelLabel(data.job.model_choice) : "";
+  const ownJobId = data?.job?.id ?? null;
+  const sameModelDraftRunning = Boolean(
+    waiting &&
+      ownModelLabel &&
+      deskJobs.data?.some(
+        (row) =>
+          row.kind === "draft" &&
+          row.status === "running" &&
+          row.id !== ownJobId &&
+          row.model === ownModelLabel,
+      ),
+  );
 
   // SG1 / Option A: "Draft with AI" and the redraft it opens.
   const paperGate = usePaperSetupGate("draft this story");
@@ -2398,6 +2451,9 @@ function StoryPage() {
     readinessReason: hasAiJudgments ? reconcileActive || waiting ? "The AI is checking this draft." : heldForDraft.length ?
       `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 70)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.` : undefined : legacyReadiness.reason,
     sectionReady,
+    // DHI-8: the warning block's own Publish anyway button names this section,
+    // so it reads exactly as the confirm press does.
+    sectionName: sectionReady ? sectionNameNow : undefined,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,
     /*
@@ -3392,7 +3448,22 @@ function StoryPage() {
                     ? "Drafting from your supplied material. Stay on this page."
                     : "Reporting first — following the trail, then drafting. Stay on this page."
               }
-            />
+            >
+              {/*
+                THV-3: a draft that takes minutes used to look dead -- the only
+                word was "Waiting on <model>" with no sign of life. The line
+                below is the model and the run's own elapsed time, from the
+                job's started_at (`waitingSince`), refreshed once a second.
+                THV-1/THU-8: when the queue shows another draft on the same
+                model, the wait is that other draft's, and the line says so.
+              */}
+              <p className="mt-1 text-sm">
+                {draftWaitingWords(storyModelLabel(data?.job?.model_choice), waitNow - waitingSince)}
+              </p>
+              {sameModelDraftRunning ? (
+                <p className="mt-1 text-sm">{sharedModelWaitWords(storyModelLabel(data?.job?.model_choice))}</p>
+              ) : null}
+            </Busy>
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
           {saveTopic.isPending ? <Busy label="Saving your section…" /> : null}
@@ -3712,7 +3783,10 @@ function StoryPage() {
             </>
           ) : draftProblem ? (
             <p className="meta" role="alert" style={{ marginTop: 14 }}>
-              {draftFailedNotSavedWords(Boolean(data?.lead.meeting_video_id || data?.lead.meeting_artifact_id))}
+              {draftNotSavedWords(
+                Boolean(data?.lead.meeting_video_id || data?.lead.meeting_artifact_id),
+                stoppedByEditor,
+              )}
             </p>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>

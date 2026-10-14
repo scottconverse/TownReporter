@@ -18,6 +18,7 @@ import {
   automaticEffortNote,
   modelEffortLabel,
   modelEffortsFor,
+  PICKER_EFFORTS,
   pickerShownEffort,
   providerEntry,
   type ModelEffort,
@@ -339,7 +340,15 @@ export function ModelPicker(props: Props) {
   const builtInOptions = SHARED_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
-    label: connection.name,
+    /*
+      THV-4: this option is the KEY route -- a connection the newsroom set up
+      with its own API key -- but it read just "Gemini — gemini-3.5-flash", so
+      an editor could not tell it apart from the Gemini models the desk reaches
+      through the signed-in Gemini program. Name the route in the label. The
+      option VALUE is unchanged (`custom:<id>`), so nothing about which model a
+      run uses moves; only the words in the one shared picker do.
+    */
+    label: `${connection.name} (key)`,
     /*
       A connection with no model yet has nothing to say in a half-line: the
       option already reads "— not set up" (isAvailable() is false without a
@@ -519,7 +528,15 @@ export function ModelPicker(props: Props) {
               "Local model (nothing loaded)"
             : "Local model")
       : pickerOptionText(option);
-  const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
+  /*
+    TIA-4: the shared picker offers ONE effort list on every screen. Before
+    this, `modelEffortsFor` returned a different list per resolved model, so
+    the story page's own panel and its redraft-settings panel could disagree
+    about the same story (Medium/Extra high on one, None/Low/High/Maximum on
+    the other). The list is now the shared union; which rungs a RUN may send is
+    still decided per model when the job is sent.
+  */
+  const effortOptions = noFallback ? [] : PICKER_EFFORTS;
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
   return (
     <div
@@ -629,9 +646,16 @@ export function ModelPicker(props: Props) {
             ))}
           </select>
           <span className="model-picker-help">
+            {/*
+              TIA-4: the picker now offers the shared effort list on every
+              screen, so this note says the same thing wherever the picker
+              draws. A rung the chosen model does not accept for the run is
+              still safe: the desk revalidates against the exact model and uses
+              that model's own default.
+            */}
             {effortOptions.length
-              ? "Changes how much this exact model reasons for this run. The model name stays the same; higher effort can take longer."
-              : "This exact model does not declare safe per-run effort levels through its configured transport, so TownReporter uses the provider default."}
+              ? "Changes how much this model reasons for this run. The model name stays the same; higher effort can take longer. A level a model does not take is left at its own default."
+              : "No effort levels are offered here."}
           </span>
         </div>
       ) : null}

@@ -1345,7 +1345,7 @@ export function SecHead({
   );
 }
 
-export function Busy({ label }: { label: string }) {
+export function Busy({ label, children }: { label: string; children?: React.ReactNode }) {
   return (
     /*
       FB5: a live region, because this sentence is the only thing the desk says
@@ -1363,6 +1363,13 @@ export function Busy({ label }: { label: string }) {
     <div className="busy" role="status" aria-live="polite" aria-atomic="true">
       <div className="busy-rule" aria-hidden />
       <p className="busy-label">{label}</p>
+      {/*
+        THV-3 / THV-1+THU-8: extra lines under the state sentence -- the model
+        and the run's elapsed time, and, when the model is held by another
+        draft, whose. Nothing passes children today except the story page's
+        waiting line; `label` stays the whole message for every other caller.
+      */}
+      {children}
     </div>
   );
 }
