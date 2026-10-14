@@ -125,13 +125,26 @@ const preflightStub = inlineModule(`
 `);
 const leadMatchStubForCopy = inlineModule(`
   export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
+  export function explainPairMatch() { return { route: "possible", reason: "", sharedName: null, sharedSubject: null }; }
+  export function sharesTightName() { return false; }
 `);
 const paperModuleStub = inlineModule(`
   export const PAPER = { timezone: "America/Denver" };
   export const TOPICS = [];
   export const formatClockTime = () => "2:10 p.m.";
   export const formatListDateTime = () => "Oct. 8, 2:10 p.m.";
+  export const parseUrlList = () => [];
 `);
+/*
+  FC18 gave desk-copy.ts a fourth import, ./sentence-stop.ts, for a scan note
+  that must not be cut mid-sentence. It imports nothing itself, so the real
+  file is loaded rather than stubbed -- the same treatment desk-copy.ts gets
+  above, and the fix for the unresolved-specifier failure this file hit.
+*/
+const sentenceStopUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/sentence-stop.ts", import.meta.url), "utf8"),
+  "sentence-stop.ts",
+);
 const deskCopyUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
   "desk-copy.ts",
@@ -139,6 +152,7 @@ const deskCopyUrl = moduleUrl(
     "./preflight.ts": preflightStub,
     "./lead-match.ts": leadMatchStubForCopy,
     "../paper.ts": paperModuleStub,
+    "./sentence-stop.ts": sentenceStopUrl,
   },
 );
 // The same server function the Sources page calls. In this static render it is
@@ -272,6 +286,15 @@ const DESK_CHROME_IMPORTS = {
   ),
   "@/components/job-card-state": inlineModule(
     "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
+  ),
+  /*
+    FC13 put the Running box's queued count in the shell, so desk-chrome.tsx
+    now names the job vocabulary from @/lib/news/job-progress. This render is
+    about the page below the shell and draws no job rows, so the stand-in only
+    has to exist. The real module reaches the database through @/lib/db.ts.
+  */
+  "@/lib/news/job-progress": inlineModule(
+    "export function runningHeadLabel() { return ''; }",
   ),
   "@/lib/appearance-context": appearanceContextStub,
   "./shortcut-sheet": moduleUrl(
