@@ -874,6 +874,15 @@ const { Chip } = await import(
       "@/lib/news/job-progress": inlineModule(
         "export function runningHeadLabel() { return ''; }",
       ),
+      /*
+        FC13's follow-up split that label into its own module so the header stops
+        pulling the server-bearing graph into the browser bundle, and
+        desk-chrome.tsx imports it from there now. Self-contained, so the same
+        shared URL the other fixtures resolve it to is used here rather than a
+        stub -- Chip() never reads it; the specifier only has to resolve for the
+        module to load.
+      */
+      "@/lib/news/running-head-label": await sharedModuleUrl("src/lib/news/running-head-label.ts"),
       "@/lib/news/jobs": inlineModule(
         "export const jobStages = () => []; export function queuedJobWaitReason() { throw new Error('lead-badge fixture: jobs.ts not loaded'); } export function requestJobCancel() { throw new Error('lead-badge fixture: jobs.ts not loaded'); }",
       ),

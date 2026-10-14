@@ -34,7 +34,7 @@ import { gateFrontierRelevance } from "./frontier-relevance.ts";
   failing to load the file at all.
 */
 async function pageNoteFor(
-  item: { label: string; why: string },
+  item: { label: string; why: string; status?: string; closed_reason?: string },
   context: { subject: string; town: string },
 ): Promise<string | null> {
   const mod: Record<string, unknown> = await import("./frontier-relevance.ts");
@@ -75,10 +75,10 @@ describe("B08 — the post-search selector does not file an off-subject lead as 
       exact results it proposed as next steps.
     */
     const proposed = [
-      { kind: "url", label: UK_AGGREGATE_URL, why: "Company record page found this round" },
-      { kind: "url", label: TREFOIL_URL, why: "Search result for rtal on a company page" },
-      { kind: "document", label: "Walton Road, Kirby Le Soken, Frinton-on-Sea", why: "Property and road records" },
-      { kind: "url", label: COUNCIL_URL, why: "The Sept. 1 Longmont City Council meeting recording" },
+      { kind: "url", label: UK_AGGREGATE_URL, why: "Company record page found this round", priority: 5, queries: [] as string[] },
+      { kind: "url", label: TREFOIL_URL, why: "Search result for rtal on a company page", priority: 5, queries: [] as string[] },
+      { kind: "document", label: "Walton Road, Kirby Le Soken, Frinton-on-Sea", why: "Property and road records", priority: 5, queries: [] as string[] },
+      { kind: "url", label: COUNCIL_URL, why: "The Sept. 1 Longmont City Council meeting recording", priority: 5, queries: [] as string[] },
     ];
 
     /*
@@ -165,7 +165,7 @@ describe("FC03 — a saved off-subject trail item is kept and marked, never remo
       state it already had, and each off-subject one gains exactly one line the
       editor can read.
     */
-    const marked = [];
+    const marked: { row: { id: number; label: string; why: string; status: string }; note: string | null }[] = [];
     for (const row of rows) marked.push({ row, note: await pageNoteFor(row, context) });
     const note = (needle: string) => marked.find((m) => m.row.label.includes(needle))!.note;
     const savedLabel = (needle: string) => marked.find((m) => m.row.label.includes(needle))!.row.label;

@@ -54,7 +54,7 @@ describe("the Today New leads heading", () => {
   });
 
   it("does not treat a finished run that errored as completed", () => {
-    const failed: TodayScanRow = { ...running, finished_at: "2026-10-11T17:59:00.000Z", error: "provider failed" };
+    const failed: TodayScanRow & { id: number } = { ...running, finished_at: "2026-10-11T17:59:00.000Z", error: "provider failed" };
     assert.equal(isCompletedScan(failed), false);
     assert.equal(latestCompletedScan([failed, completed])?.id ?? null, completed.id);
   });

@@ -647,12 +647,15 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     return { ok: true, model: label };
   });
 
-/**
- * The desk header's Running box line. FC13 (Oct 11 walk): it said
- * "Running · 11" while the work queue said 1 running and 10 queued, so jobs
- * waiting in line are counted apart.
- */
-export function runningHeadLabel(jobs: readonly Pick<JobProgressView, "status">[]): string {
-  const queued = jobs.filter((job) => job.status === "queued").length;
-  return `Running · ${jobs.length - queued}${queued ? ` · ${queued} queued` : ""}`;
-}
+/*
+  The desk header's Running box line, FC13 (Oct 11 walk), lives in
+  `running-head-label.ts` -- a module with no imports -- and is re-exported
+  here for the callers that already expect it off this module.
+
+  It moved because `desk-chrome.tsx` draws it and `desk-chrome.tsx` is a CLIENT
+  component. Importing the value from here was enough to pull this module's
+  whole import graph -- `desk-auth.ts`, `verify.server`, `isolation.server` --
+  into the browser bundle, which then would not build. The label reads nothing
+  but `job.status`, so it has no business in the server graph.
+*/
+export { runningHeadLabel } from "./running-head-label.ts";

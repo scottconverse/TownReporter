@@ -358,6 +358,21 @@ sharedHelperUrls["@/lib/news/job-progress"] = jobProgressUrl;
 sharedHelperUrls["./sentence-stop.ts"] = await moduleUrl("src/lib/news/sentence-stop.ts");
 
 /*
+  `@/lib/news/running-head-label` -- FC13 (Oct 13 2026) split the header's
+  `runningHeadLabel` out of `job-progress.ts` and into its own module, so the
+  label no longer drags the server-bearing graph (`desk-auth.ts`, the server fn
+  machinery) into the browser bundle. `desk-chrome.tsx` now imports that
+  specifier instead, and a fixture that mapped only `job-progress` broke with
+  "imports a specifier this test neither stubs nor can resolve".
+
+  The new module has no imports, so the REAL file is loaded -- the same file the
+  product runs, the same reasoning as `sentence-stop.ts` above. `job-progress`
+  stays mapped too: its own `runningHeadLabel` is still the one every
+  `job-progress.test.ts` assertion pins.
+*/
+sharedHelperUrls["@/lib/news/running-head-label"] = await moduleUrl("src/lib/news/running-head-label.ts");
+
+/*
   `lead-match.ts` -- B02 (Oct 13 2026) made the real `desk-copy.ts` import
   `explainPairMatch` and `sharesTightName` as VALUES, in addition to
   `distinguishingOverlap`. A fixture that still stubbed `./lead-match.ts` with
