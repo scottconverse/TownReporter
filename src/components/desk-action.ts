@@ -287,6 +287,20 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    * whatever `optimistic` returned for this press.
    */
   rollback?: (context: unknown, variables: Variables) => void;
+  /**
+   * The name this press's own toast carries, when the caller needs one.
+   *
+   * THU-2 / DHK-2. Without this, a press's done toast is raised under no id at
+   * all, and a toast with no name cannot be REPLACED -- only stacked beside. The
+   * Kill toast is the one press that has a follow-up of its own: its Undo raises
+   * "Restoring…" in the same paint, and the two have to be one card rather than
+   * the answered "Killed 1 lead. Undo" sitting under a "Restoring…" over the
+   * rows. A caller that names its toast here gives the follow-up something to
+   * re-raise under.
+   *
+   * Left unset, nothing changes: an ordinary press stacks as it always has.
+   */
+  toastId?: (variables: Variables) => string | undefined;
 };
 
 /**
@@ -452,11 +466,14 @@ export function useDeskMutation<Data, Variables = void>(
       }
       if (!optionsRef.current.muted?.()) {
         const { message, undo, chips, duration } = deskActionDone(data, variables, optionsRef.current);
-        if (message) deskToast(message, { tone: "ok", undo, chips, duration, id: warningIds.current.get(variables) });
-        else {
-          const id = warningIds.current.get(variables);
-          if (id) toastLayer.dismissDeskToast(id);
-        }
+        /*
+          THU-2: the caller's own name for this toast, when it named one -- the
+          Kill toast's follow-up has to be able to re-raise under it. A warning's
+          id still wins, because a warning IS a re-prompt for the same press.
+        */
+        const named = warningIds.current.get(variables) ?? optionsRef.current.toastId?.(variables);
+        if (message) deskToast(message, { tone: "ok", undo, chips, duration, id: named });
+        else if (named) toastLayer.dismissDeskToast(named);
       }
       warningIds.current.delete(variables);
     },

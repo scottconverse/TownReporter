@@ -152,6 +152,18 @@ export function LeadComparePanel({
         >
           {busy === "not-a-duplicate" ? "Saving…" : MOVE_TO_NEW_LABEL}
         </InkButton>
+        {/*
+          THU-5: this press used to be gated on status as well, so a lead in
+          Compare while still OPEN was offered only the story page's "Kill this
+          lead" and never this one. The two presses are different jobs -- the
+          page's kills the lead outright, this one kills it AS A DUPLICATE of the
+          lead beside it and records which story it duplicates -- and the second
+          is exactly as useful on an open lead as on a held one. The gate now
+          keeps only the published case (a lead on the paper cannot be killed,
+          which is the existing rule) and both presses are drawn for an open
+          lead. Nothing is removed: "Kill this lead" stays on the story page and
+          this button keeps every word it had.
+        */}
         {current.status !== "published" && onKillThis ? (
           <InkButton
             tone="quiet-danger"
