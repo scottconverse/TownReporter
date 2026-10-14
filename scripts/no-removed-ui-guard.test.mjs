@@ -1,5 +1,7 @@
 // Guard for Scott's never-remove rule (Oct 11): a PR may not remove or reword
-// an on-screen string in src/**/*.tsx unless its body says so.
+// an on-screen string in src/**/*.tsx unless its body says so. Added strings are
+// read from src/**/*.ts too, so a string moved into a .ts helper is not a
+// removal; removed comment lines are not on-screen text.
 //
 // Based on tools/pr-removed-ui.mjs in townreporter-deepseek-oversight, with two
 // changes: the diff comes from git (no `gh`, so CI needs no token), and the
@@ -25,7 +27,15 @@ export function visibleTextOf(line) {
   return out.filter((t) => t.length > 3 && /\s|[A-Z][a-z]/.test(t));
 }
 
+// A removed line that is a comment, not on-screen text: after the leading
+// "-" it is blank then //, /* or * (a block-comment continuation).
+const isCommentLine = (text) => /^\s*(?:\/\/|\/\*|\*)/.test(text);
+
 // The on-screen strings a unified diff removes and does not add back.
+// Removals are counted only in src/**/*.tsx (the files that render). Added
+// strings are collected from every non-test src/**/*.ts(x) file too, because a
+// string moved out of a .tsx into a .ts helper still shows on screen and must
+// not read as a removal.
 export function removedUiStrings(diffText) {
   let file = "";
   const removed = [];
@@ -35,11 +45,13 @@ export function removedUiStrings(diffText) {
       file = line.slice(6);
       continue;
     }
-    if (!/^src\/.+\.tsx$/.test(file) || /\.test\.tsx$/.test(file)) continue;
+    if (!/^src\/.+\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
     if (line.startsWith("+") && !line.startsWith("+++")) {
       for (const t of visibleTextOf(line)) added.add(normalize(t));
     }
+    if (line.startsWith("-") && !line.startsWith("---") && !/\.tsx$/.test(file)) continue;
     if (line.startsWith("-") && !line.startsWith("---")) {
+      if (isCommentLine(line.slice(1))) continue;
       for (const t of visibleTextOf(line)) removed.push({ file, text: t });
     }
   }
@@ -108,6 +120,26 @@ test("an ask for a different string does not excuse the removal", () => {
   ].join("\n");
   const body = "Scott asked to remove: Something else entirely.";
   assert.equal(unexplainedRemovals(diff, body).length, 1);
+});
+
+test("a string moved from a .tsx into a .ts helper is not a removal", () => {
+  const diff = [
+    "+++ b/src/routes/example.tsx",
+    '-      <span>{last ? `${when} scan · best first` : "Best first"}</span>',
+    "+      <span>{heading(completed)}</span>",
+    "+++ b/src/lib/desk/heading.ts",
+    '+export function heading(completed) { return completed ? "Best first" : "Best first"; }',
+  ].join("\n");
+  assert.deepEqual(unexplainedRemovals(diff, ""), []);
+});
+
+test("a removed // comment quoting on-screen text is not a removal", () => {
+  const diff = [
+    "+++ b/src/routes/example.tsx",
+    '-    // The refusals ("A draft is being written right now…") are thrown by the',
+    "+    // A press that could not do anything says why.",
+  ].join("\n");
+  assert.deepEqual(unexplainedRemovals(diff, ""), []);
 });
 
 test("files outside src/**/*.tsx and test files are not checked", () => {

@@ -305,6 +305,17 @@ const { DeskShell } = await import(
       "@/lib/news/job-progress": inlineModule(
         "export function runningHeadLabel() { return ''; }",
       ),
+      /*
+        FC13's follow-up split that label into its own module so the header
+        stops pulling the server-bearing graph into the browser bundle, and
+        desk-chrome.tsx imports it from there now. The module has no imports,
+        so the REAL file is loaded -- the same reasoning as desk-nav.ts above
+        -- and the specifier has to resolve for the shell to load at all.
+      */
+      "@/lib/news/running-head-label": moduleUrl(
+        await readFile(new URL("../src/lib/news/running-head-label.ts", import.meta.url), "utf8"),
+        "running-head-label.ts",
+      ),
       "@/lib/appearance-context": appearanceContextStub,
       "./shortcut-sheet": moduleUrl(
         await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),
