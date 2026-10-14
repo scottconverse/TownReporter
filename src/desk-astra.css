@@ -4384,16 +4384,32 @@
 .desk-ltr.astra .queue-bulk-what {
   font: 800 calc(15px * var(--ts)) var(--fd);
 }
-/* THU-6: the strip's own picker label ("Model for these stories") came out pale
-   on the yellow bar. The astra rule for `.model-picker-label` sets the weight,
-   size and casing but no colour, so the label inherited whatever the picker's
-   container carried and read at low contrast against `--a`. The desk's old-eyes
-   rule is that this text is normal text at full contrast, never muted, and it
-   may not go smaller -- so this only sets the ink, at the astra body colour
-   (`--fg`), and leaves the astra font rule above untouched. Scoped to the strip
-   so every other picker on the desk keeps the look it has today. */
-.desk-ltr.astra .queue-bulk .model-picker-label {
-  color: var(--fg);
+/* THU-6 / TJA-2: THU-6 gave the strip's picker labels the astra body colour
+   (`--fg`) and that is dark ink in light mode but near-white in dark mode
+   (#e8e6e1), so on the gold strip (--a) everything the picker draws there read
+   at about 1.6:1. The strip is gold in BOTH themes and carries its own ink --
+   `color: #111` on the bar itself, `#111` on its buttons -- so every text the
+   picker draws inside it uses that same #111, in both themes. The label base
+   rule (styles.css: `.desk-ltr .model-picker-label`) is `color: var(--mut)`,
+   which is why the labels need naming here; the help lines and the note
+   paragraphs inherit a muted colour too. What is NOT touched: the selects
+   (dark boxes, light text, they read fine), and every font size and weight --
+   the old-eyes rule is never smaller, never muted. The summary's hairline is
+   `--fg2`, which is near-white in dark mode on a gold bar, so it goes to #111
+   with the text it borders. Scoped to `.queue-bulk` so no other picker on the
+   desk changes. */
+.desk-ltr.astra .queue-bulk .model-picker-label,
+.desk-ltr.astra .queue-bulk .model-picker-help,
+.desk-ltr.astra .queue-bulk .model-picker-setup summary,
+.desk-ltr.astra .queue-bulk .model-picker-setup p,
+.desk-ltr.astra .queue-bulk .model-picker-setup li,
+.desk-ltr.astra .queue-bulk .model-picker-setup code,
+.desk-ltr.astra .queue-bulk .model-picker-setup .inline-link {
+  color: #111;
+  opacity: 1;
+}
+.desk-ltr.astra .queue-bulk .model-picker-setup summary {
+  border-color: #111;
 }
 .desk-ltr.astra .queue-bulk .btn {
   border-color: #111;

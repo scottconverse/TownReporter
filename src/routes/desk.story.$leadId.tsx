@@ -717,6 +717,7 @@ function StoryPage() {
   const modelAndResearchText = modelAndResearchLabel({
     runningLine: runningWriterLine,
     pickerModel: storyModelLabel(modelChoice),
+    requestedModelChoice: requestedDraftModelChoice,
     requestedModel: pickedWriterLabel,
     writerModel: savedDraftWriter,
   });

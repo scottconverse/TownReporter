@@ -14,8 +14,12 @@ test("the real-Postgres matrix uses the explicit runner for every discovered tes
   const workflow = yaml.load(ci);
   assert.ok(Object.hasOwn(workflow.on, "pull_request"));
   const job = workflow.jobs["postgres-integration"];
-  assert.equal(job.needs, undefined, "all four parts must start independently");
-  assert.equal(job.if, undefined, "Postgres coverage must run on every PR");
+  assert.equal(job.needs, "changes", "Postgres waits for the change filter, not other jobs");
+  assert.equal(job.if, "needs.changes.outputs.run_db == 'true'", "Postgres runs only when the change filter sees database files");
+  const changes = workflow.jobs["changes"];
+  assert.ok(changes, "the change filter job must exist");
+  assert.equal(Object.hasOwn(changes.outputs, "run_db"), true, "the change filter must publish the run_db output");
+  assert.equal(changes.outputs.run_db, "${{ steps.pick.outputs.run_db }}", "run_db comes from the filter step's pick");
   assert.equal(job.strategy["fail-fast"], false);
   assert.equal(job.strategy["max-parallel"], 4);
   assert.deepEqual(job.strategy.matrix.part, [1, 2, 3, 4]);

@@ -325,6 +325,12 @@ export function modelAndResearchLabel(input: {
   runningLine: string;
   /** The picker's current label. */
   pickerModel: string;
+  /**
+   * The model id the editor asked the saved draft's job for, when the caller
+   * has it. `"auto"` is the value `writerIsReady` already tests for, so
+   * Automatic is named by the id and not by whatever its label happens to say.
+   */
+  requestedModelChoice?: string;
   /** The model the editor asked the saved draft's job for. */
   requestedModel: string;
   /** The model that wrote the saved draft, or "" when no draft job finished. */
@@ -336,5 +342,11 @@ export function modelAndResearchLabel(input: {
   const requested = input.requestedModel.trim();
   if (input.pickerModel !== requested && input.pickerModel !== writer) return input.pickerModel;
   if (writer === requested) return writer;
+  /*
+    TJA-3: Automatic is a choice, not a model. When it runs its first choice --
+    DeepSeek most days -- nothing moved, so the fallback clause would be words
+    about an event no failover note records. The pick is still named.
+  */
+  if (input.requestedModelChoice === "auto") return `${writer} (you picked ${requested})`;
   return `${writer} (you picked ${requested}; it fell back)`;
 }

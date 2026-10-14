@@ -30,6 +30,16 @@ import { fileURLToPath } from "node:url";
       ("stops before the rung probe and the document reading", "stops before
        the write when the Cancel lands while the uploads are being read")
 
+  Both editorial boundaries are BEHAVIOURAL now, so neither is pinned here: the
+  pin that used to sit on "a Cancel that lands during the document reading stops
+  the write" matched 200 characters of source between the `throwIfJobCancelled`
+  and the `waitForModel` write, and Release J's THV-2 work (a comment and the
+  `suppliedMaterialText` assignment) pushed the write past that window -- so it
+  went red on a change that kept the boundary. The behaviour it named is proved
+  by running in `editorial-result-persistence.test.ts`, whose own documented
+  mutation is deleting that line. A pin is brittle by nature, and this one was
+  strictly weaker than the test already beside it.
+
   The remaining seams cannot be reached from a test without the worker's own
   dependencies -- a provider session, a built brief, a whole dig -- so this file
   pins them by reading the source, the same trade `job-progress-wiring.test.ts`
@@ -104,12 +114,6 @@ const PINS: { kind: string; file: string; pattern: RegExp; what: string }[] = [
     file: "editorial.server.ts",
     pattern: /await throwIfJobCancelled\(job\.id\);[\s\S]{0,80}?const resolvedRung =/,
     what: "the Opinion rung probe is not spent on a cancelled piece",
-  },
-  {
-    kind: "editorial",
-    file: "editorial.server.ts",
-    pattern: /"Researching the editorial"[\s\S]{0,900}?await throwIfJobCancelled\(job\.id\);[\s\S]{0,200}?const result = await waitForModel\(\{/,
-    what: "a Cancel that lands during the document reading stops the write",
   },
   {
     kind: "brief",
