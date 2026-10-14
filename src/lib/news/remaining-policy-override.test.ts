@@ -73,7 +73,10 @@ it("batch model changes warn before cancelling, then clear the old lease; identi
   const [before] = await sql.query<{status:string}>("select status from desk_jobs where id=$1",[old.id]); assert.equal(before.status,"queued");
   const result = await commitDraftBatchForAuthenticatedEditor({...input,override:["model-change-running"]},{kick:false,accountRate:false}); assert.equal(result.ok,true);
   const [after] = await sql.query<{status:string;claim_token:string|null;cancel_requested:boolean}>("select status,claim_token,cancel_requested from desk_jobs where id=$1",[old.id]);
-  assert.equal(after.status,"failed"); assert.equal(after.claim_token,null); assert.equal(after.cancel_requested,true); await audited("model-change-running");
+  // The editor approved the model change, so the old job is stopped the same
+  // way an explicit Cancel stops one: a story draft ends `cancelled`, never
+  // `failed` (requestJobCancel and draft-batch.server.ts both write that word).
+  assert.equal(after.status,"cancelled"); assert.equal(after.claim_token,null); assert.equal(after.cancel_requested,true); await audited("model-change-running");
   const identical = await commitDraftBatchForAuthenticatedEditor({...input,override:["model-change-running"]},{kick:false,accountRate:false}); assert.equal(identical.ok,false); assert.equal("warning" in identical,false);
 });
 it("owner can run disabled meeting capture once; editors cannot and running passes remain hard", async () => {
