@@ -2091,7 +2091,17 @@ function StoryPage() {
    * page instead of a link to a page that knew nothing about the pair.
    */
   const priorLead = data.lead.possible_duplicate ?? null;
-  const comparePair = data.lead.possible_duplicate_of && priorLead ? { prior: priorLead } : null;
+  /*
+    THU-5: the Queue row draws its "… · compare" chip whenever
+    `possible_duplicate` came down with the lead (a LEFT JOIN, so null only when
+    the prior row is gone), while this page gated on `possible_duplicate_of`
+    -- the raw foreign key. Those are two different tests for the same fact, and
+    the id can be set with the joined lead null, so an editor could be sent here
+    from a row that offered a comparison and find the panel absent. The pair is
+    the joined lead: if it is here, Compare is here. No button, message or
+    press is removed -- the panel only stops disappearing when it can be drawn.
+  */
+  const comparePair = priorLead ? { prior: priorLead } : null;
   const comparisonExplanation = comparePair
     ? explainPairMatch(
         data.lead.headline,

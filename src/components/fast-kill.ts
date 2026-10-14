@@ -135,6 +135,35 @@ export function killUndoPress(id: number, restore?: RestoreStatus): KillUndoPres
 }
 
 /**
+ * The press a Kill or Hold leaves behind, as the value the next U reads.
+ *
+ * THU-3: the Queue's U used to ask the ROW what to take back -- "is this lead
+ * held?" first, and a kill only if not -- so a U pressed after a Hold took back
+ * a Kill that had come before it, and a U pressed after a Kill could take back a
+ * Hold instead. The question the editor is asking is "undo what I just did", and
+ * only the press that came last can answer it.
+ *
+ * So each press stamps where it goes back to and which press it was -- this type
+ * -- and `undoPressFor` turns whatever was stamped last into the one request the
+ * restore write takes. The rule lives here, beside the two presses it reads,
+ * rather than on the screen, so it can be exercised without a browser and cannot
+ * drift between the screen's two entry points (the toast's Undo and the U key).
+ * A Hold with no restore stamps none, and the server answers `new`, which is
+ * where a hold's Undo has always put it.
+ */
+export type LastPress =
+  | { kind: "kill"; id: number; restore: RestoreStatus }
+  | { kind: "hold"; id: number; restore?: RestoreStatus };
+
+/** The request the U press sends for the press that came last, or null when nothing was pressed. */
+export function undoPressFor(press: LastPress | null | undefined): KillUndoPress | null {
+  if (!press) return null;
+  return press.kind === "hold"
+    ? holdUndoPress(holdPress(press.id, press.restore))
+    : killUndoPress(press.id, press.restore);
+}
+
+/**
  * Bring back from the Killed pile: the same way back, but the lead keeps its
  * kill record (when it was killed and why), so its history line can say so.
  */
