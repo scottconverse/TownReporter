@@ -1,6 +1,6 @@
 import { getSql } from "../db.ts";
 import { ensureFollowUpsSchema, performDueFollowUps, performFollowUpAction, performReadFollowUp, performReleaseFollowUpRun } from "./follow-ups.ts";
-import { enqueueJob } from "./jobs.ts";
+import { enqueueJob, type JobKind, type JobStatus } from "./jobs.ts";
 import { FOLLOW_UP_HARD_CAP_MS } from "./follow-up-agents.ts";
 
 /**
@@ -107,6 +107,53 @@ async function jobOpen(newsroomId: number, kind: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** Plain names for the kinds that can block a follow-up. */
+const BLOCKING_JOB_NAMES: Partial<Record<JobKind, string>> = {
+  draft: "story draft",
+  editorial: "editorial",
+  "follow-up": "follow-up check",
+  scan: "scan",
+  dark: "Dark Desk dig",
+  reconcile: "story draft",
+};
+
+/**
+ * FC10 (Oct 11 walk): the open job that holds a follow-up back, named for the
+ * editor -- its kind and whether it is QUEUED or RUNNING.
+ *
+ * The old refusal said only "a draft is being written right now", which was
+ * wrong on two counts the walk saw. It matched a QUEUED draft as if it were
+ * being written, and it never named what was actually holding the desk -- the
+ * health panel's one running job was a scan, and the drafts were only queued.
+ *
+ * The claim rule in jobs.ts is what really serializes this: a `follow-up` job
+ * waits while any `draft` is queued or running in the newsroom, and waits for
+ * any other `follow-up` to finish. A `draft` also waits while a `follow-up` is
+ * running. So the blocker is whatever open job stands between this one and its
+ * turn; this reads it so the message can say which, rather than naming a fence
+ * by guess.
+ *
+ * A queued draft is preferred over a running one in the result because that is
+ * the case the old copy got wrong: the editor needs to know the wait is behind
+ * a queue, not behind active writing.
+ */
+export async function followUpBlocker(
+  newsroomId: number,
+): Promise<{ kind: JobKind; status: JobStatus; name: string } | null> {
+  const sql = await getSql();
+  const rows = await sql<{ kind: JobKind; status: JobStatus }>`
+    select kind, status from desk_jobs
+    where newsroom_id = ${newsroomId}
+      and status in ('queued', 'running')
+      and kind in ('draft', 'follow-up')
+    order by (status = 'running') desc, id asc
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return { kind: row.kind, status: row.status, name: BLOCKING_JOB_NAMES[row.kind] ?? "job" };
+}
+
 /**
  * One newsroom's tick: reconcile, check the two fences, start at most one due
  * follow-up.
@@ -163,19 +210,37 @@ export async function tickFollowUpsFor(
  * What it does NOT do is wait: it returns as soon as the job is queued, and the
  * card's inline progress takes over from there.
  *
- * Why the fences apply to a press at all: the brief's rule is that follow-ups
- * run one at a time and never alongside a running draft, and an editor pressing
- * Run now twice on two cards is exactly how that rule would be broken. The
- * refusal is REPORTED rather than silent (`skipped`), because a button that
- * appears to do nothing is worse than one that says why.
+ * The brief's rule is that follow-ups run one at a time and never alongside a
+ * running draft, and an editor pressing Run now twice on two cards is exactly
+ * how that rule would be broken. That rule is kept -- but by the QUEUE, not by
+ * a refusal. The job claim in jobs.ts already holds a `follow-up` behind any
+ * queued or running draft and behind any other running `follow-up`, so a press
+ * that lands while the desk is busy is added to the queue and runs in its turn.
  *
- * A row that is `stopped` or `done` is refused rather than resurrected -- that
- * is what the card's Resume is for, and Stop has to mean stop. A manual ask has
- * no method and is refused too.
+ * FC10 (Oct 11 walk): it used to refuse instead, and the refusal was wrong.
+ * `jobOpen(...,"draft")` matched a QUEUED draft as if a draft were being
+ * written, so a press was turned away while the only running job on the health
+ * panel was a scan; and it never named the real blocker. A press now queues and
+ * succeeds, and the caller can say what it is waiting behind -- `followUpBlocker`
+ * above names that job, its kind and whether it is queued or running.
+ *
+ * A row that is `stopped` or `done` is still refused rather than resurrected --
+ * that is what the card's Resume is for, and Stop has to mean stop. A manual ask
+ * has no method and is refused too.
  */
 export type FollowUpRunStart = {
   started: boolean;
-  skipped: "draft-running" | "follow-up-running" | "not-found" | "not-active" | null;
+  /**
+   * Why a press did not start a NEW run: the row is gone or is not in a state
+   * Run now may move. The two job fences below are no longer refusals -- a
+   * queued press reports `queuedBehind` instead.
+   */
+  skipped: "not-found" | "not-active" | null;
+  /**
+   * The open job this press is queued behind, if any: its kind, whether it is
+   * `queued` or `running`, and a plain name for the message.
+   */
+  queuedBehind?: { kind: JobKind; status: JobStatus; name: string } | null;
 };
 
 export async function startFollowUpRun(
@@ -192,12 +257,13 @@ export async function startFollowUpRun(
   if (row.status !== "active" && row.status !== "paused") {
     return { started: false, skipped: "not-active" };
   }
-  if (await jobOpen(context.newsroomId, "draft")) {
-    return { started: false, skipped: "draft-running" };
-  }
-  if (await jobOpen(context.newsroomId, "follow-up")) {
-    return { started: false, skipped: "follow-up-running" };
-  }
+  /*
+    No refusal on the two fences. The press records the editor's request and
+    the job claim holds it until the desk is free, so a busy desk costs a queue
+    wait and not a lost request. Read the blocker now, before enqueue, so the
+    caller can say what it is waiting behind.
+  */
+  const queuedBehind = await followUpBlocker(context.newsroomId);
   const moved = await performFollowUpAction(context, id, "run-now");
   /*
     `run-now` refuses a row that is no longer active or paused, so a Stop that
@@ -216,7 +282,7 @@ export async function startFollowUpRun(
     modelChoiceSource: "auto",
     kick: deps.kick,
   });
-  return { started: true, skipped: null };
+  return { started: true, skipped: null, queuedBehind };
 }
 
 /**

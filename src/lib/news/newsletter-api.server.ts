@@ -54,10 +54,15 @@ export async function readMailboxView(newsroomId: number): Promise<NewsletterMai
   await ensureNewsletterSchema();
   const row = await getMailbox(newsroomId);
   const list = await (await import("./newsletter-poll.server.ts")).waitingMessages(newsroomId);
-  if (!row || !row.hasPassword) return { ...EMPTY_MAILBOX, waiting: list };
+  if (!row) return { ...EMPTY_MAILBOX, waiting: list };
+  /*
+    FB12 (Oct 11 walk): a mailbox saved without a password came back EMPTY, so
+    a reload showed the defaults and every saved value looked lost. The saved
+    values come back; `configured` stays false until a password is stored.
+  */
   const safe = publicMailbox(row);
   return {
-    configured: true,
+    configured: row.hasPassword,
     address: safe.address,
     host: safe.host,
     port: safe.port,

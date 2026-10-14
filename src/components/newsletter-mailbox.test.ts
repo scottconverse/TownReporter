@@ -52,6 +52,8 @@ describe("the password never comes back", () => {
     assert.match(withNew, /never shown again/i);
     assert.doesNotMatch(withNew, /hunter2/);
     assert.match(mailboxSaveResultText(false), /stored password was kept/i);
+    /* FB12: with no password stored there is nothing to keep. */
+    assert.equal(mailboxSaveResultText(false, false), "Mailbox saved. No password is stored yet.");
   });
 
   it("a test-connection result is the server's own plain message, shown as-is", () => {

@@ -1269,7 +1269,8 @@ export function InviteAnEditorPanel() {
             {message ? (
               <div className="mt-3 border-t border-rule pt-3">
                 <p className="astra-label">Ready-to-send message</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{message}</p>
+                {/* FB21 (Oct 11 walk): the message carries the link too; at 390 px it pushed the page to 566 px. */}
+                <p className="mt-1 whitespace-pre-wrap text-sm" style={{ overflowWrap: "anywhere" }}>{message}</p>
                 <InkButton
                   tone="quiet"
                   onClick={() => {

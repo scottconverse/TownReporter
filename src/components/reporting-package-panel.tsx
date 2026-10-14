@@ -18,9 +18,11 @@ import {
   heldLine,
   methodLine,
   packageGaps,
+  packagePlainSummary,
   reportingNotice,
   reportingPackageHistory,
   reportingRunState,
+  warmColdPlainLine,
 } from "@/lib/news/reporting-package-view";
 import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting";
 
@@ -185,12 +187,42 @@ function PackageBody({
 }) {
   const run = reportingRunState(report);
   const gaps = packageGaps(report);
+  /*
+    FC20 (Oct 11 walk row C20): the panel used to open on "Method 2.6.0 -
+    full-pipeline" and "warm 0 / cold 0 actions" with no explanation. This
+    summary is built from the package's own saved fields and says what was
+    read, what was established, what still needs checking and the next press.
+    Every line below it is kept.
+  */
+  const summary = packagePlainSummary(report);
   return (
     <section className="reporting-package" aria-label="Reporting package">
       <header className="reporting-package-head">
         <h2>Reporting package</h2>
-        <p className="meta">{methodLine(report)}</p>
       </header>
+      <section className="reporting-plain-summary" aria-label={summary.heading}>
+        <h3>{summary.heading}</h3>
+        <dl>
+          <div>
+            <dt>What was read</dt>
+            <dd>{summary.read}</dd>
+          </div>
+          <div>
+            <dt>What was established</dt>
+            <dd>{summary.established}</dd>
+          </div>
+          <div>
+            <dt>What still needs checking</dt>
+            <dd>{summary.stillToCheck}</dd>
+          </div>
+          <div>
+            <dt>Next press</dt>
+            <dd>{summary.nextAction}</dd>
+          </div>
+        </dl>
+      </section>
+      <p className="meta">{methodLine(report)}</p>
+      <p className="meta">{warmColdPlainLine(report.actions)}</p>
       <div className={`reporting-run reporting-run-${run.tone}`} role="status">
         <strong>{run.label}</strong>
         <p className="meta">{run.detail}</p>
@@ -224,6 +256,15 @@ function PackageBody({
       {report.held.length ? (
         <section className="reporting-held" aria-label="Held possibilities">
           <h3>Held for later</h3>
+          {/*
+            FC19 (Oct 11 walk): this list is the reporting run's suggestion; it
+            does not move a lead. The filed lead stayed New in the Queue while
+            this said held, so the panel says which one it is.
+          */}
+          <p className="meta">
+            This is the reporting run's suggestion. A lead it filed stays where it is in the Queue
+            until you hold or kill it.
+          </p>
           <ul>
             {report.held.map((held, index) => (
               <li key={`${held.storyId}-${index}`}>

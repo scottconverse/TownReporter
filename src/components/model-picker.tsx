@@ -71,6 +71,8 @@ type PickerControls<T extends StoryModelChoice> = {
   onClear?: () => void;
   disabled?: boolean;
   compact?: boolean;
+  /** FB23 (Oct 11 walk): repeat the full chosen name under a select a narrow sidebar clips. */
+  showSelectedValue?: boolean;
   layout?: "stacked" | "inline";
   effort?: ModelEffort | null;
   onEffortChange?: (value: ModelEffort | null) => void;
@@ -584,6 +586,11 @@ export function ModelPicker(props: Props) {
         <span className="model-picker-help">
           OCR reads images. Models without image support stay listed and are marked as unable to
           read images for OCR.
+        </span>
+      ) : null}
+      {props.showSelectedValue && selected ? (
+        <span className="model-picker-help" style={{ overflowWrap: "anywhere", fontWeight: 700 }}>
+          Selected: {optionText(selected)}
         </span>
       ) : null}
       <span id={helpId} className="model-picker-help">

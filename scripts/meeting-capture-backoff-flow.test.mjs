@@ -168,7 +168,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       "@/lib/news/meeting-activity-label": transpileToUrl("export function meetingStatusLabel() { return { text: 'Capture blocked', tone: 'bad' }; }", "meeting-activity-label-stub.js"),
       "@/lib/news/desk-copy": await moduleUrl("src/lib/news/desk-copy.ts", {
         "./preflight.ts": transpileToUrl("export function looksLikeProviderAuthFailure() { return false; } export function providerAuthTarget() { return ''; }", "preflight-stub.js"),
-        "./lead-match.ts": transpileToUrl("export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }", "lead-match-stub.js"),
+        "./lead-match.ts": transpileToUrl("export function distinguishingOverlap() { return { subjects: 0, names: 0 }; } export function explainPairMatch() { return null; } export function sharesTightName() { return false; }", "lead-match-stub.js"),
       }),
     });
     const cardRow = {
@@ -213,7 +213,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       await page.getByRole("heading", { name: video.title }).click();
       const { meetingYoutubeBlockedLine } = await import(await moduleUrl("src/lib/news/desk-copy.ts", {
         "./preflight.ts": transpileToUrl("export const looksLikeProviderAuthFailure=()=>false; export const providerAuthTarget=()=>'';", "copy-preflight.js"),
-        "./lead-match.ts": transpileToUrl("export const distinguishingOverlap=()=>false;", "copy-lead.js"),
+        "./lead-match.ts": transpileToUrl("export const distinguishingOverlap=()=>false; export const explainPairMatch=()=>null; export const sharesTightName=()=>false;", "copy-lead.js"),
       }));
       assert.equal(await page.getByRole("status").textContent(), meetingYoutubeBlockedLine(legacyRetryAt));
     } finally { await browser.close(); }

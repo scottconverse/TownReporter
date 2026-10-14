@@ -111,6 +111,7 @@ import {
   resolveDraftJobState,
   recoveringDraftCopy,
   storyHeaderSectionLabel,
+  STALE_DUPLICATE_NOTICE,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -1255,6 +1256,12 @@ function StoryPage() {
     },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      /*
+        FB18 (Oct 11 walk): this press saves the fields (above) but, unlike
+        Save, left the "Write it myself" flag up, so the page kept treating the
+        words as unsaved and ignored the confirmation it had just recorded.
+      */
+      if (res.ok) setManualDraft(null);
       announceToDesk(
         res.ok
           ? "Recorded: you confirmed you checked this story against your sources."
@@ -2108,6 +2115,15 @@ function StoryPage() {
       : (comparisonExplanation?.reason ??
         "The saved link does not match the current story evidence.")
     : "";
+  /*
+    B02 (2026-10-13): when this page's own check cannot explain the pair, that
+    sentence is the ONE thing the panel should say first, in one short line, so
+    it cannot be read past. The panel keeps its detail sentence too -- nothing is
+    removed -- and every button under it is untouched. Compare still only warns:
+    the editor can still keep the pair, kill the lead, or move it to New.
+  */
+  const comparePairStale = comparePair != null && comparisonExplanation == null;
+  const comparisonLead = comparePairStale ? STALE_DUPLICATE_NOTICE : "";
   const compareShown = comparePair ? (compareOpen ?? true) : false;
   /*
    * Unit AK item 6: a kill leaves a record, and the record outlives the kill --
@@ -2892,6 +2908,7 @@ function StoryPage() {
             onKillThis={killAsDuplicateOfPrior}
             onReopenPrior={reopenPrior}
             matchReason={comparisonReason}
+            staleNotice={comparisonLead}
             formatDate={formatShortDate}
           />
         </div>
@@ -3165,6 +3182,7 @@ function StoryPage() {
               leadId={id}
               notes={notes}
               hasDraft={Boolean(data.draft)}
+              draftWritten={Boolean(data.draft?.body?.trim())}
               currentDraftId={data.draft ? Number(data.draft.id) : null}
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
@@ -4831,6 +4849,7 @@ function ReportingNotesPane({
   leadId,
   notes,
   hasDraft,
+  draftWritten = hasDraft,
   locked,
   openedExtractionByUrl,
   draftMeetingEvidence,
@@ -4848,6 +4867,8 @@ function ReportingNotesPane({
   leadId: number;
   notes: ReportingNotes;
   hasDraft: boolean;
+  /** FC07 (Oct 11 walk): a draft row with no words yet was not "written before notes were kept". */
+  draftWritten?: boolean;
   locked: boolean;
   /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
   openedExtractionByUrl: Record<string, string | null>;
@@ -5163,7 +5184,7 @@ function ReportingNotesPane({
       {!filled ? (
         <>
           <p className="note-one" style={{ marginTop: small ? 0 : 8 }}>
-            {hasDraft
+            {draftWritten
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>

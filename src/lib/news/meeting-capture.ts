@@ -16,6 +16,7 @@ import { lockMeetingRevisionForCapture } from "./meeting-revision-lock.ts";
 import { flagPublishedArticlesForTranscriptRevision } from "./meeting-article-revision.ts";
 import { isYoutubeRateLimit, nextYoutube429Retry, withMeetingCapturePassLock, youtubeCaptureRetryIsDue } from "./meeting-capture-retry.ts";
 import { meetingYoutubeBlockedLine } from "./desk-copy.ts";
+import { dateFromTitle } from "./primegov.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -812,7 +813,8 @@ export async function applyCapturedMeetingTranscript(
       newsroomId: input.newsroomId,
       videoId: input.video.id,
       title: input.video.title,
-      meetingDate: input.video.published,
+      // FC08: the agenda is found by the meeting's own date (its title), not the upload date.
+      meetingDate: dateFromTitle(input.video.title ?? "") ?? input.video.published,
       artifactId: stored.id,
     });
     const warnings = section5.aligned || !section5.unalignedLead ? [] : [section5.unalignedLead.leadWhy];

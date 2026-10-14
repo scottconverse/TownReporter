@@ -297,6 +297,28 @@ export function followUpStoppedNotice(): string {
   return "Stopped — find it under Stopped. Any run in flight stops at its next step.";
 }
 
+/**
+ * FC10 (Oct 11 walk): what to say when a "Run now" press QUEUED instead of
+ * starting at once, naming the actual job in front of it -- its kind, and
+ * whether it is queued or running.
+ *
+ * That is the whole point of the sentence. The old refusal said "a draft is
+ * being written right now" while the only running job was a scan and the
+ * drafts were merely queued, so it named the wrong thing AND the wrong state.
+ * This reads the blocker the server found rather than guessing a fence, and
+ * says whichever of the two states it is really in.
+ *
+ * Null when nothing is ahead of it (it starts at once), so the caller falls
+ * back to its plain receipt.
+ */
+export function followUpQueueNotice(
+  queuedBehind: { kind: string; status: string; name: string } | null | undefined,
+): string | null {
+  if (!queuedBehind) return null;
+  const state = queuedBehind.status === "running" ? "running now" : "queued";
+  return `This check is in the queue. It runs after the ${queuedBehind.name} that is ${state} ahead of it.`;
+}
+
 export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter): boolean {
   const live = row.status === "active" || row.status === "paused";
   switch (filter) {

@@ -796,6 +796,7 @@ function SourcesPage() {
               <ModelPicker
                 scope="scan"
                 label="Model for this scan"
+                showSelectedValue
                 value={scanModel}
                 onChange={(choice) => { scanModelTouched.current = true; setScanModel(choice); setScanModelEffort(defaultModelEffort(choice)); }}
                 effort={scanModelEffort}

@@ -187,6 +187,10 @@ const paperContextStub = inlineModule(`
   export function usePaperDateFormatters() {
     return { formatShortDate: () => "Sep 3" };
   }
+  // FC13/FC18: desk-copy.ts reads usePaper() for the newsroom place words.
+  export function usePaper() {
+    return { name: "The Paper", city: "Longmont", timezone: "America/Denver" };
+  }
 `);
 
 const modelPickerStub = inlineModule(`
@@ -240,17 +244,34 @@ const preflightStub = inlineModule(`
   export function providerAuthTarget() { return ""; }
 `);
 // U26 (2026-09-30): desk-copy.ts's nearDuplicate() asks lead-match.ts for
-// distinguishingOverlap() now (it decides the "looks already printed" chip on
-// subject words rather than raw title overlap). This row only renders a dup
-// it is handed, so the stub answers "no overlap at all".
+// distinguishingOverlap() (it decides the "looks already printed" chip on
+// subject words rather than raw title overlap).
+//
+// B02 (Oct 13 2026) made desk-copy.ts also ask lead-match.ts -- through
+// explainPairMatch() and titleEntityOverlap() in duplicateLinkState() -- whether
+// a saved "possible duplicate" link still holds, so the row says "Saved link no
+// longer matches" instead of "Possible duplicate · compare" when the tightened
+// matcher no longer supports the link. The rows below are about the CHIP's
+// markup (headline, disposition, comparison link, the <a> target), not about
+// the staleness rule, so this stub answers "the pair still matches": the chip
+// renders exactly as it did before B02 and the assertion is a statement about
+// the row, not about a matcher whose own behavior is pinned in
+// src/lib/news/b02-duplicate-subject.test.ts.
 const leadMatchStubForCopy = inlineModule(`
   export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
+  export function explainPairMatch() { return { route: "possible", reason: "same subject", sharedName: null, sharedSubject: null }; }
+  export function sharesTightName() { return false; }
+  export function titleEntityOverlap() { return true; }
 `);
+// FC18 (Oct 13 2026): desk-copy.ts imports the real, self-contained
+// sentence-stop helper; it has no imports, so the REAL file is loaded.
+const sentenceStopStub = await readFile(new URL("../src/lib/news/sentence-stop.ts", import.meta.url), "utf8");
 const paperModuleStub = inlineModule(`
   export const PAPER = { timezone: "America/Denver" };
   export const TOPICS = [];
   export const formatClockTime = () => "2:10 p.m.";
   export const formatListDateTime = () => "Oct. 8, 2:10 p.m.";
+  export const parseUrlList = () => [];
 `);
 const deskCopy = moduleUrl(
   await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
@@ -259,6 +280,7 @@ const deskCopy = moduleUrl(
     "./preflight.ts": preflightStub,
     "./lead-match.ts": leadMatchStubForCopy,
     "../paper.ts": paperModuleStub,
+    "./sentence-stop.ts": moduleUrl(sentenceStopStub, "sentence-stop.ts", {}),
     react: import.meta.resolve("react"),
   },
 );
@@ -843,6 +865,26 @@ const { Chip } = await import(
       ),
       "@/lib/news/follow-up-copy": inlineModule(
         "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
+      ),
+      /*
+        FC13 (Oct 13 2026): desk-chrome.tsx imports the value runningHeadLabel
+        from job-progress.ts, which pulls jobs.ts. Chip() never reads either;
+        the specifiers only have to resolve for the module to load.
+      */
+      "@/lib/news/job-progress": inlineModule(
+        "export function runningHeadLabel() { return ''; }",
+      ),
+      /*
+        FC13's follow-up split that label into its own module so the header stops
+        pulling the server-bearing graph into the browser bundle, and
+        desk-chrome.tsx imports it from there now. Self-contained, so the same
+        shared URL the other fixtures resolve it to is used here rather than a
+        stub -- Chip() never reads it; the specifier only has to resolve for the
+        module to load.
+      */
+      "@/lib/news/running-head-label": await sharedModuleUrl("src/lib/news/running-head-label.ts"),
+      "@/lib/news/jobs": inlineModule(
+        "export const jobStages = () => []; export function queuedJobWaitReason() { throw new Error('lead-badge fixture: jobs.ts not loaded'); } export function requestJobCancel() { throw new Error('lead-badge fixture: jobs.ts not loaded'); }",
       ),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

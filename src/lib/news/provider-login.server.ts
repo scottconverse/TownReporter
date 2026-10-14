@@ -825,16 +825,24 @@ export async function providerStatuses(
       agrees.
     */
     const resolved = found?.ok ? found.bin : null;
+    /*
+      FB06 (Oct 11 walk): a Codex reached only by the bare PATH name (a Scoop
+      shim, for one) is what every draft spawns, yet this read never ran the
+      probe the comment above waits for, so Models said "Not installed" while
+      Codex jobs ran. The bare name now gets that probe; a failed probe still
+      says what failed.
+    */
+    const bareCodex = provider === "codex" && found !== null && !found.ok && found.error === null;
     let signedIn = false;
     let account: string | null = null;
     let detail = "";
     if (off) {
       detail = `Turned off with ${provider === "claude" ? "TOWNREPORTER_CLAUDE_CODE" : "TOWNREPORTER_CODEX"}=0.`;
-    } else if (!found?.ok) {
+    } else if (!found?.ok && !bareCodex) {
       // The named-path failure says which path and what to do about it; the
       // generic sentence is only right when there was nothing to find.
       detail = found?.error ?? `${PROVIDER_LABEL[provider]} was not found on this machine.`;
-    } else if (provider === "claude") {
+    } else if (provider === "claude" && found?.ok) {
       const seen = await claudeAccount(found.bin);
       signedIn = seen.signedIn;
       account = seen.account;

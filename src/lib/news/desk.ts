@@ -3040,6 +3040,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      filedHeadlines,
       standingPageDropped,
       noEventDropped,
       firstDroppedReason,
@@ -3133,6 +3134,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
+      // FC18: the example title beside "filed as new" has to be one of these.
+      filedHeadlines,
     });
     let editorSummary = String(data.editor_summary ?? "").trim();
     if (leadsCreated === 0 && !editorSummary)
@@ -5196,7 +5199,8 @@ export const setLeadStatus = createServerFn({ method: "POST" })
   });
 
 /**
- * The way back from a kill: put the lead where it was, not where kills usually go.
+ * The way back from a kill or a hold: put the lead where it was, not where these
+ * presses usually send it.
  *
  * Owner, 2026-10-03. The Undo on a kill put every lead back to `new`
  * (`killUndoPress`), so a `drafted` lead an editor killed and took back came back
@@ -5204,14 +5208,20 @@ export const setLeadStatus = createServerFn({ method: "POST" })
  * restore is the one the row held when the Kill was pressed, and for a lead that
  * had been drafted that is `drafted`.
  *
+ * TIA-2 (walk step TIA-2, 2026-10-13) made it the way back from a HOLD too. A
+ * Hold's Undo went through `setLeadStatus`, the ordinary status path, and that
+ * path refuses for any lead with a written draft -- which is the ordinary held
+ * lead. The Undo rolled back, the lead stayed held, and nothing said so. A hold
+ * is undone by the same write a kill is: here.
+ *
  * WHY THIS IS NOT `setLeadStatus`. That input has no `drafted` in it, and should
  * not: `drafted` is written by the desk's own drafting pass and never picked by
  * a screen. The Undo may write it only because it is UN-writing, so the
  * permission lives here, behind two checks the schema cannot make:
  *
- *   - the lead must be KILLED right now. An Undo is the way back from a kill and
- *     nothing else; without this the call would be a general "set any status"
- *     door with a friendly name.
+ *   - the lead must be KILLED or HELD right now. An Undo is the way back from one
+ *     of those two presses and nothing else; without this the call would be a
+ *     general "set any status" door with a friendly name.
  *   - a lead going back to `drafted` must still have its draft (`drafts.lead_id`).
  *     A lead whose draft was thrown away has nothing to go back to, and calling
  *     it drafted would promise a story that no longer exists.
@@ -5288,6 +5298,9 @@ import {
 // pulled into any bundle that imports `desk.ts`. The runtime import is inside
 // the `run-now` handler above, which is the only place it is needed.
 import type { FollowUpRunStart } from "./follow-up-scheduler.ts";
+// FC10: the queue receipt lives with the other follow-up words, in a module a
+// browser can load and a bare node test can import.
+import { followUpQueueNotice } from "./follow-up-copy.ts";
 
 /**
  * The one list read, and it is agent-only (`performListFollowUps` filters on
@@ -5342,16 +5355,18 @@ export const updateAiFollowUp = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => _performUpdateAiFollowUp(context, data));
 
 /**
- * Why a "Run now" press did not start: one sentence per fence, and no silent
- * no-op. The two fences are the brief's rule ("one at a time, never beside a
- * running draft") and the third is a card that has been ended -- Stop has to
- * mean stop, and Resume is the way back.
+ * Why a "Run now" press did not start a new run. Only two cases are left: a
+ * card that has ended (Stop has to mean stop, and Resume is the way back), and
+ * a row that is gone.
+ *
+ * FC10 (Oct 11 walk): the two job fences ("a draft is being written", "another
+ * follow-up is running") used to be refusals here, and the first one was wrong
+ * -- `jobOpen(...,"draft")` matched a QUEUED draft, so a press was turned away
+ * while the only running job was a scan. They are not refusals any more: a
+ * press while the desk is busy is QUEUED (see `followUpQueueNotice`), which is
+ * what the job claim in jobs.ts already enforces.
  */
 const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, string> = {
-  "draft-running":
-    "A draft is being written right now. Follow-ups run one at a time and never alongside a draft — try again once it finishes.",
-  "follow-up-running":
-    "Another follow-up is already running. They run one at a time — try again once it finishes.",
   "not-found": "That follow-up is gone.",
   "not-active": "That follow-up has been stopped or finished. Resume it first if you want it to run again.",
 };
@@ -5391,7 +5406,8 @@ export const followUpAction = createServerFn({ method: "POST" })
       data.id,
     );
     if (!started.started) throw new Error(RUN_START_REFUSALS[started.skipped ?? "not-found"]);
-    return { ok: true as const };
+    // FC10: a press that queued says which job it is behind, when there is one.
+    return { ok: true as const, queuedNotice: followUpQueueNotice(started.queuedBehind) };
   });
 
 /**

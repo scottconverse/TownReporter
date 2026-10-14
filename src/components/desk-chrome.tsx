@@ -30,6 +30,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
+import { runningHeadLabel } from "@/lib/news/running-head-label";
 
 const users = new WeakMap<Document, { count: number; dispose: () => void }>();
 
@@ -694,7 +695,7 @@ function RunningBox({
   return (
     <div className="astra-running">
       <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
-        <span className="astra-running-dot" aria-hidden /> Running · {jobs.length}
+        <span className="astra-running-dot" aria-hidden /> {runningHeadLabel(jobs)}
       </Link>
       {jobs.slice(0, 3).map((job) => (
         <div className="astra-running-job" key={job.id}>

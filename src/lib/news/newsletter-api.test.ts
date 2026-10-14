@@ -153,6 +153,21 @@ describe("newsletter API: mailbox settings contract", () => {
     assert.equal(view.address, "");
   });
 
+  /* FB12 (Oct 11 walk): a save with no password looked lost after a reload. */
+  it("FB12: a mailbox saved without a password keeps its settings on reload", async () => {
+    const newsroomId = nextNewsroom();
+    await saveNewsletterMailbox({
+      userId: nextUser(), newsroomId, address: "news@town.example", host: "imap.other.example", port: 143, ssl: false,
+    });
+    const view = await readMailboxView(newsroomId);
+    assert.equal(view.configured, false, "no password, so not set up yet");
+    assert.equal(view.hasPassword, false);
+    assert.equal(view.address, "news@town.example");
+    assert.equal(view.host, "imap.other.example");
+    assert.equal(view.port, 143);
+    assert.equal(view.ssl, false);
+  });
+
   it("saves owner settings, keeps password whitespace, and never returns the password", async () => {
     const newsroomId = nextNewsroom();
     const result = await saveNewsletterMailbox({

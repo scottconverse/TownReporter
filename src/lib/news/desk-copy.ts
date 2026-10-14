@@ -1,3 +1,4 @@
+
 /** Editor-facing copy. Does not change investigative behavior. */
 
 export const meetingAudioIntegrityNotice = "The saved audio does not match its record. Capture it again.";
@@ -18,9 +19,10 @@ export const meetingTranscriptSelectionRefused = "Choose a transcript saved for 
 export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
+import { cutAtSentenceEnd } from "./sentence-stop.ts";
 import * as leadMatchSignals from "./lead-match.ts";
-import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
-import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
+import { distinguishingOverlap, explainPairMatch, sharesTightName, type NewsroomPlace } from "./lead-match.ts";
+import { formatClockTime, formatListDateTime, PAPER, parseUrlList, TOPICS } from "../paper.ts";
 import type { SourceCadence } from "./adaptive-source-selection.ts";
 import type { SourcePurpose } from "./source-inventory.ts";
 import type { ScanSourceCoverageEntry } from "./scan-source-coverage.ts";
@@ -1231,7 +1233,13 @@ export function resolveDraftJobState(
   if (!job) return "idle";
   if (job.status === "completed") return "done";
   if (job.status === "failed") return "failed";
-  if (job.status === "running" || job.status === "queued") {
+  /*
+    FA06/FC06 (Oct 11 walk): a job still waiting in line has no heartbeat to
+    go cold. Calling it "recovering" told the editor the app had restarted
+    while a just-submitted draft sat queued behind a scan.
+  */
+  if (job.status === "queued") return "drafting";
+  if (job.status === "running") {
     const updated = Date.parse(job.updated_at ?? "");
     const stale = Number.isFinite(updated) && nowMs - updated > DRAFT_JOB_STALE_AFTER_SECONDS * 1000;
     return stale ? "recovering" : "drafting";
@@ -1837,6 +1845,15 @@ export function resurfacedSummarySentence(input: {
    * the full picture of one run without opening the Queue. Optional for the
    * same reason as `mergedSameScan`. */
   developingFiled?: number;
+  /**
+   * FC18: the headlines this run actually FILED (`fileScanLeads`'s
+   * `filedHeadlines`). The `e.g. '…'` example is only printed when
+   * `firstDiscardedHeadline` is one of these. It exists to prove the
+   * statement it hangs off, and a title the desk discarded proves the
+   * opposite. Optional: a caller that does not pass it gets the example
+   * dropped rather than printed unchecked.
+   */
+  filedHeadlines?: string[];
 }): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
@@ -1879,10 +1896,31 @@ export function resurfacedSummarySentence(input: {
     bits.push(`${filedNew} filed as new`);
   }
   const headline = input.firstDiscardedHeadline?.trim();
-  if (headline) {
+  /*
+    FC18: THE EXAMPLE MUST BE ONE OF THE TITLES THIS RUN FILED.
+
+    The 2026-10-11 walk read "12 filed as new — e.g. 'Longmont Museum Sets
+    Oct. 17 Grand Reopening …'" on a scan whose newest filed set did not
+    contain that headline. `firstDiscardedHeadline` is a candidate the run
+    DISCARDED as a repeat (`fileScanLeads`), so attaching it here named a
+    story the desk had just refused to file, under the count of stories it
+    did file.
+
+    The example only stands when the title is in `filedHeadlines`, and when a
+    title is suppressed the sentence says so in plain words rather than
+    leaving the reader to wonder where the example went.
+
+    A caller that passes NO list (`filedHeadlines` undefined) keeps the old
+    output: the check can only be made against a set it was given, and the
+    real caller (`scanRunSummary`, ./desk.ts) always passes one.
+  */
+  const filed = input.filedHeadlines;
+  const canCheckExample = headline && filed !== undefined;
+  if (headline && (!canCheckExample || filed!.includes(headline))) {
     return `${bits.join("; ")} — e.g. '${headline.slice(0, 120)}'.`;
   }
-  return `${bits.join("; ")}.`;
+  const noExample = headline ? " (No example title was available from the leads this scan filed.)" : "";
+  return `${bits.join("; ")}.${noExample}`;
 }
 
 /**
@@ -1990,14 +2028,22 @@ export function composeScanRunSummary(input: {
   if (tail) {
     const room = Math.max(0, limit - tail.length - 1);
     if (summary.length > room) {
-      const cut = summary.slice(0, room);
-      // Prefer to end the paragraph on a full sentence rather than mid-word.
-      const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
-      summary = (stop >= Math.floor(room / 2) ? cut.slice(0, stop + 1) : cut).trim();
+      // End the paragraph on a full sentence (never on "Oct."), not mid-word (FC18).
+      summary = cutAtSentenceEnd(summary, room);
     }
     summary = summary ? `${summary} ${tail}` : tail;
   }
-  return summary.slice(0, limit);
+  /*
+    FC18: THE ASSEMBLED NOTE ENDS A SENTENCE.
+
+    `slice(0, limit)` here was the last raw character cut in the chain, and it
+    landed after the join -- so a note whose parts each ended cleanly could
+    still be written back mid-word. The room check above already trims the
+    paragraph to the space the counts leave; this is the backstop for the case
+    where the tail itself is longer than the column, and it cuts on a sentence
+    the same way.
+  */
+  return cutAtSentenceEnd(summary, limit);
 }
 
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {
@@ -2192,9 +2238,6 @@ export function nearDuplicate(
   place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
-    const recent = Date.parse(p.published_at) >= Date.now() - 60 * 24 * 60 * 60 * 1000;
-    if (recent && leadMatchSignals.titleEntityOverlap?.(lead.headline, p.headline, place))
-      return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
     const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);
     // Nothing else can fire, and the Queue calls this once per published
@@ -2202,7 +2245,30 @@ export function nearDuplicate(
     if (!titlesOverlapRaw && !sameTopic) continue;
     const { subjects, names } = distinguishingOverlap(lead.headline, p.headline, place);
     const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
-    if (titlesAgree || (names >= 2 && sameTopic)) {
+    // B02 (2026-10-13): a shared SECTION and two shared NAMES is not a shared
+    // story. The arm that fired here was `names >= 2 && sameTopic`, and
+    // "St. Vrain Valley" is two names: the school district's open house dates
+    // were chipped "Looks already printed: Wild Plum Center Holds Head Start
+    // Designation for St. Vrain Valley...", and filed as a possible duplicate
+    // of a City Council study session. Three unrelated stories, one district.
+    //
+    // A count of shared names cannot tell that from the two real pairs the desk
+    // does want -- "Bohn Farm" and "Safety & Justice Center" are also exactly
+    // two shared names with no shared subject word (measured: the true and the
+    // false pairs both read subjects 0, names 2). What separates them is
+    // whether the two headlines NAME THE SAME THING: both write "Bohn Farm"
+    // and both write "Justice Center" as a name, while neither writes
+    // "St. Vrain Valley" as a name -- one only mentions the district. So the
+    // word rule now keeps a name-only pair when the two headlines share a
+    // compound name (sharesTightName), adds a shared subject word, or name at
+    // least three of each other's names. A pair that shares only a loose name
+    // waits on the desk's own check instead (see dup-check.ts, which reads both
+    // and clears the chip on a "no").
+    const sameEntity =
+      titlesAgree ||
+      (sameTopic && ((names >= 2 && subjects >= 1) || names >= 3)) ||
+      sharesTightName(lead.headline, p.headline, place);
+    if (sameEntity) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     }
   }
@@ -2250,6 +2316,82 @@ export function printedDupChip(
   const aiWhy = dupAiReason(lead.dup_ai_printed_why);
   return aiWhy ? { ...dup, aiWhy } : dup;
 }
+
+/**
+ * B02 (2026-10-13): does a lead's saved "possible duplicate" link still hold
+ * up against the matcher's current rule?
+ *
+ * The owner's walk: a school open-house lead was saved as a possible duplicate
+ * of a council study session. Opening Compare, the page itself warned "The
+ * saved link does not match the current story evidence" -- the matcher no
+ * longer found any shared subject between the two -- yet the Queue still drew
+ * the row as "Possible duplicate · compare", and after the editor cleared the
+ * link the wrong printed-story match stayed. A link that was true when it was
+ * filed can stop being true when a rule tightens or a headline is edited, and
+ * the row kept asserting the old answer.
+ *
+ * This asks `explainPairMatch` -- the SAME function the Compare view renders
+ * its own reason from -- whether the pair still matches now, so the Queue and
+ * Compare cannot disagree. It never touches the database: the stored link stays
+ * exactly as filed (no link is deleted), and the editor keeps every Compare
+ * button; only the row's wording changes.
+ *
+ *   - "matches": the current rule still finds the pair (or there is no link at
+ *     all). The row reads exactly as it does today.
+ *   - "stale": there is a saved link but the current rule finds no shared
+ *     subject between the two headlines. The row says so plainly instead of
+ *     claiming a duplicate, and the Compare view leads with the same sentence.
+ */
+export function duplicateLinkState(
+  lead: {
+    headline: string;
+    topic?: string | null;
+    source_urls?: string | null;
+    dup_kind?: string | null;
+  },
+  prior: {
+    headline: string;
+    topic?: string | null;
+    source_urls?: string | null;
+  } | null | undefined,
+  place?: NewsroomPlace | null,
+): "matches" | "stale" {
+  /* No saved prior lead is not a stale link -- nothing to disagree with. A
+   * "developing" link is deliberately kept whatever the matcher says: it is
+   * filed because the lead carries NEW FACTS against a killed lead, not
+   * because the two headlines match, so re-running the headline matcher on it
+   * would clear a link the desk meant to keep (see newFactsIn). */
+  if (!prior || String(prior.headline ?? "").trim() === "") return "matches";
+  if (lead.dup_kind === "developing") return "matches";
+  const reasons = parseUrlList(prior.source_urls);
+  const urls = parseUrlList(lead.source_urls);
+  /* The same two doors the matcher itself uses to file a link: a route through
+   * `pairMatches`, or the entity overlap that `matchStrength` falls back on
+   * (findMatchingLead in ./lead-match.ts). Checking only the route would call a
+   * genuine two-caps pair stale. */
+  const explanation = explainPairMatch(
+    lead.headline,
+    urls,
+    prior.headline,
+    reasons,
+    place,
+    { candidateTopic: lead.topic, leadTopic: prior.topic },
+  );
+  const matched =
+    explanation != null ||
+    leadMatchSignals.titleEntityOverlap?.(lead.headline, prior.headline, place) === true;
+  return matched ? "matches" : "stale";
+}
+
+/** B02: the one sentence for a link the current rule no longer supports. Shown
+ * on the Queue row and, as the main line, in the Compare view. Plain words, and
+ * it names the next press rather than only the problem. */
+export const STALE_DUPLICATE_NOTICE =
+  "The saved link does not match the current story evidence. Compare it, and press Not a duplicate if these are two different stories.";
+
+/** B02: the short chip label for a stale link, so the Queue row stops claiming
+ * a duplicate it can no longer support. The Compare link stays. */
+export const STALE_DUPLICATE_LABEL = "Saved link no longer matches";
 
 /*
  * Unit AK items 2, 4, 6 and 7 (2026-09-26): the words the desk uses about a

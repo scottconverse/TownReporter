@@ -2758,10 +2758,27 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const settings = await getPaperConfig(newsroomId).catch(() => null);
   const place: Place = opts.place ?? settings ?? { city: "", state: "" };
   await investigationNewsroom(opts.investigationId, newsroomId);
-  const investigation = await sql<{ title: string }>`
-    select title from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
+  const investigation = await sql<{ title: string; ordinary_explanation: string | null }>`
+    select title, ordinary_explanation from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
   `;
   const investigationTitle = investigation[0]?.title ?? "";
+  /*
+    B08/FC03: what a follow-up is allowed to be about -- the file's own question
+    (headline plus the plain-English explanation the editor read before
+    starting) and the paper's town. Held here, once per run, so the gate at the
+    bottom of the hop and the marker the page prints read the same two strings.
+
+    Without it, an ungated persist path filed UK aggregate companies and a
+    Frinton-on-Sea property record as open leads on a US city council
+    question: the gate above ran only on `investigationTitle`, and the
+    post-search selector's plan reached `persistPlan` without passing it at all.
+  */
+  const frontierContext = {
+    subject: [investigation[0]?.title ?? "", investigation[0]?.ordinary_explanation ?? ""]
+      .filter(Boolean)
+      .join(" "),
+    town: place.city ?? "",
+  };
   if (opts.executionMode === "responsive" && !opts._responsiveOperation) {
     return responsiveResearchLoop(opts, investigationTitle, place, newsroomId);
   }
@@ -3101,15 +3118,30 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         priority: 10,
       });
     }
+    /*
+      B08/FC03: the last door before a proposed follow-up joins the trail. The
+      gate above (`boundedFrontierItems`) only ever saw the headline, and the
+      post-search selector's plan skipped it entirely, so a result from another
+      country could still be filed here as an open lead. Checked again on the
+      words that are actually written down.
+
+      An off-subject item is still recorded -- it is closed and carries the
+      reason, exactly as `boundedFrontierItems` files one -- so nothing the desk
+      found is thrown away; it simply is not a next step for this question.
+    */
     for (const f of plan.frontier) {
+      const gated = gateFrontierRelevance(
+        { label: f.label, why: f.why, status: f.status, closed_reason: f.closed_reason },
+        frontierContext,
+      );
       await persistDiscovery(opts.userId, opts.investigationId, {
         kind: f.kind,
         label: f.label,
         why: f.why,
         priority: f.priority,
         pendingQueries: f.queries,
-        status: f.status === "closed" ? "closed" : undefined,
-        closedReason: f.closed_reason,
+        status: gated.status === "closed" ? "closed" : f.status === "closed" ? "closed" : undefined,
+        closedReason: gated.closed_reason ?? f.closed_reason,
       });
     }
 
@@ -3485,6 +3517,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
             opts.investigationId,
             groundPlan(postSearchPlan, corpus).plan,
             newsroomId,
+            frontierContext,
           );
       } catch (err) {
         postSearchFailure = err instanceof Error ? err.message : "post-search selector failed";
@@ -3813,7 +3846,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       });
     }
 
-    await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
+    await persistPlan(opts.userId, opts.investigationId, plan, newsroomId, frontierContext);
     await resurfaceDeadEnds(opts.userId, opts.investigationId, thisHopEvidenceNames);
 
     if (queries.length) {
@@ -4380,6 +4413,7 @@ async function persistPlan(
   investigationId: number,
   plan: HopPlan,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  context?: { subject: string; town: string },
 ) {
   const sql = await getSql();
   const known = await sql<{ canonical: string; name: string }>`
@@ -4654,15 +4688,28 @@ async function persistPlan(
       });
     }
   }
+  /*
+    B08/FC03: the post-search selector's plan reaches this function without
+    passing `boundedFrontierItems`, so the subject-and-place check is applied
+    here too, on the words actually written. An off-subject item is filed
+    closed with the reason rather than dropped -- the record stays, it is the
+    "next step" claim that is refused.
+  */
   for (const f of plan.frontier) {
+    const gated = context
+      ? gateFrontierRelevance(
+          { label: f.label, why: f.why, status: f.status, closed_reason: f.closed_reason },
+          context,
+        )
+      : { status: f.status, closed_reason: f.closed_reason };
     await persistDiscovery(userId, investigationId, {
       kind: f.kind,
       label: f.label,
       why: f.why,
       priority: f.priority,
       pendingQueries: f.queries,
-      status: f.status === "closed" ? "closed" : undefined,
-      closedReason: f.closed_reason,
+      status: gated.status === "closed" ? "closed" : f.status === "closed" ? "closed" : undefined,
+      closedReason: gated.closed_reason ?? f.closed_reason,
     });
   }
   for (const a of plan.anomalies) {

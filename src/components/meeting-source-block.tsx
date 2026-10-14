@@ -216,7 +216,7 @@ export function MeetingSourceBlock({
         </>
       ) : (
         <p className="note-one note-gate">
-          This lead has transcript material, but the current draft has no complete persisted used-citation record. Publishing will remain blocked until it is redrafted from the current recording.
+          This lead has transcript material, but the current draft has no complete persisted used-citation record. Publish still works, with a warning, until it is redrafted from the current recording.
         </p>
       )}
       {/*

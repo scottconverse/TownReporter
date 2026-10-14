@@ -93,7 +93,31 @@ export function buildScanBatches(input: BuildScanBatchesInput): ScanBatch[] {
  * URL, and the editor summaries joined. Per-lead source attribution is
  * preserved because each lead keeps its own `source_urls` from the batch it
  * came from.
+ *
+ * FC18: THE PARAGRAPH IS BUILT FROM EVERY BATCH, AND NEVER CUT MID-SENTENCE.
+ *
+ * Each batch's model call saw only its own sources, so its paragraph can only
+ * describe its own slice -- and the walk found a scan whose note said the only
+ * dated items were obituaries while its own 14 handoffs carried dated road
+ * work, an office closure, canvasses, festivals and a fundraiser. That is what
+ * a summary drawn from one batch and stopped with a character cap looks like.
+ * Every batch's paragraph is therefore carried here, joined in batch order.
+ *
+ * The old `summaries.join(" ").slice(0, 2000)` cut at a raw character, which is
+ * where "… (Casey Cooley's Oct." came from. When the joined text has to be
+ * shortened it now ends on a sentence, so the note never reads as a thought
+ * that was interrupted.
  */
+export const SCAN_SUMMARY_CHAR_LIMIT = 2000;
+
+/**
+ * The longest prefix of `text` that fits `limit` characters and ends a
+ * sentence (never on an abbreviation like "Oct."). Falls back to the raw cut
+ * only when there is no sentence end to land on.
+ */
+import { cutAtSentenceEnd } from "./sentence-stop.ts";
+export { cutAtSentenceEnd };
+
 export function mergeScanBatchResults<
   TLead extends { headline: string; source_urls: string[] },
   TProposed extends { url: string },
@@ -126,6 +150,6 @@ export function mergeScanBatchResults<
   return {
     leads,
     proposed_sources: proposed,
-    editor_summary: summaries.join(" ").slice(0, 2000),
+    editor_summary: cutAtSentenceEnd(summaries.join(" "), SCAN_SUMMARY_CHAR_LIMIT),
   };
 }

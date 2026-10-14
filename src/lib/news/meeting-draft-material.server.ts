@@ -6,6 +6,7 @@ import {
 } from "./meeting-transcript-alignment-copy.ts";
 import type { Sql } from "../db.ts";
 import { meetingClock, meetingEvidenceBlock } from "./meeting-draft-input.ts";
+import { dateFromTitle } from "./primegov.ts";
 
 export type LoadedMeetingDraftMaterial = {
   evidence: string;
@@ -109,7 +110,8 @@ export async function loadMeetingDraftMaterial(
         videoId,
         artifactId: input.artifactId,
         title: captures[0].title,
-        meetingDate: captures[0].published?.slice(0, 10),
+        // FC08: the meeting's own date (from its title) finds its agenda, not the upload date.
+        meetingDate: dateFromTitle(captures[0].title) ?? captures[0].published?.slice(0, 10),
         alignmentOnly: true,
       },
       alignmentDeps,
@@ -171,7 +173,13 @@ export async function loadMeetingDraftMaterial(
   );
   const capture = captures[0];
   const title = capture?.title?.trim() || input.fallbackTitle;
-  const date = capture?.published ? String(capture.published).slice(0, 10) : null;
+  /*
+    FC08 (Oct 11 walk): the upload date is not the meeting date. A Sept. 21
+    meeting posted Sept. 30 reached the writer as "(2026-09-30)". The date in
+    the meeting's own title wins; the upload date is the fallback only.
+  */
+  const date = (capture?.title ? dateFromTitle(capture.title) : null)
+    ?? (capture?.published ? String(capture.published).slice(0, 10) : null);
   const videoUrl = (videoId === input.videoId ? input.videoUrl : undefined) || `https://www.youtube.com/watch?v=${videoId}`;
   const evidence = meetingEvidenceBlock({
     title,

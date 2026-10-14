@@ -60,6 +60,7 @@ import { getYouTubeKeyStateFn } from "@/lib/news/youtube-data-settings";
 import { getOpsHealth } from "@/lib/ops/dashboard";
 import { getLocalModelChoice, getProviderTimeSettings } from "@/lib/news/provider-settings";
 import { providerAvailability, PROVIDER_AVAILABILITY_QUERY_KEY, localModelCatalog } from "@/lib/news/provider-availability";
+import { getProviderStatuses } from "@/lib/news/provider-login";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
@@ -280,6 +281,15 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     queryFn: () => localModelCatalog(),
     enabled: isOwner,
   });
+  /*
+    B07/FB06 (Oct 11 walk): the Codex rung reads its login here, the same read
+    and key the Models screen uses, so the two screens cannot disagree.
+  */
+  const statuses = useQuery({
+    queryKey: ["provider-statuses"],
+    queryFn: () => getProviderStatuses(),
+    enabled: isOwner,
+  });
 
   /*
     Routine notices is the one card whose rows need two reads, and both of them
@@ -320,7 +330,7 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
       state: "ladder",
       lines: writingModelLines({
         times: times.data,
-        statuses: [],
+        statuses: statuses.data ?? [],
         catalog: catalog.data,
         availability:availability.data,
         localModel:localChoice.data.override,

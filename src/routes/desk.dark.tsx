@@ -2307,6 +2307,9 @@ function InvestigationWorkspace({
                 {f.status === "deferred" ? (
                   <p className="meta">Saved for a later run; this lead was not rejected.</p>
                 ) : null}
+                {f.offSubjectNote ? (
+                  <p className="meta fr-off-subject">{f.offSubjectNote}</p>
+                ) : null}
                 {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
                 <InkButton
                   tone="quiet"
@@ -2476,7 +2479,8 @@ function DarkResearchCard({ job, onStop, onOpen, stopDisabled }: { job: JobProgr
     stages: ["Question", "Gather", "Case file", "Challenge"],
     stageIndex: job.status === "queued" ? 0 : Math.min(3, Math.max(1, (job.stageIndex ?? 0) + 1)),
     step: darkJobStepLine(job.step),
-    doneText: "Case file ready for your decision",
+    /* FC26: keep the job view's own done line when the round could not finish. */
+    doneText: job.doneText.startsWith("Could not finish") ? job.doneText : "Case file ready for your decision",
     openLabel: "Open file",
     error: job.status === "failed"
       ? /cancel(?:led|ed)? by the editor/i.test(job.error ?? "")

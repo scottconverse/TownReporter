@@ -279,3 +279,91 @@ test("an Undo refuses to put a lead back to drafted when the draft is gone, and 
     throw error;
   }
 });
+
+/*
+  TIA-2 (walk step TIA-2, 2026-10-13). An editor pressed "Hold" on one open lead
+  (counts moved Open 11 -> 10, Held 16 -> 17), pressed the toast's own "Undo" --
+  and the lead stayed held. The row's "Release" button did put it back, and the
+  Undo a KILL raises worked, so the two presses were compared.
+
+  The cause is the write, not the button. The toast's Undo re-sent the Hold's own
+  write reversed -- `setLeadStatus` with `new`, the ordinary status path -- and
+  that path raises the drafted warning for any lead with a written text, which is
+  the ordinary held lead. The walker's lead had a draft, the desk refused in
+  silence, `leadStatusOptimistic` rolled the row back, and the lead stayed held.
+  A kill's Undo never goes near that path: it carries the status the row held and
+  goes through the desk's own way back (`restoreKilledLead`).
+
+  These two tests are the fix. The first is the walker's press, made again, and
+  the second is the refusal that used to be the whole answer -- asserted rather
+  than described, so the red half of this unit is a measurement.
+*/
+
+// guards: TIA-2 -- the toast's Undo after a Hold must put the lead back where it was, through the desk's own way back.
+test("an Undo of a Hold puts a drafted lead back to drafted and a released lead back to held", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_prior_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      create table audit_events(id serial primary key, user_id text not null, action text not null,
+        detail text not null default '', created_at timestamptz not null default now(),
+        newsroom_id integer not null default 1, subject_kind text, subject_id integer);
+      insert into leads(id,newsroom_id,status) values (1,7,'new'),(2,7,'held');
+      insert into drafts(id,lead_id,newsroom_id) values (1,2,7);`);
+    const sql = makeSql(db);
+    const editor = { userId: "editor-1", newsroomId: 7 };
+
+    // The walker's lead: the desk has already drafted it, and the editor holds it.
+    assert.equal((await setLeadStatusForEditor(sql, editor, { id: 2, status: "held" })).ok, true);
+    // An Undo carries the status the row held when the Hold was pressed, and the
+    // keys the editor already approved on that press.
+    assert.deepEqual(
+      await restoreKilledLeadForEditor(sql, editor, { id: 2, status: "drafted", override: ["lead-status-drafted"] }),
+      { ok: true, status: "drafted" },
+      "a HOLD is put back by the desk's way back -- the half that used to refuse",
+    );
+    const [back] = await sql<{ status: string }>`select status from leads where id = 2`;
+    assert.equal(back.status, "drafted", "the lead is where it was, its draft intact");
+
+    // The row's own Release, unchanged: a released lead goes back on hold.
+    assert.equal((await setLeadStatusForEditor(sql, editor, { id: 1, status: "held" })).ok, true);
+    assert.deepEqual(await restoreKilledLeadForEditor(sql, editor, { id: 1 }), { ok: true, status: "new" });
+    const [released] = await sql<{ status: string }>`select status from leads where id = 1`;
+    assert.equal(released.status, "new", "a Hold on an open lead comes back to New");
+  } finally {
+    await db.close();
+  }
+});
+
+// guards: TIA-2 -- the ordinary status write is refused for the walker's lead, and the way back is still narrow to a held or killed lead.
+test("the ordinary status write cannot undo a Hold, and the way back refuses a lead it did not hold", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_prior_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      create table audit_events(id serial primary key, user_id text not null, action text not null,
+        detail text not null default '', created_at timestamptz not null default now(),
+        newsroom_id integer not null default 1, subject_kind text, subject_id integer);
+      insert into leads(id,newsroom_id,status) values (1,7,'new'),(2,7,'held');
+      insert into drafts(id,lead_id,newsroom_id,body) values (1,2,7,'Saved prose');`);
+    const sql = makeSql(db);
+    const editor = { userId: "editor-1", newsroomId: 7 };
+
+    // The write the toast's Undo sent before the fix, verbatim: refused, silently.
+    const refused = await setLeadStatusForEditor(sql, editor, { id: 2, status: "new" });
+    assert.equal(refused.ok, false, "the ordinary write is refused for the walker's lead, which is why the Undo did nothing");
+    assert.equal((await sql<{ status: string }>`select status from leads where id = 2`)[0].status, "held");
+
+    // The way back is not a general "set any status" door: an open lead is left alone.
+    const open = await restoreKilledLeadForEditor(sql, editor, { id: 1, status: "held" });
+    assert.equal(open.ok, false, "a lead that was never held or killed is not a way back");
+    assert.match(String(open.error), /killed or held/i);
+    // And a held lead asked to come back held is no way back at all.
+    assert.equal((await restoreKilledLeadForEditor(sql, editor, { id: 2, status: "held" })).ok, false);
+    assert.equal((await sql<{ status: string }>`select status from leads where id = 2`)[0].status, "held");
+  } finally {
+    await db.close();
+  }
+});

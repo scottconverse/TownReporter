@@ -115,9 +115,9 @@ export function NewsletterMailbox() {
           ...(password === "" ? {} : { password }),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setSaveErr(null);
-      setSaveNote(mailboxSaveResultText(password !== ""));
+      setSaveNote(mailboxSaveResultText(password !== "", res.mailbox.hasPassword));
       setPassword("");
       setTouched(false);
       announceToDesk("Newsletter mailbox saved.");

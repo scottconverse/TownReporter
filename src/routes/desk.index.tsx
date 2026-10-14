@@ -6,6 +6,11 @@ import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
+import {
+  latestCompletedScan,
+  todayLeadsHeading,
+  todayScanReadingNote,
+} from "@/lib/desk/today-leads-heading";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +52,6 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
 import { KillDialog } from "@/components/dialogs/KillDialog";
 import {
   cardResultLine,
-  isAgentKind,
   matchesFollowUpFilter,
   parseFinding,
 } from "@/lib/news/follow-up-copy";
@@ -76,6 +80,7 @@ import {
   openLeads,
   parseFailedSources,
   printedDupChip,
+  investigationPileFor,
   pileForStatus,
   scanCountsLine,
   scanZeroWhy,
@@ -682,6 +687,14 @@ function DeskHome() {
   const flakyFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "flaky");
   const last = scans.data?.rows?.[0];
   const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error);
+  /*
+    FC15: the heading credits a scan with the pile only when that scan has
+    finished and filed its leads. `last` is the newest row of any state and is
+    kept for the other surfaces that name the latest run; the New leads heading
+    uses the newest COMPLETED one, so a scan still reading sources is never
+    named as the source of a pile that holds older leads.
+  */
+  const completedScan = latestCompletedScan(scans.data?.rows);
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
@@ -693,12 +706,12 @@ function DeskHome() {
     `followUps` query the rail's count above also reads -- see that query's own
     note -- so the two numbers on this page cannot disagree.
   */
-  const waitingOnFollowUp = (followUps.data ?? []).filter(
-    (row) =>
-      isAgentKind(row.agent_kind) &&
-      matchesFollowUpFilter(row, "active") &&
-      row.last_state !== "found",
-  ).length;
+  /*
+    FC14 (Oct 11 walk): this counted every live AI follow-up, including one on
+    a published story, so Today said 1 while Dark Desk's own pile said 0. It is
+    Dark Desk's pile, so it uses Dark Desk's rule (`investigationPileFor`).
+  */
+  const waitingOnFollowUp = invs.filter((row) => investigationPileFor(row) === "waiting").length;
   const printed = published.data ?? [];
 
   /*
@@ -1969,10 +1982,18 @@ function DeskHome() {
                 <div className="today-leads-head">
                   <div className="today-leads-title">
                     <h2>New leads</h2>
-                    <span>
-                      {last ? `${formatListDateTime(last.started_at)} scan · best first` : "Best first"}
-                    </span>
+                    <span>{todayLeadsHeading(completedScan)}</span>
                   </div>
+                  {/*
+                    FC15: the heading above names the last scan that FILED its
+                    leads. While a scan is still reading sources its leads are
+                    not on this pile, and the pile holds everything open -- older
+                    leads and Dark Desk handoffs among them -- so the running
+                    scan is named here, apart from the heading, as activity.
+                  */}
+                  {todayScanReadingNote(scanning) ? (
+                    <p className="meta" role="status">{todayScanReadingNote(scanning)}</p>
+                  ) : null}
                   <div className="today-segs" role="group" aria-label="Which leads to show">
                     <button
                       type="button"

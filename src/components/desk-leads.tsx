@@ -4,16 +4,19 @@ import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { formatAge, parseUrlList } from "@/lib/paper";
-import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   editorTitle,
   cameBackLabel,
   DEVELOPING_LABEL,
   dupAiReason,
+  duplicateLinkState,
   killedAsDuplicateNote,
   killRecordLine,
   printedDuplicateLine,
   leadSourceEvidenceLabel,
+  STALE_DUPLICATE_LABEL,
+  STALE_DUPLICATE_NOTICE,
   type PrintedDup,
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
@@ -196,6 +199,16 @@ export function LeadRowView({
   killPending?: boolean;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
+  /*
+    B02 (2026-10-13): the paper's own place, so this row asks the matcher the
+    same question with the same town the Compare view uses. See the dup-stale
+    line below and duplicateLinkState in lib/news/desk-copy.
+  */
+  const paper = usePaper();
+  /* B02: asked once per row, not once per mention. */
+  const savedLinkStale =
+    lead.possible_duplicate_of != null &&
+    duplicateLinkState(lead, lead.possible_duplicate, paper) === "stale";
   const [confirming, setConfirming] = useState(false);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
@@ -622,6 +635,17 @@ export function LeadRowView({
             ) : "the earlier lead is unavailable; compare it only if it is restored."}
           </p>
         ) : null}
+        {/*
+          B02 (2026-10-13): the saved link stopped matching. The link above stays
+          exactly where it was, with its Compare link and every button; this is
+          one plain line under it so the row does not read as "a duplicate" on
+          its own. The editor decides -- nothing is blocked, no link is removed.
+        */}
+        {savedLinkStale ? (
+          <p className="meta dup-stale">
+            <strong>{STALE_DUPLICATE_LABEL}</strong> — {STALE_DUPLICATE_NOTICE}
+          </p>
+        ) : null}
         {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
         {dup ? (
           <p className="meta dup-match">
@@ -774,6 +798,20 @@ export function LeadSourceEvidenceCount({
 
 export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | null }) {
   const { formatShortDate } = usePaperDateFormatters();
+  /*
+    B02 (2026-10-13): a saved "possible duplicate" link can stop being true --
+    the rule that filed it is tightened, or a headline is edited -- and the row
+    kept drawing "Possible duplicate · compare" while the Compare view itself
+    warned that the saved link did not match the current evidence. The link is
+    NOT removed (no database row is touched, and every Compare button stays);
+    the row just says plainly that the saved link no longer matches, so it stops
+    asserting a duplicate the desk can no longer support. "matches" leaves the
+    chip exactly as it reads today. See duplicateLinkState in lib/news/desk-copy.
+  */
+  const paper = usePaper();
+  const savedLinkStale =
+    lead.possible_duplicate_of != null &&
+    duplicateLinkState(lead, lead.possible_duplicate, paper) === "stale";
   return (
     <div className="lead-flags">
       <Chip s={lead.status} />
@@ -849,11 +887,15 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
                 }`
           }
         >
-          {lead.dup_kind === "developing" ? "New facts · compare" : "Possible duplicate · compare"}
+          {savedLinkStale
+            ? `${STALE_DUPLICATE_LABEL} · compare`
+            : lead.dup_kind === "developing"
+              ? "New facts · compare"
+              : "Possible duplicate · compare"}
         </Link>
       ) : lead.possible_duplicate_of ? (
         <span className="chip maybe-same" title="The earlier lead is unavailable.">
-          Possible duplicate · unavailable
+          {savedLinkStale ? `${STALE_DUPLICATE_LABEL} · unavailable` : "Possible duplicate · unavailable"}
         </span>
       ) : null}
     </div>

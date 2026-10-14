@@ -57,7 +57,8 @@ it("an empty story never inherits ready from its memo, acknowledgement, or zero 
       acknowledgedForVersion: false,
       exempt: false,
     }).state,
-    "checking",
+    /* FA06/FC05 (Oct 11 walk): no words yet is "No draft yet", even while a job waits. */
+    "not-ready",
   );
   assert.equal(
     editorStoryState([{ key: "body", kind: "hard", sentence: "The story body is empty." }], 0)

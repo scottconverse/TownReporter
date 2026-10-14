@@ -278,7 +278,12 @@ export function jobProgressView(
 ): JobProgressView {
   const kind = row.kind;
   let cutOff = false;
-  try { cutOff = JSON.parse(row.result_json ?? "{}").draftCutOff === true; } catch { /* Legacy receipt. */ }
+  let darkStop = "";
+  try {
+    const receipt = JSON.parse(row.result_json ?? "{}");
+    cutOff = receipt.draftCutOff === true;
+    darkStop = typeof receipt.darkStop === "string" ? receipt.darkStop : "";
+  } catch { /* Legacy receipt. */ }
   let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
   if (typeof row.model_choice === "string" && row.model_choice.startsWith("custom:")) {
     try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
@@ -301,7 +306,12 @@ export function jobProgressView(
           ? `/desk/story/${leadId}`
           : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
-    doneText: kind === "draft" && cutOff ? CUT_OFF_WARNING : DONE_TEXT[kind] ?? "Done",
+    doneText: kind === "draft" && cutOff
+      ? CUT_OFF_WARNING
+      : kind === "dark" && darkStop === "synthesis-failed"
+        /* FC26: the file page's own sentence for this stop (desk-copy.ts). */
+        ? "Could not finish this round. What was found is still on the file."
+        : DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
     /*
       Retry re-runs the request the row describes, so it is only offered for the
@@ -636,3 +646,16 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     }
     return { ok: true, model: label };
   });
+
+/*
+  The desk header's Running box line, FC13 (Oct 11 walk), lives in
+  `running-head-label.ts` -- a module with no imports -- and is re-exported
+  here for the callers that already expect it off this module.
+
+  It moved because `desk-chrome.tsx` draws it and `desk-chrome.tsx` is a CLIENT
+  component. Importing the value from here was enough to pull this module's
+  whole import graph -- `desk-auth.ts`, `verify.server`, `isolation.server` --
+  into the browser bundle, which then would not build. The label reads nothing
+  but `job.status`, so it has no business in the server graph.
+*/
+export { runningHeadLabel } from "./running-head-label.ts";

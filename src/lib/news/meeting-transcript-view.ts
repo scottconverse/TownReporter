@@ -52,7 +52,10 @@ export type TranscriptView = {
   artifactId: number;
   videoId: string;
   title: string | null;
+  /** FC08 (Oct 11 walk): the date in the meeting's own title, not the upload date. */
   meetingDate: string | null;
+  /** When the video was posted; printed as "Posted", never as the meeting date. */
+  postedDate: string | null;
   storagePath: string;
   sha256: string;
   format: string;
@@ -111,6 +114,17 @@ export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
  */
 export const TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE =
   "Integrity: not checked (the original file is missing).";
+
+/**
+ * The plain reason the storage facts are on the page (walk row FC11).
+ *
+ * WHY. The owner's walk found the long stored path, the SHA-256 and the "srv3"
+ * format printed above the readable tape with no explanation, so they read as
+ * machine noise. This one line says what they are for. Every value below it
+ * stays visible.
+ */
+export const TRANSCRIPT_STORAGE_DETAILS_EXPLANATION =
+  "Storage details: where the saved copy is kept and its fingerprint, which proves the tape was not changed.";
 
 export type TranscriptOriginalDownload =
   | { ok: true; blob: Blob }
