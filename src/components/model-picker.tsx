@@ -18,7 +18,6 @@ import {
   automaticEffortNote,
   modelEffortLabel,
   modelEffortsFor,
-  PICKER_EFFORTS,
   pickerShownEffort,
   providerEntry,
   type ModelEffort,
@@ -529,14 +528,16 @@ export function ModelPicker(props: Props) {
             : "Local model")
       : pickerOptionText(option);
   /*
-    TIA-4: the shared picker offers ONE effort list on every screen. Before
-    this, `modelEffortsFor` returned a different list per resolved model, so
-    the story page's own panel and its redraft-settings panel could disagree
-    about the same story (Medium/Extra high on one, None/Low/High/Maximum on
-    the other). The list is now the shared union; which rungs a RUN may send is
-    still decided per model when the job is sent.
+    TIA-4: the effort list is the EXACT model's own list, so the setting shown
+    is the setting that runs -- a model that takes no effort level offers none,
+    and the note below says why. Every surface for one story draws this one
+    shared picker with the same `value` and the same resolved `exactModel`
+    (story page's own panel, redraft settings, Redraft dialog), so they cannot
+    offer different rungs for the same story. A surface that handed this picker
+    a different model (its own last-run/resolved id) is what made the two lists
+    disagree; the fix is that they now all pass the page's own pick.
   */
-  const effortOptions = noFallback ? [] : PICKER_EFFORTS;
+  const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
   return (
     <div
@@ -646,16 +647,9 @@ export function ModelPicker(props: Props) {
             ))}
           </select>
           <span className="model-picker-help">
-            {/*
-              TIA-4: the picker now offers the shared effort list on every
-              screen, so this note says the same thing wherever the picker
-              draws. A rung the chosen model does not accept for the run is
-              still safe: the desk revalidates against the exact model and uses
-              that model's own default.
-            */}
             {effortOptions.length
-              ? "Changes how much this model reasons for this run. The model name stays the same; higher effort can take longer. A level a model does not take is left at its own default."
-              : "No effort levels are offered here."}
+              ? "Changes how much this exact model reasons for this run. The model name stays the same; higher effort can take longer."
+              : "This exact model does not declare safe per-run effort levels through its configured transport, so TownReporter uses the provider default."}
           </span>
         </div>
       ) : null}
