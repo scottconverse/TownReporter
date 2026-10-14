@@ -46,7 +46,8 @@ function Inline({ text, publicReading = false }: { text: string; publicReading?:
 }
 /**
  * What a body block is, for the renderer: the public reading's `claims` heading
- * (the "Claims and sources" anchor), an ordinary `h2`, or not a heading at all.
+ * (the "Claims and sources" anchor), an ordinary `h2`, a `hidden` duplicate of
+ * the claims title the page already printed, or not a heading at all.
  *
  * Two things make a heading. An explicit `## ` marker, as before. And one
  * standing section title the whole-meeting writer emits as its own block --
@@ -62,12 +63,25 @@ function Inline({ text, publicReading = false }: { text: string; publicReading?:
 function storyBlockHeading(
   block: string,
   { publicReading = false, claimsUsed = false }: { publicReading?: boolean; claimsUsed?: boolean } = {},
-): "claims" | "h2" | null {
+): "claims" | "h2" | "hidden" | null {
   const heading = block
     .replace(/^#{1,3}\s+/, "")
     .replace(/^\*\*|\*\*$/g, "")
     .trim();
-  if (publicReading && !claimsUsed && /^claims and sources\s*:?$/i.test(heading)) return "claims";
+  /*
+    One "Claims and sources" heading per page (Scott, Oct 14 2026: "show it
+    once"). A piece the editor pasted in leads with its own `CLAIMS AND
+    SOURCES` line, so the public page printed that section under the page's
+    heading and then printed the pasted title again one line below it.
+
+    The FIRST such line is the heading: it takes the anchor and prints the
+    page's own words, so a lower-case or colon-bearing line is tidied rather
+    than repeated. Every later one duplicates a heading the reader has already
+    seen and goes. `claimsUsed` is what carries that state through the blocks.
+  */
+  if (publicReading && /^claims and sources\s*:?$/i.test(heading)) {
+    return claimsUsed ? "hidden" : "claims";
+  }
   if (block.startsWith("## ") || /^also at the meeting\s*:?$/i.test(heading)) return "h2";
   return null;
 }
@@ -94,6 +108,10 @@ export function StoryBody({
           .trim();
         const kind = storyBlockHeading(block, { publicReading, claimsUsed });
         if (kind === "claims") claimsUsed = true;
+        if (kind === "hidden") {
+          claimsUsed = true;
+          return null;
+        }
         if (kind)
           return (
             <h2
@@ -102,7 +120,17 @@ export function StoryBody({
               className="font-display text-xl font-semibold text-ink"
             >
               <Inline
-                text={block.startsWith("## ") ? block.slice(3) : heading}
+                /*
+                  The claims heading prints the page's own words, not whatever
+                  the body happened to say. A piece the editor pasted in
+                  leads with its own `CLAIMS AND SOURCES` line, and printing
+                  that line verbatim left the reader with the desk's all-caps
+                  form where the page has a title of its own (Release J,
+                  THU-9: "show it once").
+                */
+                text={
+                  kind === "claims" ? "Claims and sources" : block.startsWith("## ") ? block.slice(3) : heading
+                }
                 publicReading={publicReading}
               />
             </h2>

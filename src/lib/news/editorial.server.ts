@@ -46,6 +46,7 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
+import { readerAppendixText } from "./reader-source-names.ts";
 import { suppliedMaterialCapFor, suppliedMaterialCutRecord } from "./supplied-material-cap.ts";
 import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
@@ -1076,6 +1077,7 @@ export async function performEditorialWork(
   }
 
   let documentEvidence = "";
+  let suppliedMaterialText = "";
   const readEditorialDocuments =
     deps.readEditorialDocuments ??
     (await import("./story-documents.server.ts")).readEditorialDocuments;
@@ -1185,6 +1187,12 @@ export async function performEditorialWork(
     undo.
   */
   await throwIfJobCancelled(job.id);
+  /*
+    The pasted text as a supplied document, when no upload was read at all:
+    the same paragraph the reader's appendix should be able to cite. It is
+    empty when the desk read uploads, because their notes are the material.
+  */
+  suppliedMaterialText = documentEvidence ? "" : req.source_text;
   const result = await waitForModel({
     jobId: job.id,
     // `activeChoice` is reassigned by the reading pass's switch handler above,
@@ -1195,7 +1203,20 @@ export async function performEditorialWork(
         userId: job.user_id,
         newsroomId: job.newsroom_id,
         subject: req.subject,
-        sourceText: documentEvidence || req.source_text || req.subject,
+        /*
+          THV-2: the editor's uploads and pasted text are supplied material,
+          and the reading notes name them by OUR filenames ("Opinion desk
+          pasted material.txt", or the uploaded packet's own name). A claim
+          carried back out of it would be cited, on the public page, to a row
+          in our own file store.
+
+          So the material the writer sees is labelled "the supplied document"
+          before it enters the pack, and whatever it cites from it can only
+          carry that name. This renames the LABEL only: the notes, their page
+          locators and every public URL are untouched, and material that
+          carries no internal name passes through character for character.
+        */
+        sourceText: readerAppendixText(documentEvidence || suppliedMaterialText || req.source_text || req.subject),
         pointers,
         ourStory,
         askedFor: req.asked_for,
