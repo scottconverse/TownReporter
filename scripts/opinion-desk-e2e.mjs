@@ -220,14 +220,28 @@ async function main() {
     throw new Error(`the finished piece offers ${offered} Publishes on its row; expected 1`);
   }
   /*
-    0.6.80 (CK): publishing refuses an empty dek, and a pasted piece files
-    none. The row's press says so in words and prints nothing. The editor then
-    writes the dek (the full editor's Dek field; here written to the draft
-    directly, the way this walk seeds its other rows) and presses again.
+    0.6.80 (CK), changed by DHK-3 (Release J): publishing WARNS on an empty dek,
+    and a pasted piece files none. The row's press no longer refuses -- the
+    server hands back the warnings it computed inside the transaction
+    (`performPublishEditorial`, `src/lib/news/opinion.ts`) and the desk draws
+    them under the row with a "Publish anyway" press
+    (`OpinionPublishWarnings`, `src/routes/desk.opinion.tsx`). Nothing prints
+    until the editor either acknowledges the warning or writes the dek, which
+    is what this walk now proves. The editor writes the dek (the full editor's
+    Dek field; here written to the draft directly, the way this walk seeds its
+    other rows) and presses again. The panel is a div, not a dialog: there is
+    nothing to close or cancel, and the row's own Publish stays the press that
+    does the printing.
   */
   await rowPublish.click();
-  await page.getByText(/Add a dek, the one-line summary under the headline/).waitFor({ timeout: 30_000 });
-  step("a piece with no dek is refused in words from its own row");
+  const dekWarning = page
+    .locator('[role="alert"]')
+    .filter({ hasText: "No dek yet. You can add one, or publish without it." });
+  await dekWarning.waitFor({ timeout: 30_000 });
+  // The warning stands beside a press that goes on -- the piece is neither
+  // printed nor refused outright until the editor chooses.
+  await dekWarning.getByRole("button", { name: "Publish anyway" }).waitFor({ timeout: 20_000 });
+  step("a piece with no dek is warned about in words from its own row, and not printed");
   const dekClient = new Client({ connectionString: dbUrl });
   await dekClient.connect();
   const dekSet = await dekClient.query(
@@ -237,6 +251,12 @@ async function main() {
   );
   await dekClient.end();
   if (dekSet.rowCount !== 1) throw new Error(`the dek went to ${dekSet.rowCount} drafts; expected 1`);
+  /*
+    The dek is written, so the warning no longer holds and the row's Publish
+    prints without an acknowledgement. The warning panel was never a modal, so
+    there is nothing to dismiss first -- the row's own press is still the one
+    that puts the piece on the paper.
+  */
   await rowPublish.click();
   await page.getByText(/On the paper\. See it under Published/).waitFor({ timeout: 30_000 });
 

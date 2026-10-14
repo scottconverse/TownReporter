@@ -142,11 +142,20 @@ async function main() {
   await page.getByText(/CLAIMS AND SOURCES|primegov/i).first().waitFor({ timeout: 20_000 });
   step("the sources came with it");
 
-  // DHB4: a missing dek is a visible warning, followed by an explicit,
+  // DHB4: a missing dek is a visible WARNING, followed by an explicit,
   // recorded Publish anyway press. The paper and feed checks above happened
   // before either publish press, so the paste path itself remains draft-only.
+  //
+  // DHK-3 (Release J) changed the words: an empty dek is no longer a refusal.
+  // The press opens the confirm dialog, which draws the SERVER's own sentence
+  // for the dek -- "No dek yet. You can add one, or publish without it."
+  // (`opinionPublishWarnings`, src/lib/news/opinion-draft.server.ts:88) --
+  // above a confirm press labelled "Publish anyway in <section>"
+  // (src/components/publish-confirmation.ts:27, :88).
   await page.getByRole("button", { name: "Publish to the paper", exact: true }).click();
-  const dekWarning = page.getByText("Add a dek, the one-line summary under the headline, before you publish.", { exact: true });
+  const dekWarning = page.locator(".astra-publish-warning", {
+    hasText: "No dek yet. You can add one, or publish without it.",
+  });
   await dekWarning.waitFor({ timeout: 20_000 });
   const publishAnyway = page.getByRole("button", { name: /Publish anyway/ });
   await publishAnyway.waitFor({ timeout: 20_000 });
