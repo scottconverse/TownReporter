@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, openSync, closeSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, openSync, closeSync, realpathSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -2459,8 +2459,19 @@ test("the lockfile is hashed from the app folder even when PowerShell was starte
     const result = read(resultPath).trim();
     const line = (name) => result.split("\n").find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1) ?? "(missing)";
 
-    // The precondition the bug needs: the process really is somewhere else.
-    assert.equal(line("processDir").toLowerCase().replace(/\\+$/, ""), elsewhere.toLowerCase(), "PowerShell did not start in the other folder, so this proves nothing");
+    /*
+      The precondition the bug needs: the process really is somewhere else.
+
+      Compare CANONICAL long paths on both sides. [Environment]::CurrentDirectory
+      comes back from the OS and, on the Windows CI runner, in 8.3 short form
+      ("c:\users\runner~1\...") while `elsewhere` is the long path Node built
+      ("c:\users\runneradmin\..."). The two name the same folder, so lower-casing
+      them is not enough: realpathSync.native expands the alias first. This does
+      NOT loosen what the assertion proves -- it still fails if PowerShell started
+      anywhere other than `elsewhere`.
+    */
+    const canonical = (p) => realpathSync.native(p).toLowerCase().replace(/\\+$/, "");
+    assert.equal(canonical(line("processDir")), canonical(elsewhere), "PowerShell did not start in the other folder, so this proves nothing");
     assert.ok(!existsSync(join(elsewhere, "package-lock.json")), "the other folder has a lockfile, so this proves nothing");
 
     assert.equal(line("lockBefore"), expected, "the lockfile was not hashed from the app folder before the fast-forward");

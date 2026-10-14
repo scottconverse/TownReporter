@@ -1170,7 +1170,12 @@ async function main() {
   await openStoryDetails(page);
   await page.locator("#story-topic-select").selectOption("community");
   await page.waitForFunction(() => !document.getElementById("story-topic-select")?.disabled);
-  await page.getByRole("button", { name: "Publish anyway — I accept these claims are unreviewed", exact: true }).click();
+  /*
+    DHI-8 (Release J) made the press one sentence: the section it will publish
+    into sits between the two halves, so this matches the stable first clause
+    and the stable acceptance clause rather than the whole old string.
+  */
+  await page.getByRole("button", { name: /^Publish anyway( in .+)? — I accept these claims are unreviewed$/ }).click();
   await page.waitForFunction(() => {
     const accept = [...document.querySelectorAll("#publish-blockers button")]
       .find(button => /I accept these claims/.test(button.textContent ?? ""));

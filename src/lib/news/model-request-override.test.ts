@@ -67,7 +67,7 @@ it("a different transcript warns, then queues that exact artifact; changing a ru
   const second = {...input,meetingArtifactId:artifacts[1],override:["transcript-selection-mismatch"]};
   const conflict = await commitStoryDraftForAuthenticatedEditor(second,deps);assert.equal("warning" in conflict && conflict.warning?.key,"transcript-run-conflict");
   const restart = await commitStoryDraftForAuthenticatedEditor({...second,override:["transcript-selection-mismatch","transcript-run-conflict"]},deps);assert.equal(restart.ok,true);
-  const [cancelled] = await sql.query<{status:string;claim_token:string|null}>("select status,claim_token from desk_jobs where id=$1",[old.id]); assert.equal(cancelled.status,"failed");assert.equal(cancelled.claim_token,null);
+  const [cancelled] = await sql.query<{status:string;claim_token:string|null}>("select status,claim_token from desk_jobs where id=$1",[old.id]); assert.equal(cancelled.status,"cancelled");assert.equal(cancelled.claim_token,null);
   await expectAudit("transcript-selection-mismatch"); await expectAudit("transcript-run-conflict");
   const missing = await commitStoryDraftForAuthenticatedEditor({...input,meetingArtifactId:2147483000,override:["transcript-selection-mismatch"]},deps); assert.equal(missing.ok,false);assert.match(missing.error,/not in this newsroom/i);
 });
@@ -81,7 +81,7 @@ it("a model change warns then cancels the old draft, clears its claim and queues
   const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["model-change-running"] }, deps);
   assert.equal(result.ok, true);
   const [cancelled] = await sql<{ status: string; claim_token: string | null; cancel_requested: boolean }>`select status,claim_token,cancel_requested from desk_jobs where id=${old.id}`;
-  assert.equal(cancelled.status, "failed"); assert.equal(cancelled.claim_token, null); assert.equal(cancelled.cancel_requested, true);
+  assert.equal(cancelled.status, "cancelled"); assert.equal(cancelled.claim_token, null); assert.equal(cancelled.cancel_requested, true);
   const [current] = await sql<{ model_choice: string }>`select model_choice from desk_jobs where subject_id=${leadId} and kind='draft' and status='queued'`;
   assert.equal(current.model_choice, "claude-sonnet"); await expectAudit("model-change-running");
 });

@@ -728,7 +728,9 @@ async function releaseGOverrides() {
       await openTheStory(leadId);
     }
     if (mode === "accepted-edited") {
-      await page.getByRole("button", { name: /Publish anyway — I accept these claims/ }).click();
+      /* DHI-8 (Release J): the press is one sentence, so the section may sit between
+         the two clauses. Match the clause pair, not the whole old string. */
+      await page.getByRole("button", { name: /Publish anyway( in .+)? — I accept these claims/ }).click();
       await waitForBlockerCount(0, "the recorded acceptance");
       await page.locator("#story-body").fill(body.replace("short", "brief"));
       await page.getByRole("button", { name: "Save edits", exact: true }).click();
@@ -744,7 +746,14 @@ async function releaseGOverrides() {
     }
     await publishButton().click();
     step(`${mode}: opened the publish confirmation`);
-    await page.getByRole("button", { name: `${mode === "self-checked" ? "Yes, print it" : "Publish anyway"} in ${SECTION_NAME}`, exact: true }).click();
+    /* DHI-8 (Release J): the confirmation carries the section AND the acceptance
+       clause as one sentence. "Yes, print it" is unchanged; "Publish anyway" now
+       has the claims clause after the section. */
+    await page.getByRole("button", {
+      name: mode === "self-checked"
+        ? new RegExp(`^Yes, print it in ${SECTION_NAME}$`)
+        : new RegExp(`^Publish anyway in ${SECTION_NAME} — I accept`),
+    }).click();
     step(`${mode}: pressed the confirmation`);
     const article = await waitForTruth(`${mode} to publish`, async () => (await pg.query("select slug,body from articles where lead_id=$1", [leadId])).rows[0]);
     assert.equal(article.body, mode === "accepted-edited" ? body.replace("short", "brief") : body);
