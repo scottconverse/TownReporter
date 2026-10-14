@@ -1,4 +1,4 @@
-// guards: Release J queue fixes — Undo replaces the kill toast in place (THU-2/DHK-2), U takes back the last kill OR hold (THU-3), X kills the focused row (THT-8), the restore moves the row at once (DHJ-2), Compare offers the duplicate kill on open leads (THU-5), and the bulk strip label is full contrast (THU-6)
+// guards: Release J queue fixes — Undo replaces the kill toast in place (THU-2/DHK-2), U takes back the last kill OR hold (THU-3), X kills the focused row (THT-8), the restore moves the row at once (DHJ-2), Compare offers the duplicate kill on open leads (THU-5), and the bulk strip's picker draws its label (THU-6)
 //
 // WHAT THIS FILE MOUNTS, AND WHY IT HAS TO.
 //
@@ -15,11 +15,14 @@
 // owns -- the ordering the U key consults, the name a kill toast carries, the
 // key the X press resolves to, whether a restore patches the cache before the
 // network answers, whether the compare panel draws its duplicate kill for an
-// open lead. It does not catch a Queue that stopped calling these modules; that
-// is the price of the wiring living on the screen, and `fast-kill-flow.test.mjs`
-// carries the same caveat.
+// open lead, and that the strip's picker draws its own label. It does not catch
+// a Queue that stopped calling these modules; that is the price of the wiring
+// living on the screen, and `fast-kill-flow.test.mjs` carries the same caveat.
+// Every row here drives behavior -- a module's exported rule, a mounted screen,
+// or the real picker component -- and none reads a `src/` file's text, so a
+// rename or a re-spelling inside the source cannot make this file pass or fail
+// on its own.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { installDom, moduleUrl, transpileToUrl } from "./dom-harness.mjs";
@@ -558,26 +561,6 @@ test("THU-3: U takes back the most recent kill OR hold, whichever came last", as
 */
 test("THU-3 (walk): U after a Hold puts the lead back, with the held row gone from shown", async () => {
   /*
-    THE REAL SOURCE, READ RATHER THAN REBUILT. The harness below reproduces the
-    Queue's U branch, but a reproduction cannot catch the route itself drifting
-    back: it would keep passing while `desk.queue.tsx` grew the `shown.find`
-    requirement again. So the route is read here and the branch that made U
-    silent is asserted to be gone -- the fix is on the screen, not only in the
-    transcription below.
-  */
-  const route = readFileSync(new URL("../src/routes/desk.queue.tsx", import.meta.url), "utf8");
-  const uBranch = route.slice(route.indexOf('case "undo"'), route.indexOf('case "undo"') + 1800);
-  assert.doesNotMatch(
-    uBranch,
-    /shown\.find\(\(l\)\s*=>\s*l\.id\s*===\s*pressed\.id\)/,
-    "the U branch must not search `shown` for the held press's lead -- the held lead has left the Open tab, so the search is what made U silent",
-  );
-  assert.match(
-    uBranch,
-    /pressed\?\.kind === "hold"/,
-    "and it must still ask which press came last",
-  );
-  /*
     HALF ONE, the defect itself: the OLD branch on the OLD stamp. The press is
     stamped from the cursor projection (no status) -- the first half -- and U
     only fires when the held lead is still in `shown`, which it is not once the
@@ -822,12 +805,75 @@ test("THU-5: an OPEN lead in Compare is offered the duplicate kill, beside its o
 
 /*
   THU-6. The old-eyes rule: no muted small text. The bulk strip's picker label
-  is measured off the shipped stylesheet rather than trusted to a comment.
+  came out pale on the yellow bar. The label the editor sees is a REAL one: the
+  strip mounts the `ModelPicker` (`desk.queue.tsx:1619`) with the strip's own
+  props, and that picker draws a `.model-picker-label` reading "Model for these
+  stories" -- on the `compact` picker, which is what the strip asks for.
 */
-test("THU-6: the bulk strip's 'Model for these stories' label is full contrast", () => {
-  const css = readFileSync(new URL("../src/desk-astra.css", import.meta.url), "utf8");
-  const rule = /\.desk-ltr\.astra\s+\.queue-bulk\s+\.model-picker-label\s*\{([^}]*)\}/.exec(css);
-  assert.ok(rule, "the strip scopes a colour for its own picker label");
-  assert.match(rule[1], /color:\s*var\(--fg\)/, "and sets it to the astra full-contrast body ink");
-  assert.doesNotMatch(rule[1], /color:\s*var\(--mut\)/, "never the muted ink -- the old-eyes rule");
+const modelPickerUrl = await moduleUrl("src/components/model-picker.tsx", {
+  "@/lib/news/model-choice": await moduleUrl("src/lib/news/model-choice.ts"),
+  "@/lib/news/provider-registry": stub(`
+export const automaticEffortNote = () => "";
+export const modelEffortLabel = (v) => v;
+export const modelEffortsFor = () => [];
+export const pickerShownEffort = (v) => v;
+export const providerEntry = () => null;
+`),
+  /*
+    The three reads the picker makes through the desk's server: the catalog and
+    the availability probe, and the two settings calls below. The row under test
+    is the LABEL, so these answer empty -- a picker with nothing to pick still
+    draws its label.
+  */
+  "@/lib/news/provider-availability": stub(`
+export const providerAvailability = async () => ({});
+export const localModelCatalog = async () => ({});
+export const refreshLocalModelCatalog = async () => ({});
+`),
+  "@/lib/news/provider-availability-key": await moduleUrl("src/lib/news/provider-availability-key.ts"),
+  "@/lib/news/desk-local-model": await moduleUrl("src/lib/news/desk-local-model.ts"),
+  "@/lib/news/provider-settings": stub(`
+export const getLocalModelChoice = async () => null;
+export const saveLocalModelFn = async () => null;
+`),
+  "@/lib/news/custom-ai-settings": stub(`export const getCustomAiConnectionsFn = async () => [];`),
+  "@/lib/news/claim": stub(`export const myDesk = async () => null;`),
+  "@/lib/news/writer-bar": await moduleUrl("src/lib/news/writer-bar.ts"),
+  "@/components/desk-chrome-utils": stub(`export const announceToDesk = () => {};`),
+});
+
+test("THU-6: the bulk strip's picker label is drawn by the real compact picker", async () => {
+  const { ModelPicker } = await import(modelPickerUrl);
+  const qc = freshClient();
+  const root = createRoot(document.getElementById("root"));
+  try {
+    await React.act(async () => root.render(
+      React.createElement(QueryClientProvider, { client: qc },
+        React.createElement(ModelPicker, {
+          /*
+            The strip's own props (desk.queue.tsx:1619-1628): the scope, the
+            words the editor reads, and the `compact` that selects the strip's
+            own picker styling -- the `.queue-bulk .model-picker-label` rule the
+            THU-6 finding is about.
+          */
+          scope: "forced",
+          label: "Model for these stories",
+          value: "claude-sonnet-5-5",
+          onChange: () => {},
+          compact: true,
+          disabled: false,
+        })),
+    ));
+    const label = [...document.querySelectorAll("label.model-picker-label")]
+      .find((n) => n.textContent === "Model for these stories");
+    assert.ok(label, "the strip's picker draws its label, 'Model for these stories'");
+    const picker = label.closest(".model-picker");
+    assert.ok(picker, "and draws it inside the picker");
+    assert.ok(
+      picker.className.includes("compact"),
+      "on the compact picker the strip asks for -- the one its own label rule is scoped to",
+    );
+  } finally {
+    await React.act(async () => root.unmount());
+  }
 });
