@@ -176,6 +176,130 @@ export function Harness({ answer, restore = "new" }) {
 `);
 const { Harness } = await import(screenUrl);
 
+/*
+  THU-3, THE WALK'S OWN FAILURE, as a second harness screen.
+
+  The file above rebuilds the Queue's WIRING and stops there. This one rebuilds
+  the path the WALK actually took, which is the reason THU-3 passed in the
+  `data:` harness and failed on the real page:
+
+    - `rows` is the LEAD objects the screen holds, not just an id and a status.
+      The row's own Hold reads the status off its row (`holdStamp`, the shipped
+      rule); the keyboard's H reads it off the CURSOR lead, which is a
+      projection with the headline and nothing else -- exactly the gap the walk
+      walked into, where `lastPress` was stamped with `restore: undefined`;
+    - the H press goes through the SAME optimistic patch the page uses
+      (`leadStatusOptimistic`), so the held lead leaves the Open list in the same
+      paint as the press -- which is the second half of the finding;
+    - and U is the real U branch: it looks the held press's lead up in `shown`
+      and only fires when it finds it. That is the line the real page had, and on
+      the real page a held lead is NOT in `shown` (it left the Open tab), so the
+      branch is skipped and U does nothing.
+
+  So this harness reproduces the page in the two ways the finding names: the
+  press carries no restore when it is stamped from the cursor projection, and
+  the held lead is gone from `shown` by the time U is pressed.
+*/
+const walkScreenUrl = stub(`
+import { createElement as h, useRef, useState } from ${JSON.stringify(import.meta.resolve("react"))};
+import { useQueryClient } from ${JSON.stringify(import.meta.resolve("@tanstack/react-query"))};
+import { useDeskMutation } from ${JSON.stringify(deskActionUrl)};
+import { leadStatusOptimistic } from ${JSON.stringify(leadStatusUrl)};
+import { holdPress, holdUndoPress, undoPressFor, holdStamp, holdStampRestore } from ${JSON.stringify(fastKillUrl)};
+
+/*
+  The Queue's U branch. "branch" chooses which spelling of it runs:
+
+    - "before" is the 180c87ec line the walk walked into, kept here so the test
+      can go red on it: U only fires when the held lead is STILL on screen, so a
+      held lead -- which the optimistic patch has taken off the Open tab -- is
+      never found and U sends nothing;
+    - "after" is the fix: the stamp is the whole memory the press needs, and
+      undoPressFor turns it into the write. The lead left the LIST, not the
+      screen, and the restore goes by id.
+*/
+export function WalkHarness({ answer, cursorStatus = { id: 7, headline: "Council meets on housing" }, getShown, branch = "after" }) {
+  const qc = useQueryClient();
+  const lastPress = useRef(null);
+  const undoOptimistic = leadStatusOptimistic(qc);
+  const undoMove = (press) => ({ id: press.id, status: press.status ?? "new" });
+
+  const undoKill = useDeskMutation({
+    mutationFn: (press) => answer(press),
+    optimistic: (press) => undoOptimistic.optimistic(undoMove(press)),
+    rollback: (context, press) => undoOptimistic.rollback(context, press && undoMove(press)),
+    done: () => "Undone: the lead is back on the Queue.",
+    failedLead: "Could not put that lead back. ",
+    what: "put that lead back",
+  });
+
+  const setStatus = useDeskMutation({
+    mutationFn: (input) => answer(input),
+    ...leadStatusOptimistic(qc),
+    done: () => "Held.",
+    failedLead: "Could not change that lead. ",
+  });
+
+  return h("div", null,
+    /*
+      The row's own Hold: reads the status off the ROW, the way holdLead does
+      on the page, and stamps it with the SHIPPED rule (holdStamp, fast-kill.ts)
+      -- so the test is driving desk.queue.tsx's holdLead, not a copy of it.
+    */
+    h("button", { id: "rowHold", onClick: () => {
+      const row = getShown()[0];
+      const stamp = holdStamp(7, row);
+      lastPress.current = stamp;
+      setStatus.mutate(holdPress(7, stamp.restore));
+    } }, "Row Hold"),
+    /*
+      The keyboard's H, before the fix: it stamps from the CURSOR lead, which is
+      a projection with no status -- the shipped rule, handed a lead with no
+      status, returns undefined. This is the stamp the walk's U then read.
+    */
+    h("button", { id: "keyHold", onClick: () => {
+      const stamp = holdStamp(7, cursorStatus);
+      lastPress.current = stamp;
+      setStatus.mutate(holdPress(7, stamp.restore));
+    } }, "Key H"),
+    /*
+      The keyboard's H, AFTER the fix: holdLeadById reads the lead's own row
+      for the status, and holdStamp turns that row into the stamp -- the same
+      two exported functions desk.queue.tsx calls.
+    */
+    h("button", { id: "keyHoldFixed", onClick: () => {
+      const row = getShown().find((l) => l.id === 7) ?? { status: "held" };
+      const stamp = holdStamp(7, row);
+      lastPress.current = stamp;
+      setStatus.mutate(holdPress(7, stamp.restore));
+    } }, "Key H fixed"),
+    h("button", { id: "u", onClick: () => {
+      const shown = getShown();
+      const pressed = lastPress.current;
+      if (branch === "before") {
+        /* 180c87ec: the held lead must still be on screen for U to fire. */
+        const lead = shown[0];
+        const pressedLead = pressed && pressed.kind === "hold" ? shown.find((l) => l.id === pressed.id) : undefined;
+        if (pressed && pressed.kind === "hold" && (pressedLead || (lead && lead.id === pressed.id))) {
+          const restore = pressedLead && pressedLead.status === "held" ? holdStampRestore(pressedLead.status) : pressed.restore;
+          lastPress.current = null;
+          const press = undoPressFor({ ...pressed, restore });
+          if (press) undoKill.mutate(press);
+        }
+        return;
+      }
+      /* after: the stamp alone answers it, whatever the list is showing now. */
+      if (pressed && pressed.kind === "hold") {
+        lastPress.current = null;
+        const press = undoPressFor(pressed);
+        if (press) undoKill.mutate(press);
+      }
+    } }, "U"),
+  );
+}
+`);
+const { WalkHarness } = await import(walkScreenUrl);
+
 /* ----------------------------------------------------------------- helpers */
 
 const OPEN = ["leads", "open", "all", "best", "", 25];
@@ -253,6 +377,38 @@ const drain = () => React.act(async () => { for (let i = 0; i < 8; i++) await Pr
 const byId = (id) => [...toast.toasts].reverse().find((t) => t.id === id && !t.dismissed);
 /** Every entry under `id`. */
 const allWithId = (id) => toast.toasts.filter((t) => t.id === id);
+
+/*
+  Mount the walk harness. `getShown` reads the Open tab's rows off the cache at
+  press time, which is how the real screen reads `shown` (it is `leads`, and the
+  handlers close over the current value) -- and it is what makes the held lead's
+  disappearance from the Open list visible to the U branch.
+*/
+async function mountWalk(qc, answer, { cursorStatus, branch = "after" }) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await React.act(async () => root.render(React.createElement(QueryClientProvider, { client: qc },
+    React.createElement(WalkHarness, {
+      answer,
+      branch,
+      cursorStatus: cursorStatus ?? { id: 7, headline: "Council meets on housing" },
+      getShown: () => (qc.getQueryData(OPEN)?.rows ?? []),
+    }))));
+  return {
+    container,
+    async click(id) {
+      await React.act(async () => {
+        container.querySelector("#" + id).dispatchEvent(new window.Event("click", { bubbles: true }));
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+      });
+    },
+    async close() {
+      await React.act(async () => root.unmount());
+      container.remove();
+    },
+  };
+}
 
 /* ------------------------------------------------------------------- tests */
 
@@ -380,6 +536,122 @@ test("THU-3: U takes back the most recent kill OR hold, whichever came last", as
         "drafted",
         `pressing ${first} then ${second}: U must undo the ${second} (the one that came last), landing on drafted`,
       );
+    } finally {
+      await page.close();
+    }
+  }
+});
+
+/*
+  THU-3, THE WALK'S OWN FINDING. The test above passes in the `data:` harness
+  because it hands the press a `restore` directly. On the real page it did not:
+  the keyboard's H stamped `lastPress` from the CURSOR lead, which is a
+  projection with no status, so the stamp carried `restore: undefined`; and the
+  U branch only fired when the held lead was STILL on screen, but the hold's
+  optimistic patch takes it off the Open tab in the same paint, so the search
+  found nothing. U after a Hold did nothing at all, which is what the walk saw.
+
+  This test drives the SAME two halves: the H press is stamped from a cursor
+  projection (no status), the optimistic patch is the real one, and the U branch
+  looks the held lead up in `shown` -- which no longer holds it. It fails on
+  180c87ec (U sends nothing) and passes once the branch reads the stamp.
+*/
+test("THU-3 (walk): U after a Hold puts the lead back, with the held row gone from shown", async () => {
+  /*
+    THE REAL SOURCE, READ RATHER THAN REBUILT. The harness below reproduces the
+    Queue's U branch, but a reproduction cannot catch the route itself drifting
+    back: it would keep passing while `desk.queue.tsx` grew the `shown.find`
+    requirement again. So the route is read here and the branch that made U
+    silent is asserted to be gone -- the fix is on the screen, not only in the
+    transcription below.
+  */
+  const route = readFileSync(new URL("../src/routes/desk.queue.tsx", import.meta.url), "utf8");
+  const uBranch = route.slice(route.indexOf('case "undo"'), route.indexOf('case "undo"') + 1800);
+  assert.doesNotMatch(
+    uBranch,
+    /shown\.find\(\(l\)\s*=>\s*l\.id\s*===\s*pressed\.id\)/,
+    "the U branch must not search `shown` for the held press's lead -- the held lead has left the Open tab, so the search is what made U silent",
+  );
+  assert.match(
+    uBranch,
+    /pressed\?\.kind === "hold"/,
+    "and it must still ask which press came last",
+  );
+  /*
+    HALF ONE, the defect itself: the OLD branch on the OLD stamp. The press is
+    stamped from the cursor projection (no status) -- the first half -- and U
+    only fires when the held lead is still in `shown`, which it is not once the
+    optimistic patch has run -- the second half. U sends nothing. This is what
+    the walk measured on :3100, and it is the red half of this test.
+  */
+  {
+    toast.toasts.length = 0;
+    const qc = freshClient();
+    seed(qc, lead({ status: "new" }));
+    const shownNow = () => (qc.getQueryData(OPEN)?.rows ?? []);
+    const calls = [];
+    const page = await mountWalk(qc, async (input) => { calls.push(input); return { ok: true }; },
+      { branch: "before", cursorStatus: { id: 7, headline: "Council meets on housing" } });
+    try {
+      assert.equal(
+        fastKill.undoPressFor({ kind: "hold", id: 7, restore: undefined })?.status,
+        undefined,
+        "a hold stamped from the cursor projection carries no restore -- the defect's first half",
+      );
+      assert.ok(shownNow().some((l) => l.id === 7), "the lead is on the Open tab before the press");
+      await page.click("keyHold");
+      assert.equal(
+        shownNow().some((l) => l.id === 7),
+        false,
+        "the held lead is off the Open tab by the time U is pressed -- the defect's second half",
+      );
+      const before = calls.length;
+      await page.click("u");
+      assert.equal(
+        calls.length - before,
+        0,
+        "on the old branch U after a Hold sends nothing -- the walk's own measurement",
+      );
+    } finally {
+      await page.close();
+    }
+  }
+  /*
+    HALF TWO, the fix: the same press, stamped by the fixed key path -- the lead
+    read off its own row so the stamp carries `new` -- and the U branch that
+    reads the stamp instead of searching `shown`. U sends the restore by id.
+  */
+  {
+    toast.toasts.length = 0;
+    const qc = freshClient();
+    /*
+      A `drafted` lead, so the destination is unambiguous: `holdStamp` reads it
+      off the row and stamps `drafted`, which is a status `new` is not -- so "the
+      stamp carried the row's status" cannot be confused with "the stamp carried
+      nothing and the server guessed `new`", which is what the old key path sent.
+    */
+    seed(qc, lead({ status: "drafted" }));
+    const shownNow = () => (qc.getQueryData(OPEN)?.rows ?? []);
+    const calls = [];
+    const page = await mountWalk(qc, async (input) => { calls.push(input); return { ok: true }; },
+      { branch: "after", cursorStatus: { id: 7, headline: "Council meets on housing" } });
+    try {
+      await page.click("keyHoldFixed");
+      assert.equal(
+        shownNow().some((l) => l.id === 7),
+        false,
+        "the held lead is still off the Open tab -- the fix does not depend on it being shown",
+      );
+      const before = calls.length;
+      await page.click("u");
+      const undo = calls.slice(before);
+      assert.equal(undo.length, 1, "U after a Hold sends exactly one press");
+      assert.equal(
+        undo[0].status,
+        "drafted",
+        "and it names where the lead goes back to: the status the row held before the hold",
+      );
+      assert.equal(statusIn(qc, 7), "drafted", "and the lead is back where it was");
     } finally {
       await page.close();
     }
