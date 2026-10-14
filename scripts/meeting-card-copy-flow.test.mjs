@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 installDom();
 const copy = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": stubUrl("export const looksLikeProviderAuthFailure=()=>false; export const providerAuthTarget=()=>null;"),
-  "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>false;"),
+  "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>false; export const explainPairMatch=()=>null; export const sharesTightName=()=>false;"),
 });
 const base = { published: "2026-10-07T06:29:30Z", channelUrl: "https://youtube.com/@city", aligned: null, chunks: [], votes: [], revisionCount: 0 };
 const rows = [{ ...base, published: "2026-10-07T05:29:30Z", videoId: "blocked", title: "Library Board", status: "failed", failureReason: "WARNING: yt-dlp could not download: socket ECONNRESET\nTraceback: internal tool output" },

@@ -18,7 +18,7 @@ const paperStub = stub(`
 `);
 const copy = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": stub("export const looksLikeProviderAuthFailure=()=>false; export const providerAuthTarget=()=>\"\";"),
-  "./lead-match.ts": stub("export const distinguishingOverlap=()=>({subjects:0,names:0});"),
+  "./lead-match.ts": stub("export const distinguishingOverlap=()=>({subjects:0,names:0}); export const explainPairMatch=()=>null; export const sharesTightName=()=>false;"),
   "../paper.ts": paperStub,
 });
 const chrome = stub(`

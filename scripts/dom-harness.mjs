@@ -123,6 +123,24 @@ export function stubUrl(body) {
  * module with a store in it, like the toast layer. A cycle fails by name
  * instead of spinning.
  */
+/*
+  THE CACHE IS ONLY CONSULTED WHEN THE CALLER SUPPLIES NO MAPPINGS, and that
+  guard is load-bearing. A cached entry was transpiled with SOME fixed set of
+  `imports` -- whatever the first caller passed -- so returning it to a later
+  caller who passed their own mapping silently discards that mapping and hands
+  back a module wired to the wrong dependencies.
+
+  Release I (FC13, Oct 13 2026) made this reachable: the harness now loads
+  `job-progress.ts` once at module scope (`jobProgressUrl`, to give `desk-chrome`
+  the real `runningHeadLabel`) with `./jobs.ts` replaced by a stub. A fixture
+  that then called `moduleUrl("src/lib/news/job-progress.ts", {"./jobs.ts": <the
+  REAL jobs.ts>})` -- cancel-draft-release-flow.test.mjs does exactly this --
+  got the cached stub-wired module back, and `readDeskJobs`' nested
+  `await import("./jobs.ts")` resolved to a module with no `ensureJobsSchema`.
+  Transpiling fresh whenever the caller is explicit keeps that fixture on the
+  real dependency while leaving the shared-instance guarantee intact for the
+  recursive calls, which all pass `{}`.
+*/
 const moduleCache = new Map();
 
 /*
@@ -154,8 +172,10 @@ export async function moduleUrl(path, imports = {}) {
 
 async function loadModule(file, label, imports, chain) {
   const absolute = fileURLToPath(file);
-  const cached = moduleCache.get(absolute);
-  if (cached) return cached;
+  if (Object.keys(imports).length === 0) {
+    const cached = moduleCache.get(absolute);
+    if (cached) return cached;
+  }
   if (chain.includes(absolute))
     throw new Error(
       `circular import while transpiling ${label}: ${[...chain, absolute].join(" -> ")}`,
@@ -213,6 +233,48 @@ function staticSpecifiers(source) {
 }
 function staticRelativeSpecifiers(source) {
   return staticSpecifiers(source).filter(name => name.startsWith("."));
+}
+
+/*
+  EVERY string-literal import specifier in the file, static OR dynamic, at any
+  depth -- this is the set `rewriteSpecifiers` REWRITES. It is deliberately
+  wider than `staticSpecifiers`, which is the set a fixture is REQUIRED to map.
+
+  The dynamic half matters because a NESTED `import("...")` cannot run at module
+  scope, so no fixture is obliged to supply a URL for it -- but when one DOES
+  (a caller's mapping, `loadModule` following it, or `sharedHelperUrls`), the
+  literal must still be rewritten, or the `data:` module's own
+  `import("./jobs.ts")` resolves against the `data:` URL and yields a module
+  with none of the exports read off it. That is exactly the `readDeskJobs` case:
+  it calls `await import("./jobs.ts")` inside a function body and then reads
+  `ensureJobsSchema` off the result, and a fixture that passed the real
+  `./jobs.ts` URL (cancel-draft-release-flow.test.mjs) got back a module with no
+  `ensureJobsSchema`.
+
+  The static half is here too, and it is why this walker must NOT be written as
+  a dynamic-only visitor. A static `import { A } from "./x.ts"` IS in
+  `staticSpecifiers`, so its mapping is present in `imports` -- but if this
+  function does not also name it, `rewriteSpecifiers` never reaches the
+  `replaceAll` for it, and the `data:` module ships `"./x.ts"` verbatim, where
+  Node cannot resolve it. Writing this as only the `ImportKeyword` case is the
+  bug that produced `Failed to resolve module specifier
+  "./draft-completeness.ts"` from `job-progress.ts` even though
+  `loadModule` had already followed and mapped that exact specifier.
+*/
+function allSpecifiers(source) {
+  const ast = ts.createSourceFile("fixture.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set();
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+        node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      names.add(node.moduleSpecifier.text);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] && ts.isStringLiteral(node.arguments[0])) names.add(node.arguments[0].text);
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return [...names];
 }
 
 export function transpileToUrl(code, fileName, imports = {}) {
@@ -295,6 +357,31 @@ export const getSql = () => { throw new Error("dom-harness: the real db.ts was n
 sharedHelperUrls["@/lib/news/job-progress"] = jobProgressUrl;
 sharedHelperUrls["./sentence-stop.ts"] = await moduleUrl("src/lib/news/sentence-stop.ts");
 
+/*
+  `lead-match.ts` -- B02 (Oct 13 2026) made the real `desk-copy.ts` import
+  `explainPairMatch` and `sharesTightName` as VALUES, in addition to
+  `distinguishingOverlap`. A fixture that still stubbed `./lead-match.ts` with
+  only `distinguishingOverlap` (or `@/lib/news/lead-match`, or omitted the
+  specifier entirely, as `screen-render-harness.mjs` does) then failed to load
+  the module with "does not provide an export named 'explainPairMatch'".
+
+  The real `lead-match.ts` is a large, self-contained pure module with no
+  imports, so it is loadable here -- but stubbing it as "no match" for the two
+  new names is the intent stated by every fixture that already stubbed
+  `distinguishingOverlap` to zero, and none of them tests the duplicate/merge
+  path B02 added. A stub that says "no match" is the fixture's own default, not
+  a fake of a behavior under test. The `distinguishingOverlap` name is left to
+  the fixture when it supplies one; this entry only fills the specifier.
+
+  Fixtures that pass `./lead-match.ts` explicitly still win: an explicit
+  `imports[specifier]` beats `sharedHelperUrls` in `rewriteSpecifiers` below.
+*/
+sharedHelperUrls["./lead-match.ts"] = stubUrl(`
+export const distinguishingOverlap = () => ({ subjects: 0, names: 0 });
+export const explainPairMatch = () => null;
+export const sharesTightName = () => false;
+`);
+
 /**
  * Point every specifier at a URL Node can import.
  *
@@ -309,12 +396,18 @@ sharedHelperUrls["./sentence-stop.ts"] = await moduleUrl("src/lib/news/sentence-
 function rewriteSpecifiers(output, fileName, imports) {
   let rewritten = output;
   /*
-    A dynamic `import("...")` that lives inside a function body is left alone. It
-    cannot run at module scope, so it is not something a `data:` module needs a
-    URL for, and demanding one of every fixture is what made `desk-auth.ts`
-    unloadable.
+    A dynamic `import("...")` that lives inside a function body is not something
+    the fixture is REQUIRED to supply a URL for: it cannot run at module scope,
+    and demanding one of every fixture is what made `desk-auth.ts` unloadable.
+    But when a mapping DOES exist -- a caller passed one, `loadModule` followed
+    it, or `sharedHelperUrls` holds one -- the literal must be rewritten, or the
+    `data:` module's own `import("./jobs.ts")` resolves against the `data:` URL
+    and yields a module with none of the exports read off it. So the set that is
+    REWRITTEN is every string-literal import specifier in the file; the set that
+    must BE resolvable (`unresolved`) stays the top-level static one.
   */
-  const specifiers = staticSpecifiers(output);
+  const specifiers = allSpecifiers(output);
+  const required = new Set(staticSpecifiers(output));
   const unresolved = [];
   for (const specifier of specifiers) {
     let mapped = imports[specifier];
@@ -345,14 +438,21 @@ function rewriteSpecifiers(output, fileName, imports) {
     }
     let url = mapped;
     if (!url) {
+      /*
+        A bare (non-relative) specifier that resolves from `node_modules` is
+        rewritten whether or not it is required. A relative one that was not
+        mapped is only a failure when it is a REQUIRED (top-level static)
+        import; a nested dynamic `./jobs.ts` with no mapping is left exactly as
+        it was, which is the pre-split behaviour for `desk-auth.ts`.
+      */
       if (specifier.startsWith(".")) {
-        unresolved.push(specifier);
+        if (required.has(specifier)) unresolved.push(specifier);
         continue;
       }
       try {
         url = import.meta.resolve(specifier);
       } catch {
-        unresolved.push(specifier);
+        if (required.has(specifier)) unresolved.push(specifier);
         continue;
       }
     }

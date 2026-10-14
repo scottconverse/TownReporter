@@ -305,6 +305,8 @@ const deskCopyUrl = await load("src/lib/news/desk-copy.ts", {
   "./preflight.ts": preflightUrl,
   "./lead-match.ts": leadMatchUrl,
   "../paper.ts": paperUrl,
+  // FC18 (Oct 13 2026): desk-copy.ts now imports the real sentence-stop helper.
+  "./sentence-stop.ts": await load("src/lib/news/sentence-stop.ts"),
 });
 const sourceLinesUrl = await load("src/lib/news/source-lines.ts", {
   "./url-guard.ts": urlGuardUrl,

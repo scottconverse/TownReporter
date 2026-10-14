@@ -18,6 +18,22 @@ globalThis.screenData = {
     body: "The original filed draft.",
   },
 };
+/*
+  FC20 (Release I, ae1b0c1d) made the panel call `packagePlainSummary` and read
+  `.heading` off the result. Every other import from
+  `@/lib/news/reporting-package-view` is rendered straight to text, so the
+  harness defaulting unstubbed exports to `() => null` was harmless -- but this
+  one is dereferenced, and the default turned into "Cannot read properties of
+  null (reading 'heading')".
+
+  The real `packagePlainSummary` is NOT loaded here, because this fixture drives
+  the panel with a minimal `report` (empty arrays, no `unknowns`) and the real
+  sibling helpers in the same module (`packageGaps`, which iterates
+  `report.unknowns`) demand the full shape. The fixture already stubs those to
+  the shapes its report has; `packagePlainSummary` is stubbed the same way: a
+  fixed summary object, which is all the panel dereferences. This fixture is
+  about the filed-draft link, not the summary wording.
+*/
 const { ReportingPackagePanel } = await screenModule("src/components/reporting-package-panel.tsx", {
   Link: `({to,params,children})=>h('a',{href:to.replace('$draftId',params.draftId),onClick:e=>{e.preventDefault();globalThis.openFiledDraft(e.currentTarget.getAttribute('href'));}},children)`,
   hasReportingPackage: "() => true",
@@ -25,6 +41,8 @@ const { ReportingPackagePanel } = await screenModule("src/components/reporting-p
   reportingPackageHistory: "(row) => ({current:row,earlier:[]})",
   packageGaps: "() => []",
   SCORE_COMPONENTS: "[]",
+  packagePlainSummary:
+    "() => ({heading:'The reporting run finished',read:'',established:'',stillToCheck:'',nextAction:''})",
 });
 test("reporting run opens its filed draft and omits the link when none was filed", async () => {
   const container = document.createElement("div");

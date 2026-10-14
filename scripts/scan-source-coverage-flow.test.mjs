@@ -12,10 +12,10 @@ const preflightStub = transpileToUrl(
   "preflight-stub.js",
 );
 const leadMatchStub = transpileToUrl(
-  "export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }",
+  "export function distinguishingOverlap() { return { subjects: 0, names: 0 }; } export function explainPairMatch() { return null; } export function sharesTightName() { return false; }",
   "lead-match-stub.js",
 );
-const paperStub = transpileToUrl("export const TOPICS = [], PAPER = { timezone: \"America/Denver\" }; export const formatClockTime = () => \"\", formatListDateTime = () => \"\";", "paper-stub.js");
+const paperStub = transpileToUrl("export const TOPICS = [], PAPER = { timezone: \"America/Denver\" }; export const formatClockTime = () => \"\", formatListDateTime = () => \"\"; export const parseUrlList = () => [];", "paper-stub.js");
 const copyUrl = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": preflightStub,
   "./lead-match.ts": leadMatchStub,
