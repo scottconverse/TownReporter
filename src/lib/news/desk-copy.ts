@@ -592,7 +592,7 @@ export function observedDarkJobFinished(
       job &&
       observed.investigationId === investigationId &&
       observed.jobId === job.id &&
-      (job.status === "completed" || job.status === "failed"),
+      (job.status === "completed" || job.status === "failed" || job.status === "cancelled"),
   );
 }
 
@@ -1220,8 +1220,8 @@ export type DraftJobUiState = "idle" | "drafting" | "recovering" | "failed" | "d
  *   drainer in `./jobs.ts` will reclaim and re-run this same job on its own;
  *   the UI must not suggest clicking again, which would just coalesce onto
  *   the job that is already being retried.
- * - "failed": the job ended in error. This is the only state where a retry
- *   click is the right advice.
+ * - "failed": the job ended in error, or an editor stopped it. This is the
+ *   only state where a retry click is the right advice.
  * - "done": the job completed.
  * - "idle": no job at all (never drafted, or a lead with no draft job on
  *   record).
@@ -1232,7 +1232,12 @@ export function resolveDraftJobState(
 ): DraftJobUiState {
   if (!job) return "idle";
   if (job.status === "completed") return "done";
-  if (job.status === "failed") return "failed";
+  /*
+    Release H (DHI-5): a job an editor stopped is over -- the retry advice is
+    the right advice for it exactly as it is for an error, which is why the
+    stop press already sets "Stopped. No draft was saved." beside it.
+  */
+  if (job.status === "failed" || job.status === "cancelled") return "failed";
   /*
     FA06/FC06 (Oct 11 walk): a job still waiting in line has no heartbeat to
     go cold. Calling it "recovering" told the editor the app had restarted

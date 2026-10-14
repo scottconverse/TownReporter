@@ -19,7 +19,7 @@ export type DraftBatchStartItem = { leadId: number; researchScope?: "public" | "
 export type DraftBatchItem = {
   leadId: number;
   jobId: number;
-  status: "queued" | "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
   stage: string;
   error: string | null;
   draftId: number | null;

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { appendStoryFailoverNote } from "./automatic-failover.ts";
 import {
   customConnectionStatus,
   draftFallbackAttribution,
@@ -262,6 +263,17 @@ describe("running writer and switch reason", () => {
     assert.equal(
       switchReasonFromNote("Gemini timed out -> Codex Sol 6.1 (balanced) timed out -> DeepSeek v4.1 Flash"),
       "Codex Sol 6.1 (balanced) timed out",
+    );
+  });
+
+  it("keeps a reason that itself contains an arrow, whole and without a second period", () => {
+    const note = appendStoryFailoverNote(
+      "This draft moved to Gemini (key) because Gemini (gemini-3.5-flash) cannot be read. Fix it in Server -> Connections.",
+      "This draft moved to DeepSeek v4.1 Flash because Gemini (key) cannot be read. Fix it in Server -> Connections.",
+    );
+    assert.equal(
+      runningWriterSentence({ pickedModel: "Gemini (gemini-3.5-flash)", writerModel: "DeepSeek v4.1 Flash", failoverNote: note }),
+      "You picked Gemini (gemini-3.5-flash). DeepSeek v4.1 Flash is writing because Gemini (key) cannot be read. Fix it in Server -> Connections.",
     );
   });
 

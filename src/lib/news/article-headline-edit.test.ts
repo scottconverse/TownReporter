@@ -303,3 +303,50 @@ it("DHH-3: every headline suggestion call leaves a receipt row saying what was a
   await sql.query("delete from desk_jobs where newsroom_id=$1 and kind='headlines'", [NEWSROOM]);
   await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);
 });
+
+it("DHI-6: a headline receipt starts at the press and ends after the model answers, so its runtime shows", async () => {
+  /*
+    Release H DHI-6: the receipt was written with started_at = now() and
+    finished_at = now() AFTER the call, so every suggestion read as a 0-second
+    job. The model call here takes a measurable time; the receipt must span it.
+  */
+  await reset();
+  const sql = await getSql();
+  await sql.query("delete from desk_jobs where newsroom_id=$1 and kind='headlines'", [NEWSROOM]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id, newsroom_id, headline, why, topic) values($1,$2,$3,'','council') returning id",
+    [USER, NEWSROOM, "Council approves the plan"],
+  );
+  assert.ok(lead);
+  const pressed = Date.now();
+  await performSuggestHeadlines(
+    { userId: USER, newsroomId: NEWSROOM },
+    lead.id,
+    "Council approves the plan",
+    { choice: "deepseek-flash", effort: "high" },
+    {
+      chat: (async () => {
+        await new Promise((done) => setTimeout(done, 400));
+        return {
+          ok: true as const,
+          text: "1. Council approves plan after Tuesday vote\n2. Officials approve the revised city plan\n3. Council approves changes to city proposal",
+          meta: { provider: "deepseek", model: "deepseek-v4.1-flash", durationMs: 400, timedOut: false },
+        };
+      }) as unknown as NonNullable<Parameters<typeof performSuggestHeadlines>[4]>["chat"],
+    },
+  );
+
+  const [row] = await sql.query<{ started_at: Date; finished_at: Date }>(
+    "select started_at, finished_at from desk_jobs where newsroom_id=$1 and kind='headlines' and subject_id=$2 order by id desc limit 1",
+    [NEWSROOM, lead.id],
+  );
+  assert.ok(row?.started_at && row.finished_at, "the receipt has both times");
+  assert.ok(new Date(row.started_at).getTime() >= pressed - 1000, "the start is the press, not the write");
+  assert.ok(
+    new Date(row.finished_at).getTime() - new Date(row.started_at).getTime() >= 350,
+    "the receipt spans the model call",
+  );
+
+  await sql.query("delete from desk_jobs where newsroom_id=$1 and kind='headlines'", [NEWSROOM]);
+  await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);
+});

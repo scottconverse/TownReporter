@@ -16,7 +16,7 @@ export type JobCardState = "running" | "done" | "failed";
 /** `queued` is a running job that has not started: same treatment, no clock. */
 export function jobCardState(job: Pick<JobProgressView, "status">): JobCardState {
   if (job.status === "completed") return "done";
-  if (job.status === "failed") return "failed";
+  if (job.status === "failed" || job.status === "cancelled") return "failed";
   return "running";
 }
 

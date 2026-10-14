@@ -115,7 +115,7 @@ export function deskDraftElapsed(fromIso: string | null | undefined, nowMs: numb
 export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftState {
   const job = String(facts.job_status ?? "");
   const running = job === "running" || job === "queued";
-  const failed = job === "failed";
+  const failed = job === "failed" || job === "cancelled";
   const yours = editorOwnsHeadline(facts);
   const unresolved = Math.max(0, Number(facts.names_unresolved) || 0);
   const base = { needsYou: false, running, failed, yours };

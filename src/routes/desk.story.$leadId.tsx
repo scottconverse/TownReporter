@@ -635,7 +635,7 @@ function StoryPage() {
   };
 
   const previousJobError =
-    !waiting && !msg && data?.job?.status === "failed"
+    !waiting && !msg && (data?.job?.status === "failed" || data?.job?.status === "cancelled")
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
   const draftProblem = msg || previousJobError;
@@ -828,7 +828,7 @@ function StoryPage() {
       staying on the button for good (DHC14).
     */
     if (
-      data?.job?.status !== "failed" ||
+      (data?.job?.status !== "failed" && data?.job?.status !== "cancelled") ||
       (expectedDraftJobId.current != null
         ? data.job.id !== expectedDraftJobId.current
         : data.job.id === priorDraftJobId.current)
@@ -4527,6 +4527,7 @@ function StoryPage() {
         model={headlineModel}
         effort={headlineEffort}
         modelPicked={headlinePick !== null}
+        suggestFirst
         onModelChange={(choice) => setHeadlinePick({ model: choice as StoryModelChoice, effort: defaultModelEffort(choice) })}
         onEffortChange={(effort) =>
           setHeadlinePick({ model: headlineModel, effort: (effort as ModelEffort | null) })
