@@ -43,6 +43,7 @@ export type ExtractedArticle = {
 
 const READABILITY_MIN_CHARS = 60;
 const EXPANDABLE_CONTROLS = "button[aria-controls], button[aria-expanded], .accordion-button, details, summary";
+const LIST_DATE_OR_TIME = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b|\b\d{1,2}\/\d{1,2}\b|\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:am|pm)\b/i;
 
 const KILL_SELECTORS = [
   "nav",
@@ -105,20 +106,49 @@ function listPageFallback(html: string, extractedText: string): string | null {
   // Do not count paragraphs or related links inside an individual article.
   // Cards may themselves be <article>s, so inspect their containing grid.
   const groups = document.querySelectorAll("body, main, section, div, ul, ol, tbody");
+  const candidates = new Set<Element>();
   for (const group of groups) {
     if (group.closest("article")) continue;
-    const shapes = new Map<string, number>();
+    const shapes = new Map<string, Element[]>();
     for (const item of Array.from(group.children)) {
       const length = htmlToPlainText(item.innerHTML).length;
       if (length < 20 || length > 1200) continue;
       if (!item.matches("li, tr, article") && !item.querySelector("a, h2, h3, h4, time")) continue;
       const shape = `${item.tagName}:${item.getAttribute("class") ?? ""}`;
-      const count = (shapes.get(shape) ?? 0) + 1;
-      if (count >= 5) return bodyText;
-      shapes.set(shape, count);
+      const items = shapes.get(shape) ?? [];
+      items.push(item);
+      shapes.set(shape, items);
+    }
+    for (const items of shapes.values()) {
+      if (items.length >= 5) for (const item of items) candidates.add(item);
     }
   }
-  return null;
+  if (!candidates.size) return null;
+
+  // Traverse in page order, keeping whole outer cards rather than also
+  // extracting their nested lists. Only a confirmed list recovery gets this
+  // ordering; Readability and the other fallback paths keep their exact text.
+  const items = Array.from(document.querySelectorAll("*")).filter((item) => {
+    if (!candidates.has(item)) return false;
+    for (let parent = item.parentElement; parent; parent = parent.parentElement) {
+      if (candidates.has(parent)) return false;
+    }
+    return true;
+  });
+  const seen = new Set<string>();
+  const dated: string[] = [];
+  const undated: string[] = [];
+  for (const item of items) {
+    const text = htmlToPlainText(item.innerHTML);
+    // Remove duplicates from the remainder too, but never normalize their
+    // text beyond the existing HTML-to-text conversion used by the reader.
+    item.remove();
+    if (seen.has(text)) continue;
+    seen.add(text);
+    (LIST_DATE_OR_TIME.test(text) ? dated : undated).push(text);
+  }
+  const remainder = htmlToPlainText(document.body?.innerHTML ?? "");
+  return [...dated, ...undated, remainder].filter(Boolean).join("\n\n");
 }
 
 function expandableMainFallback(html: string, readabilityText: string): string | null {
