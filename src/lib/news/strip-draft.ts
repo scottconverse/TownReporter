@@ -70,8 +70,17 @@ export function cleanMissingFactNotes(headline: string, dek: string): {
 } {
   const cleanHeadline = cleanSummaryField(headline);
   const cleanDek = cleanSummaryField(dek);
+  let cleaned = cleanHeadline.notes.length ? cleanHeadline.text.replace(/[.!?]+$/, "") : cleanHeadline.text;
+  /*
+    A headline that is nothing but a missing-fact note cleans to "" -- and a
+    story with no headline is worse for the reader than a headline carrying an
+    editor check. Fall back to the headline as written; the note is still kept
+    in `notes` for the editor. Measured Oct 13 2026 (PR298-2): 0 of 157 live
+    stories hit this, so it is a guard, not a cleanup.
+  */
+  if (cleanHeadline.notes.length && !/[\p{L}\p{N}]/u.test(cleaned)) cleaned = headline;
   return {
-    headline: cleanHeadline.notes.length ? cleanHeadline.text.replace(/[.!?]+$/, "") : cleanHeadline.text,
+    headline: cleaned,
     dek: cleanDek.text,
     notes: [...new Set([...cleanHeadline.notes, ...cleanDek.notes])],
   };
