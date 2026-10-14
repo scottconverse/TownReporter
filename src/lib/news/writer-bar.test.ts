@@ -7,6 +7,7 @@ import {
   lastDraftInHand,
   lastDraftLine,
   lastDraftWhen,
+  modelAndResearchLabel,
   readinessDot,
   readinessFailureMessage,
   requestedModelChoice,
@@ -333,6 +334,54 @@ describe("lastDraftInHand: the draft in hand keeps its model after a save messag
     assert.equal(
       draftFallbackAttribution({ pickedModel: "Codex Sol", writerModel: "Gemini Flash", failoverNote: "This draft moved to Gemini Flash because Codex Sol returned an empty draft." }),
       "You picked Codex Sol. Gemini Flash wrote this draft because Codex Sol returned an empty draft.",
+    );
+  });
+});
+
+/*
+  TJA-3: Automatic is not a fallback. Job 335 asked for Automatic, ran its first
+  choice (DeepSeek), and the button told the editor "it fell back" -- words about
+  a move no failover note and no preflight record ever made. The distinction the
+  label has to keep is between a MODEL that changed and a CHOICE that resolved:
+  "Automatic" is the second, so it never earns the fallback clause.
+*/
+describe("modelAndResearchLabel: Automatic does not say it fell back", () => {
+  it("names the Automatic pick with no fallback clause when its first choice wrote the draft", () => {
+    assert.equal(
+      modelAndResearchLabel({
+        runningLine: "",
+        pickerModel: "Automatic",
+        requestedModelChoice: "auto",
+        requestedModel: "Automatic",
+        writerModel: "DeepSeek v4.1 Flash",
+      }),
+      "DeepSeek v4.1 Flash (you picked Automatic)",
+    );
+  });
+
+  it("still says the explicit pick fell back when a different model wrote", () => {
+    assert.equal(
+      modelAndResearchLabel({
+        runningLine: "",
+        pickerModel: "Claude Sonnet 5.5",
+        requestedModelChoice: "claude-sonnet",
+        requestedModel: "Claude Sonnet 5.5",
+        writerModel: "DeepSeek v4.1 Flash",
+      }),
+      "DeepSeek v4.1 Flash (you picked Claude Sonnet 5.5; it fell back)",
+    );
+  });
+
+  it("returns the writer alone when the requested choice is the writer", () => {
+    assert.equal(
+      modelAndResearchLabel({
+        runningLine: "",
+        pickerModel: "DeepSeek v4.1 Flash",
+        requestedModelChoice: "deepseek-flash",
+        requestedModel: "DeepSeek v4.1 Flash",
+        writerModel: "DeepSeek v4.1 Flash",
+      }),
+      "DeepSeek v4.1 Flash",
     );
   });
 });
