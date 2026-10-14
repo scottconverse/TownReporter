@@ -406,20 +406,15 @@ export function buildEditorialPack(input: {
 
   if (input.askedFor?.trim()) {
     /*
-      NOT "WHAT THE EDITOR ASKED FOR" (Release J, THV-2, Scott Oct 14 2026).
-
-      That literal was the model's cue to write the phrase back out -- the
-      public appendix of "OPINION: Keep the A Line at 15 minutes" cited the
-      assignment "in the prompt", naming a prompt no reader can see. The pack
-      still carries the editor's direction in full, under the reader-safe name
-      the rename already uses for the desk's own material: there is no way the
-      phrase "the supplied document" reaches the page as anything but a source.
-      The material above is labelled "THE SUPPLIED DOCUMENT" for the same
-      reason.
+      The editor's direction is instructions, never a source (Release J, THV-2,
+      Scott Oct 14 2026). Labelling it with a source name like "THE SUPPLIED
+      DOCUMENT" invites the writer to cite it as evidence on the public page --
+      the failure that produced the appendix citing the assignment "in the
+      prompt". Only pasted text and uploads are the supplied document.
     */
     parts.push(
       "",
-      `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`,
+      `EDITOR'S DIRECTION (instructions for this piece; not a source; never cite it): ${input.askedFor.trim()}`,
     );
   }
 
