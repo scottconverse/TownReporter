@@ -2769,7 +2769,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     bottom of the hop and the marker the page prints read the same two strings.
 
     Without it, an ungated persist path filed UK aggregate companies and a
-    Frinton-on-Sea property record as open leads on a Colorado city council
+    Frinton-on-Sea property record as open leads on a US city council
     question: the gate above ran only on `investigationTitle`, and the
     post-search selector's plan reached `persistPlan` without passing it at all.
   */

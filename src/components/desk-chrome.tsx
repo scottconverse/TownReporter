@@ -29,7 +29,8 @@ import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
-import { runningHeadLabel, type JobProgressView } from "@/lib/news/job-progress";
+import type { JobProgressView } from "@/lib/news/job-progress";
+import { runningHeadLabel } from "@/lib/news/running-head-label";
 
 const users = new WeakMap<Document, { count: number; dispose: () => void }>();
 
