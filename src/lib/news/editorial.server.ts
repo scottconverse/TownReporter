@@ -46,7 +46,7 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
-import { readerAppendixText } from "./reader-source-names.ts";
+import { suppliedDocumentLabel } from "./reader-source-names.ts";
 import { suppliedMaterialCapFor, suppliedMaterialCutRecord } from "./supplied-material-cap.ts";
 import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
@@ -1210,13 +1210,19 @@ export async function performEditorialWork(
           carried back out of it would be cited, on the public page, to a row
           in our own file store.
 
-          So the material the writer sees is labelled "the supplied document"
-          before it enters the pack, and whatever it cites from it can only
-          carry that name. This renames the LABEL only: the notes, their page
-          locators and every public URL are untouched, and material that
-          carries no internal name passes through character for character.
+          So the desk's own filenames are named "the supplied document" before
+          the material enters the pack, and whatever the writer cites from it
+          can only carry that name. This renames the LABEL only: the notes,
+          their page locators and every public URL are untouched, and material
+          that carries no internal name passes through character for character.
+
+          The editor's own words are handed over as they were typed. The pack
+          no longer labels them "WHAT THE EDITOR ASKED FOR" (see
+          `buildEditorialPack`), so nothing here needs to rewrite them: that
+          phrasing was the model's cue to cite an assignment "in the prompt",
+          and the phrase "the supplied document" is now the one name for it.
         */
-        sourceText: readerAppendixText(documentEvidence || suppliedMaterialText || req.source_text || req.subject),
+        sourceText: suppliedDocumentLabel(documentEvidence || suppliedMaterialText || req.source_text || req.subject),
         pointers,
         ourStory,
         askedFor: req.asked_for,

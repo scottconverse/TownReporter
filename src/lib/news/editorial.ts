@@ -405,7 +405,22 @@ export function buildEditorialPack(input: {
   );
 
   if (input.askedFor?.trim()) {
-    parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    /*
+      NOT "WHAT THE EDITOR ASKED FOR" (Release J, THV-2, Scott Oct 14 2026).
+
+      That literal was the model's cue to write the phrase back out -- the
+      public appendix of "OPINION: Keep the A Line at 15 minutes" cited the
+      assignment "in the prompt", naming a prompt no reader can see. The pack
+      still carries the editor's direction in full, under the reader-safe name
+      the rename already uses for the desk's own material: there is no way the
+      phrase "the supplied document" reaches the page as anything but a source.
+      The material above is labelled "THE SUPPLIED DOCUMENT" for the same
+      reason.
+    */
+    parts.push(
+      "",
+      `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`,
+    );
   }
 
   parts.push(
@@ -677,7 +692,9 @@ export function buildDeskFindingsPack(input: {
     DESK_FINDINGS_ASK,
     "",
     `SUBJECT: ${input.subject}`,
-    ...(input.askedFor?.trim() ? ["", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`] : []),
+    ...(input.askedFor?.trim()
+      ? ["", `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`]
+      : []),
     "",
     `WHAT THE DESK READ (${input.reading.length}):`,
     records.join("\n\n---\n\n"),
@@ -765,11 +782,12 @@ export function buildWritingPack(input: {
       "",
       "SUPPLIED-ONLY SCOPE: The editor selected 'Use only supplied material'. There was no outside research pass.",
       "Do not search, browse, open or fetch outside sources. Do not add any citation, URL, date, name, number or other factual claim that the supplied material does not contain.",
-      "Cite only URLs explicitly present in the supplied material or the explicitly selected TownReporter story above, and exact supplied document filenames with page/section locators. Never cite a source you did not receive.",
+      "Cite only URLs explicitly present in the supplied material or the explicitly selected TownReporter story above, and exact supplied document filenames with page/section locators. Never cite a source you did not receive. Never write 'the prompt' or 'what the editor asked for' in a citation: anything the editor supplied is 'the supplied document'.",
       "Every checkable claim must be supported by that supplied record, or qualified/removed.",
       "When a fact needed for the piece is missing, do not guess or fill it from memory. Name it in an EDITOR CHECKS subsection inside EDITOR'S FACT SHEET so the editor can supply or verify it.",
     );
-    if (input.askedFor?.trim()) parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    if (input.askedFor?.trim())
+      parts.push("", `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
     parts.push(
       "",
       "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
@@ -874,7 +892,11 @@ export function buildWritingPack(input: {
   }
 
   if (input.askedFor?.trim()) {
-    parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    // The reader-safe label; see the note in `buildEditorialPack`.
+    parts.push(
+      "",
+      `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`,
+    );
   }
 
   // Every writer cites the supplied record; opening sources is not a pack promise.

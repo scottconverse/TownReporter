@@ -29,15 +29,114 @@ test("the desk's pasted-material filename becomes the supplied document", () => 
   assert.equal(readerSourceName("Opinion desk pasted text.txt"), "The supplied document");
 });
 
-test("the prompt and the assignment become the supplied document", () => {
+/*
+  ADJUSTED (Scott, Oct 14 2026, coordinator review). This test used to assert
+  that "What the editor asked for" and a bare "the prompt" also became the
+  supplied document. Both are broad phrases a normal story can say, and both
+  have been removed from the render path, so those two assertions are gone --
+  they were the only two in this file pinning a removed pattern. The assignment
+  reference itself is unchanged and still asserted.
+*/
+test("the assignment in the prompt becomes the supplied document", () => {
   assert.equal(readerSourceName("the assignment in the prompt"), SUPPLIED_DOCUMENT_NAME);
-  assert.equal(readerSourceName("What the editor asked for"), "The supplied document");
-  assert.equal(readerSourceName("the prompt"), SUPPLIED_DOCUMENT_NAME);
   /* Mid-sentence, the model's own casing is kept: no stray capital. */
   assert.match(
-    readerAppendixText("Cited to the assignment in the prompt, the desk wrote the outline."),
-    /^Cited to the supplied document, the desk wrote the outline\.$/,
+    readerAppendixText(
+      [
+        "Claims and sources",
+        "Cited to the assignment in the prompt, the desk wrote the outline.",
+      ].join("\n"),
+    ),
+    /^Claims and sources\nCited to the supplied document, the desk wrote the outline\.$/,
   );
+});
+
+/*
+  THE BROAD PHRASES ARE NOT NAMES (Scott, Oct 14 2026, coordinator review).
+
+  A news story may quote an editor, or print a line reading "The attached
+  document", as its own words. Those are the reader's sentences. The rename
+  exists for the desk's own file rows and the assignment reference, and for
+  nothing else -- so these print character for character, wherever they sit.
+*/
+/* A literal, escaped, for asserting that a whole block came back untouched. */
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const NOT_OUR_NAMES = [
+  "What the editor asked for",
+  "The editor asked for a shorter piece.",
+  "what the editor asked for was a plainer lead.",
+  "The attached document",
+  "The attached document lists the stops.",
+  "An uploaded file was read into the record.",
+  "The supplied text runs to nine pages.",
+  "the prompt",
+  "The prompt asked for two hundred words.",
+  "The editor's question in the prompt went unanswered.",
+];
+
+test("the broad phrases a story may say on its own are left alone", () => {
+  for (const line of NOT_OUR_NAMES) {
+    assert.equal(readerSourceName(line), line, `"${line}" must print unchanged`);
+  }
+});
+
+/* (a) ABOVE the claims section, story prose is never touched -- heading or no. */
+test("a story body above the claims section is served unchanged", () => {
+  const prose = [
+    "The editor asked what the editor asked for, and the desk answered in a memo.",
+    "",
+    "The attached document lists the stops, and an uploaded file was read into the record.",
+    "",
+    "The prompt asked for two hundred words; the piece ran long.",
+    "",
+    "What the editor asked for was a plainer lead.",
+  ].join("\n");
+  const withHeading = `${prose}\n\nClaims and sources\n- https://example.gov/agenda — the schedule.`;
+  assert.equal(readerAppendixText(prose), prose, "a body with no claims heading is returned whole");
+  assert.match(readerAppendixText(withHeading), new RegExp(`^${escapeRe(prose)}\\n\\nClaims and sources`));
+  /* The same story with the desk's own file named up in the prose: still untouched. */
+  const withName = `A memo headed Opinion desk pasted material.txt sits in the file.\n\n${withHeading}`;
+  assert.match(readerAppendixText(withName), /^A memo headed Opinion desk pasted material\.txt sits in the file\./);
+});
+
+/* (b) INSIDE the section, only the exact names of item 2 change. */
+test("inside the claims section only the desk's exact names change", () => {
+  const kept = [
+    "The attached document lists the stops.",
+    "What the editor asked for was a plainer lead.",
+    "The prompt asked for two hundred words.",
+    "The editor's question in the prompt went unanswered.",
+    "An uploaded file was read into the record.",
+    "The supplied text runs to nine pages.",
+  ];
+  const section = ["Claims and sources", ...kept].join("\n");
+  assert.equal(readerAppendixText(section), section, "only the exact names change");
+  /* And the two exact names DO change, in the same section. */
+  const changed = [
+    "Claims and sources",
+    "- Opinion desk pasted material.txt (page 2) — the ridership figure.",
+    "- Opinion desk pasted text — the outline.",
+    "- the assignment in the prompt — the framing the editor set.",
+  ].join("\n");
+  const reader = readerAppendixText(changed);
+  assert.match(reader, /- The supplied document \(page 2\) — the ridership figure\./);
+  assert.match(reader, /- The supplied document — the outline\./);
+  assert.match(reader, /- the supplied document — the framing the editor set\./);
+  assert.doesNotMatch(reader, /Opinion desk pasted|the assignment in the prompt/);
+});
+
+/* (c) The THV-2 example itself, still corrected at render. */
+test("the THV-2 example still becomes the supplied document", () => {
+  const section = [
+    "Claims and sources",
+    "- Opinion desk pasted material.txt (page 2) — the ridership figure.",
+    "- the assignment in the prompt — the framing the editor set.",
+  ].join("\n");
+  const reader = readerAppendixText(section);
+  assert.doesNotMatch(reader, /Opinion desk pasted material|the assignment in the prompt/);
+  assert.match(reader, /- The supplied document \(page 2\) — the ridership figure\./);
+  assert.match(reader, /- the supplied document — the framing the editor set\./);
 });
 
 /* A pasted editorial's appendix is one source to a line, most of them bullets. */
