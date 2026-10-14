@@ -55,12 +55,24 @@ export const useQueryClient = () => ({ invalidateQueries() {} });
 `;
 const stubUrl = `data:text/javascript;base64,${Buffer.from(stubs).toString("base64")}`;
 
+/*
+  FB17 gave provider-time-field.tsx an import of @/lib/news/provider-time-name,
+  which names which of two identically labelled time rows is which. Like
+  provider-registry.ts above it imports nothing itself, so the real file is
+  loaded rather than stubbed.
+*/
+const timeNameUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/provider-time-name.ts", import.meta.url), "utf8"),
+  "provider-time-name.ts",
+);
+
 const { ProviderTimeField } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/provider-time-field.tsx", import.meta.url), "utf8"),
     "provider-time-field.tsx",
     {
       "@/lib/news/provider-registry": registryUrl,
+      "@/lib/news/provider-time-name": timeNameUrl,
       "@/lib/news/provider-settings": stubUrl,
       "@/components/desk-chrome": stubUrl,
       "@tanstack/react-query": stubUrl,

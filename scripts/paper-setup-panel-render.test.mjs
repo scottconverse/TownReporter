@@ -151,6 +151,12 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
           "./preflight.ts": import.meta.resolve("../src/lib/news/preflight.ts"),
           "./lead-match.ts": import.meta.resolve("../src/lib/news/lead-match.ts"),
           "../paper.ts": import.meta.resolve("../src/lib/paper.ts"),
+          /*
+            FC18 gave desk-copy.ts a fourth import, ./sentence-stop.ts, for a
+            scan note that must not be cut mid-sentence. It imports nothing
+            itself, so the real file is loaded like its three siblings above.
+          */
+          "./sentence-stop.ts": import.meta.resolve("../src/lib/news/sentence-stop.ts"),
         },
       ),
       "@/lib/timezone": timezoneStub,
