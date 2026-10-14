@@ -365,3 +365,46 @@ it("names a missing section as a warning the editor can act on", () => {
     "a chosen section clears it",
   );
 });
+
+/*
+  DHK-3: the opinion list row with no dek warned "Add a dek, the one-line
+  summary under the headline, before you publish" beside a "Publish anyway"
+  button, and the press went through with no dek -- so the words read as a rule
+  to obey while the button beside them said the rule did not bind. The row is
+  advice now: it says the piece has no dek, and that the editor may add one or
+  print without it. The button is kept (asserted below).
+*/
+it("says the missing dek is advice, not a rule, and still prints over it", async () => {
+  const f = await fixture();
+  const ctx = { userId: f.userId, newsroomId: f.newsroomId };
+
+  const [row] = await f.sql.query<Record<string, unknown>>("select * from drafts where id=$1", [
+    f.draftId,
+  ]);
+  const dekWarning = opinionPublishWarnings(row as never).find(
+    (w: { key: string; sentence: string }) => w.key === "dek",
+  );
+  assert.ok(dekWarning, "the missing dek is still named, so the editor can act on it");
+  assert.match(dekWarning!.sentence, /No dek yet/, "it says plainly there is no dek");
+  assert.match(
+    dekWarning!.sentence,
+    /publish without it/,
+    "and it says the editor may print without one -- advice, not a demand",
+  );
+  assert.doesNotMatch(
+    dekWarning!.sentence,
+    /before you publish/,
+    "it no longer reads as a rule to obey before the press",
+  );
+
+  const refused = await performPublishEditorial(ctx, f.draftId);
+  assert.equal(refused.ok, false, "the first press still asks about the warning");
+  const printed = await performPublishEditorial(ctx, f.draftId, ["dek", "evidence-stale"]);
+  assert.equal(printed.ok, true, refusalOf(printed));
+  assert.ok(printed.ok && printed.slug, "and the press without a dek goes through");
+  const [article] = await f.sql.query<{ dek: string }>(
+    "select dek from articles where origin_draft_id=$1",
+    [f.draftId],
+  );
+  assert.equal((article.dek ?? "").trim(), "", "the piece printed with no dek, as the words said it could");
+});

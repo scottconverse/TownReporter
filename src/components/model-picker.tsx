@@ -319,6 +319,23 @@ export function LocalModelSelect({
   );
 }
 
+/*
+  THV-4: a saved API connection is the KEY route -- a provider the newsroom set
+  up with its own API key -- but as an option it read just "Gemini — gemini-3.5-flash",
+  so an editor could not tell it apart from the Gemini models the desk reaches
+  through the signed-in Gemini program. The label names the route.
+
+  What the label must never do is say it twice. A connection an operator already
+  called "Gemini (key)" (the name `readinessFailureMessage` teaches, see
+  writer-bar.ts) would otherwise render "Gemini (key) (key)" in the option, the
+  select's title, and the readiness sentence. The word is added only when the
+  name does not already carry it; the one sentence an editor reads names the
+  connection exactly once.
+*/
+function customConnectionLabel(name: string): string {
+  return name.toLowerCase().includes("(key)") ? name : `${name} (key)`;
+}
+
 export function ModelPicker(props: Props) {
   const connections = useQuery({
     queryKey: ["custom-ai-connections"],
@@ -339,7 +356,15 @@ export function ModelPicker(props: Props) {
   const builtInOptions = SHARED_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
-    label: connection.name,
+    /*
+      THV-4: this option is the KEY route -- a connection the newsroom set up
+      with its own API key -- but it read just "Gemini — gemini-3.5-flash", so
+      an editor could not tell it apart from the Gemini models the desk reaches
+      through the signed-in Gemini program. Name the route in the label. The
+      option VALUE is unchanged (`custom:<id>`), so nothing about which model a
+      run uses moves; only the words in the one shared picker do.
+    */
+    label: customConnectionLabel(connection.name),
     /*
       A connection with no model yet has nothing to say in a half-line: the
       option already reads "— not set up" (isAvailable() is false without a
@@ -436,7 +461,7 @@ export function ModelPicker(props: Props) {
     return (
       writerUnavailableReason({
         choice: option.value,
-        label: option.label,
+        label: customConnectionLabel(option.label),
         availability: availability.data,
         localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
         customConnection:
@@ -519,6 +544,16 @@ export function ModelPicker(props: Props) {
               "Local model (nothing loaded)"
             : "Local model")
       : pickerOptionText(option);
+  /*
+    TIA-4: the effort list is the EXACT model's own list, so the setting shown
+    is the setting that runs -- a model that takes no effort level offers none,
+    and the note below says why. Every surface for one story draws this one
+    shared picker with the same `value` and the same resolved `exactModel`
+    (story page's own panel, redraft settings, Redraft dialog), so they cannot
+    offer different rungs for the same story. A surface that handed this picker
+    a different model (its own last-run/resolved id) is what made the two lists
+    disagree; the fix is that they now all pass the page's own pick.
+  */
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
   return (

@@ -85,7 +85,7 @@ export function opinionPublishWarnings(draft: DraftRow): EditorialPublishWarning
   if (!(draft.dek ?? "").trim()) {
     warnings.push({
       key: "dek",
-      sentence: "Add a dek, the one-line summary under the headline, before you publish.",
+      sentence: "No dek yet. You can add one, or publish without it.",
     });
   }
 

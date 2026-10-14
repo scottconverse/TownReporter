@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
 import { cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
+import { readerAppendixText } from "./reader-source-names.ts";
 import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
@@ -103,11 +104,26 @@ function readerText<T extends ArticleRow>(row: T) {
   const summary = cleanMissingFactNotes(u.headline, u.dek);
   u.headline = summary.headline;
   u.dek = summary.dek;
-  u.body = stripReporterNotebook(u.body);
+  u.body = readerAppendixText(stripReporterNotebook(u.body));
   return { u, missingFactNotes: summary.notes };
 }
 
-/** Keep a print-time cleanup visible in the private editor checks, without delaying readers on a failed write. */
+/**
+ * Keep a print-time cleanup visible in the private editor checks, without
+ * delaying readers on a failed write.
+ *
+ * PR298-1: the note goes on the draft that was PUBLISHED -- `articles.origin_draft_id`,
+ * which the publish path writes as the draft row it printed -- not on whichever
+ * draft of the lead happens to be newest. The old rule was `order by
+ * updated_at desc limit 1` over the lead's drafts, so an editor who published,
+ * then asked for a redraft, had the next reader's visit file the note against
+ * the NEWER draft: a private check sitting on a draft nobody printed, and a
+ * missing one on the draft that is actually on the page.
+ *
+ * A lead-level fallback is kept for articles from before `origin_draft_id` was
+ * recorded (it is null on those rows), so an old story still gets its note
+ * somewhere an editor can read it rather than losing it.
+ */
 export async function rememberMissingFactNotesForArticle(
   articleId: number,
   notes: readonly string[],
@@ -125,14 +141,20 @@ export async function rememberMissingFactNotesForArticle(
           else btrim(d.integrity_notes) || E'\\n' || ${note}
         end
         where d.id = (
-          select editor_draft.id
-          from drafts as editor_draft
-          join articles as article on article.lead_id = editor_draft.lead_id
+          select case
+            when article.origin_draft_id is not null then article.origin_draft_id
+            else (
+              select editor_draft.id
+              from drafts as editor_draft
+              where editor_draft.lead_id = article.lead_id
+                and editor_draft.newsroom_id = ${newsroomId}
+              order by editor_draft.updated_at desc, editor_draft.id desc
+              limit 1
+            )
+          end
+          from articles as article
           where article.id = ${articleId}
             and article.newsroom_id = ${newsroomId}
-            and editor_draft.newsroom_id = ${newsroomId}
-          order by editor_draft.updated_at desc, editor_draft.id desc
-          limit 1
         )
         and position(lower(${note}) in lower(coalesce(d.integrity_notes, ''))) = 0
       `;

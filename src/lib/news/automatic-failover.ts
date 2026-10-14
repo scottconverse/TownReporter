@@ -35,7 +35,7 @@
 
 import { AUTOMATIC_LADDER, type ProviderProbe } from "./ai.ts";
 import { looksLikeProviderAuthFailure, looksLikeTimeoutText } from "./preflight.ts";
-import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
+import { FAILOVER_TRAIL_SEPARATOR, modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 
 export type AutomaticFailoverInput = {
   /** How the preferred model was chosen. Explicit local/Ollama choices do not fail over. */
@@ -223,17 +223,18 @@ export function failoverNoteSentence(
 
 /** Preserve each Story switch, accepting the durable wording from older runs. */
 export function appendStoryFailoverNote(previous: string, next: string): string {
+  const sep = FAILOVER_TRAIL_SEPARATOR;
   const asTrail = (note: string) => {
     const hop = /^This draft moved to (.+) because (.+)$/.exec(note);
-    return hop ? `${hop[2]} -> ${hop[1]}` : note;
+    return hop ? `${hop[2]}${sep}${hop[1]}` : note;
   };
   const trail = asTrail(previous);
   const hop = asTrail(next);
   if (!trail) return hop;
-  if (trail === hop || trail.endsWith(` -> ${hop}`)) return trail;
-  const boundary = trail.lastIndexOf(" -> ");
-  const destination = boundary >= 0 ? trail.slice(boundary + 4) : "";
+  if (trail === hop || trail.endsWith(`${sep}${hop}`)) return trail;
+  const boundary = trail.lastIndexOf(sep);
+  const destination = boundary >= 0 ? trail.slice(boundary + sep.length) : "";
   return destination && hop.startsWith(`${destination} `)
-    ? `${trail.slice(0, boundary)} -> ${hop}`
-    : `${trail} -> ${hop}`;
+    ? `${trail.slice(0, boundary)}${sep}${hop}`
+    : `${trail}${sep}${hop}`;
 }

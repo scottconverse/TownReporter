@@ -43,12 +43,35 @@ export type Editorial = {
   imagePrompt: string;
 };
 
+/**
+ * A source line as an editor pastes it: a link, or a bare host (with or
+ * without `www.`), or a document filename with a locator.
+ *
+ * THU-12: the desk flagged a pasted piece "Claims missing" unless the source
+ * line was written in the model's own exact shape, `Source: URL (accessed
+ * date)`. The owner pasted a real column whose sources read `Source:
+ * example.org/record` and `see www.example.org/record` -- a URL to a person --
+ * and the piece was held. A line that names where a claim comes from is a
+ * source line however it is written, so the bare-host form is accepted here
+ * beside the full `https://…` form and the document-filename form. The exact
+ * format keeps working; this only adds forms that were being refused.
+ */
+const SOURCE_LINE = new RegExp(
+  [
+    "https?:\\/\\/[^\\s<>]+",
+    // A bare host: `example.org/record`, `www.example.org`, `city.gov/budget/2026`.
+    "(?:^|[\\s(<\\[])(?:www\\.)?[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*\\.[a-z]{2,}(?:\\/[^\\s<>)]*)?",
+    "\\b[^\\n]+\\.(?:pdf|docx?|txt|md|rtf)\\b[^\\n]{0,180}\\b(?:page|section|paragraph|characters)\\s+[\\w.-]+",
+  ].join("|"),
+  "i",
+);
+
 /** Structural completeness only; a URL alone never proves a claim is true. */
 export function editorialSourcesError(appendix: string): string | null {
   if (!appendix.trim() || /(?:claims\s+)?appendix\s+(?:is\s+)?omitted|no web verification available|no URL was fetched/i.test(appendix)) {
     return "Claims and sources are incomplete. This draft is saved, but every op-ed needs a sourced claims appendix before publication.";
   }
-  if (!/https?:\/\/[^\s<>]+/i.test(appendix) && !/\b[^\n]+\.(?:pdf|docx?|txt|md|rtf)\b[^\n]{0,180}\b(?:page|section|paragraph|characters)\s+[\w.-]+/i.test(appendix)) {
+  if (!SOURCE_LINE.test(appendix)) {
     return "Claims and sources need supporting links or document filenames with page or section locators. The draft is saved.";
   }
   return null;
@@ -382,7 +405,17 @@ export function buildEditorialPack(input: {
   );
 
   if (input.askedFor?.trim()) {
-    parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    /*
+      The editor's direction is instructions, never a source (Release J, THV-2,
+      Scott Oct 14 2026). Labelling it with a source name like "THE SUPPLIED
+      DOCUMENT" invites the writer to cite it as evidence on the public page --
+      the failure that produced the appendix citing the assignment "in the
+      prompt". Only pasted text and uploads are the supplied document.
+    */
+    parts.push(
+      "",
+      `EDITOR'S DIRECTION (instructions for this piece; not a source; never cite it): ${input.askedFor.trim()}`,
+    );
   }
 
   parts.push(
@@ -654,7 +687,9 @@ export function buildDeskFindingsPack(input: {
     DESK_FINDINGS_ASK,
     "",
     `SUBJECT: ${input.subject}`,
-    ...(input.askedFor?.trim() ? ["", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`] : []),
+    ...(input.askedFor?.trim()
+      ? ["", `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`]
+      : []),
     "",
     `WHAT THE DESK READ (${input.reading.length}):`,
     records.join("\n\n---\n\n"),
@@ -742,11 +777,12 @@ export function buildWritingPack(input: {
       "",
       "SUPPLIED-ONLY SCOPE: The editor selected 'Use only supplied material'. There was no outside research pass.",
       "Do not search, browse, open or fetch outside sources. Do not add any citation, URL, date, name, number or other factual claim that the supplied material does not contain.",
-      "Cite only URLs explicitly present in the supplied material or the explicitly selected TownReporter story above, and exact supplied document filenames with page/section locators. Never cite a source you did not receive.",
+      "Cite only URLs explicitly present in the supplied material or the explicitly selected TownReporter story above, and exact supplied document filenames with page/section locators. Never cite a source you did not receive. Never write 'the prompt' or 'what the editor asked for' in a citation: anything the editor supplied is 'the supplied document'.",
       "Every checkable claim must be supported by that supplied record, or qualified/removed.",
       "When a fact needed for the piece is missing, do not guess or fill it from memory. Name it in an EDITOR CHECKS subsection inside EDITOR'S FACT SHEET so the editor can supply or verify it.",
     );
-    if (input.askedFor?.trim()) parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    if (input.askedFor?.trim())
+      parts.push("", `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
     parts.push(
       "",
       "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
@@ -851,7 +887,11 @@ export function buildWritingPack(input: {
   }
 
   if (input.askedFor?.trim()) {
-    parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
+    // The reader-safe label; see the note in `buildEditorialPack`.
+    parts.push(
+      "",
+      `THE SUPPLIED DOCUMENT — WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`,
+    );
   }
 
   // Every writer cites the supplied record; opening sources is not a pack promise.

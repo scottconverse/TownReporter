@@ -18,7 +18,7 @@
  * cannot answer it differently) and the words are the picker's words.
  */
 
-import { isCustomModelChoice } from "./model-choice.ts";
+import { FAILOVER_TRAIL_SEPARATOR, isCustomModelChoice } from "./model-choice.ts";
 import { clockLabel } from "./follow-up-copy.ts";
 
 /** Reasons use the existing availability check, with no extra probes. */
@@ -76,7 +76,7 @@ export function readinessFailureMessage(choice: string, name: string, message: s
     if (/CLI not found|not installed/i.test(message)) return "Claude Code is not installed on this server.";
     if (/signed out|not logged|sign in|session expired/i.test(message)) return "Claude is signed out on this server. Sign in once: run claude auth login on the server.";
   }
-  if (isCustomModelChoice(choice) && /key.*(?:decrypt|cannot be read)|decrypt.*key/i.test(message)) return `${name} (key) — key can't be read. Fix it in Server -> Connections.`;
+  if (isCustomModelChoice(choice) && /key.*(?:decrypt|cannot be read)|decrypt.*key/i.test(message)) return `${name.toLowerCase().includes("(key)") ? name : `${name} (key)`} — key can't be read. Fix it in Server -> Connections.`;
   if (/usage limit|out of quota|quota.*(?:exceeded|exhausted)|insufficient_quota/i.test(message)) return `${name} hit its usage limit.`;
   return `${name} is not ready: ${message}`;
 }
@@ -186,16 +186,18 @@ export function draftFallbackAttribution(input: {
 /**
  * The reason the job itself recorded for its latest switch. `failover_note` holds
  * either the sentence "This draft moved to <X> because <Y>" or the trail
- * "<Y> -> <X>" that `appendStoryFailoverNote` builds; the last hop's reason is
- * the part before the final " -> ". Nothing is invented: no note, no reason.
+ * "<Y> → <X>" that `appendStoryFailoverNote` builds (older rows: "<Y> -> <X>");
+ * the last hop's reason is the part before the final hop's arrow. The reason
+ * keeps its own text, arrows included; only its closing period is dropped,
+ * because the sentence adds one. Nothing is invented: no note, no reason.
  */
 export function switchReasonFromNote(failoverNote: string | null | undefined): string | undefined {
   const note = (failoverNote ?? "").trim();
   if (!note) return undefined;
   const sentence = /^This draft moved to .+? because (.+)$/i.exec(note);
   if (sentence) return sentence[1].replace(/\.$/, "");
-  const hops = note.split(" -> ");
-  return hops.length > 1 ? hops[hops.length - 2] : undefined;
+  const hops = note.includes(FAILOVER_TRAIL_SEPARATOR) ? note.split(FAILOVER_TRAIL_SEPARATOR) : note.split(" -> ");
+  return hops.length > 1 ? hops[hops.length - 2].replace(/\.$/, "") : undefined;
 }
 
 /**

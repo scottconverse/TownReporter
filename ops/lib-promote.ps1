@@ -572,6 +572,9 @@ function Set-PromoteInstalledLockHash {
   it is still worth having in the log, but a run that fast-forwarded the
   checkout by hand makes the two equal and that says nothing at all about what
   node_modules holds.
+
+  THROWS when package-lock.json exists under -App but -LockHash is empty: that
+  is a hash that failed, not a lockfile that is missing.
 #>
 function Test-PromoteNeedsInstall {
   param(
@@ -579,6 +582,18 @@ function Test-PromoteNeedsInstall {
     [string]$LockHash = "",
     [string]$ResumeAt = ""
   )
+  <#
+    An empty hash is only "no lockfile" when there IS no lockfile. When the
+    file is there and the hash came back empty, the hash failed -- and on
+    2026-10-10 11:33 PM that failure read as "nothing to install", npm ci was
+    skipped, and a release that added a dependency died at the build. Checked
+    first, before -Resume, because no answer built on an unreadable lockfile
+    is a safe one. The caller stops the promotion on this.
+  #>
+  $lockFile = Join-Path $App 'package-lock.json'
+  if (-not $LockHash -and (Test-Path -LiteralPath $lockFile)) {
+    throw "package-lock.json is at $lockFile but its hash came back empty, so whether node_modules matches it cannot be known"
+  }
   if ($ResumeAt -eq 'deps') {
     return [pscustomobject]@{
       Needed = $true

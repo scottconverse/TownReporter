@@ -6281,7 +6281,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     if (!draft.dek || !draft.dek.trim()) {
       warnings.push({
         key: "dek",
-        sentence: "Add a dek, the one-line summary under the headline, before you publish.",
+        sentence: "No dek yet. You can add one, or publish without it.",
       });
     }
 
@@ -7461,6 +7461,8 @@ export async function performSuggestHeadlines(
     `grokChat` is still the thing that resolves an "auto".
   */
   const newsroomId = owned(context);
+  /* Release H DHI-6: the receipt keeps the press as its start, so the runtime shows. */
+  const startedAt = new Date();
   const { resolveRequestedJobModel } = await import("./job-model-runtime.server.ts");
   const assignment = await resolveRequestedJobModel(newsroomId, "headlines", model?.choice, modelEffort(model?.choice ?? "auto", model?.effort), model?.modelChoiceExplicit);
   const choice = assignment.providerId as EffectiveProviderChoice;
@@ -7496,7 +7498,7 @@ export async function performSuggestHeadlines(
     try {
       await sql.query(
         `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error, result_json, started_at, finished_at)
-         values ($1, $2, 'headlines', $3, $4, $5, 'default', $6, $7, $8, $9, now(), now())`,
+         values ($1, $2, 'headlines', $3, $4, $5, 'default', $6, $7, $8, $9, $10, now())`,
         [
           newsroomId,
           context.userId,
@@ -7512,6 +7514,7 @@ export async function performSuggestHeadlines(
             ranProvider: got.meta?.provider ?? null,
             suggestions: count,
           }),
+          startedAt,
         ],
       );
     } catch {

@@ -255,13 +255,14 @@ describe("structured job progress", () => {
       __setJobWorkForTest();
     }
     const stopped = (await stored(id)) as DeskJob;
-    // A cancel is a failed job whose reason is the editor's, because the card's
-    // three states are running, done and failed -- and "Cancelled by the editor"
-    // with Retry beside it is what the editor needs to see.
-    assert.equal(stopped.status, "failed");
+    // An editor's Cancel on a story draft settles the row as `cancelled`
+    // (requestJobCancel, jobs.ts), and the reason stays the editor's own
+    // sentence. The card still draws this as its failed state -- see
+    // cancelled-status-readers.test.ts -- so Retry is beside it either way.
+    assert.equal(stopped.status, "cancelled");
     assert.equal(stopped.error, JOB_CANCELLED_REASON);
     assert.equal(stopped.step_text, "Checking the draft against the evidence");
-    assert.equal(stopped.pct, 40, "the failed card shows how far it got");
+    assert.equal(stopped.pct, 40, "the stopped card shows how far it got");
 
     await sql`delete from desk_jobs where id = ${job.id} and newsroom_id = ${NEWSROOM}`;
   });
@@ -281,7 +282,9 @@ describe("structured job progress", () => {
       __setJobWorkForTest();
     }
     assert.deepEqual(ran, [], "the claim was refused, so no model was ever reached");
-    assert.equal((await stored(id))!.status, "failed");
+    // The Cancel press settled the row before it was ever claimed, so it is
+    // `cancelled` -- executeJob's own early return accepts either word here.
+    assert.equal((await stored(id))!.status, "cancelled");
     await sql`delete from desk_jobs where id = ${job.id} and newsroom_id = ${NEWSROOM}`;
   });
 });

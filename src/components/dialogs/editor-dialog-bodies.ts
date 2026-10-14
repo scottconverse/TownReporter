@@ -851,6 +851,8 @@ export type HeadlineBodyProps = {
   set: (patch: Partial<HeadlineState>) => void;
   problem: string | null;
   note: string | null;
+  /** Release H DHI-7: the first suggestion call is running; the empty list says so. */
+  asking?: boolean;
   /**
    * The shared model picker for "Suggest 3 more", which now carries the pick
    * (`headlineSuggestRequest`). The reference draws this row on the headline
@@ -888,7 +890,7 @@ export function HeadlineBody(p: HeadlineBodyProps): ReactNode {
       : createElement(
           "p",
           { className: "astra-msg", role: "status" },
-          "No suggestions yet. Press Suggest 3 more.",
+          p.asking ? "Asking the story model…" : "No suggestions yet. Press Suggest 3 more.",
         ),
     fields([
       field("Or write a new one", "", line(s.written, "Type a headline here; it replaces the choice above", (v) => set({ written: v })), "written"),

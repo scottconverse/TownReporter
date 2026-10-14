@@ -505,7 +505,14 @@ export async function commitDraftBatchForAuthenticatedEditor(
       const checked = await inspectSelection(tx, input, runtimeSnapshot, true);
       if (!checked.ok) return checked;
       await deps.afterSelectionLocked?.();
-      for (const jobId of checked.cancelJobIds) await tx.query("update desk_jobs set cancel_requested=true,status='failed',stage='Cancelled',error='Stopped by the editor for a model restart.',finished_at=now(),updated_at=now(),claim_token=null where id=$1 and newsroom_id=$2 and status in ('queued','running')", [jobId, input.context.newsroomId],
+      /*
+        `cancelJobIds` is drawn only from `kind='draft'` rows (inspectSelection),
+        so every job stopped here is a story draft and ends `cancelled` -- the
+        same word `requestJobCancel` writes. It used to say `failed` here, which
+        left the batch path disagreeing with the single-draft path about a job
+        stopped for exactly the same reason.
+      */
+      for (const jobId of checked.cancelJobIds) await tx.query("update desk_jobs set cancel_requested=true,status=case when kind='draft' then 'cancelled' else 'failed' end,stage='Cancelled',error='Stopped by the editor for a model restart.',finished_at=now(),updated_at=now(),claim_token=null where id=$1 and newsroom_id=$2 and status in ('queued','running')", [jobId, input.context.newsroomId],
         );
       const [batch] = await tx.query<{ id: number }>(
         "insert into draft_batches(newsroom_id,user_id,runtime_snapshot) values($1,$2,$3::jsonb) returning id",

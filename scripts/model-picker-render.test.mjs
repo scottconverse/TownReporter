@@ -150,8 +150,30 @@ test("an unreadable Gemini key is disclosed before the draft press", () => {
   availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
   try {
     const html = render({ value: "custom:gemini" });
+    // THV-4: this connection is named "Gemini", not "Gemini (key)", so the
+    // option label names the key route and the readiness sentence follows it.
     assert.match(html, /Gemini \(key\) — key can&#x27;t be read\. Fix it in Server -&gt; Connections\./);
+    assert.doesNotMatch(html, /\(key\) \(key\)/);
     assert.doesNotMatch(html, /value="custom:gemini"[^>]*disabled=""/);
+  } finally { availabilityStub.__setConnections([]); }
+});
+
+test("a connection already named \"(key)\" renders the key route exactly once", () => {
+  /*
+    THV-4 labels the saved-connection option with the key route. An operator who
+    already named the connection "Gemini (key)" -- the name readinessFailureMessage
+    itself teaches -- must not read "Gemini (key) (key)" in the option, the
+    select's title, or the readiness sentence.
+  */
+  availabilityStub.__setConnections([
+    { id: "gemini", name: "Gemini (key)", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." },
+  ]);
+  try {
+    const html = render({ value: "custom:gemini" });
+    assert.doesNotMatch(html, /\(key\) \(key\)/);
+    assert.match(html, /Gemini \(key\) — gemini-3\.5-flash/);
+    assert.match(html, /Gemini \(key\) — key can&#x27;t be read\. Fix it in Server -&gt; Connections\./);
+    assert.match(html, /value="custom:gemini"[^>]*selected=""/);
   } finally { availabilityStub.__setConnections([]); }
 });
 
@@ -361,8 +383,12 @@ test("saved API connections supplement rather than replace all built-in picker c
     // `[^>]*` rather than a literal space: 0.6.63 gave every option a `title`
     // (Unit P item 7), which sits between the value and `selected`.
     assert.match(html, /value="custom:abc"[^>]*selected=""/);
-    assert.match(html, /Newsroom LiteLLM — my-model/);
-    assert.match(html, /Prefers Newsroom LiteLLM \(my-model\) for this run/);
+    // THV-4: the connection is named "Newsroom LiteLLM" and its own key is
+    // what reaches it, so the option says "(key)" -- this is the label an
+    // editor needs to tell the key route apart from a built-in model. The
+    // value stays `custom:abc` (asserted above).
+    assert.match(html, /Newsroom LiteLLM \(key\) — my-model/);
+    assert.match(html, /Prefers Newsroom LiteLLM \(key\) \(my-model\) for this run/);
     assert.match(html, /technical failure can move the unfinished call/);
     assert.match(html, /value="auto"/);
     assert.match(html, /value="local-model"/);
@@ -441,6 +467,10 @@ test("a stored SuperGrok choice on the forced surface falls back to Automatic", 
 for (const [choice, error, sentence] of [
   ["claude-haiku", "Claude is signed out. Open Claude Code, sign in, then try again.", "Claude is signed out on this server. Sign in once: run claude auth login on the server."],
   ["claude-sonnet", "Claude Code CLI not found. Install it.", "Claude Code is not installed on this server."],
+  /*
+    THV-4: this connection is named "Custom", not "Custom (key)",
+    so the option label (and the sentence built from it) names the key route.
+  */
   ["custom:broken", "The saved API key cannot be decrypted.", "Custom (key) — key can't be read. Fix it in Server -> Connections."],
 ]) test(`${choice}: option and readiness line disclose the server reason`, async () => {
   const { chromium } = await import("playwright");
@@ -451,8 +481,10 @@ for (const [choice, error, sentence] of [
   availabilityStub.__setConnections(custom ? [custom] : []);
   try {
     const page = await browser.newPage();
-    // The picker names a custom connection by its connection name (model-picker.tsx).
-    const input = { choice, availability, customConnection: custom, label: custom ? custom.name : "Claude" };
+    // The picker names a custom connection by its connection name with the key
+    // route spelled out (model-picker.tsx, THV-4); the drawer's status line is
+    // handed that same name, so both lines say the same words.
+    const input = { choice, availability, customConnection: custom, label: custom ? `${custom.name} (key)` : "Claude" };
     const reason = writerBar.writerUnavailableReason?.(input);
     const dot = writerBar.readinessDot(false, { state: "ready", reason: "Story checked." }, reason);
     await page.setContent(renderToStaticMarkup(createElement("div", {},

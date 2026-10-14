@@ -91,8 +91,14 @@ try {
   Check 'ops\promote.ps1 hashes the lockfile without Get-FileHash' {
     $lines = Get-Content -LiteralPath $promote
     $lockLines = @($lines | Where-Object { $_ -match '^\$lock(Before|After) = if \(Test-Path' })
+    # The two lines hash $lockFile, the full path built from $app -- never a
+    # bare relative name (see the 2026-10-10 note in ops\promote.ps1).
+    $pathLines = @($lines | Where-Object { $_ -match '^\$lockFile = ' })
     if ($lockLines.Count -ne 2) { "expected 2 lockfile lines, found $($lockLines.Count)" }
+    elseif ($pathLines.Count -ne 1) { "expected 1 `$lockFile line, found $($pathLines.Count)" }
     else {
+      $app = $AppRoot
+      Invoke-Expression $pathLines[0]
       $seen = @()
       foreach ($line in $lockLines) {
         if ($line -match 'Get-FileHash') { return "still calls Get-FileHash: $line" }

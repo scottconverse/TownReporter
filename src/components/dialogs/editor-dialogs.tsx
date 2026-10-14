@@ -1209,6 +1209,12 @@ export type HeadlineDialogProps = {
   modelPicked?: boolean;
   onModelChange?: (model: string) => void;
   onEffortChange?: (effort: string | null) => void;
+  /**
+   * Release H DHI-7: the story screen's "Suggest headlines" press opens this
+   * panel, and with no suggestions yet the panel starts the first round on the
+   * same model its row shows. "Suggest 3 more" is unchanged.
+   */
+  suggestFirst?: boolean;
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
@@ -1246,6 +1252,7 @@ export function HeadlineDialog({
   modelPicked = false,
   onModelChange,
   onEffortChange,
+  suggestFirst = false,
   open,
   onClose,
   onDone,
@@ -1298,18 +1305,18 @@ export function HeadlineDialog({
     return { note: text };
   };
 
-  const onSuggested = () =>
+  const suggestWith = (from: HeadlineState, explicit: boolean) =>
     press.run(async () => {
       const asked = await suggestHeadlines({
         data: {
           leadId,
-          ...headlineSuggestRequest(state),
-          modelChoiceExplicit: modelTouched.current || modelPicked,
+          ...headlineSuggestRequest(from),
+          modelChoiceExplicit: explicit,
         },
       });
       if (!asked.ok) return { problem: asked.error };
       if (!asked.options.length) return { problem: "The AI offered no headlines. Your own line still works." };
-      set({ suggestions: asked.options, choice: asked.options[0] ?? state.choice });
+      set({ suggestions: asked.options, choice: asked.options[0] ?? from.choice });
       const runtime = asked.model?.trim();
       return {
         note: runtime
@@ -1317,6 +1324,19 @@ export function HeadlineDialog({
           : `${asked.options.length} suggestions. The provider did not report which model ran. Pick one, or type your own.`,
       };
     });
+  const onSuggested = () => suggestWith(state, modelTouched.current || modelPicked);
+
+  // Release H DHI-7: a fresh open is seeded empty (useDialogState), so the first
+  // round on the story screen starts here with the same state the seed gives
+  // the row: the screen's model on the screen's effort.
+  React.useEffect(() => {
+    if (!open || !suggestFirst) return;
+    const seeded = headlineInitial(current, defaultModel, defaultEffort);
+    const from = shared ? { ...seeded, model: screenModel ?? seeded.model, effort: screenEffort } : seeded;
+    void suggestWith(from, modelPicked);
+    // Only the open edge starts it; "Suggest 3 more" is the editor's own press.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const onPrimary = () =>
     press.run(async () => {
@@ -1345,6 +1365,7 @@ export function HeadlineDialog({
         state={state}
         set={setFromEditor}
         problem={press.problem ?? headlineProblem(state)}
+        asking={press.busy}
         note={press.note}
         ModelPicker={DialogModelPicker}
         Choice={Choice}

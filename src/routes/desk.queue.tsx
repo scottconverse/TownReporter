@@ -73,10 +73,13 @@ import {
   killUndoPress,
   holdPress,
   holdUndoPress,
+  holdStampRestore,
   bringBackPress,
   restoreStatus,
+  undoPressFor,
   type KillReasonRequest,
   type KillUndoPress,
+  type LastPress,
   type RestoreStatus,
 } from "@/components/fast-kill";
 import { bulkDeskWarnings, bulkDeskRetry, bulkWarningSentence, deskWarning, withDeskOverride, type BulkDeskWarning } from "@/lib/news/desk-warning";
@@ -238,10 +241,27 @@ function QueuePage() {
   const bulkKillReport = useRef<{ promise: Promise<{ undoIds: number[] }>; settle: (r: { undoIds: number[] }) => void } | null>(null);
   /* THT-8: each lead's status write that has not answered yet; a restore waits for it. */
   const leadWrites = useRef(createLeadWrites());
+  /*
+    THU-3: the most recent KILL or HOLD this screen pressed, whichever came last.
+
+    The legend says "U undo" (`TRIAGE_LEGEND`) and means the one press that just
+    happened. Before this, U read the held cursor first and `lastKill` only
+    second, so a hold pressed after a kill was the one U took back only when the
+    cursor happened to be on it -- and a kill pressed after a hold was taken back
+    only if no held lead was under the cursor. Two memories with a fixed order
+    between them cannot answer "whichever came last"; one memory stamped at the
+    press can.
+
+    The shape is `LastPress` (fast-kill.ts), the same value `undoPressFor` reads
+    and turns back into a write, so the press this screen stamps and the request
+    the U key sends cannot disagree about what a press is.
+  */
+  const lastPress = useRef<(LastPress & { bulk?: true }) | null>(null);
   const killLead = (lead: { id: number; status: string }) => {
     const restore = restoreStatus(lead.status);
     killedFrom.current.set(lead.id, restore);
     lastKill.current = { id: lead.id, restore };
+    lastPress.current = { kind: "kill", id: lead.id, restore };
     return killPress(lead.id, restore);
   };
   /*
@@ -250,10 +270,33 @@ function QueuePage() {
     at the moment of the press because by Undo time the row is held and its prior
     status is gone. Every Hold this screen makes goes through here, so the toast's
     Undo and the U key both have a value to read instead of a guess.
+
+    THU-3: the same press is stamped as the most recent one, so a U pressed after
+    a Hold takes the Hold back even when a Kill came before it.
   */
   const holdLead = (lead: { id: number; status: string }) => {
+    const restore = holdRestore(lead);
     heldFrom.current.add(lead.id);
-    return holdPress(lead.id, holdRestore(lead));
+    lastPress.current = { kind: "hold", id: lead.id, restore };
+    return holdPress(lead.id, restore);
+  };
+  /*
+    THU-3, the walk's own H. The key handler holds the lead `shown` names for
+    the cursor, not the full row -- a projection with the headline and nothing
+    else. Stamping `lastPress` from that object directly is what made the key
+    path silently different from the row's Hold: `holdRestore` reads
+    `lead.status`, the projection has none, so the stamp carried
+    `{restore: undefined}`. `undoPressFor` then built a hold undo with no
+    `status`, and the restore write was sent asking the server to guess -- an
+    Undo that answers nothing on a lead whose draft makes `new` wrong. Every
+    Hold on this screen -- the keyboard's H, the row's own, and the row menu's
+    dialog -- goes through here, so the press the key stamps is the press the
+    row's Hold makes, and `holdRestore` is the one place the status is read.
+  */
+  const holdLeadById = (id: number) => {
+    const lead = leads.find((l) => l.id === id);
+    const row = lead ?? { id, status: "held" };
+    return holdLead(row);
   };
   /*
     Where a held lead goes back to, for a lead that is held NOW. `restoreStatus`
@@ -264,7 +307,7 @@ function QueuePage() {
     guessed at (`undefined`), which the server answers with `new`.
   */
   const holdRestore = (lead: { status: string }): RestoreStatus | undefined =>
-    lead.status === "drafted" ? "drafted" : lead.status === "held" ? "new" : undefined;
+    holdStampRestore(lead.status);
   /*
     The way back from a kill, putting the lead where it was (owner, 2026-10-03).
     A `drafted` lead an editor killed came back as `new` with its draft orphaned,
@@ -282,16 +325,38 @@ function QueuePage() {
   /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
   const undoOptimistic = leadStatusOptimistic(qc);
   const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
+  /*
+    THU-2 / DHK-2: the one name a lead's kill toast carries, so its Undo can
+    REPLACE that toast in place instead of stacking a second one beside it.
+
+    The old shape raised the kill under no id at all and the "Restoring…" line
+    under `desk-restoring-<id>` -- two names, so sonner drew two cards: the
+    "Killed 1 lead. Undo" sentence the editor had just answered, and, over the
+    rows, a "Restoring…" the kill toast knew nothing about. Naming both from
+    one place is what makes the second press a replacement.
+
+    Deliberately NOT the same name as `desk-restoring-<id>`, because the bulk
+    path already owns that one for its own single line and the two must not
+    coalesce into each other.
+  */
+  const killToastId = (id: number) => `desk-kill-toast-${id}`;
   const undoKill = useDeskMutation({
     mutationFn: async (press: KillUndoPress) => {
       // The lead is being put back, so U must not aim at it again.
       if (lastKill.current?.id === press.id) lastKill.current = null;
+      if (lastPress.current?.id === press.id) lastPress.current = null;
       /*
         THT-8, DHJ-2: the toast says "Restoring…" in the same paint as the press,
         and goes when the write answers (the done or failed toast takes over).
         A bulk press owns its own outcome, so it stays quiet here.
+
+        THU-2 / DHK-2: raised under the KILL toast's own name, which is what
+        makes it a replacement rather than a second card. `killToastId(press.id)`
+        is the same name `setStatus` gave the "The lead moved to Killed." toast,
+        so sonner swaps that card's sentence where it stands: no stale "Undo"
+        and no second line over the rows.
       */
-      const restoringId = `desk-restoring-${press.id}`;
+      const restoringId = killToastId(press.id);
       if (!bulkMuted.current) deskToast("Restoring…", { id: restoringId, duration: Infinity });
       try {
         /*
@@ -440,6 +505,13 @@ function QueuePage() {
       it for the whole life.
     */
     duration: (_result, input) => (input.status === "killed" ? KILL_TOAST_MS : undefined),
+    /*
+      THU-2 / DHK-2: a kill's toast is named for its lead, so the press's own
+      Undo can replace it in place with "Restoring…" (`undoKill` raises that
+      under the same name). Nothing else on this screen names its toast, and a
+      Hold -- which has no follow-up sentence -- goes on stacking as before.
+    */
+    toastId: (input) => (input.status === "killed" ? killToastId(input.id) : undefined),
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -927,7 +999,9 @@ function QueuePage() {
       case "hold":
         // TIA-2: the same press the row's Hold makes, so the keyboard's H and
         // the button beside it both leave a way back the Undo can read.
-        if (lead) setStatus.mutate(holdLead(lead));
+        // THU-3: `holdLeadById` reads the LEAD's own row for the status, the
+        // projection the key holds has none (see `holdLeadById` above).
+        if (lead) setStatus.mutate(holdLeadById(lead.id));
         break;
       case "kill":
         /*
@@ -944,37 +1018,77 @@ function QueuePage() {
           if (target) setStatus.mutate(killLead(target));
         }
         break;
-      case "undo":
-        if (lead && lead.status === "held") {
+      case "undo": {
+        /*
+          THU-3: U takes back the MOST RECENT kill or hold, whichever came last.
+
+          The order below is the whole fix. It used to be "held cursor first,
+          then last kill", which answers a fixed priority rather than "whichever
+          came last": press H then X and U took the HOLD back if a held lead was
+          under the cursor, and press X then H and U took the KILL back only when
+          no held lead was. `lastPress` is stamped by `killLead` and `holdLead`
+          at the press, so the key reads the press that actually came last.
+        */
+        const pressed = lastPress.current;
+        if (pressed?.kind === "hold") {
           /*
-            TIA-2, walk step TIA-2. This branch used to be the same write as the
-            toast's "Undo" for a hold -- `setStatus` with `release: true` -- and
-            that write lands on `moveLeadStatusHere` below, which puts a released
-            lead back on hold and says "Released.". A held lead is not a released
-            one (the screen has no release for its own toast's Undo), so it takes
-            the same way back the toast takes: `undoHoldPress`, carrying the
-            status the row held when the Hold was pressed. The keyboard and the
-            button therefore move a held lead to the same place, by the same
-            write, and neither can be the one that stayed put.
+            TIA-2, walk step TIA-2. The toast's Undo for a hold is `undoHoldPress`,
+            carrying the status the row held when the Hold was pressed -- not the
+            ordinary `setStatus` write, which for a lead with a written draft is
+            refused with the drafted warning and leaves the row held with nothing
+            said. A hold this screen pressed is taken back by the same write as
+            the toast's Undo, so the key and the button cannot be the one that
+            stayed put.
+
+            THU-3, THE WALK'S THIRD FINDING. The branch used to require the held
+            lead to be on screen: `shown.find(...)` or the cursor row. It never
+            is. A hold's optimistic patch (`leadStatusOptimistic`) takes the row
+            off the Open tab in the same paint as the press, and `shown` IS the
+            server's Open page, so by the time U is pressed the search finds
+            nothing, the cursor is on the next row, and the press falls through
+            to the kill branch -- a U that did nothing on a hold, which is what
+            the walk walked into. The stamp is the whole memory a press needs:
+            the lead left the list, not the screen, and the write `undoPressFor`
+            builds goes by id.
+
+            The request itself is built by `undoPressFor` (fast-kill.ts), the one
+            place the Kill and the Hold agree on how a press becomes a write, so
+            the key and the toast's Undo cannot drift apart. `holdLeadById` read
+            the row's status at the press, so `pressed.restore` is the answer
+            even though the row is gone.
+          */
+          lastPress.current = null;
+          const press = undoPressFor(pressed);
+          if (press) void undoKill.mutate(press);
+        } else if (pressed?.kind === "kill" && pressed.bulk && bulkKillReport.current) {
+          // THU-4: U puts back every lead the bulk press killed, the same as its toast's Undo.
+          lastPress.current = null;
+          lastKill.current = null;
+          void runBulkKillUndo();
+        } else if (pressed?.kind === "kill") {
+          // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
+          lastPress.current = null;
+          const press = undoPressFor(pressed);
+          if (press) void undoKill.mutate(press);
+        } else if (lead && lead.status === "held") {
+          /*
+            No press this screen remembers, so U falls back to the cursor the way
+            it always did. A held lead this screen held takes the toast's own way
+            back; one carried in from the Held tab (or held in another tab) keeps
+            the drawn `release`, and the "Released." strip offers the way back
+            from there.
           */
           if (heldFrom.current.has(lead.id)) {
             void undoKill.mutate(
               holdUndoPress(holdPress(lead.id, holdRestore(lead))),
             );
           } else {
-            /*
-              A lead held before this screen knew -- carried in from the Held
-              tab, or held in another tab. `release` is the drawn behaviour this
-              key had and is kept for it: the lead goes back on hold, and the
-              "Released." strip offers the way back from there.
-            */
             setStatus.mutate({ id: lead.id, status: "new", release: true });
           }
         } else if (lastKill.current) {
-          // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
+          // THT-7, THT-9: a kill pressed before `lastPress` existed on screen.
           const last = lastKill.current;
           if (last.bulk && bulkKillReport.current) {
-            // THU-4: U puts back every lead the bulk press killed, the same as its toast's Undo.
             lastKill.current = null;
             void runBulkKillUndo();
           } else {
@@ -991,6 +1105,8 @@ function QueuePage() {
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
+        break;
+      }
         break;
       case "open":
         if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
@@ -1231,6 +1347,8 @@ function QueuePage() {
       bulkKillReport.current = { promise, settle };
       bulkRestores.current = restores;
       lastKill.current = { id: ids[0], restore: restores[ids[0]], bulk: true };
+      // THU-3: the batch is a kill, and the most recent press like any other.
+      lastPress.current = { kind: "kill", id: ids[0], restore: restores[ids[0]], bulk: true };
       deskToast(`Killed ${ids.length} lead${ids.length === 1 ? "" : "s"}.`, {
         tone: "ok",
         id: BULK_STATUS_TOAST_ID,
@@ -1874,7 +1992,10 @@ function QueuePage() {
             <span>Filed</span>
             <span className="queue-head-acts">Actions</span>
           </div>
-          <div className="lead-list roomy">
+          {/* THU-2 / DHK-2: `queue-toast-room` reserves the foot of the list for
+              the fixed bottom-left toast stack, so a kill's toast (chips, Undo)
+              never covers the rows it is about. See desk-astra.css. */}
+          <div className="lead-list roomy queue-toast-room">
             {shown.map((l, index) => {
               // U26b: the same paper's place the server's counts and the scan's
               // matcher use, so the chip and the "≈ Printed" tab agree. U28:
@@ -2412,6 +2533,16 @@ function QueuePage() {
             // TIA-2: the dialog holds the lead this screen just held, so the U
             // key knows the hold it is taking back is this screen's own press.
             heldFrom.current.add(holdFor.id);
+            /*
+              THU-3, THE WALK'S SECOND FINDING. The row menu's "Hold with a
+              reason" writes through the dialog's own call, which does not touch
+              `lastPress` -- so the menu's Hold was the one hold on this screen
+              the U key could not see, and the walk's U after a menu Hold did
+              nothing at all. `holdLeadById` stamps the same press the row's own
+              Hold and the keyboard's H do, carrying the status the row held
+              before the dialog was opened, so all three leave one way back.
+            */
+            holdLeadById(holdFor.id);
             moveLeadStatusNow(qc, holdFor.id, "held");
             void qc.invalidateQueries({ queryKey: ["leads"] });
           }}

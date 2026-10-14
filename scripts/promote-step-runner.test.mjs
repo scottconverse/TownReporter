@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, openSync, closeSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, openSync, closeSync, realpathSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { copyDatabaseName, isCopyOf, parseCopyStamp } from "../ops/lib-promote-db.mjs";
 
@@ -240,10 +241,10 @@ function writeHarness(install, name, body) {
   return file;
 }
 
-function runPowerShell(file, { timeout = 120_000, onSpawn, env } = {}) {
+function runPowerShell(file, { timeout = 120_000, onSpawn, env, cwd = ROOT } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", file], {
-      cwd: ROOT,
+      cwd,
       env: env ? { ...process.env, ...env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -1219,6 +1220,7 @@ test("the promotion order puts the copy inside the stop-the-app window, before a
     */
     for (const [what, marker] of [
       ["the fast-forward", /\$recovered = Invoke-PromoteRolloutFailure -Why "the fast-forward could not run" -RestoreBuild \$false/],
+      ["the lockfile that cannot be hashed", /\$recovered = Invoke-PromoteRolloutFailure -Why \$why -RestoreBuild \$false/],
       ["the dependency install", /\$recovered = Invoke-PromoteRolloutFailure -Why "npm ci did not succeed \(\$code\)" -RestoreBuild \$false/],
       ["the build", /Invoke-PromoteRolloutFailure -Why "the build did not succeed" -MigrationsRan \$migrations -BuildOutput \$output/],
       ["the start", /\$recovered = Invoke-PromoteRolloutFailure -Why "the new build did not answer on port \$port" -MigrationsRan 'yes' -BuildOutput \$buildOutputFile/],
@@ -1226,13 +1228,13 @@ test("the promotion order puts the copy inside the stop-the-app window, before a
       const calls = [...src.matchAll(new RegExp(marker.source, "g"))].length;
       assert.equal(calls, 1, `${what} no longer puts the database back through Invoke-PromoteRolloutFailure (found ${calls} call sites)`);
     }
-    // ...and the definition itself is not counted as one of them: four call
+    // ...and the definition itself is not counted as one of them: five call
     // sites and one definition, whatever anybody adds later.
     assert.equal([...src.matchAll(/^function Invoke-PromoteRolloutFailure/gm)].length, 1);
     assert.equal(
       [...src.matchAll(/Invoke-PromoteRolloutFailure/g)].length,
-      5,
-      "the number of mentions of the recovery changed: four call sites plus the definition",
+      6,
+      "the number of mentions of the recovery changed: five call sites plus the definition",
     );
     assert.match(src, /if \(\$RollbackDatabase\)/, "promote.ps1 no longer has a way to put a copy back by hand");
   } finally {
@@ -2333,7 +2335,10 @@ test("whether to install is decided by what node_modules was built from, not by 
       `Set-Content -Path ${psLiteral(marker)} -Value 'not-a-hash' -Encoding ASCII`,
       "$garbage = Decide $a ''",
       "$garbageRead = Get-PromoteInstalledLockHash -App $app",
-      // 5: no lockfile at all -- nothing to install from, and never was.
+      // 5: no lockfile at all -- nothing to install from, and never was. The
+      // file written above is removed first: an empty hash with the file
+      // still there is a failed hash, and that throws (see the next test).
+      "Remove-Item -LiteralPath (Join-Path $app 'package-lock.json')",
       "$noLock = Decide '' ''",
       // 6: -Resume at the install means the install it started never finished.
       "$resumed = Decide $a 'deps'",
@@ -2386,6 +2391,95 @@ test("whether to install is decided by what node_modules was built from, not by 
     // The round trip, and that the marker is stored as the hash it was given.
     assert.equal(line("readBack"), hashB, "the marker did not read back as the hash that was written");
     assert.equal(read(marker).trim(), hashB, "the marker on disk is not the hash");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+
+test("the lockfile is hashed from the app folder even when PowerShell was started in another folder", windowsOnly, async () => {
+  /*
+    2026-10-10 11:33 PM, logs\promote-20261010-233305.log lines 29-32.
+
+    A deploy wrapper in another folder started the promotion. promote.ps1 did
+    `Set-Location $app` and then hashed "package-lock.json" by that bare name.
+    Test-Path read the PowerShell location and said the file was there; the
+    hash opened it through .NET, which reads the PROCESS directory, found
+    nothing, and the catch turned that into ''. '' read as "there is no
+    package-lock.json here", npm ci was skipped, and a release that added a
+    dependency (imapflow) died at npm run build and rolled back.
+
+    So this starts PowerShell in a folder with NO lockfile, moves to the app
+    folder the way promote.ps1 does, and runs the REAL lines lifted out of
+    ops\promote.ps1 and the REAL install decision. node_modules was installed
+    from an older lockfile, so the only right answer is "install".
+  */
+  const install = makeInstall();
+  try {
+    const lockText = '{ "name": "townreporter", "lockfileVersion": 3, "packages": { "node_modules/imapflow": {} } }\n';
+    writeFileSync(join(install.app, "package-lock.json"), lockText);
+    const expected = createHash("sha256").update(lockText).digest("hex").toUpperCase();
+    const oldHash = "ED9F0A0EE7D92BB75FB33CF4BE8906FF144E2138861C74794A2827B25230F004";
+    mkdirSync(join(install.app, "node_modules"), { recursive: true });
+    writeFileSync(join(install.app, "node_modules", ".promote-lock-hash"), `${oldHash}\n`);
+    // Where the process starts: a folder that holds no package-lock.json.
+    const elsewhere = join(install.root, "deploys", "release-g");
+    mkdirSync(elsewhere, { recursive: true });
+
+    const promoteLines = read(join(OPS, "promote.ps1")).split(/\r?\n/);
+    const lifted = promoteLines.filter((l) => /^\$lockFile = /.test(l) || /^\$lock(Before|After) = if \(Test-Path/.test(l));
+    assert.equal(lifted.length, 3, `expected the $lockFile line and the two hash lines in ops\\promote.ps1, found:\n${lifted.join("\n")}`);
+
+    const harness = writeHarness(install, "lock-elsewhere.ps1", [
+      `. ${psLiteral(join(OPS, "lib-backup.ps1"))}`,
+      "$processDir = [Environment]::CurrentDirectory",
+      "Set-Location $app",
+      ...lifted,
+      "$d = Test-PromoteNeedsInstall -App $app -LockHash $lockAfter -ResumeAt ''",
+      // The library on its own, with a relative name: it must read the
+      // PowerShell location too, not the process directory.
+      "$relative = Get-TownReporterFileHash -Path 'package-lock.json'",
+      // And an empty hash with the file present is a hard stop, not "skip".
+      "$threw = ''",
+      "try { [void](Test-PromoteNeedsInstall -App $app -LockHash '' -ResumeAt ''); $threw = 'no' } catch { $threw = $_.Exception.Message }",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Encoding ASCII -Value (@(
+        "processDir=$processDir",
+        "lockBefore=$lockBefore",
+        "lockAfter=$lockAfter",
+        "needed=$($d.Needed)",
+        "reason=$($d.Reason)",
+        "relative=$relative",
+        "threw=$threw"
+      ) -join ([char]10))`,
+    ]);
+
+    const run = await runPowerShell(harness, { cwd: elsewhere });
+    const resultPath = join(install.app, "result.txt");
+    assert.ok(existsSync(resultPath), `the harness wrote no result: ${run.err || run.out}`);
+    const result = read(resultPath).trim();
+    const line = (name) => result.split("\n").find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1) ?? "(missing)";
+
+    /*
+      The precondition the bug needs: the process really is somewhere else.
+
+      Compare CANONICAL long paths on both sides. [Environment]::CurrentDirectory
+      comes back from the OS and, on the Windows CI runner, in 8.3 short form
+      ("c:\users\runner~1\...") while `elsewhere` is the long path Node built
+      ("c:\users\runneradmin\..."). The two name the same folder, so lower-casing
+      them is not enough: realpathSync.native expands the alias first. This does
+      NOT loosen what the assertion proves -- it still fails if PowerShell started
+      anywhere other than `elsewhere`.
+    */
+    const canonical = (p) => realpathSync.native(p).toLowerCase().replace(/\\+$/, "");
+    assert.equal(canonical(line("processDir")), canonical(elsewhere), "PowerShell did not start in the other folder, so this proves nothing");
+    assert.ok(!existsSync(join(elsewhere, "package-lock.json")), "the other folder has a lockfile, so this proves nothing");
+
+    assert.equal(line("lockBefore"), expected, "the lockfile was not hashed from the app folder before the fast-forward");
+    assert.equal(line("lockAfter"), expected, "the lockfile was not hashed from the app folder after the fast-forward");
+    assert.equal(line("needed"), "True", `npm ci would be skipped for a lockfile node_modules was not built from: ${line("reason")}`);
+    assert.match(line("reason"), /installed from a different lockfile/);
+    assert.equal(line("relative"), expected, "Get-TownReporterFileHash read a relative name against the process directory");
+    assert.match(line("threw"), /package-lock\.json is at .* but its hash came back empty/, `an empty hash with the lockfile present did not stop: ${line("threw")}`);
   } finally {
     await cleanup(install);
   }
