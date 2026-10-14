@@ -534,6 +534,272 @@ test("no /desk/dark rule declares a literal color", () => {
   assert.deepEqual(literals, []);
 });
 
+// ── The Queue's bulk strip: the picker text on the gold bar ─────────────────
+
+/*
+  THU-6 / TJA-2. The Queue's bulk strip carries its own ink for the same reason
+  the hot score does: the strip is a GOLD FILL in both themes (`--a`, #ffd23f
+  light / #e6c35c dark) and dark ink is the only text that reads on it.
+
+  THU-6 gave the picker's labels `var(--fg)`, which is dark ink in light mode
+  but near-white (#e8e6e1) in dark mode -- about 1.6:1, measured on the walk
+  screenshot, for the four lines the shared picker draws inside the strip:
+  "Model for these stories", its help paragraph, "Thinking effort" and its
+  help line. The base rules the strip inherited are `color: var(--mut)` on
+  `.model-picker-label` and `.model-picker-help` (`src/styles.css:1703,1706`),
+  and `--mut` is the same near-white in dark. The summary's hairline is
+  `--fg2` (`src/desk-astra.css:8644`), near-white too.
+
+  This section does not grep the stylesheet for a rule name -- that would pin
+  the source text, not the reading. It resolves the cascade the way the
+  browser does, for the one element the finding is about:
+
+    - the element is `.desk-ltr.astra .queue-bulk` (the strip, which declares
+      `color: #111`), in LIGHT mode and in the two dark builds the desk
+      actually ships: `.desk-ltr.astra.night` and the appearance setting
+      `:root[data-appearance="desk-dark"] .desk-ltr.astra`;
+    - every rule whose selector chain could match the picker's text INSIDE
+      that element is collected from both stylesheets, ordered by the cascade
+      (origin, then specificity, then source order across the two files as
+      `src/routes/__root.tsx` imports them), and the `color` that wins is the
+      one the browser would paint.
+
+  A rule that names the text but is scoped somewhere else on the desk (the
+  inspector, the Dark Desk panel, the batch dialog's own picker) does not
+  match this element and is skipped, so this measures the strip and only the
+  strip.
+*/
+const ROOT_CSS = readFileSync(join(ROOT, "src", "routes", "__root.tsx"), "utf8");
+const SHEET_ORDER = ["src/styles.css", "src/desk-astra.css"];
+
+/** Every selector in that file that names this class as its last compound. */
+function selectorsEndingIn(sheetText, className) {
+  const names = [];
+  for (const m of sheetText.matchAll(/([^{}]+)\{/g)) {
+    for (const part of m[1].split(",")) {
+      const s = part.trim();
+      if (/^(?:@|from$|to$|\d|to\b)/.test(s)) continue;
+      const last = s.split(/\s+|>|\+|~/).filter(Boolean).pop() ?? "";
+      if (new RegExp(`\\.${className}\\b`).test(last.replace(/:{1,2}[\\w-]+(\\([^)]*\\))?/g, ""))) {
+        names.push(s);
+      }
+    }
+  }
+  return names;
+}
+
+/*
+  Comments are removed before anything is read out of a rule. Both stylesheets
+  carry long block comments INSIDE declaration blocks -- `.desk-ltr {` has a
+  paragraph explaining `--a` and `--adeep` before it declares either -- and a
+  regex that scanned the raw text would find `--a` named in that prose.
+*/
+function withoutComments(sheetText) {
+  return sheetText.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/** `[theme]`-scoped declarations written in a rule of its own, e.g. `--fg`. */
+function declarationOf(sheetText, selector) {
+  const at = sheetText.indexOf(selector);
+  if (at < 0) return null;
+  const open = sheetText.indexOf("{", at);
+  const close = sheetText.indexOf("}", open);
+  return withoutComments(sheetText.slice(open + 1, close));
+}
+
+/** One `prop: value;` out of a declaration block, or null. */
+function declaration(text, prop) {
+  if (!text) return null;
+  const m = text.match(new RegExp(String.raw`(?:^|;|{)\s*` + prop + String.raw`\s*:\s*([^;]+)`, "m"));
+  return m ? m[1].trim() : null;
+}
+
+/** The theme scopes the finding is measured in, as the browser would select.
+ * `rootTokens` are the extra tokens the theme puts on the `.desk-ltr.astra`
+ * root element, so a theme-scoped rule (`.desk-ltr.astra.night`, or the
+ * `[data-appearance]` attribute selector the desk-dark theme rides on) is
+ * matched onto the same chain the light theme measures. */
+const STRIP_THEMES = [
+  { name: "light", dark: false, sheetText: null, rootTokens: [] },
+  { name: "night", dark: true, sheetText: declarationOf(astraCss, ".desk-ltr.astra.night,"), rootTokens: [".night"] },
+  {
+    name: "desk-dark",
+    dark: true,
+    sheetText: declarationOf(astraCss, ':root[data-appearance="desk-dark"] .desk-ltr.astra'),
+    rootTokens: ['[data-appearance="desk-dark"]'],
+  },
+];
+
+/**
+ * The value a custom property computes to on `.desk-ltr.astra .queue-bulk`
+ * in one theme. The strip's own rule declares `color` as a literal, but this
+ * resolves `var()` the way the browser would rather than assuming a literal:
+ * a re-point on the strip (`--fg` or any other name) is picked up here, so a
+ * future rule that moved the ink through a token is measured too.
+ */
+function stripToken(theme, name, seen = new Set()) {
+  if (seen.has(name)) throw new Error(`custom-property cycle on --${name} (${theme.name})`);
+  seen.add(name);
+  const scope = declarationOf(astraCss, ".desk-ltr.astra {");
+  const raw =
+    declaration(theme.sheetText, `--${name}`) ??
+    declaration(scope, `--${name}`) ??
+    declaration(declarationOf(css, ".desk-ltr {"), `--${name}`);
+  if (raw == null) throw new Error(`--${name} is declared nowhere the strip can read it`);
+  const alias = raw.match(/^var\(--([\w-]+)\)$/);
+  return alias ? stripToken(theme, alias[1], seen) : raw;
+}
+
+/**
+ * `color` on a text node inside the strip, computed from the cascade.
+ *
+ * `chain` is the element path from the strip's own class down to the text
+ * node. A rule only counts when EVERY compound in its selector matches a
+ * compound on that path, in order -- which is what makes a rule scoped to
+ * the inspector, the Dark Desk panel or the batch dialog fail to match the
+ * strip without this needing a list of the places the picker is NOT.
+ */
+function stripColorFor(theme, chain) {
+  // The theme rides on the root element, so its tokens join the root compound:
+  // the night rule's `.desk-ltr.astra.night` and the desk-dark theme's
+  // `.desk-ltr.astra[data-appearance="desk-dark"]` both land on compound 0.
+  const path = [chain[0] + theme.rootTokens.join(""), ...chain.slice(1)];
+  const compounds = path.map((part) =>
+    part.split(/(?=[.:#[])/).map((c) => c.trim()).filter(Boolean),
+  );
+  // A selector matches when its compounds appear on the chain IN ORDER, not
+  // necessarily adjacently: `.desk-ltr.astra .queue-bulk .model-picker-label`
+  // reaches the label across the `.model-picker` wrapper the chain carries,
+  // and the base `.desk-ltr .model-picker-label` in styles.css reaches it too.
+  // Each selector compound must have every one of its tokens present in the
+  // chain compound it lands on (`.desk-ltr.astra` needs both `desk-ltr` and
+  // `astra`); a compound the chain does not have keeps the cursor where it is
+  // rather than failing the selector, which is the descendant combinator.
+  const matches = (selector) => {
+    const parts = selector.split(/\s*>\s*|\s+/).filter(Boolean);
+    let cursor = 0;
+    for (const part of parts) {
+      const here = part.split(/(?=[.:#[])/).map((c) => c.trim()).filter(Boolean);
+      while (cursor < compounds.length && here.some((token) => !compounds[cursor].includes(token))) {
+        cursor += 1;
+      }
+      if (cursor === compounds.length) return false;
+      cursor += 1;
+    }
+    return true;
+  };
+  const candidates = [];
+  for (const [fileIndex, path] of SHEET_ORDER.entries()) {
+    const sheetText = path.endsWith("desk-astra.css") ? astraCss : css;
+    // Comments go first: a rule that follows a block comment would otherwise
+    // carry the comment text into its FIRST selector and never match.
+    for (const m of withoutComments(sheetText).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const selector of m[1].split(",")) {
+        const s = selector.trim();
+        if (!matches(s)) continue;
+        const raw = declaration(m[2], "color");
+        if (raw == null) continue;
+        const ids = (s.match(/#[\w-]+/g) ?? []).length;
+        const classes = (s.match(/\.[\w-]+/g) ?? []).length;
+        const scopes = (s.match(/\[[^\]]+\]/g) ?? []).length;
+        // A theme selector (`[data-appearance]`, `.night`) outranks the same
+        // declaration written for both themes; that is the cascade rule the
+        // whole fix depends on.
+        candidates.push({ raw, fileIndex, ids, classes, scopes, order: candidates.length });
+      }
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      a.ids - b.ids ||
+      a.classes - b.classes ||
+      a.scopes - b.scopes ||
+      a.fileIndex - b.fileIndex ||
+      a.order - b.order,
+  );
+  const won = candidates.at(-1);
+  if (!won) throw new Error(`nothing declares a color on ${chain.join(" ")}`);
+  const alias = won.raw.match(/^var\(--([\w-]+)\)$/);
+  return alias ? stripToken(theme, alias[1]) : won.raw;
+}
+
+/**
+ * The text the strip's picker draws, as the walk measured it. `chain` is the
+ * element path from the strip's class to the text; the strip is the ground for
+ * all of them, because the picker paints no background of its own inside it.
+ */
+const BULK_TEXT_NODES = [
+  { chain: [".desk-ltr.astra", ".queue-bulk", ".model-picker", ".model-picker-label"], label: '"Model for these stories" and "Thinking effort" (both labels)' },
+  { chain: [".desk-ltr.astra", ".queue-bulk", ".model-picker", ".model-picker-help"], label: "the two picker help lines (the gateway sentence, the effort sentence)" },
+  { chain: [".desk-ltr.astra", ".queue-bulk", ".model-picker", ".model-picker-setup", "summary"], label: 'the "Set up a writing model" summary link' },
+  { chain: [".desk-ltr.astra", ".queue-bulk", ".model-picker", ".model-picker-setup", "p"], label: "the setup note paragraphs" },
+  { chain: [".desk-ltr.astra", ".queue-bulk", ".model-picker", ".model-picker-setup", "li"], label: "the setup steps" },
+];
+
+/** Every strip pairing, for the printed table and the assertions below. */
+function bulkStripRows() {
+  const out = [];
+  for (const theme of STRIP_THEMES) {
+    const bgHex = stripToken(theme, "a");
+    for (const node of BULK_TEXT_NODES) {
+      const fgHex = stripColorFor(theme, node.chain);
+      out.push({ theme: theme.name, fgHex, bgHex, ratio: contrastRatio(fgHex, bgHex), label: node.label });
+    }
+  }
+  return out;
+}
+
+/*
+  The strip is a FILL, and every text the picker draws on it is a real reading
+  on a gold ground -- not a decoration. 4.5:1 is the same floor the rest of
+  this audit holds normal text to; #111 on --a is about 13:1 in light and 11:1
+  dark, so the finding this section exists for (near-white on gold at 1.6:1)
+  is what fails here.
+*/
+test("the Queue's bulk strip picker text meets WCAG AA on the gold bar, in every theme", () => {
+  const failures = bulkStripRows().filter((r) => r.ratio < 4.5);
+  assert.deepEqual(
+    failures.map((f) => `${f.theme} ${f.fgHex} on ${f.bgHex} = ${f.ratio.toFixed(2)}:1 (${f.label})`),
+    [],
+    "the bulk strip's picker text fails WCAG AA on the gold bar",
+  );
+  assert.equal(bulkStripRows().length, BULK_TEXT_NODES.length * STRIP_THEMES.length);
+});
+
+test("the bulk strip section resolves the cascade it means to", () => {
+  // The strip's own background rule was found and is the gold fill.
+  assert.equal(stripToken(STRIP_THEMES[0], "a").toLowerCase(), "#ffd23f");
+  assert.equal(stripToken(STRIP_THEMES[1], "a").toLowerCase(), "#e6c35c");
+  assert.equal(stripToken(STRIP_THEMES[2], "a").toLowerCase(), "#e6c35c");
+  // Dark mode really does paint near-white ink for the tokens the strip has to
+  // override -- if this stops being true the defect is gone for another reason
+  // and this section should be read again, not silently kept.
+  assert.equal(stripToken(STRIP_THEMES[1], "fg").toLowerCase(), "#e8e6e1");
+  assert.equal(stripToken(STRIP_THEMES[1], "mut").toLowerCase(), "#bdbab3");
+  // And the labels/help the picker draws were found by the cascade walk (the
+  // base rules are `color: var(--mut)` in styles.css), not skipped.
+  const base = selectorsEndingIn(css, "model-picker-label");
+  assert.ok(
+    base.some((s) => s.includes("desk-ltr")),
+    `expected the base label rule in styles.css, found ${base.join(" | ") || "none"}`,
+  );
+  // Source order is half the cascade this walk relies on, so the order the two
+  // sheets are read in is asserted against the imports `__root.tsx` actually
+  // carries -- if that import order ever flips, this section stops being true
+  // and says so rather than measuring a cascade the app does not have. The
+  // root imports a third sheet, reader-astra.css, after both of these; it is
+  // the reader panel's own palette and paints no desk text, so it is not in
+  // SHEET_ORDER -- only the pair this strip is drawn from is asserted here.
+  const imported = [...ROOT_CSS.matchAll(/import\s+\w+\s+from\s+"\.\.\/([\w.-]+\.css)\?url"/g)].map(
+    (m) => `src/${m[1]}`,
+  );
+  assert.deepEqual(
+    imported.filter((p) => SHEET_ORDER.includes(p)),
+    SHEET_ORDER,
+    "SHEET_ORDER must be the order `src/routes/__root.tsx` imports the two desksheets",
+  );
+});
+
 /*
   The CLI print sits at the end of the file, after every top-level `const` it
   reads. It used to sit above the /desk/dark panel section, which made
@@ -554,6 +820,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         "4.5:1",
         r.ratio >= 4.5 ? "PASS" : "FAIL",
         "text ",
+        `${r.fgHex} on ${r.bgHex}`,
+        r.label,
+      ].join(" | "),
+    );
+  }
+  console.log("");
+  console.log("-- the Queue's bulk strip picker text --");
+  for (const r of bulkStripRows()) {
+    console.log(
+      [
+        r.theme.padEnd(9),
+        r.ratio.toFixed(2).padStart(5),
+        "4.5:1",
+        r.ratio >= 4.5 ? "PASS" : "FAIL",
         `${r.fgHex} on ${r.bgHex}`,
         r.label,
       ].join(" | "),
