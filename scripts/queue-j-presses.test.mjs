@@ -822,18 +822,42 @@ export const providerEntry = () => null;
   /*
     The three reads the picker makes through the desk's server: the catalog and
     the availability probe, and the two settings calls below. The row under test
-    is the LABEL, so these answer empty -- a picker with nothing to pick still
-    draws its label.
+    is the LABEL, so these name a real-but-empty local catalog -- no server, no
+    default model -- rather than a bare `{}`.
+
+    THU-6 flake (Oct 14): the two local reads used to answer `{}` and `null`.
+    Both are the SAME query keys the picker shares with any other mounted
+    picker, and a react-query cache in this file is not per-render: a value of
+    the wrong SHAPE reaches the picker and the picker reads it as the real one.
+    `localModelCatalog() === {}` leaves `catalog.servers` undefined, and
+    `localMetadata` (`model-picker.tsx:517-519`) calls `.find` on it, so the
+    render threw `Cannot read properties of undefined (reading 'find')` --
+    intermittently, depending on which cached shape the picker saw first. The
+    stubs now answer the full `LocalCatalog` / `LocalModelChoice` shapes the
+    picker reads, so a cross-key cache hit is harmless.
   */
   "@/lib/news/provider-availability": stub(`
 export const providerAvailability = async () => ({});
-export const localModelCatalog = async () => ({});
-export const refreshLocalModelCatalog = async () => ({});
+export const localModelCatalog = async () => ({ servers: [], defaultModel: null, checkedAt: 0 });
+export const refreshLocalModelCatalog = async () => ({ servers: [], defaultModel: null, checkedAt: 0 });
 `),
   "@/lib/news/provider-availability-key": await moduleUrl("src/lib/news/provider-availability-key.ts"),
   "@/lib/news/desk-local-model": await moduleUrl("src/lib/news/desk-local-model.ts"),
+  /*
+    The stored local pick, in the full `LocalModelChoice` shape -- `catalog`
+    included, because `optionText` reads
+    `selectedLocalChoice.data.catalog.servers` (`model-picker.tsx:539`). A
+    `null` here is read as the "no choice yet" state and the picker falls back
+    to the catalog above; both shapes now answer what the picker asks for.
+  */
   "@/lib/news/provider-settings": stub(`
-export const getLocalModelChoice = async () => null;
+export const getLocalModelChoice = async () => ({
+  override: null,
+  storedPick: null,
+  source: "stored",
+  notice: null,
+  catalog: { servers: [], defaultModel: null, checkedAt: 0 },
+});
 export const saveLocalModelFn = async () => null;
 `),
   "@/lib/news/custom-ai-settings": stub(`export const getCustomAiConnectionsFn = async () => [];`),
