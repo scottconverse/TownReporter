@@ -126,6 +126,13 @@ export type PublishBlockerState = {
   body: string;
   /** A person has chosen, or confirmed, the section this files under. */
   sectionReady: boolean;
+  /**
+   * DHI-8: the section this story files under, so the warning block's own
+   * "Publish anyway" button can name it exactly as the confirm does. Optional:
+   * a caller that has not resolved a section passes nothing and the button
+   * names no section, the same as a story with no section.
+   */
+  sectionName?: string;
   /** The AI's last saved readiness result for a civic-reporting draft. */
   readiness?: StoryReadinessState;
   readinessReason?: string;
@@ -243,6 +250,15 @@ export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
  * `publish.isPending` is in `publishing`, so it is here too, and a press in
  * flight is not a reason that can be cleared by working.
  */
+/** DHI-8: the ONE words for "Publish anyway", used by the warning block's own
+ * button and by the confirm, so one act never reads two ways. A piece with no
+ * section has no "in <section>" to say (THU-10); the accepted-claims part is
+ * passed in, because the block and the confirm know it differently. */
+export function publishAnywayLabel(sectionName: string | undefined, acceptWords: string): string {
+  const where = sectionName?.trim() ? ` in ${sectionName.trim()}` : "";
+  return `Publish anyway${where}${acceptWords}`;
+}
+
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
   if (draftLooksCutOff(state.body ?? "")) blockers.push({key:"draft-cut-off",kind:"warning",sentence:CUT_OFF_WARNING,action:{label:"Read the draft",target:{kind:"body"}}});
@@ -394,10 +410,12 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
         target: { kind: "evidence-review" },
       },
       altAction: {
-        label:
+        label: publishAnywayLabel(
+          state.sectionName,
           m > 0
-            ? `Publish anyway — I accept these claims, including ${m} the record contradicts`
-            : "Publish anyway — I accept these claims are unreviewed",
+            ? ` — I accept these claims, including ${m} the record contradicts`
+            : " — I accept these claims are unreviewed",
+        ),
         target: { kind: "accept-unreviewed" },
       },
     });
@@ -610,27 +628,38 @@ export function publishConfirmation(
     claimsAccepted?: boolean;
   } = {},
 ): PublishConfirmation {
-  const warnings = blockers.filter((blocker) => blocker.kind === "warning");
   const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
+  const warnings = blockers.filter((blocker) => blocker.kind === "warning");
   /*
-    DHI-8: the warning block above the press offers "Publish anyway — I accept
-    these claims are unreviewed", and this confirm is the same act. It carries
-    the same words after the section, so the two buttons never read as two
-    different decisions.
+    DHI-8: the warning block above the press offers its own "Publish anyway"
+    button, and this confirm is the same act -- so the confirm takes that
+    button's own words. `publishBlockers` already built them with the section
+    name, so the two buttons read the one sentence. When the acceptance is
+    already recorded the warning is gone from `blockers`, and `claimsAccepted`
+    (DJ-3) rebuilds the same sentence with this confirm's section name.
   */
-  const acceptWords = warnings
-    .find((warning) => warning.key === "claims-unreviewed" && warning.altAction?.target.kind === "accept-unreviewed")
-    ?.altAction?.label.replace(/^Publish anyway/, "");
-  const words = acceptWords ?? (options.claimsAccepted ? " — I accept these claims are unreviewed" : "");
+  const accepted = warnings.find((warning) => warning.key === "claims-unreviewed")?.altAction?.label;
+  /*
+    The block built its label with the section it was given; this confirm names
+    the same section. Strip any section the block already inserted and rebuild
+    the one sentence here, so both buttons carry the SAME words even when the
+    two callers passed the section in different places.
+  */
+  const acceptWords = accepted
+    ? accepted.slice(accepted.indexOf("—") > 0 ? accepted.indexOf("—") - 1 : "Publish anyway".length)
+    : options.claimsAccepted
+      ? " — I accept these claims are unreviewed"
+      : "";
   /* A piece with no section has no "in <section>" to say (THU-10). */
-  const where = sectionName.trim() ? ` in ${sectionName}` : "";
-  const overrideLabel = `Publish anyway${where}${words}`;
+  const overrideLabel = publishAnywayLabel(sectionName, acceptWords);
   return {
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
     confirmLabel:
-      warnings.length > 0 || words !== "" ? overrideLabel : `Yes, print it${where}`,
+      warnings.length > 0 || acceptWords !== ""
+        ? overrideLabel
+        : `Yes, print it${sectionName.trim() ? ` in ${sectionName.trim()}` : ""}`,
   };
 }
 

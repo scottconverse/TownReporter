@@ -2398,3 +2398,18 @@ describe("failed draft words on the story page (THT-4)", () => {
     assert.match(general, /^The draft did not finish and was not saved/);
   });
 });
+
+describe("stopped draft words on the story page (DHI-3)", () => {
+  it("gives the stop as the reason, and never calls a non-meeting lead a meeting", async () => {
+    const { draftNotSavedWords } = await import("./desk-copy.ts");
+    const stopped = draftNotSavedWords(false, true);
+    assert.match(stopped, /^Stopped\. No draft was saved\./);
+    assert.doesNotMatch(stopped, /meeting/i);
+    assert.doesNotMatch(stopped, /failed/i);
+    // A meeting lead that was stopped also says Stopped, not "meeting draft failed".
+    assert.equal(draftNotSavedWords(true, true), stopped);
+    // Without a stop the old lines are unchanged, so nothing was taken away.
+    assert.match(draftNotSavedWords(true, false), /^The meeting draft failed/);
+    assert.match(draftNotSavedWords(false, false), /^The draft did not finish and was not saved/);
+  });
+});

@@ -129,6 +129,25 @@ export const savePaperEditorialVoice = createServerFn({ method: "POST" })
     return savePaperVoiceText(data);
   });
 
+/**
+ * Whether a request row belongs on the Opinion desk list (THU-12).
+ *
+ * A piece the editor pasted in ("written-by-the-editor") carries one request
+ * row that exists only to surface its draft. Deleting the draft DETACHES the
+ * row (the pointer is nulled so Undo can relink it), and the detached shell --
+ * subject, finished time, no piece -- sat on the desk forever, so pressing
+ * Delete on a pasted piece looked like it did nothing. The shell has nothing
+ * to read, edit or publish, so it is hidden. A request the desk wrote still
+ * shows with no draft: it may be writing, or have failed, and Clear
+ * (`discardEditorialRequest`) is how the editor removes those.
+ */
+export function editorialRequestShowsOnDesk(row: {
+  source_kind?: string | null;
+  draft_id?: number | null;
+}): boolean {
+  return !(row.source_kind === "written-by-the-editor" && (row.draft_id ?? null) === null);
+}
+
 export const listEditorials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<EditorialRow[]> => {
@@ -157,6 +176,15 @@ export const listEditorials = createServerFn({ method: "GET" })
       order by r.id desc
     `.catch(() => []);
     /*
+      THU-12: a piece the editor pasted in ("written-by-the-editor") whose draft
+      was deleted left a detached request row on the desk, since Delete only
+      nulls the pointer. That shell has nothing to read, edit or publish, so it
+      is hidden here. A request the desk wrote still shows when its draft is
+      gone -- it may be still writing or failed, and the editor clears those
+      with Clear (`discardEditorialRequest`).
+    */
+    const shown = rows.filter((row) => editorialRequestShowsOnDesk(row));
+    /*
       Only rows that still look open are worth a job lookup. A piece writes
       for 10-40 minutes and this desk deliberately never polls faster than
       20s, so the `Elapsed` clock on `desk.opinion.tsx` was the only signal
@@ -164,7 +192,7 @@ export const listEditorials = createServerFn({ method: "GET" })
       process that owned it died. `runLooksStalled` tells the two apart using
       the same heartbeat `executeJob` already keeps fresh for a live run.
     */
-    for (const row of rows) {
+    for (const row of shown) {
       if (row.finished_at) continue;
       const job = await latestJob({
         newsroomId: owned(context),
@@ -181,7 +209,7 @@ export const listEditorials = createServerFn({ method: "GET" })
       */
       row.job = job ? jobProgressView(job, row.id, row.draft_id) : null;
     }
-    return rows;
+    return shown;
   });
 
 export const getEditorial = createServerFn({ method: "GET" })
@@ -611,6 +639,17 @@ export const deleteEditorial = createServerFn({ method: "POST" })
       return { ok: false as const, error: "That draft is already gone." };
     }
     await sql`delete from editorial_extras where draft_id = ${draftId}`.catch(() => undefined);
+    /*
+      THU-12: the desk lists REQUESTS, not drafts, so a request whose draft is
+      gone still drew a row. Deleting DETACHES the request (`set draft_id =
+      null`) rather than removing it -- and `restoreTrashItem` puts the pointer
+      back on Undo (`repointRequests`), so the row has to survive for Undo to
+      work. What the owner saw was the detached shell: a pasted piece he
+      deleted stayed on the Opinion desk. It is hidden from the list now (the
+      query below skips a `written-by-the-editor` request with no draft), so
+      Delete removes the piece at once while Undo still has the row to relink.
+      The snapshot keeps the ids (`keepACopy`).
+    */
     await sql`
       update editorial_requests set draft_id = null
       where draft_id = ${draftId} and newsroom_id = ${owned(context)}

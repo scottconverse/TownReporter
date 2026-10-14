@@ -84,7 +84,7 @@ it("refuses to publish a lead-bound draft with an empty dek", async () => {
   assert.equal(published.ok, false, "an empty dek must not print");
   assert.equal(
     "error" in published ? published.error : "",
-    "Add a dek, the one-line summary under the headline, before you publish.",
+    "No dek yet. You can add one, or publish without it.",
   );
 });
 
@@ -111,7 +111,7 @@ it("refuses to publish a standalone editorial with an empty dek", async () => {
   assert.equal(published.ok, false, "an empty editorial dek must not print");
   assert.equal(
     "error" in published ? published.error : "",
-    "Add a dek, the one-line summary under the headline, before you publish.",
+    "No dek yet. You can add one, or publish without it.",
   );
 });
 

@@ -277,6 +277,9 @@ function EditorialPage() {
     dek,
     body,
     sectionReady: topic.trim() !== "",
+    // DHI-8: the section the override names, so this page's two override
+    // buttons read the same words as the block beside them.
+    sectionName: topic.trim() !== "" ? sectionNameNow : undefined,
     openClaims: 0,
     namedOutlets: [],
     /*

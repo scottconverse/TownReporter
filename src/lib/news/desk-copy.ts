@@ -912,6 +912,64 @@ export function draftFailedNotSavedWords(isMeetingLead: boolean): string {
     : "The draft did not finish and was not saved. Review the error above, then try Draft with AI again.";
 }
 
+/*
+  DHI-3: when the editor pressed Stop, the page said a failure line as well as
+  "Stopped. No draft was saved." A stop is not a failure, and it has a reason
+  the editor already knows, so the stop words win. Only a lead that came from a
+  meeting says "meeting"; the stop line is the same either way, because the
+  editor ended the run, not the model.
+*/
+export const DRAFT_STOPPED_WORDS = "Stopped. No draft was saved.";
+
+/** The one line under a draft that left nothing on the page. `stopped` is the
+ * editor's own Stop press (the job's error is JOB_CANCELLED_REASON). */
+export function draftNotSavedWords(
+  isMeetingLead: boolean,
+  stopped: boolean = false,
+): string {
+  return stopped ? DRAFT_STOPPED_WORDS : draftFailedNotSavedWords(isMeetingLead);
+}
+
+/**
+ * THV-3: the line while a draft is still being written.
+ *
+ * The story page sat on "Waiting on DeepSeek v4.1 Flash" for the ten minutes a
+ * draft really takes, with no sign of life -- the editor could not tell a run
+ * that was working from one that had died. This is the same sentence, with the
+ * run's own elapsed time after it, so the number moves while the job does. The
+ * clock is the job's `started_at` (falling back to when the page began waiting)
+ * and the copy is derived from the model's own label, so no second vocabulary
+ * is invented for it.
+ *
+ * `elapsedMs` is passed in rather than read here so one render measures against
+ * one clock, the same rule `deskDraftElapsed` keeps. A duration under a minute
+ * reads "< 1 min" rather than "0 min", which would look stuck.
+ */
+export function draftWaitingWords(modelLabel: string, elapsedMs: number): string {
+  const who = modelLabel.trim();
+  const minutes = Math.max(0, Math.floor(elapsedMs / 60_000));
+  const clock = minutes < 1 ? "< 1 min" : `${minutes} min`;
+  return who ? `Writing with ${who} · ${clock}` : `Writing · ${clock}`;
+}
+
+/**
+ * THV-1 + THU-8: the second line, when the queue shows another draft already
+ * running on this draft's model.
+ *
+ * The wait line above is true but leaves the cause off the page: while a second
+ * job holds the model, the new draft does nothing at all and the editor reads
+ * that as a hang. The sentence names the model that is busy and whose turn it
+ * is, in the same plain words as the queue reason on the job card. It is only
+ * rendered when a live same-model job exists, so it never claims a wait that is
+ * not happening.
+ */
+export function sharedModelWaitWords(modelLabel: string): string {
+  const who = modelLabel.trim();
+  return who
+    ? `Another draft is using ${who}; this one waits its turn.`
+    : "Another draft is using this model; this one waits its turn.";
+}
+
 /** Workbench draft errors. Not scan copy, not Dark Desk “Keep digging”. */
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;

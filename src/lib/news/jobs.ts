@@ -77,20 +77,55 @@ export function laneForKind(kind: JobKind): JobLane {
   return kind === "editorial" ? "editorial" : kind === "draft" ? "draft" : "default";
 }
 
+/**
+ * THV-1 + THU-8: the other running job that holds THIS job's model, if any.
+ *
+ * The queue reason above answered "who is ahead of me in the lane", which on a
+ * one-slot draft lane is usually right -- but when a second job is sitting on
+ * the same model the wait is the model's, and an editor reading a bare "another
+ * job is ahead" looks for the wrong cause. This names the row. `undefined`
+ * means no other LIVE job is on the model, which is a real answer ("nothing
+ * else is holding it") and not the same as "we did not look".
+ *
+ * Cancel-requested rows are excluded: a job the editor has already stopped is
+ * not what their next draft is waiting for. Same freshness rule as the reason
+ * above, so a dead process cannot hold a model hostage in the copy.
+ */
+export function sameModelRunner(job: DeskJob, running: DeskJob[], now = Date.now()): DeskJob | undefined {
+  const choice = (job.model_choice ?? "").trim();
+  if (!choice) return undefined;
+  return running.find(row =>
+    row.id !== job.id &&
+    row.status === "running" &&
+    !row.cancel_requested &&
+    (row.model_choice ?? "").trim() === choice &&
+    now - new Date(row.updated_at).getTime() < STALE_RUNNING_SECONDS * 1000);
+}
+
 /** Plain queue reason shared by the story card and Health. No invented ETA. */
 export function queuedJobWaitReason(job: DeskJob, running: DeskJob[], now = Date.now()): string {
   const local = (choice: string) => choice === "local-model" || choice === "qwen-local";
   const fresh = running.filter(row => row.id !== job.id && row.status === "running" &&
     !row.cancel_requested && now - new Date(row.updated_at).getTime() < STALE_RUNNING_SECONDS * 1000);
   const modelBusy = local(job.model_choice) ? fresh.find(row => local(row.model_choice)) : undefined;
+  const sameModel = sameModelRunner(job, running, now);
   const sameLane = fresh.filter(row => row.lane === job.lane);
-  const blocker = modelBusy ?? fresh.find(row =>
+  const blocker = modelBusy ?? sameModel ?? fresh.find(row =>
     job.kind === "draft" && row.kind === "follow-up" && row.newsroom_id === job.newsroom_id) ??
     (sameLane.length >= LANE_CONCURRENCY[job.lane] ? sameLane[0] : undefined);
   const names: Partial<Record<JobKind, string>> = { scan: "scan", dark: "Dark Desk dig", draft: "story draft", editorial: "editorial", "follow-up": "follow-up check" };
   const time = blocker ? new Date(blocker.started_at ?? blocker.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+  /*
+    THU-8: the same-lane sentence named a "writing worker" busy with an
+    "editorial" -- true, and useless to the editor whose draft is behind another
+    draft on the same model. When the holder IS a same-model draft, say that
+    instead; every other case keeps its words exactly.
+  */
+  const sameModelDraft = sameModel?.kind === "draft";
   const reason = blocker
-    ? `Waiting for ${modelBusy ? "the local model" : "a writing worker"}, which is busy with the ${time} ${names[blocker.kind] ?? "job"}.`
+    ? sameModelDraft
+      ? `Another draft is using ${modelChoiceLabel(job.model_choice)}; this one waits its turn.`
+      : `Waiting for ${modelBusy ? "the local model" : "a writing worker"}, which is busy with the ${time} ${names[blocker.kind] ?? "job"}.`
     : "Waiting for a writing worker to pick up this draft.";
   const seconds = Math.max(0, Math.floor((now - new Date(job.created_at).getTime()) / 1000));
   return `${reason} Waited ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}. The finish time is not known; you can run it on another model.`;
