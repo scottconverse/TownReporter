@@ -95,7 +95,7 @@ export async function loadWholeMeetingInput(
   const transcriptFile = artifact?.storage_path?.trim() ?? "";
   if (!transcriptFile || !existsSync(transcriptFile)) {
     throw new Error(
-      "The transcript file for this meeting is not on this computer (it was saved and checked when captured, but the file is not here now). Pick another transcript or capture it again.",
+      "The transcript file for this meeting is not on this computer now, although the desk has a record of it. Pick another transcript or capture it again.",
     );
   }
   if (statSync(transcriptFile).size === 0) {

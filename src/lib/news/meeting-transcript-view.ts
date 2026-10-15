@@ -105,7 +105,7 @@ export function transcriptViewPath(artifactId: number): string {
 
 /** What the editor reads when the stored original cannot be found or opened. */
 export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
-  "The transcript file for this meeting is not on this computer (it was saved and checked when captured, but the file is not here now). The text transcript is still here.";
+  "The transcript file for this meeting is not on this computer now, although the desk has a record of it. The text transcript is still here.";
 
 /**
  * The integrity line the page prints while the stored original cannot be read.
