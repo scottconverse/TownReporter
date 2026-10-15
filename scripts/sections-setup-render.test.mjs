@@ -276,6 +276,11 @@ const DESK_CHROME_IMPORTS = {
 
   "@/components/desk-toaster": deskToasterStub,
   "@/components/desk-jobs": deskJobsUrl,
+  "@/components/escape-to-cancel": moduleUrl(
+    await readFile(new URL("../src/components/escape-to-cancel.ts", import.meta.url), "utf8"),
+    "escape-to-cancel.ts",
+    { react: import.meta.resolve("react") },
+  ),
   /*
     FB1 units 3-4: the shell's Running box draws the real card from the one job
     query, so both specifiers have to resolve for desk-chrome.tsx to load.

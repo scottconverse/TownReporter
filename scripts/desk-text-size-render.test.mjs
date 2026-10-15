@@ -247,6 +247,17 @@ const deskNavUrl = moduleUrl(
   "desk-nav.ts",
 );
 
+/*
+  desk-chrome.tsx imports the Escape-to-cancel helper from
+  src/components/escape-to-cancel.ts. That file imports only react, so the REAL
+  module compiles here and the shell runs the code the app ships.
+*/
+const escapeToCancelUrl = moduleUrl(
+  await readFile(new URL("../src/components/escape-to-cancel.ts", import.meta.url), "utf8"),
+  "escape-to-cancel.ts",
+  { react: REACT_URL },
+);
+
 const { DeskShell } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
@@ -282,6 +293,7 @@ const { DeskShell } = await import(
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
 
       "@/components/desk-toaster": deskToasterStub,
+      "@/components/escape-to-cancel": escapeToCancelUrl,
       "@/components/desk-jobs": deskJobsUrl,
       /*
         FB1 units 3-4: the shell's Running box and the In-progress strip draw

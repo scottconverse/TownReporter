@@ -175,6 +175,11 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/form-error": formErrorStub,
       "@/components/desk-chrome-utils": utilsStub,
       "@/components/paper-setup-form": formModule,
+      "@/components/escape-to-cancel": moduleUrl(
+        await readFile(new URL("../src/components/escape-to-cancel.ts", import.meta.url), "utf8"),
+        "escape-to-cancel.ts",
+        { react: REACT_URL },
+      ),
       "@/components/JobCard": inlineModule("export const DeskJobCard = () => null;"),
       "@/components/job-card-state": inlineModule("export const useDeskJobs = () => ({data:[]});"),
       "@/components/newsletter-mailbox": inlineModule("export function NewsletterMailbox() { return null; }"),

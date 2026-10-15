@@ -189,6 +189,7 @@ const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
   "@/components/desk-chrome-utils": deskChromeUtils,
   "@/components/desk-toaster": stub(`export function DeskToaster() { return null; }`),
   "@/components/desk-jobs": deskJobsUrl,
+  "@/components/escape-to-cancel": await moduleUrl("src/components/escape-to-cancel.ts", {}),
   "@/components/JobCard": stub(`export function DeskJobCard() { return null; } export function JobCard() { return null; }`),
   "@/components/job-card-state": stub(
     `export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}`,
