@@ -383,7 +383,7 @@ export function LeadRowView({
     menu says the two presses differ. Kill is not passed there -- "Kill with a
     reason" above is that screen's row. Both stay for a screen with no dialog.
   */
-  if (onHold) items.push({ label: "Hold (no reason)", onSelect: onHold });
+  if (onHold) items.push({ label: onHoldWithReason ? "Hold (no reason)" : "Hold", onSelect: onHold });
   if (onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
   if (onDraft) {
     items.push({
