@@ -149,7 +149,6 @@ import {
   modelAndResearchLabel,
   lastDraftInHand,
   lastDraftWhen,
-  recordedRuntime,
   requestedModelChoice,
   readinessDot,
   saveState,
@@ -681,13 +680,12 @@ function StoryPage() {
     The Reporting package shows its own run status; until the page has a
     truthful reporting receipt line, suppress this stale attribution.
   */
-  /* The model that finished the draft: a failover note names it; else the receipt's recorded runtime. */
-  const receiptRuntime = data?.job ? recordedRuntime(data.job.result_json) : null;
+  /* The model that finished the draft: a failover note's destination, else the job's model_choice (the model that ran). */
   const lastDraft = lastDraftInHand({
     hasDraft: Boolean(data?.draft),
     civicReporting: civicReportingDraft,
     jobStatus: data?.job?.status,
-    modelLabel: receiptRuntime ? storyModelLabel(receiptRuntime) : "",
+    modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
     failoverNote: data?.job?.failover_note,
     finishedAt: data?.job?.finished_at,
   });
