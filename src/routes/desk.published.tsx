@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { Dialog } from "@/components/dialog";
+import { EscapeToCancel } from "@/components/escape-to-cancel";
 import { ModelPicker } from "@/components/model-picker";
 import { LegalRemovalDialog } from "@/components/dialogs/LegalRemovalDialog";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
@@ -1166,6 +1167,11 @@ function PublishedPage() {
                 */}
                 {killFor === p.slug ? (
                   <>
+                    {/* DLG-2: Escape does what Keep does; never while the removal is saving. */}
+                    <EscapeToCancel
+                      active={!remove.isPending}
+                      onCancel={() => setKillFor(null)}
+                    />
                     {/*
                       Unit UI1a2: the confirm press carries the states --
                       "Removing…" with a spinner while the write is in flight.

@@ -2,6 +2,7 @@ import { DeskJobCard } from "@/components/JobCard";
 import { ModelAssignmentsPanel } from "@/routes/desk.models";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { useDeskJobs } from "@/components/job-card-state";
+import { EscapeToCancel } from "@/components/escape-to-cancel";
 /*
   The editors behind the Server screen's cards (unit CX2).
 
@@ -926,6 +927,8 @@ export function RecentlyDeletedPanel() {
                   </InkButton>
                   {confirmPurge === r.id ? (
                     <>
+                      {/* DLG-2: Escape does what Keep does. */}
+                      <EscapeToCancel onCancel={() => setConfirmPurge(null)} />
                       <InkButton
                         tone="ghost"
                         disabled={purge.isPending}

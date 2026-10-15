@@ -1,5 +1,6 @@
 import { NativeDialog, DialogScrim } from "@/components/dialog";
 import { ShortcutSheet } from "./shortcut-sheet";
+import { EscapeToCancel } from "@/components/escape-to-cancel";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -910,6 +911,11 @@ export function LeaveEditorControl({ email }: { email: string }) {
       await navigate({ to: "/" });
     },
   });
+  // DLG-2: Escape does what the No button does.
+  const keep = () => {
+    setAsk(false);
+    setTyped("");
+  };
 
   if (!ask) {
     return (
@@ -925,6 +931,7 @@ export function LeaveEditorControl({ email }: { email: string }) {
 
   return (
     <div className="leave-ask">
+      <EscapeToCancel active={!leave.isPending} onCancel={keep} />
       <p>{copy.confirm}</p>
       <label htmlFor="leave-confirm-email">Your email address</label>
       <input
@@ -949,10 +956,7 @@ export function LeaveEditorControl({ email }: { email: string }) {
         type="button"
         className="leave-no"
         disabled={leave.isPending}
-        onClick={() => {
-          setAsk(false);
-          setTyped("");
-        }}
+        onClick={keep}
       >
         {copy.confirmNo}
       </button>

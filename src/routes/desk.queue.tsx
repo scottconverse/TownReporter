@@ -3,6 +3,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
+import { useEscapeToCancel } from "@/components/escape-to-cancel";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { ModelPicker } from "@/components/model-picker";
 import { useBatchModelChoice } from "@/components/batch-model-choice";
@@ -1312,6 +1313,12 @@ function QueuePage() {
    * answer ("no reason"), which is the design's fast path.
    */
   const [bulkKillReason, setBulkKillReason] = useState<string | null>(null);
+  // DLG-2: Escape does what Keep does, for both bulk confirms. Keep on the
+  // delete confirm is disabled while the delete is saving, so Escape waits too.
+  useEscapeToCancel(bulkKillReason !== null, () => setBulkKillReason(null));
+  useEscapeToCancel(confirmingBulkDelete && !bulkRemove.isPending, () =>
+    setConfirmingBulkDelete(false),
+  );
   /*
     THU-4: the Undo for a bulk Kill, whether the toast's button or the U key
     presses it. It waits for the batch's own report, so it works the moment the

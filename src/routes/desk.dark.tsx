@@ -1964,7 +1964,16 @@ function InvestigationWorkspace({
           <p className="astra-label">The question</p>
           <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
         </div>
-        <details className="astra-more-file-actions of-trail">
+        <details
+          className="astra-more-file-actions of-trail"
+          onKeyDown={(event) => {
+            // DLG-5: Escape closes this panel and puts focus back on its summary.
+            if (event.key !== "Escape" || !event.currentTarget.open) return;
+            event.stopPropagation();
+            event.currentTarget.open = false;
+            event.currentTarget.querySelector("summary")?.focus();
+          }}
+        >
           <summary>More file actions</summary>
           <div className="astra-panel-acts">
             <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
