@@ -378,12 +378,12 @@ export function LeadRowView({
   }
   if ((held || closed) && onBack) items.push({ label: "Back", onSelect: onBack });
   /*
-    The row's own plain Hold and Kill. On the Queue neither is passed -- "Hold
-    with a reason" and "Kill with a reason" above are that screen's rows, and a
-    second pair of words for the same press is what BF3 took out. They stay for
-    a screen that has no dialog to open.
+    The row's own plain Hold and Kill. On the Queue the plain Hold is passed
+    too (TIA-2) and reads "Hold (no reason)" beside "Hold with a reason", so the
+    menu says the two presses differ. Kill is not passed there -- "Kill with a
+    reason" above is that screen's row. Both stay for a screen with no dialog.
   */
-  if (onHold) items.push({ label: "Hold", onSelect: onHold });
+  if (onHold) items.push({ label: "Hold (no reason)", onSelect: onHold });
   if (onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
   if (onDraft) {
     items.push({

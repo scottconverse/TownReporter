@@ -2032,9 +2032,9 @@ function QueuePage() {
                     duplicate the ROW matched (`dup`, and with it the row's
                     three-state saved/failed line), which only the row holds. So
                     the row owns the order and this screen supplies the handlers.
-                    `onHold` is not passed (its plain "Hold" would be the same
-                    action with the reason dropped) and `onKill` is not passed
-                    either: this menu's kill row is the drawn "Kill with a
+                    `onHold` is passed too, as the plain "Hold (no reason)"
+                    (TIA-2), so the two Hold presses read apart. `onKill` is not
+                    passed: this menu's kill row is the drawn "Kill with a
                     reason" below.
                   */
                   onBack={() => (l.status === "killed"

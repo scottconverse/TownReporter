@@ -3410,26 +3410,27 @@ function StoryPage() {
                   </li>
                 ))}
               </ul>
-              <div className="flex gap-3 mt-2">
+              <div className="flex items-start gap-3 mt-2">
                 <InkButton
                   disabled={reviewEvidence.isPending}
                   onClick={() => reviewEvidence.mutate("keep")}
                 >
                   I checked: keep this evidence
                 </InkButton>
-                <InkButton
-                  tone="ghost"
-                  disabled={reviewEvidence.isPending}
-                  onClick={() => reviewEvidence.mutate("remove")}
-                >
-                  Remove old evidence from public story
-                </InkButton>
+                <div className="flex flex-col items-start gap-1">
+                  <InkButton
+                    tone="ghost"
+                    disabled={reviewEvidence.isPending}
+                    onClick={() => reviewEvidence.mutate("remove")}
+                  >
+                    Remove old evidence from public story
+                  </InkButton>
+                  <p>
+                    Clears the old public source list, reporting trail, findings and unanswered
+                    questions; keeps the private audit copy; your body and links stay.
+                  </p>
+                </div>
               </div>
-              <p>
-                Remove clears the old public source list, reporting trail, findings and unanswered
-                questions; it keeps their private audit copy and does not edit your body or its
-                links.
-              </p>
             </div>
           ) : null}
           {/*
