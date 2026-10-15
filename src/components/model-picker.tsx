@@ -670,7 +670,7 @@ export function ModelPicker(props: Props) {
               </option>
             ))}
           </select>
-          <span className="model-picker-help" style={{ color: "var(--fg)", overflowWrap: "anywhere", fontWeight: 700 }}>
+          <span className="model-picker-help model-picker-chosen">
             Selected: {chosenEffortText}
           </span>
           <span className="model-picker-help">

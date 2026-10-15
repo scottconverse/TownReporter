@@ -2033,7 +2033,7 @@ function QueuePage() {
                     three-state saved/failed line), which only the row holds. So
                     the row owns the order and this screen supplies the handlers.
                     `onHold` is passed too, as the plain "Hold (no reason)"
-                    (TIA-2), so the two Hold presses read apart. `onKill` is not
+                    (TKA-2), so the two Hold presses read apart. `onKill` is not
                     passed: this menu's kill row is the drawn "Kill with a
                     reason" below.
                   */

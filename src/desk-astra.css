@@ -4398,6 +4398,14 @@
    `--fg2`, which is near-white in dark mode on a gold bar, so it goes to #111
    with the text it borders. Scoped to `.queue-bulk` so no other picker on the
    desk changes. */
+/* TKA-4: the chosen effort printed in full under its select. Full ink, bold,
+   wraps anywhere. Before the strip block below, so on the gold bar the
+   strip's #111 wins in both themes. */
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-help.model-picker-chosen {
+  color: var(--fg);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
 .desk-ltr.astra .queue-bulk .model-picker-label,
 .desk-ltr.astra .queue-bulk .model-picker-help,
 .desk-ltr.astra .queue-bulk .model-picker-setup summary,

@@ -379,7 +379,7 @@ export function LeadRowView({
   if ((held || closed) && onBack) items.push({ label: "Back", onSelect: onBack });
   /*
     The row's own plain Hold and Kill. On the Queue the plain Hold is passed
-    too (TIA-2) and reads "Hold (no reason)" beside "Hold with a reason", so the
+    too (TKA-2) and reads "Hold (no reason)" beside "Hold with a reason", so the
     menu says the two presses differ. Kill is not passed there -- "Kill with a
     reason" above is that screen's row. Both stay for a screen with no dialog.
   */
