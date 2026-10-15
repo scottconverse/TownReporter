@@ -556,6 +556,13 @@ export function ModelPicker(props: Props) {
   */
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
+  /*
+    TKA-4: the select is only as wide as its row, so a long effort name (the
+    DeepSeek note) is cut mid-word on the bulk strip and the scan. The chosen
+    text is also printed in full under the select, where it wraps.
+  */
+  const noEffortText = shownValue === "auto" ? automaticEffortNote(null) : "Provider default";
+  const chosenEffortText = selectedEffort == null ? noEffortText : modelEffortLabel(selectedEffort, exactModel);
   return (
     <div
       data-model-picker="shared"
@@ -655,7 +662,7 @@ export function ModelPicker(props: Props) {
               "Provider default" that reads as no answer.
             */}
             {selectedEffort == null ? (
-              <option value="">{shownValue === "auto" ? automaticEffortNote(null) : "Provider default"}</option>
+              <option value="">{noEffortText}</option>
             ) : null}
             {effortOptions.map((effort) => (
               <option key={effort} value={effort}>
@@ -663,6 +670,9 @@ export function ModelPicker(props: Props) {
               </option>
             ))}
           </select>
+          <span className="model-picker-help model-picker-chosen">
+            Selected: {chosenEffortText}
+          </span>
           <span className="model-picker-help">
             {effortOptions.length
               ? "Changes how much this exact model reasons for this run. The model name stays the same; higher effort can take longer."

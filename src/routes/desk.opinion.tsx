@@ -38,6 +38,7 @@ import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
+import { OpinionPublishWarnings } from "@/components/opinion-publish-warnings";
 import { editorialSourcesError, parseEditorial } from "@/lib/news/editorial";
 import { readSuppliedMaterialCut } from "@/lib/news/supplied-material-cap";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -881,22 +882,14 @@ function OpinionPage() {
                       <>
                         {/*
                           DHD2-12: the empty summary is said on the row BEFORE any press, the same
-                          words and the same "Publish anyway" as the open piece's panel (DHC11).
-                          The press acknowledges the summary warning, so it publishes at once.
+                          words as the open piece's panel (DHC11).
+                          TJA-4: the row has no "Publish anyway" of its own. Publish below opens the
+                          warning box on this row when the summary is missing, and that box holds the
+                          one press, which acknowledges every warning listed in it.
                         */}
                         {r.dek?.trim() ? null : (
                           <span className="meta" role="note">
-                            This piece has no summary for readers.{" "}
-                            <InkButton
-                              tone="quiet"
-                              small
-                              disabled={publish.isPending}
-                              onClick={() => publish.mutate({ draftId: r.draft_id!, acknowledgedWarningKeys: ["dek"] })}
-                            >
-                              {publish.isPending && publish.variables?.draftId === r.draft_id
-                                ? "Publishing…"
-                                : "Publish anyway"}
-                            </InkButton>
+                            This piece has no summary for readers.
                           </span>
                         )}
                         {/*
@@ -1072,9 +1065,9 @@ function OpinionPage() {
                       <OpinionPublishWarnings
                         warnings={publishWarning.warnings}
                         busy={publish.isPending}
-                        onPublishAnyway={() => publish.mutate({
+                        onPublishAnyway={(keys) => publish.mutate({
                           draftId: publishWarning.draftId,
-                          acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+                          acknowledgedWarningKeys: keys,
                         })}
                       />
                     </div>
@@ -1108,18 +1101,14 @@ function OpinionPage() {
                   if (piece.data) {
                     return (
                       <>
-                        {/* DHC11: the empty summary is said on screen before the press, not only after it. */}
+                        {/*
+                          DHC11: the empty summary is said on screen before the press, not only after it.
+                          TJA-4: no "Publish anyway" of its own here -- the warning box under this heading
+                          holds the one press, and it acknowledges every warning listed above it.
+                        */}
                         {piece.data.dek?.trim() ? null : (
                           <div className="mt-3 border border-rule bg-paper-2 p-4" role="note">
                             <p className="text-sm text-ink">This piece has no summary for readers.</p>
-                            <button
-                              type="button"
-                              className="btn mt-3"
-                              disabled={publish.isPending}
-                              onClick={() => publish.mutate({ draftId: openId })}
-                            >
-                              {publish.isPending ? "Publishing…" : "Publish anyway"}
-                            </button>
                           </div>
                         )}
                         <InkButton
@@ -1145,9 +1134,9 @@ function OpinionPage() {
             <OpinionPublishWarnings
               warnings={publishWarning.warnings}
               busy={publish.isPending}
-              onPublishAnyway={() => publish.mutate({
+              onPublishAnyway={(keys) => publish.mutate({
                 draftId: publishWarning.draftId,
-                acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+                acknowledgedWarningKeys: keys,
               })}
             />
           ) : null}
@@ -1210,34 +1199,6 @@ function OpinionPage() {
         </section>
       ) : null}
     </DeskShell>
-  );
-}
-
-function OpinionPublishWarnings({
-  warnings,
-  busy,
-  onPublishAnyway,
-}: {
-  warnings: { key: string; sentence: string }[];
-  busy: boolean;
-  onPublishAnyway: () => void;
-}) {
-  /* DHG-2: the claims warning's confirm uses the Story page's own words. */
-  const claimsWarning = warnings.some((warning) => warning.key === "editorial-sources");
-  const confirmWords = claimsWarning ? "Publish anyway — I accept these claims are unreviewed" : "Publish anyway";
-  return (
-    <div className="mt-3 border border-rule bg-paper-2 p-4" role="alert">
-      {warnings.map((warning) => (
-        <p key={warning.key} className="text-sm text-ink">
-          {warning.sentence}
-        </p>
-      ))}
-      <div className="mt-3">
-        <button type="button" className="btn" disabled={busy} onClick={onPublishAnyway}>
-          {busy ? "Publishing…" : confirmWords}
-        </button>
-      </div>
-    </div>
   );
 }
 
