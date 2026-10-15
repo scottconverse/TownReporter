@@ -105,7 +105,7 @@ export function transcriptViewPath(artifactId: number): string {
 
 /** What the editor reads when the stored original cannot be found or opened. */
 export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
-  "The original file is missing from this computer. The text transcript is still here.";
+  "The transcript file for this meeting is not on this computer now, although the desk has a record of it. The text transcript is still here.";
 
 /**
  * The integrity line the page prints while the stored original cannot be read.
@@ -113,7 +113,7 @@ export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
  * is nothing to check the recorded SHA-256 against.
  */
 export const TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE =
-  "Integrity: not checked (the original file is missing).";
+  "Integrity: not checked (the transcript file for this meeting is not on this computer).";
 
 /**
  * The plain reason the storage facts are on the page (walk row FC11).

@@ -95,7 +95,7 @@ export async function loadWholeMeetingInput(
   const transcriptFile = artifact?.storage_path?.trim() ?? "";
   if (!transcriptFile || !existsSync(transcriptFile)) {
     throw new Error(
-      "The transcript for this meeting cannot be read (the original file is missing). Pick another transcript or capture it again.",
+      "The transcript file for this meeting is not on this computer now, although the desk has a record of it. Pick another transcript or capture it again.",
     );
   }
   if (statSync(transcriptFile).size === 0) {

@@ -14,12 +14,19 @@ test("scan counts distinguish selection and fetch limits from recorded results",
     enabled: true,
     localTime: "06:00",
     selectedSourceIds: [1, 2, 3],
+    everyDaySourceCount: 1,
     sourceCap: 2,
-    lastScan: { sources_fetched: 1, leads_created: 4 },
+    lastScan: {
+      sources_fetched: 1,
+      leads_created: 4,
+      startedAt: "2026-10-14T12:00:00.000Z",
+      finishedAt: "2026-10-14T12:20:00.000Z",
+    },
   });
   const values = Object.fromEntries(rows.map((r) => [r.label, r.value]));
   assert.equal(values["Sources selected"], "3");
+  assert.equal(values["Priority set"], "1");
   assert.equal(values["Fetch cap"], "2");
-  assert.equal(values["Sources actually read"], "1");
-  assert.equal(values["Leads filed"], "4");
+  assert.equal(values["Sources read (daily scan, Oct 14, 6:00 a.m.)"], "1");
+  assert.equal(values["Leads filed (daily scan, Oct 14, 6:00 a.m.)"], "4");
 });

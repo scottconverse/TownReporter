@@ -625,7 +625,7 @@ describe("whole-meeting writer, against the migrated schema", () => {
         },
         { primeGovOrigin: async () => null },
       ),
-      /cannot be read.*file is missing/,
+      /transcript file for this meeting is not on this computer/,
     );
     assert.equal(modelCalls, 0, "the run stops before any model is called");
   });

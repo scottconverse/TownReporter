@@ -272,22 +272,54 @@ export function lastDraftLine(input: { modelLabel: string; when: string; draftSa
 }
 
 /**
+ * The model a job's last failover hop moved the draft to: the sentence
+ * "This draft moved to <X> because <Y>" or the trail "<Y> → <X>" (older rows:
+ * "<Y> -> <X>"). A note with no hop names no model.
+ */
+export function failoverDestinationFromNote(failoverNote: string | null | undefined): string | undefined {
+  const note = (failoverNote ?? "").trim();
+  if (!note) return undefined;
+  const sentence = /^This draft moved to (.+?) because .+$/i.exec(note);
+  if (sentence) return sentence[1].trim() || undefined;
+  const hops = note.includes(FAILOVER_TRAIL_SEPARATOR) ? note.split(FAILOVER_TRAIL_SEPARATOR) : note.split(" -> ");
+  return hops.length > 1 ? hops[hops.length - 1].replace(/\.$/, "").trim() || undefined : undefined;
+}
+
+/**
  * The "Last draft" line for the draft in hand, whatever the page last printed.
  * A save message ("Draft saved.") or an old error does not hide it: a finished
  * draft always names the model that ran. Nothing is printed when the latest
  * writer job did not complete, because then the draft in hand is not that
  * job's draft, and nothing for a civic-reporting draft, which has no such job.
+ *
+ * The model that finished the draft is the failover note's last destination
+ * when the job switched, else `modelLabel` -- the model the job's receipt
+ * records as running. Neither one means the desk has no record of the finishing
+ * model, so the line prints the time only rather than guess the picked model.
  */
 export function lastDraftInHand(input: {
   hasDraft: boolean;
   civicReporting: boolean;
   jobStatus: string | null | undefined;
+  /** The receipt's recorded runtime, labeled; "" when the receipt records none. */
   modelLabel: string;
+  failoverNote?: string | null;
   finishedAt: string | null | undefined;
   now?: Date;
 }): string {
   if (!input.hasDraft || input.civicReporting || input.jobStatus !== "completed") return "";
-  return lastDraftLine({ modelLabel: input.modelLabel, when: lastDraftWhen(input.finishedAt, input.now) });
+  const finishingModel = failoverDestinationFromNote(input.failoverNote) ?? input.modelLabel;
+  return lastDraftLine({ modelLabel: finishingModel, when: lastDraftWhen(input.finishedAt, input.now) });
+}
+
+/** The runtime the job's receipt records as having run (`actualRuntime`), or null when it records none. */
+export function recordedRuntime(resultJson: string | null | undefined): string | null {
+  try {
+    const receipt = JSON.parse(resultJson ?? "{}") as { actualRuntime?: unknown };
+    return typeof receipt.actualRuntime === "string" && receipt.actualRuntime.trim() ? receipt.actualRuntime.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

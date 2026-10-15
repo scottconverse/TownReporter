@@ -785,7 +785,7 @@ function SourcesPage() {
                 <dd>{row.value}</dd>
               </dl>
             ))}
-            <p className="astra-note">Read and filed counts are from the latest scan.</p>
+            <p className="astra-note">Read and filed counts are from the latest daily scan, not a manual one.</p>
 
             <dl className="astra-kv ruled">
               <dt>Model</dt>
