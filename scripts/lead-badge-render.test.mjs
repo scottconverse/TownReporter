@@ -1334,7 +1334,7 @@ test("killed and published rows offer Edit, Hold, Kill and Draft so the server c
       lead: baseLead({status}), onEdit() {}, onHold() {}, onKill() {}, onDraft() {},
     }));
     assert.match(html, />Edit the lead</);
-    assert.match(html, />Hold \(no reason\)</);
+    assert.match(html, />Hold</);
     assert.match(html, />Kill</);
     assert.match(html, />Draft with AI</);
   }
