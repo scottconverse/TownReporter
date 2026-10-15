@@ -10,6 +10,7 @@ import {
   modelAndResearchLabel,
   readinessDot,
   readinessFailureMessage,
+  recordedRuntime,
   requestedModelChoice,
   runningWriterSentence,
   switchReasonFromNote,
@@ -383,5 +384,50 @@ describe("modelAndResearchLabel: Automatic does not say it fell back", () => {
       }),
       "DeepSeek v4.1 Flash",
     );
+  });
+});
+
+// DHK-1: the "Last draft" model is the model that finished the draft. A failover
+// note names that model; with no note, the receipt's recorded runtime does; with
+// neither (a legacy job with null runtime fields), the line prints the time only.
+describe("lastDraftInHand: the model that finished the draft (DHK-1)", () => {
+  const finishedAt = "2026-10-12T16:53:00.000Z";
+  const now = new Date("2026-10-12T20:00:00.000Z");
+  const when = lastDraftWhen(finishedAt, now);
+  it("names the failover destination when the job moved to another model and the receipt records no runtime", () => {
+    assert.equal(
+      lastDraftInHand({
+        hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "", now, finishedAt,
+        failoverNote: "This draft moved to Codex Terra because Codex Sol 6.1 timed out.",
+      }),
+      `Last draft: Codex Terra, ${when}`,
+    );
+  });
+  it("names the last destination of a failover trail, not the model the job picked", () => {
+    assert.equal(
+      lastDraftInHand({
+        hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "Codex Sol 6.1 (balanced)", now, finishedAt,
+        failoverNote: "Codex Sol 6.1 timed out → DeepSeek v4.1 was unavailable → Codex Terra",
+      }),
+      `Last draft: Codex Terra, ${when}`,
+    );
+  });
+  it("prints the time only when the desk records no finishing model (null runtime, no switch)", () => {
+    assert.equal(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "", failoverNote: null, now, finishedAt }),
+      `Last draft: ${when}`,
+    );
+  });
+  it("keeps the recorded runtime's name when the job did not switch", () => {
+    assert.equal(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "Codex Sol 6.1 (balanced)", failoverNote: null, now, finishedAt }),
+      `Last draft: Codex Sol 6.1 (balanced), ${when}`,
+    );
+  });
+  it("reads the recorded runtime from a job receipt, and nothing from a receipt without one", () => {
+    assert.equal(recordedRuntime(JSON.stringify({ actualRuntime: "codex-sol-balanced" })), "codex-sol-balanced");
+    assert.equal(recordedRuntime("{}"), null);
+    assert.equal(recordedRuntime(null), null);
+    assert.equal(recordedRuntime("not json"), null);
   });
 });

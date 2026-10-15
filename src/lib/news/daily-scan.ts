@@ -44,8 +44,16 @@ export type DailyScanPolicy = {
   lastLocalDay: string | null;
   nextRunAt: string | null;
   openRun: null | { runId: number; jobId: number; localDay: string; status: "queued" | "running" };
-  /** Latest scan receipt, including manual scans, for both summary screens. */
-  lastScan?: { sources_fetched: number; leads_created: number } | null;
+  /**
+   * The DAILY scan's own latest run (the reservation's `scan_run_id`), never a
+   * manual or other scan. `finishedAt` is null while that run is still going.
+   */
+  lastScan?: {
+    sources_fetched: number;
+    leads_created: number;
+    startedAt: string;
+    finishedAt: string | null;
+  } | null;
   lastRun: null | {
     runId: number;
     jobId: number | null;
@@ -341,10 +349,13 @@ export async function readDailyScanPolicy(
     "select r.*,j.status as job_status,j.error as job_error from daily_scan_reservations r left join desk_jobs j on j.id=r.desk_job_id where r.newsroom_id=$1 order by r.local_day desc limit 1",
     [newsroomId],
   );
-  const [lastScan] = await sql.query<{ sources_fetched: number; leads_created: number }>(
-    "select sources_fetched, leads_created from scan_runs where newsroom_id=$1 order by started_at desc, id desc limit 1",
-    [newsroomId],
-  );
+  /* The daily run's own row, not the newest scan of any kind: a manual or still-open scan must not stand in for it. */
+  const [lastScan] = r?.scan_run_id
+    ? await sql.query<{ sources_fetched: number; leads_created: number; started_at: string | Date; finished_at: string | Date | null }>(
+        "select sources_fetched, leads_created, started_at, finished_at from scan_runs where id=$1 and newsroom_id=$2",
+        [r.scan_run_id, newsroomId],
+      )
+    : [];
   const enabled = p?.enabled === true,
     paused = p?.paused === true,
     localTime = p?.local_time ?? UNSAVED_DAILY_SCAN_POLICY.localTime;
@@ -388,7 +399,14 @@ export async function readDailyScanPolicy(
       last && (last.status === "queued" || last.status === "running")
         ? { runId: last.runId, jobId: last.jobId!, localDay: last.localDay, status: last.status }
         : null,
-    lastScan: lastScan ?? null,
+    lastScan: lastScan
+      ? {
+          sources_fetched: lastScan.sources_fetched,
+          leads_created: lastScan.leads_created,
+          startedAt: new Date(lastScan.started_at).toISOString(),
+          finishedAt: lastScan.finished_at ? new Date(lastScan.finished_at).toISOString() : null,
+        }
+      : null,
     lastRun: last,
   };
 }
