@@ -2410,6 +2410,48 @@
     gap: 12px;
   }
 }
+/*
+  DLG-1 / DLG-3: a short window (720x450 at Large text, for one) leaves the
+  dialog body about 83px tall. These rules take room from the frame and the
+  textarea caps only -- never from the text size, and no field, help line or
+  button is hidden. The body is the scrolling part, so it gets the room.
+*/
+@media (max-height: 520px) {
+  .desk-ltr.astra-modal-layer {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .desk-ltr.astra-modal-layer .astra-modal {
+    max-height: calc(100dvh - 24px);
+    padding-top: 12px;
+    padding-bottom: 12px;
+    gap: 10px;
+  }
+  .desk-ltr.astra-modal-layer .astra-modal-sub {
+    margin-top: 4px;
+  }
+  .desk-ltr.astra-modal-layer .astra-modal-foot {
+    padding-top: 10px;
+  }
+  .desk-ltr.astra-modal-layer #story-source-text,
+  .desk-ltr.astra-modal-layer #paste-one-text {
+    max-height: 30vh;
+  }
+  /* The paste box has a 160px floor elsewhere; the floor would win over the cap. */
+  .desk-ltr.astra-modal-layer #paste-one-text {
+    min-height: 0;
+  }
+}
+/*
+  DLG-4: the native model and thinking-effort lists are drawn by the browser.
+  Where it honors option padding and line height, each row is 44px (24px line
+  plus 10px above and below). Browsers that ignore these keep their own rows.
+*/
+.desk-ltr.astra-modal-layer .model-picker select option {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  line-height: 24px;
+}
 
 /* The middle may shrink; its fields and paragraphs must keep their own size. */
 .desk-ltr.astra-modal-layer .astra-modal-body > * { flex-shrink: 0; }
