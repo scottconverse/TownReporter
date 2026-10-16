@@ -22,6 +22,13 @@
     processes of the app. A process cannot restart itself, and a tunnel restart
     cannot deliver its own result over the tunnel it has just killed.
 
+  * The paper and the tunnel also start at boot, not only at logon, and all six
+    tasks run whether or not anyone is signed in. That needs an elevated shell.
+    Tasks are registered as this user with no stored password (S4U) and with
+    RunLevel Limited, so postgres.exe gets the filtered token it accepts (Oct 16
+    boot-start). Run without elevation, the tasks keep the at-logon form and the
+    script says so.
+
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI, so
   anything else comes out as mojibake and can truncate a line.
 
@@ -67,6 +74,10 @@ function HiddenAction($script) {
 }
 
 $atLogon    = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$atStartup  = New-ScheduledTaskTrigger -AtStartup
+$identity   = [Security.Principal.WindowsIdentity]::GetCurrent()
+$elevated   = (New-Object Security.Principal.WindowsPrincipal -ArgumentList $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$principal  = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType S4U -RunLevel Limited
 $everyFive  = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
                 -RepetitionInterval (New-TimeSpan -Minutes 5)
 
@@ -78,8 +89,8 @@ $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
 $tasks = @(
-  @{ Name = "TownReporter";                Action = (PsAction     "start-townreporter.ps1"); Trigger = $atLogon;   Why = "starts Postgres, migrates, serves the paper" },
-  @{ Name = "TownReporter Tunnel";         Action = (PsAction     "run-tunnel.ps1");         Trigger = $atLogon;   Why = "connects the Cloudflare Tunnel" },
+  @{ Name = "TownReporter";                Action = (PsAction     "start-townreporter.ps1"); Trigger = $atLogon;   Boot = $true; Why = "starts Postgres, migrates, serves the paper" },
+  @{ Name = "TownReporter Tunnel";         Action = (PsAction     "run-tunnel.ps1");         Trigger = $atLogon;   Boot = $true; Why = "connects the Cloudflare Tunnel" },
   @{ Name = "TownReporter Monitors";       Action = (HiddenAction "cron-tick.ps1");          Trigger = $everyFive; Why = "rechecks watched sources, drains desk jobs" },
   @{ Name = "TownReporter Watchdog";       Action = (HiddenAction "watchdog.ps1");           Trigger = $everyFive; Why = "restarts whatever has stopped" },
   @{ Name = "TownReporter Restart";        Action = (PsAction     "restart-app.ps1");        Trigger = $null;      Why = "on demand, from the Server page" },
@@ -113,6 +124,10 @@ Write-Host "  TownReporter scheduled tasks"
 Write-Host "  ----------------------------"
 Write-Host "  app: $app"
 Write-Host ""
+if (-not $elevated) {
+  Write-Host "  Boot start was not set up: run this script as administrator to make the paper start without a sign-in."
+  Write-Host ""
+}
 
 # A second checkout is the obvious footgun: this machine has a production
 # install and a development one, and running this from the wrong folder
@@ -156,6 +171,10 @@ foreach ($t in $tasks) {
     Description = "TownReporter: $($t.Why)"
   }
   if ($t.Trigger) { $args.Trigger = $t.Trigger }
+  if ($elevated) {
+    $args.Principal = $principal
+    if ($t.Boot) { $args.Trigger = @($atStartup, $t.Trigger) }
+  }
 
   Register-ScheduledTask @args | Out-Null
   $verb = if ($existing) { "updated" } else { "created" }

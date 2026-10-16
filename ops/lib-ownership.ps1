@@ -8,6 +8,47 @@ function Assert-TownReporterTaskOwnership([string]$Name, [string]$Script) {
     throw "Scheduled task $Name does not point to this exact installation script; no task was changed."
   }
 }
+# Reads the port from the config files, not postgres.exe -C port: a boot-start
+# task has a full admin token and postgres.exe refuses it (Oct 16 boot-start).
+# Last active `port = N` wins; auto.conf is read after postgresql.conf; default 5432.
+# An active include falls back to postgres.exe -C port and is named if that fails.
+function Get-TownReporterClusterPort {
+  param([Parameter(Mandatory = $true)][string]$DataDir, [string]$PgBin)
+  $port = $null
+  $include = $null
+  foreach ($name in @('postgresql.conf', 'postgresql.auto.conf')) {
+    $file = Join-Path $DataDir $name
+    if (!(Test-Path -LiteralPath $file -PathType Leaf)) { continue }
+    foreach ($raw in Get-Content -LiteralPath $file) {
+      # A # outside single quotes starts a comment. An escaped '' inside quotes toggles twice, so it stays inside.
+      $code = $raw
+      $inQuote = $false
+      for ($i = 0; $i -lt $raw.Length; $i++) {
+        if ($raw[$i] -eq "'") { $inQuote = !$inQuote }
+        elseif ($raw[$i] -eq '#' -and !$inQuote) { $code = $raw.Substring(0, $i); break }
+      }
+      if (!$include -and $code -match '^\s*include(_if_exists|_dir)?\b') { $include = $code.Trim() }
+      if ($code -match "^\s*port(\s*=\s*|\s+)(.*?)\s*$") {
+        $value = $matches[2]
+        if ($value -match "^'((?:[^']|'')*)'$") { $value = $matches[1] -replace "''", "'" }
+        if ($value -notmatch '^\d+$') { throw "PostgreSQL port setting in $file is not a whole number ($value); refusing operations." }
+        $port = [int]$value
+      }
+    }
+  }
+  if ($include) {
+    $why = "PostgreSQL config in $DataDir has an active $include line, so the port cannot be read from the files"
+    if (!$PgBin) { throw "$why; refusing operations." }
+    $out = & (Join-Path $PgBin 'postgres.exe') -D $DataDir -C port
+    if ($LASTEXITCODE -ne 0) { throw "$why, and postgres.exe -C port failed (exit $LASTEXITCODE); refusing operations." }
+    $value = ($out | Out-String).Trim()
+    if ($value -notmatch '^\d+$') { throw "$why, and postgres.exe -C port printed '$value' instead of a port; refusing operations." }
+    return [int]$value
+  }
+  if ($null -eq $port) { return 5432 }
+  return $port
+}
+
 function Assert-TownReporterLegacyOwnership {
   param([switch]$Watchdog)
   $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
@@ -47,8 +88,9 @@ function Assert-TownReporterLegacyOwnership {
     if ((Get-Item -LiteralPath $values[$key]).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Legacy database paths must not be junctions.' }
   }
   if (!(Test-Path -LiteralPath (Join-Path $values['TOWNREPORTER_PG_DATA'] 'PG_VERSION'))) { throw 'Configured legacy PostgreSQL data directory is not initialized.' }
-  $configuredPort = & (Join-Path $values['TOWNREPORTER_PG_BIN'] 'postgres.exe') -D $values['TOWNREPORTER_PG_DATA'] -C port
-  if ($LASTEXITCODE -ne 0 -or [string]$configuredPort -ne [string]$database.Port) { throw 'Configured PostgreSQL cluster port does not match DATABASE_URL; refusing operations.' }
+  # Oct 16 boot-start: read the port from the config files; postgres.exe -C refuses a full admin token.
+  $configuredPort = Get-TownReporterClusterPort -DataDir $values['TOWNREPORTER_PG_DATA'] -PgBin $values['TOWNREPORTER_PG_BIN']
+  if ([string]$configuredPort -ne [string]$database.Port) { throw 'Configured PostgreSQL cluster port does not match DATABASE_URL; refusing operations.' }
   $script:OwnedPgBin = $values['TOWNREPORTER_PG_BIN']
   $script:OwnedPgData = $values['TOWNREPORTER_PG_DATA']
   $script:OwnedPgPort = $database.Port
