@@ -446,3 +446,48 @@ describe("TNB-7: the words after an acceptance say whether publish has happened"
     );
   });
 });
+
+/*
+  TPU-1 (Oct 16, Test walk publish-truth-2, p4-toast-354-1440): the TNB-7 words
+  live in a toast, and at 1440 wide the confirm panel covers that toast, so the
+  editor could not read "Nothing is published yet". The same truth is drawn
+  INSIDE the panel, above the consequence text, whenever the acceptance is on
+  this page. The toast stays as it is.
+*/
+describe("TPU-1: the confirm panel says inside itself that nothing is published yet", () => {
+  const line =
+    "Your acceptance of the unreviewed claims is recorded. Nothing is published yet: press the button below to publish.";
+  const unreviewed = { unreviewedClaims: 3, unreviewedAccepted: false };
+  const accepted = { unreviewedClaims: 3, unreviewedAccepted: true };
+
+  it("draws the line above the consequence text and the publish button after the acceptance", () => {
+    const html = renderToStaticMarkup(
+      createElement(PublishConfirmation, {
+        blockers: publishBlockers({ ...CLEAN, ...accepted }),
+        sectionName: "Infrastructure",
+        claimsAccepted: true,
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    );
+    const at = html.indexOf(`<p role="status">${line}</p>`);
+    assert.ok(at >= 0, "the panel must say inside itself that nothing is published yet");
+    assert.ok(at < html.indexOf("This puts the story on the public paper"), "the line must come above the consequence text");
+    assert.ok(at < html.search(/<button[^>]*class="action-btn btn solid/), "the line must come above the publish button");
+  });
+
+  it("draws no such line when no claims were accepted on this page", () => {
+    for (const claimsAccepted of [undefined, false]) {
+      const html = renderToStaticMarkup(
+        createElement(PublishConfirmation, {
+          blockers: publishBlockers({ ...CLEAN, ...unreviewed }),
+          sectionName: "Infrastructure",
+          claimsAccepted,
+          onConfirm: () => {},
+          onCancel: () => {},
+        }),
+      );
+      assert.equal(html.includes("Your acceptance of the unreviewed claims"), false);
+    }
+  });
+});

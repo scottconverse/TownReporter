@@ -117,8 +117,23 @@ export function PublishConfirmation(props: {
       "This puts the story on the public paper and in the feed, under your name, now. Corrections are published, not silent edits.",
   );
 
+  /*
+    TPU-1: after "I accept these claims are unreviewed", the TNB-7 words are
+    drawn INSIDE the panel too, above the consequence text. The toast can sit
+    under this panel at 1440 wide, so the panel has to say it itself. Plain body
+    text, not `.note` (the desk draws that small and muted), and a status region
+    so a screen reader hears it.
+  */
+  const acceptedLine = props.claimsAccepted
+    ? createElement(
+        "p",
+        { role: "status" },
+        "Your acceptance of the unreviewed claims is recorded. Nothing is published yet: press the button below to publish.",
+      )
+    : null;
+
   const body: ReactNode[] = [
-    createElement("div", { className: "astra-publish-confirm" }, deskNote),
+    createElement("div", { className: "astra-publish-confirm" }, acceptedLine, deskNote),
   ];
 
   if (sentences.length > 0) {
