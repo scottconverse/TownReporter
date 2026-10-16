@@ -50,6 +50,8 @@ import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
+  bulkKillConfirmWords,
+  bulkKillNeedsConfirm,
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
   bulkDeleteReasonLines,
@@ -1739,12 +1741,11 @@ function QueuePage() {
                   }
                   onAct={() => {
                     /*
-                      FB6, item 2: several leads in one kill press asks ONCE for
-                      one reason they all carry. One lead keeps the row's own
-                      path (the drawn "Kill with a reason" dialog above), which
-                      is where a per-lead reason already lives.
+                      FB6, item 2 and TMA-2: a bulk Kill asks ONCE for one reason
+                      they all carry, one lead included, before anything is killed.
+                      The row's own Kill and the K key stay instant, with their Undo.
                     */
-                    if (selectedLeads.length > 1) setBulkKillReason("");
+                    if (bulkKillNeedsConfirm(selectedLeads.length)) setBulkKillReason("");
                     else bulkSetStatus("killed");
                   }}
                 >
@@ -1753,10 +1754,7 @@ function QueuePage() {
                 {bulkKillReason !== null ? (
                   <div className="queue-bulk-delete-confirm">
                     <label className="queue-bulk-reason">
-                      <span>
-                        Killing {selectedLeads.length} leads. Why? One reason is written on all of
-                        them.
-                      </span>
+                      <span>{bulkKillConfirmWords(selectedLeads.length).prompt}</span>
                       <input
                         value={bulkKillReason}
                         onChange={(event) => setBulkKillReason(event.target.value)}
@@ -1772,7 +1770,7 @@ function QueuePage() {
                         bulkSetStatus("killed", reason);
                       }}
                     >
-                      Yes, kill {selectedLeads.length}
+                      {bulkKillConfirmWords(selectedLeads.length).confirm}
                     </InkButton>
                     <InkButton tone="quiet" onClick={() => setBulkKillReason(null)}>
                       Keep

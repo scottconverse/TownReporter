@@ -212,3 +212,23 @@ export function bulkDeleteReasonLines(
     return { id: lead.id, title: editorTitle(lead.headline), reason };
   });
 }
+
+/**
+ * TMA-2: a bulk Kill asks for its one shared reason before it takes, for one
+ * lead as well as for several. Only the bulk strip asks; the row's own Kill and
+ * the K key stay instant, with their Undo toast.
+ */
+export function bulkKillNeedsConfirm(count: number): boolean {
+  return count > 0;
+}
+
+/** The words of that confirm, for one lead or for several (TMA-2). */
+export function bulkKillConfirmWords(count: number): { prompt: string; confirm: string } {
+  if (count === 1) {
+    return { prompt: "Killing 1 lead. Why? The reason is written on it.", confirm: "Yes, kill 1" };
+  }
+  return {
+    prompt: `Killing ${count} leads. Why? One reason is written on all of them.`,
+    confirm: `Yes, kill ${count}`,
+  };
+}
