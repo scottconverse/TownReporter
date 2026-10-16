@@ -24,10 +24,13 @@
 
   * The paper and the tunnel also start at boot, not only at logon, and all six
     tasks run whether or not anyone is signed in. That needs an elevated shell.
-    Tasks are registered as this user with no stored password (S4U) and with
-    RunLevel Limited, so postgres.exe gets the filtered token it accepts (Oct 16
-    boot-start). Run without elevation, the tasks keep the at-logon form and the
-    script says so.
+    Tasks are registered as this user with no stored password (S4U), RunLevel
+    Limited. A task run that way still gets a FULL admin token for an admin
+    user, and postgres.exe refuses one (measured Oct 16 with S4U + Limited), so
+    the ops scripts read the cluster port from the config files instead of
+    `postgres.exe -C` (Get-TownReporterClusterPort in lib-ownership.ps1); pg_ctl
+    starts the server under a restricted token on its own. Run without
+    elevation, the tasks keep the at-logon form and the script says so.
 
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI, so
   anything else comes out as mojibake and can truncate a line.
