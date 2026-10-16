@@ -1969,15 +1969,24 @@
   awaiting-a-session screen. The inline fallback in __root.tsx stamps
   data-stranded on <html> after eight seconds if React has not hydrated that
   screen (see the long comment there for why it stopped redirecting), and this
-  rule is what makes the link appear. Author CSS outranks the UA rule behind
-  `hidden`, so nothing has to touch an attribute React rendered -- undoing one
-  makes a late hydration mismatch and log a warning.
+  rule is what makes the link appear. Nothing has to touch an attribute React
+  rendered -- undoing one makes a late hydration mismatch and log a warning.
+
+  It has to beat Tailwind's preflight, not just the browser's `hidden` rule.
+  Preflight sets `[hidden]:where(:not([hidden='until-found'])) { display: none
+  !important }` in the `base` cascade layer. For !important declarations a
+  layer beats the unlayered styles, and an earlier layer beats a later one, so
+  an unlayered `display: block` loses even with !important. This rule is
+  written inside the same `base` layer with !important instead. Its selector
+  (0,5,0) outranks preflight's `[hidden]` (0,1,0), so it wins.
 
   It lives in the stylesheet, not in the script, because the stylesheet is a
   plain <link>: it is still there on the page where the app bundle is not.
 */
-[data-stranded] [data-awaiting-session]:not([data-session-hydrated]) [data-stranded-signin][hidden] {
-  display: block;
+@layer base {
+  [data-stranded] [data-awaiting-session]:not([data-session-hydrated]) [data-stranded-signin][hidden] {
+    display: block !important;
+  }
 }
 
 /* Legal action descriptions remain readable with Large text on narrow screens. */
