@@ -4,14 +4,14 @@ import { publishConfirmation } from "../lib/news/publish-blockers.ts";
 import { ActionButton, type ActionPhase } from "./action-button.ts";
 
 /**
- * TNB-7: the words the desk announces after "Publish anyway -- I accept these
- * claims are unreviewed" records the acceptance. When the confirm opens next,
- * nothing has been published yet, so the words say so. The acceptance is the
- * same record either way.
+ * The words the desk announces after "Publish anyway -- I accept these claims
+ * are unreviewed" records the acceptance. They say only what was recorded, and
+ * they must stay true after the publish (TPV-4): a toast outlives the press, so
+ * a "Nothing is published yet" clause here read as false next to "Published".
+ * The confirm panel draws that line itself (TPU-1).
  */
-export function acceptanceAnnouncement(input: { count: number; confirmFollows: boolean }): string {
-  const recorded = `Recorded: you accepted ${input.count} unreviewed claim${input.count === 1 ? "" : "s"} for this draft.`;
-  return input.confirmFollows ? `${recorded} Nothing is published yet; confirm in the box that opens.` : recorded;
+export function acceptanceAnnouncement(input: { count: number }): string {
+  return `Recorded: you accepted ${input.count} unreviewed claim${input.count === 1 ? "" : "s"} for this draft.`;
 }
 
 /**

@@ -425,23 +425,26 @@ describe("DHI-8 / DHJ-3: the confirm after 'I accept these claims are unreviewed
 });
 
 /*
-  TNB-7 (Oct 16, walk N-2 lead 441): "Publish anyway -- I accept these claims are
-  unreviewed" recorded the acceptance, then the confirm opened, but the words
-  said only "Recorded: you accepted 1 unreviewed claim for this draft." -- so a
-  walk (and an editor) read it as done. The words now say the confirm is next,
-  and nothing is published until that confirm is pressed. The acceptance itself
-  is recorded exactly as before.
+  TPV-4 (Oct 16, Test walk publish-truth-3, after-publish-1440.png): TNB-7 put
+  "Nothing is published yet; confirm in the box that opens" on this toast. The
+  toast outlives the publish, so after the press the desk showed that sentence
+  next to "Published". The toast is the plain recorded sentence again, whether
+  or not a confirm follows; the confirm panel carries the "Nothing is published
+  yet" line (TPU-1, below).
 */
-describe("TNB-7: the words after an acceptance say whether publish has happened", () => {
-  it("says nothing is published yet when the confirm opens after the acceptance", () => {
-    const words = acceptanceAnnouncement({ count: 1, confirmFollows: true });
-    assert.match(words, /^Recorded: you accepted 1 unreviewed claim for this draft\./);
-    assert.match(words, /Nothing is published yet; confirm in the box that opens\.$/);
+describe("TPV-4: the accept toast stays true after publishing", () => {
+  it("never says nothing is published, even when the confirm opens after the acceptance", () => {
+    // The confirm follows this acceptance, the state that used to add the clause.
+    // The words must not change with it.
+    const afterAcceptance = { count: 1, confirmFollows: true };
+    const words = acceptanceAnnouncement(afterAcceptance);
+    assert.doesNotMatch(words, /Nothing is published yet/);
+    assert.equal(words, "Recorded: you accepted 1 unreviewed claim for this draft.");
   });
 
-  it("keeps the plain recorded words when no confirm follows", () => {
+  it("uses the plural for more than one claim", () => {
     assert.equal(
-      acceptanceAnnouncement({ count: 2, confirmFollows: false }),
+      acceptanceAnnouncement({ count: 2 }),
       "Recorded: you accepted 2 unreviewed claims for this draft.",
     );
   });

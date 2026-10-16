@@ -1284,7 +1284,7 @@ function StoryPage() {
       if (res.ok) setAcceptedUnreviewed(true);
       if (res.ok && goOn) setConfirmingPublish(true);
       announceToDesk(
-        res.ok ? acceptanceAnnouncement({ count: res.count, confirmFollows: goOn }) : res.error,
+        res.ok ? acceptanceAnnouncement({ count: res.count }) : res.error,
         res.ok ? "ok" : "err",
       );
     },
