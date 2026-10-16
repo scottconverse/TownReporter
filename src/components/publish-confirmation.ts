@@ -4,6 +4,17 @@ import { publishConfirmation } from "../lib/news/publish-blockers.ts";
 import { ActionButton, type ActionPhase } from "./action-button.ts";
 
 /**
+ * TNB-7: the words the desk announces after "Publish anyway -- I accept these
+ * claims are unreviewed" records the acceptance. When the confirm opens next,
+ * nothing has been published yet, so the words say so. The acceptance is the
+ * same record either way.
+ */
+export function acceptanceAnnouncement(input: { count: number; confirmFollows: boolean }): string {
+  const recorded = `Recorded: you accepted ${input.count} unreviewed claim${input.count === 1 ? "" : "s"} for this draft.`;
+  return input.confirmFollows ? `${recorded} Nothing is published yet; confirm in the box that opens.` : recorded;
+}
+
+/**
  * ── THE CONFIRM PRESS FOR A STORY THE DESK ONLY WARNED ABOUT (unit OH) ────────
  *
  * The publish button used to be off whenever the blocker list was non-empty. On

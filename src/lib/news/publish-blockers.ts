@@ -449,10 +449,17 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   }
 
   if (state.evidenceStale) {
+    /*
+      TNB-6: with no claims recorded the unchecked warning above says nothing
+      has been checked, so this one must not say a check went stale. The text
+      did change, so the warning stays, worded to agree with it.
+    */
     blockers.push({
       key: "evidence-stale",
       kind: "warning",
-      sentence: "The story changed after its evidence was checked, so the check no longer covers this text.",
+      sentence: state.uncheckedStory
+        ? "The story changed after its evidence was gathered, so that evidence does not cover this text."
+        : "The story changed after its evidence was checked, so the check no longer covers this text.",
       action: {
         label: "I checked: keep this evidence",
         target: { kind: "keep-evidence" },

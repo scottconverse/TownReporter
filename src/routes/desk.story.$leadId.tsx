@@ -22,7 +22,7 @@ import {
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/components/publish-bar-result";
-import { PublishConfirmation } from "@/components/publish-confirmation";
+import { PublishConfirmation, acceptanceAnnouncement } from "@/components/publish-confirmation";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { KILL_TOAST_MS, restoreStatus } from "@/components/fast-kill";
@@ -46,7 +46,7 @@ import type {
   EvidenceCheckState,
 } from "@/lib/news/evidence-check-state";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
-import { areaPills, HOME_AREA } from "@/lib/story-area";
+import { areaPills, cleanStoryArea, defaultStoryArea, HOME_AREA, type StoryArea } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -307,7 +307,8 @@ function StoryPage() {
     existing publish step, not a new step: the editor sets it here and the
     request carries it, exactly as the section travels.
 
-    Default is the home town, which is also what a story with no stored area
+    Default is the place the story's own words name (TOB-2), else the home town,
+    which is also what a story with no stored area
     reads as on the paper -- so the default the editor sees and the default a
     scripted publish gets are the same ground, and neither is a decision nobody
     made.
@@ -321,7 +322,16 @@ function StoryPage() {
     jobKey: "headlines",
     assignments: modelAssignments.data?.ok ? modelAssignments.data.assignments : [],
   });
-  const [area, setArea] = useState<string>(HOME_AREA);
+  /*
+    TOB-2: the select shows the ground the publish will store. Until the editor
+    picks one, that is the place the story's own headline or body names (see
+    `defaultStoryArea`), and the home town when neither names a place. The
+    select and the publish read this same value, so what the editor sees is
+    what is filed.
+  */
+  const [areaChoice, setAreaChoice] = useState<StoryArea | null>(null);
+  const area: StoryArea =
+    areaChoice ?? defaultStoryArea({ headline, body }, labels.longmont) ?? HOME_AREA;
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
@@ -1274,9 +1284,7 @@ function StoryPage() {
       if (res.ok) setAcceptedUnreviewed(true);
       if (res.ok && goOn) setConfirmingPublish(true);
       announceToDesk(
-        res.ok
-          ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
-          : res.error,
+        res.ok ? acceptanceAnnouncement({ count: res.count, confirmFollows: goOn }) : res.error,
         res.ok ? "ok" : "err",
       );
     },
@@ -4235,7 +4243,7 @@ function StoryPage() {
                   <select
                     id="story-area-select"
                     value={area}
-                    onChange={(e) => setArea(e.target.value)}
+                    onChange={(e) => setAreaChoice(cleanStoryArea(e.target.value))}
                     disabled={onPaper}
                   >
                     {areaPills(labels).map((p) => (
@@ -4247,7 +4255,7 @@ function StoryPage() {
                 </Field>
                 <p className="note">
                   Which pill this story answers to on the front page — {labels[HOME_AREA]} is the
-                  home town and the default.
+                  home town. It starts on the place the story names, or the home town when it names none.
                 </p>
               </div>
               {/*

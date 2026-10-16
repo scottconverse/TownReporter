@@ -9,6 +9,7 @@ import {
   STORY_AREAS,
   areaLabelsFor,
   cleanStoryArea,
+  defaultStoryArea,
   readStoryArea,
 } from "../story-area.ts";
 
@@ -147,5 +148,44 @@ describe("the county ground in the paper's own words", () => {
     const hook = readFileSync(new URL("../paper-context-state.ts", import.meta.url), "utf8");
     assert.match(hook, /const \{ city, state, county \} = usePaper\(\)/);
     assert.match(hook, /areaLabelsFor\(\{ city, state \}, county\)/);
+  });
+});
+
+/*
+  TOB-2 (Oct 16, walk boot-start-1 lead 452): the headline said Boulder and the
+  body named Louisville and Boulder, never Longmont, yet the story was published
+  with area `longmont` because the page always started on the home town. The
+  default now follows the place the story's own words name. On the old code
+  `defaultStoryArea` does not exist, so this file fails to load.
+*/
+describe("TOB-2: the default area follows the place the story names", () => {
+  const HOME = "Longmont";
+
+  it("a story naming Louisville and Boulder, and not Longmont, stands on Nearby", () => {
+    const story = {
+      headline: "Pickleball fundraiser set for Boulder on Oct. 24",
+      body: "The fundraiser, run by Mindful Works, will serve players in Louisville and Boulder.",
+    };
+    assert.equal(defaultStoryArea(story, HOME), "nearby");
+  });
+
+  it("a story naming the home town stands on the home town", () => {
+    const story = { headline: "Longmont council approves budget", body: "The vote was 5-2." };
+    assert.equal(defaultStoryArea(story, HOME), "longmont");
+  });
+
+  it("a story naming Boulder County stands on the county", () => {
+    const story = { headline: "Boulder County commissioners adopt rules", body: "Rules apply countywide." };
+    assert.equal(defaultStoryArea(story, HOME), "county");
+  });
+
+  it("the headline decides before the body", () => {
+    const story = { headline: "Lyons trustees post water rate study", body: "Longmont officials were asked." };
+    assert.equal(defaultStoryArea(story, HOME), "nearby");
+  });
+
+  it("a story naming no place returns null, so the page keeps the home town and says so", () => {
+    const story = { headline: "City council approves budget", body: "The superior court ruled on it." };
+    assert.equal(defaultStoryArea(story, HOME), null);
   });
 });

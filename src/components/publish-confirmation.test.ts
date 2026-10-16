@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PublishConfirmation } from "./publish-confirmation.ts";
+import { PublishConfirmation, acceptanceAnnouncement } from "./publish-confirmation.ts";
 import {
   publishBlockers,
   publishConfirmation,
@@ -421,5 +421,28 @@ describe("DHI-8 / DHJ-3: the confirm after 'I accept these claims are unreviewed
   it("leaves the plain confirm words alone when nothing was accepted", () => {
     const { html } = render({}, { sectionName: "Infrastructure" });
     assert.equal(confirmLabel(html), "Yes, print it in Infrastructure");
+  });
+});
+
+/*
+  TNB-7 (Oct 16, walk N-2 lead 441): "Publish anyway -- I accept these claims are
+  unreviewed" recorded the acceptance, then the confirm opened, but the words
+  said only "Recorded: you accepted 1 unreviewed claim for this draft." -- so a
+  walk (and an editor) read it as done. The words now say the confirm is next,
+  and nothing is published until that confirm is pressed. The acceptance itself
+  is recorded exactly as before.
+*/
+describe("TNB-7: the words after an acceptance say whether publish has happened", () => {
+  it("says nothing is published yet when the confirm opens after the acceptance", () => {
+    const words = acceptanceAnnouncement({ count: 1, confirmFollows: true });
+    assert.match(words, /^Recorded: you accepted 1 unreviewed claim for this draft\./);
+    assert.match(words, /Nothing is published yet; confirm in the box that opens\.$/);
+  });
+
+  it("keeps the plain recorded words when no confirm follows", () => {
+    assert.equal(
+      acceptanceAnnouncement({ count: 2, confirmFollows: false }),
+      "Recorded: you accepted 2 unreviewed claims for this draft.",
+    );
   });
 });

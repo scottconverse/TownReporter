@@ -96,7 +96,7 @@ import {
 } from "./published-rows.ts";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
-import { cleanStoryArea } from "../story-area.ts";
+import { cleanStoryArea, defaultStoryArea } from "../story-area.ts";
 import { findDuplicate } from "./import-review.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
@@ -6088,7 +6088,9 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     The ground this story stands on, as the editor chose it on the publish step
     (0.6.71). One of the four keys the paper's geography pills read, or absent.
 
-    Absent is not an error and is not a second decision to make: it means no
+    Absent (a scripted call or an older client) falls back to the place the
+    story's own words name (TOB-2), and to the home town when they name none.
+    It is not an error and is not a second decision to make: it means no
     area was shown to the editor, and a story with no recorded area reads as the
     home town -- the owner's rule (2026-09-26) and the same fallback every story
     printed before 0098 gets. So a scripted call, an older client and "the
@@ -6191,6 +6193,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     `;
   const preDraft = preDraftRows[0];
   const acknowledged = new Set(acknowledgedWarningKeys);
+  const homeCity = String((await getPaperPlace(owned(context))).city ?? "");
 
   const collectWarnings = async (
     tx: Sql,
@@ -6206,7 +6209,6 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     evidence: Awaited<ReturnType<typeof loadMeetingPublishEvidence>> | null;
   }> => {
     const draftTopic = String(row.topic ?? "").trim();
-    const area = cleanStoryArea(areaFromEditor);
     const editorTopic = String(sectionFromEditor ?? "").trim();
     const warnings: { key: string; sentence: string }[] = [];
 
@@ -6217,6 +6219,9 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     */
     const draft = unpackStoredDraft({ ...row });
     draft.body = stripReporterNotebook(draft.body);
+    const area =
+      cleanStoryArea(areaFromEditor) ??
+      defaultStoryArea({ headline: String(draft.headline ?? ""), body: String(draft.body ?? "") }, homeCity);
     if (!String(draft.headline ?? "").trim()) {
       return {
         warnings,

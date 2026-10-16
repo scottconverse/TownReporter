@@ -122,3 +122,56 @@ export function cleanStoryArea(raw: unknown): StoryArea | null {
   const value = raw.trim().toLowerCase();
   return (STORY_AREAS as readonly string[]).includes(value) ? (value as StoryArea) : null;
 }
+
+/**
+ * The towns the "Nearby" ground covers, as the shipped paper names them. A
+ * story whose headline or body names one of them (and not the home town, and
+ * not the county) stands on Nearby. Matched whole-word and case-sensitively, so
+ * "superior court" in lower case is not a town.
+ */
+export const NEARBY_TOWNS: readonly string[] = [
+  "Boulder",
+  "Broomfield",
+  "Berthoud",
+  "Dacono",
+  "Erie",
+  "Firestone",
+  "Frederick",
+  "Lafayette",
+  "Louisville",
+  "Lyons",
+  "Mead",
+  "Nederland",
+  "Niwot",
+  "Superior",
+];
+
+function namesPlace(text: string, place: string): boolean {
+  const name = place.trim();
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`).test(text);
+}
+
+function groundNamedIn(text: string, homeCity: string): StoryArea | null {
+  if (namesPlace(text, homeCity)) return HOME_AREA;
+  if (namesPlace(text, "Boulder County")) return "county";
+  if (NEARBY_TOWNS.some((town) => namesPlace(text, town))) return "nearby";
+  return null;
+}
+
+/**
+ * The ground a story stands on, from the place its own words name (TOB-2).
+ *
+ * The headline is read first, then the body. A story naming the home town is
+ * home; one naming Boulder County is county; one naming a Nearby town is
+ * nearby. A story that names none of them returns null, which the page and the
+ * publish step both read as the home town -- the same stored value as before --
+ * so a story is never filed under a town its words do not name.
+ */
+export function defaultStoryArea(
+  story: { headline: string; body: string },
+  homeCity: string,
+): StoryArea | null {
+  return groundNamedIn(story.headline, homeCity) ?? groundNamedIn(story.body, homeCity);
+}

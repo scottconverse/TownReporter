@@ -445,3 +445,33 @@ it("the killed and held cards' Publish anyway press publishes now rather than sc
     assert.deepEqual(row!.action?.target, { kind: "publish-now" }, `${leadStatus}: the press must publish, not only point at the bar`);
   }
 });
+
+/*
+  TNB-6 (Oct 16, walk N-2 lead 466): the publish bar said "No claims were
+  recorded for this story, so nothing has been checked" AND "The story changed
+  after its evidence was checked, so the check no longer covers this text" --
+  two warnings that cannot both be true. Both stay (each is true on its own);
+  the stale one is worded so it does not say a check existed for this text.
+*/
+describe("TNB-6: the publish bar's two warnings agree", () => {
+  it("when nothing was checked, the changed-story warning does not say a check went stale", () => {
+    const blockers = publishBlockers(withState({ uncheckedStory: true, evidenceStale: true }));
+    const unchecked = blockers.find((b) => b.key === "unchecked");
+    const stale = blockers.find((b) => b.key === "evidence-stale");
+    assert.ok(unchecked, "the unchecked warning still shows");
+    assert.ok(stale, "the changed-story warning still shows: the text did change");
+    assert.match(unchecked!.sentence, /nothing has been checked/);
+    assert.doesNotMatch(
+      stale!.sentence,
+      /the check no longer covers/,
+      "'nothing has been checked' and 'the check no longer covers this text' cannot both be true",
+    );
+    assert.match(stale!.sentence, /changed after its evidence was gathered/);
+    assert.deepEqual(stale!.action, { label: "I checked: keep this evidence", target: { kind: "keep-evidence" } });
+  });
+
+  it("a story with checked claims keeps the changed-story wording it always had", () => {
+    const [stale] = publishBlockers(withState({ evidenceStale: true }));
+    assert.match(stale!.sentence, /changed after its evidence was checked, so the check no longer covers this text/);
+  });
+});
