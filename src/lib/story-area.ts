@@ -13,6 +13,8 @@
  * mirror of migration 0098 that PGLite needs.
  */
 
+import { isLongmont, type NewsroomPlace } from "./news/dark-place.ts";
+
 /** The stored value on `articles.area`. Stable keys; the labels are display. */
 export const STORY_AREAS = ["longmont", "nearby", "county", "colorado"] as const;
 export type StoryArea = (typeof STORY_AREAS)[number];
@@ -128,6 +130,10 @@ export function cleanStoryArea(raw: unknown): StoryArea | null {
  * story whose headline or body names one of them (and not the home town, and
  * not the county) stands on Nearby. Matched whole-word and case-sensitively, so
  * "superior court" in lower case is not a town.
+ *
+ * This list belongs to the shipped Longmont, Colorado paper only. A paper
+ * configured for another town has no Nearby towns, and `defaultStoryArea` never
+ * reads this list for it (the Riverbend, Ohio leak).
  */
 export const NEARBY_TOWNS: readonly string[] = [
   "Boulder",
@@ -153,25 +159,47 @@ function namesPlace(text: string, place: string): boolean {
   return new RegExp(`\\b${escaped}\\b`).test(text);
 }
 
-function groundNamedIn(text: string, homeCity: string): StoryArea | null {
-  if (namesPlace(text, homeCity)) return HOME_AREA;
-  if (namesPlace(text, "Boulder County")) return "county";
-  if (NEARBY_TOWNS.some((town) => namesPlace(text, town))) return "nearby";
+/**
+ * Whether the text names this paper's county. The configured county, when Paper
+ * setup has one, is "<County> County". The shipped Longmont paper also keeps
+ * its literal "Boulder County" (`isLongmont`), so no other paper ever matches it.
+ */
+function namesCounty(text: string, place: NewsroomPlace): boolean {
+  const configured = (place.county ?? "").trim();
+  if (configured && namesPlace(text, `${configured} County`)) return true;
+  return isLongmont(place) && namesPlace(text, "Boulder County");
+}
+
+function groundNamedIn(text: string, place: NewsroomPlace): StoryArea | null {
+  if (namesPlace(text, place.city)) return HOME_AREA;
+  if (namesCounty(text, place)) return "county";
+  if (isLongmont(place) && NEARBY_TOWNS.some((town) => namesPlace(text, town))) return "nearby";
   return null;
 }
 
 /**
  * The ground a story stands on, from the place its own words name (TOB-2).
  *
- * The headline is read first, then the body. A story naming the home town is
- * home; one naming Boulder County is county; one naming a Nearby town is
- * nearby. A story that names none of them returns null, which the page and the
+ * The headline is read first, then the body. A story naming the paper's own
+ * city is home (for any paper); one naming the paper's county is county; one
+ * naming a Nearby town is nearby, and only the shipped Longmont paper has Nearby
+ * towns. A story that names none of them returns null, which the page and the
  * publish step both read as the home town -- the same stored value as before --
  * so a story is never filed under a town its words do not name.
+ *
+ * `paper.county` is the configured county name when the caller has it (Paper
+ * setup), and is omitted or null when it does not.
  */
 export function defaultStoryArea(
   story: { headline: string; body: string },
-  homeCity: string,
+  paper: { city?: string | null; state?: string | null; county?: string | null },
 ): StoryArea | null {
-  return groundNamedIn(story.headline, homeCity) ?? groundNamedIn(story.body, homeCity);
+  // `getPaperPlace` types its fields as optional (lead-match.ts); a blank city
+  // names nothing, so a missing field reads as the empty string here.
+  const place: NewsroomPlace = {
+    city: paper.city ?? "",
+    state: paper.state ?? "",
+    county: paper.county ?? null,
+  };
+  return groundNamedIn(story.headline, place) ?? groundNamedIn(story.body, place);
 }

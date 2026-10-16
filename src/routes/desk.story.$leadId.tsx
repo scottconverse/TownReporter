@@ -331,7 +331,7 @@ function StoryPage() {
   */
   const [areaChoice, setAreaChoice] = useState<StoryArea | null>(null);
   const area: StoryArea =
-    areaChoice ?? defaultStoryArea({ headline, body }, labels.longmont) ?? HOME_AREA;
+    areaChoice ?? defaultStoryArea({ headline, body }, paperIdentity) ?? HOME_AREA;
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");

@@ -6193,7 +6193,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     `;
   const preDraft = preDraftRows[0];
   const acknowledged = new Set(acknowledgedWarningKeys);
-  const homeCity = String((await getPaperPlace(owned(context))).city ?? "");
+  const paperPlace = await getPaperPlace(owned(context));
 
   const collectWarnings = async (
     tx: Sql,
@@ -6221,7 +6221,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     draft.body = stripReporterNotebook(draft.body);
     const area =
       cleanStoryArea(areaFromEditor) ??
-      defaultStoryArea({ headline: String(draft.headline ?? ""), body: String(draft.body ?? "") }, homeCity);
+      defaultStoryArea({ headline: String(draft.headline ?? ""), body: String(draft.body ?? "") }, paperPlace);
     if (!String(draft.headline ?? "").trim()) {
       return {
         warnings,

@@ -159,33 +159,71 @@ describe("the county ground in the paper's own words", () => {
   `defaultStoryArea` does not exist, so this file fails to load.
 */
 describe("TOB-2: the default area follows the place the story names", () => {
-  const HOME = "Longmont";
+  const PLACE = { city: "Longmont", state: "Colorado" };
 
   it("a story naming Louisville and Boulder, and not Longmont, stands on Nearby", () => {
     const story = {
       headline: "Pickleball fundraiser set for Boulder on Oct. 24",
       body: "The fundraiser, run by Mindful Works, will serve players in Louisville and Boulder.",
     };
-    assert.equal(defaultStoryArea(story, HOME), "nearby");
+    assert.equal(defaultStoryArea(story, PLACE), "nearby");
   });
 
   it("a story naming the home town stands on the home town", () => {
     const story = { headline: "Longmont council approves budget", body: "The vote was 5-2." };
-    assert.equal(defaultStoryArea(story, HOME), "longmont");
+    assert.equal(defaultStoryArea(story, PLACE), "longmont");
   });
 
   it("a story naming Boulder County stands on the county", () => {
     const story = { headline: "Boulder County commissioners adopt rules", body: "Rules apply countywide." };
-    assert.equal(defaultStoryArea(story, HOME), "county");
+    assert.equal(defaultStoryArea(story, PLACE), "county");
   });
 
   it("the headline decides before the body", () => {
     const story = { headline: "Lyons trustees post water rate study", body: "Longmont officials were asked." };
-    assert.equal(defaultStoryArea(story, HOME), "nearby");
+    assert.equal(defaultStoryArea(story, PLACE), "nearby");
   });
 
   it("a story naming no place returns null, so the page keeps the home town and says so", () => {
     const story = { headline: "City council approves budget", body: "The superior court ruled on it." };
-    assert.equal(defaultStoryArea(story, HOME), null);
+    assert.equal(defaultStoryArea(story, PLACE), null);
+  });
+});
+
+/*
+  TOB-2 follow-up: the Nearby towns and "Boulder County" are the SHIPPED
+  paper's geography. On 909a041a `defaultStoryArea` read them for every paper,
+  so a Riverbend, Ohio story naming Erie filed under Nearby. The Riverbend "Erie"
+  case below fails on 909a041a (it returns "nearby").
+*/
+describe("TOB-2 follow-up: a paper configured for another town keeps its own geography", () => {
+  const RIVERBEND = { city: "Riverbend", state: "Ohio" };
+
+  it("a Riverbend story naming Erie and Boulder County stands on no ground", () => {
+    const story = {
+      headline: "Erie council hears Boulder County bus plan",
+      body: "The plan covers Superior and Lafayette.",
+    };
+    assert.equal(defaultStoryArea(story, RIVERBEND), null);
+  });
+
+  it("a Riverbend story naming only Erie stands on no ground, not Nearby", () => {
+    const story = { headline: "Erie council hears bus plan", body: "The plan covers the whole route." };
+    assert.equal(defaultStoryArea(story, RIVERBEND), null);
+  });
+
+  it("a Riverbend story naming Boulder County stands on no ground, even with a county set", () => {
+    const story = { headline: "Boulder County commissioners adopt rules", body: "Rules apply countywide." };
+    assert.equal(defaultStoryArea(story, { ...RIVERBEND, county: "Franklin" }), null);
+  });
+
+  it("a Riverbend story naming its configured county stands on the county", () => {
+    const story = { headline: "Franklin County commissioners adopt rules", body: "Rules apply countywide." };
+    assert.equal(defaultStoryArea(story, { ...RIVERBEND, county: "Franklin" }), "county");
+  });
+
+  it("a Riverbend story naming its own town stands on the home town", () => {
+    const story = { headline: "Riverbend council approves budget", body: "The vote was 5-2." };
+    assert.equal(defaultStoryArea(story, RIVERBEND), "longmont");
   });
 });
