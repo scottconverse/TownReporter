@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
+  bulkKillConfirmWords,
+  bulkKillNeedsConfirm,
   bulkStatusReport,
   bulkStatusSummary,
   settleBulkKill,
@@ -190,5 +192,35 @@ describe("THU-4: the bulk Kill's Undo waits for the batch and puts back every le
       undoBulkKill(Promise.resolve({ undoIds: [1, 2, 3] }), async (id) => { if (id !== 2) throw new Error("no"); }),
       /2 leads could not be put back/,
     );
+  });
+});
+
+/**
+ * TMA-2: a bulk Kill of ONE lead opened no confirm, so one press killed it with
+ * no question asked. The confirm now opens for every count the strip can kill.
+ *
+ * THE MUTATION THAT MATTERS. A rule of `count > 1` (what the route used) fails
+ * "asks first for ONE lead too"; dropping the one-lead words fails "says the
+ * one-lead words".
+ */
+describe("the bulk Kill confirm (TMA-2)", () => {
+  it("asks first for ONE lead too", () => {
+    assert.equal(bulkKillNeedsConfirm(1), true);
+    assert.equal(bulkKillNeedsConfirm(3), true);
+  });
+  it("asks nothing when no lead is ticked", () => {
+    assert.equal(bulkKillNeedsConfirm(0), false);
+  });
+  it("says the one-lead words for one lead", () => {
+    assert.deepEqual(bulkKillConfirmWords(1), {
+      prompt: "Killing 1 lead. Why? The reason is written on it.",
+      confirm: "Yes, kill 1",
+    });
+  });
+  it("keeps the same words for two or more", () => {
+    assert.deepEqual(bulkKillConfirmWords(2), {
+      prompt: "Killing 2 leads. Why? One reason is written on all of them.",
+      confirm: "Yes, kill 2",
+    });
   });
 });

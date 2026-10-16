@@ -51,6 +51,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draftNotSavedWords, draftWaitingWords, editorTitle, sharedModelWaitWords } from "@/lib/news/desk-copy";
+import { showDraftRunning } from "@/lib/desk/draft-running";
 import { useDeskJobs } from "@/components/job-card-state";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
@@ -529,6 +530,9 @@ function StoryPage() {
   const [previewSeen, setPreviewSeen] = useState(false);
 
   const waiting = waitingSince !== null;
+  // TMA-6: the running text waits for the server's answer; `waiting` still disables buttons.
+  // The leading `waiting &&` keeps TypeScript's narrowing of waitingSince for the wait words.
+  const draftRunningShown = waiting && showDraftRunning({ waiting, awaitingAck: awaitingDraftJobAck });
 
   const { data, isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ["lead", id],
@@ -3441,9 +3445,9 @@ function StoryPage() {
           about why the pull came back empty. It now names the providers in
           plain words; the raw lines stay inside for support.
         */}
-          {waiting && jobState === "recovering" ? (
+          {draftRunningShown && jobState === "recovering" ? (
             <Notice kind="warn">{recoveringDraftCopy()}</Notice>
-          ) : waiting ? (
+          ) : draftRunningShown ? (
             <Busy
               label={
                 slowWait
@@ -3802,7 +3806,7 @@ function StoryPage() {
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton>
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
       </div> : null}
-      {waiting ? <section className="astra-model-research">
+      {draftRunningShown ? <section className="astra-model-research">
         <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
         <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} compact />
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
