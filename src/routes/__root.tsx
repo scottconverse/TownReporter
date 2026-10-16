@@ -7,6 +7,7 @@ import { PaperProvider } from "@/lib/paper-context";
 import { getPaperIdentityFn } from "@/lib/news/paper-settings";
 import { AppearanceProvider } from "@/lib/appearance-provider";
 import { appearanceHeadScript } from "@/lib/appearance";
+import { assetReloadHeadScript } from "@/lib/asset-reload";
 import { readerStorageKey } from "@/lib/reader";
 import appCss from "../styles.css?url";
 import deskCss from "../desk-astra.css?url";
@@ -163,6 +164,23 @@ function Root() {
         <script
           dangerouslySetInnerHTML={{
             __html: appearanceHeadScript(readerStorageKey(paper.name, paper.city)),
+          }}
+        />
+        {/*
+          Reload once when the app's own code file fails to download.
+
+          Added after the Oct 15 2026 stuck "Setting type..." screen: the first
+          /desk load lost /assets/reader-*.js to a transport error
+          (ERR_QUIC_PROTOCOL_ERROR), and nothing on the page asked for it
+          again. This listens for that failed download and reloads once per
+          path per 60 seconds. It waits on no timer, for the reason the
+          stranded-visitor note below gives. It only listens: it changes
+          nothing React renders and stamps nothing on <html>. See
+          src/lib/asset-reload.ts.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: assetReloadHeadScript(),
           }}
         />
       </head>
