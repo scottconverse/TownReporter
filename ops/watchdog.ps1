@@ -185,7 +185,7 @@ if (-not $pgUp) {
   $pgLog = Join-Path $OwnedPgData 'townreporter-postgres.log'
   try {
     Start-Process -FilePath "$bin\pg_ctl.exe" `
-      -ArgumentList "-D", "`"$data`"", "-l", "`"$pgLog`"", "start" -NoNewWindow
+      -ArgumentList "-D", "`"$data`"", "-l", "`"$pgLog`"", "start" -WindowStyle Hidden  # own hidden console: the Oct 15 23:00:53 stop was 0xC000013A (a console close or Ctrl+C)
     # Three minutes, for the same reason as start-townreporter.ps1: crash
     # recovery after an unclean shutdown outran a thirty second wait on this
     # machine by twenty-three seconds.

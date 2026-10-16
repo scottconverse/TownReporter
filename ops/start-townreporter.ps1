@@ -61,7 +61,7 @@ function Test-Port($p) {
 
 if (-not (Test-Port $OwnedPgPort)) {
   Start-Process -FilePath "$bin\pg_ctl.exe" `
-    -ArgumentList "-D","`"$data`"","-l","`"$log`"","start" -NoNewWindow
+    -ArgumentList "-D","`"$data`"","-l","`"$log`"","start" -WindowStyle Hidden  # own hidden console: the Oct 15 23:00:53 stop was 0xC000013A (a console close or Ctrl+C)
   <#
     Wait up to three minutes, not thirty seconds.
 
@@ -169,7 +169,7 @@ if (-not (Test-TownReporterPort $port)) {
     -WorkingDirectory $app `
     -RedirectStandardOutput (Join-Path $logDir "app.out.log") `
     -RedirectStandardError  (Join-Path $logDir "app.err.log") `
-    -NoNewWindow
+    -WindowStyle Hidden  # own hidden console: a closed caller console takes the app down too (Oct 15 23:00:53, 0xC000013A)
 }
 
 <#
