@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
-import { cleanMissingFactNotes } from "@/lib/news/strip-draft";
+import { cleanMissingFactNotes, stripReaderYearNote } from "@/lib/news/strip-draft";
 import { rememberMissingFactNotesForArticle } from "@/lib/news/public";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
 import { getPublicPaperConfig, isOnboarded } from "@/lib/news/paper-settings";
@@ -88,15 +88,18 @@ export const Route = createFileRoute("/feed")({
         const items = (await Promise.all(collapsePrintedDuplicates(rows)
           .map(async (r) => {
             const readerSummary = cleanMissingFactNotes(r.headline, r.dek);
+            /* TPT-3 follow-up: readers get the same year-note cut as the story page. An empty headline keeps its text. */
+            const readerHeadline = stripReaderYearNote(readerSummary.headline) || readerSummary.headline;
+            const readerDek = stripReaderYearNote(readerSummary.dek);
             await rememberMissingFactNotesForArticle(r.id, readerSummary.notes);
             const link = `${origin}/articles/${encodeURIComponent(r.slug)}`;
             const at = new Date(r.published_at);
             const pubDate = Number.isNaN(at.getTime()) ? "" : at.toUTCString();
             return `<item>
-  <title>${xmlText(readerSummary.headline)}</title>
+  <title>${xmlText(readerHeadline)}</title>
   <link>${xmlEscape(link)}</link>
   <guid isPermaLink="true">${xmlEscape(link)}</guid>${pubDate ? `\n  <pubDate>${pubDate}</pubDate>` : ""}
-  <description>${xmlText(readerSummary.dek)}</description>
+  <description>${xmlText(readerDek)}</description>
 </item>`;
           }))).join("\n");
         const xml = `<?xml version="1.0" encoding="UTF-8"?>

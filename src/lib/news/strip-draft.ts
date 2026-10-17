@@ -144,6 +144,19 @@ export function stripReaderNotebook(body: string, writtenOn: Date = new Date()):
   return stripNotebook(body, READER_YEAR_NOTE, writtenOn);
 }
 
+/*
+  The same reader cut for one line -- a headline or a dek (TPT-3 follow-up). Returns ""
+  when nothing is left; the caller decides what an empty line means (a headline keeps
+  its text as written, a dek may go empty). A line that ended without a period is not
+  given one by the cut.
+*/
+export function stripReaderYearNote(line: string, writtenOn: Date = new Date()): string {
+  if (!READER_YEAR_NOTE.test(line)) return line;
+  const trimmed = line.trim();
+  const cut = stripYearNotesFromParagraph(trimmed, writtenOn, READER_YEAR_NOTE).trim();
+  return /[.!?]$/.test(trimmed) ? cut : cut.replace(/[.!?]+$/, "");
+}
+
 function stripNotebook(body: string, yearNote: RegExp, writtenOn: Date = new Date()): string {
   const marker = body.search(TRAILER);
   const cut = marker >= 0 ? body.slice(0, marker) : body;

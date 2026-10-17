@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { cleanMissingFactNotes, stripReaderNotebook, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
+import { cleanMissingFactNotes, stripReaderNotebook, stripReaderYearNote, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
 import { publicArticle } from "./public.ts";
 
 it("moves the Pace Street schedule-year note out of the reader summary and leaves news copy intact", () => {
@@ -135,4 +135,47 @@ it("keeps sentences that only mention a year, a school year, a fiscal year, or a
   for (const sentence of keep) {
     assert.equal(stripReaderNotebook(sentence, oct), sentence);
   }
+});
+
+// Scott, Oct 16 2026 (TPT-3 follow-up): readers' headline and dek get the same cut as the body.
+it("drops the missing-year clause from a dek and keeps the rest, and leaves a dek without one alone", () => {
+  const oct = new Date(2026, 9, 16);
+  assert.equal(
+    stripReaderYearNote("Oct. 7 and Nov. 11 sessions; the listing shows month and day without a year.", oct),
+    "Oct. 7 and Nov. 11 sessions.",
+  );
+  assert.equal(stripReaderYearNote("Open year-round at the library.", oct), "Open year-round at the library.");
+});
+
+it("keeps a dek's missing-year clause at the turn of the year when it names a January or February date", () => {
+  const dek = "Hearing set for Jan. 8; the listing shows month and day without a year.";
+  assert.equal(stripReaderYearNote(dek, new Date(2026, 11, 20)), dek);
+  assert.equal(stripReaderYearNote(dek, new Date(2026, 9, 16)), "Hearing set for Jan. 8.");
+});
+
+it("gives the story page's headline and dek the same cut, and keeps a headline that is only a note", () => {
+  const oct = new Date(2026, 9, 16);
+  const onlyNote = "The pages show month and day without a year.";
+  assert.equal(stripReaderYearNote(onlyNote, oct), "");
+  const row = (headline: string, dek: string) =>
+    publicArticle({
+      id: 2,
+      slug: "sessions",
+      headline,
+      dek,
+      body: "Doors open at 6 p.m.",
+      topic: "community",
+      source_urls: "[]",
+      status: "published",
+      published_at: "2026-10-16T12:00:00Z",
+    });
+  const cut = row(
+    "Oct. 7 and Nov. 11 sessions planned",
+    "Oct. 7 and Nov. 11 sessions; the listing shows month and day without a year.",
+  );
+  assert.equal(cut.headline, "Oct. 7 and Nov. 11 sessions planned");
+  assert.equal(cut.dek, "Oct. 7 and Nov. 11 sessions.");
+  const kept = row(onlyNote, "Open year-round at the library.");
+  assert.equal(kept.headline, onlyNote);
+  assert.equal(kept.dek, "Open year-round at the library.");
 });
