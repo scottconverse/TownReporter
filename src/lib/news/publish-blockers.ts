@@ -305,7 +305,7 @@ export function oldDraftSentence(writtenAt: string | null | undefined, now: Date
     day: "numeric",
     timeZone: "America/Denver",
   }).format(written);
-  return `This draft was last written ${when} (${days} days ago). Check its dates and times words like "Saturday" or "two days out" before you publish.`;
+  return `This draft was last written ${when} (${days} days ago). Check any words about dates and times, such as "Saturday" or "two days out", before you publish.`;
 }
 
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {

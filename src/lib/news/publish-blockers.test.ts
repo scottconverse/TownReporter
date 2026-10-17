@@ -493,7 +493,7 @@ describe("TPW-2: an old draft draws one warning and never blocks Publish", () =>
     assert.equal(old[0]!.kind, "warning");
     assert.match(
       old[0]!.sentence,
-      /^This draft was last written [A-Z][a-z]{2} \d{1,2} \(30 days ago\)\. Check its dates and times words like "Saturday" or "two days out" before you publish\.$/,
+      /^This draft was last written [A-Z][a-z]{2} \d{1,2} \(30 days ago\)\. Check any words about dates and times, such as "Saturday" or "two days out", before you publish\.$/,
     );
   });
 
