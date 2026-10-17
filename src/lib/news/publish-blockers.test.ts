@@ -1,8 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  acceptanceRecordedFor,
+  oldDraftSentence,
   publishBlockers,
   publishBlockedSummary,
+  publishConfirmation,
   publishGateNote,
   showsPublishPrep,
   type PublishBlockerState,
@@ -473,5 +476,73 @@ describe("TNB-6: the publish bar's two warnings agree", () => {
   it("a story with checked claims keeps the changed-story wording it always had", () => {
     const [stale] = publishBlockers(withState({ evidenceStale: true }));
     assert.match(stale!.sentence, /changed after its evidence was checked, so the check no longer covers this text/);
+  });
+});
+
+/*
+  TPW-2 (Oct 16, walk publish-truth-4): a draft last written weeks ago still prints
+  its own time words ("Saturday", "two days out") under today's date. The desk warns
+  once and never blocks: the editor may read the warning and print anyway.
+*/
+describe("TPW-2: an old draft draws one warning and never blocks Publish", () => {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+
+  it("says when the draft was written, how many days ago, and what to check", () => {
+    const old = publishBlockers(withState({ draftWrittenAt: daysAgo(30) })).filter((b) => b.key === "draft-old");
+    assert.equal(old.length, 1, "one warning, not one per check");
+    assert.equal(old[0]!.kind, "warning");
+    assert.match(
+      old[0]!.sentence,
+      /^This draft was last written [A-Z][a-z]{2} \d{1,2} \(30 days ago\)\. Check its dates and times words like "Saturday" or "two days out" before you publish\.$/,
+    );
+  });
+
+  it("stays quiet for a draft written within 14 days, and for a draft with no date", () => {
+    assert.equal(keys({ draftWrittenAt: daysAgo(14) }).includes("draft-old"), false);
+    assert.equal(keys({ draftWrittenAt: null }).includes("draft-old"), false);
+    assert.equal(keys({}).includes("draft-old"), false);
+  });
+
+  it("leaves the press on and keeps Publish anyway, so an old draft can still be printed", () => {
+    const decision = publishConfirmation(publishBlockers(withState({ draftWrittenAt: daysAgo(30) })), "Council");
+    assert.equal(decision.enabled, true);
+    assert.equal(decision.confirmLabel, "Publish anyway in Council");
+    assert.ok(decision.acknowledgedWarningKeys.includes("draft-old"));
+  });
+});
+
+describe("TPW-2: the server's warning uses the same day count and the same words", () => {
+  const now = new Date("2026-10-16T12:00:00-06:00");
+  const daysBefore = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
+
+  it("is silent through 14 days and speaks from 15 days", () => {
+    assert.equal(oldDraftSentence(daysBefore(14), now), null);
+    assert.match(oldDraftSentence(daysBefore(15), now)!, /\(15 days ago\)/);
+  });
+
+  it("is silent for a missing or unreadable date", () => {
+    assert.equal(oldDraftSentence(null, now), null);
+    assert.equal(oldDraftSentence("not a date", now), null);
+  });
+});
+
+/*
+  TPU-4 (Oct 16, walk publish-truth-2): the editor's "I accept these claims are
+  unreviewed" was remembered only on the page, so a reload lost it. The server
+  returns the recorded count on every load; this decides whether that count still
+  covers the claims open now.
+*/
+describe("TPU-4: a recorded acceptance is known again after a reload", () => {
+  it("counts the acceptance once it covers every claim still open", () => {
+    assert.equal(acceptanceRecordedFor(3, 3), true);
+  });
+
+  it("does not count it once a claim is open that the acceptance did not cover", () => {
+    assert.equal(acceptanceRecordedFor(3, 4), false);
+  });
+
+  it("does not count it when nothing is open, or nothing was accepted", () => {
+    assert.equal(acceptanceRecordedFor(3, 0), false);
+    assert.equal(acceptanceRecordedFor(0, 2), false);
   });
 });

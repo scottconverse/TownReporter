@@ -102,6 +102,11 @@ const WARNING_CASES: { key: string; patch: Partial<PublishBlockerState>; sentenc
     sentence: /The meeting citation no longer matches the record\./,
   },
   {
+    key: "draft-old",
+    patch: { draftWrittenAt: new Date(Date.now() - 30 * 86_400_000).toISOString() },
+    sentence: /This draft was last written [A-Z][a-z]{2} \d{1,2} \(30 days ago\)\./,
+  },
+  {
     key: "lead-held",
     patch: { leadStatus: "held" },
     sentence: /on hold/,
@@ -403,7 +408,12 @@ describe("DHI-8 / DHJ-3: the confirm after 'I accept these claims are unreviewed
     assert.equal(confirmLabel(html), longWords);
   });
 
-  it("keeps the long words after the acceptance is recorded and the warning is gone", () => {
+  /*
+    TPU-2 (Oct 16, walk publish-truth-2): once the acceptance is recorded, the
+    press says what it does now. The story page's own accept button keeps the
+    long words; only this confirm changes.
+  */
+  it("says what the press does now once the acceptance is recorded and the warning is gone", () => {
     const blockers = publishBlockers({ ...CLEAN, ...accepted });
     const html = renderToStaticMarkup(
       createElement(PublishConfirmation, {
@@ -415,7 +425,20 @@ describe("DHI-8 / DHJ-3: the confirm after 'I accept these claims are unreviewed
       }),
     );
     assert.equal(confirmDisabled(html), false);
-    assert.equal(confirmLabel(html), longWords);
+    assert.equal(confirmLabel(html), "Publish now in Infrastructure");
+  });
+
+  it("keeps the no-section note in that label when the page says no section was chosen", () => {
+    const html = renderToStaticMarkup(
+      createElement(PublishConfirmation, {
+        blockers: publishBlockers({ ...CLEAN, ...accepted }),
+        sectionName: "Infrastructure (no section was chosen)",
+        claimsAccepted: true,
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    );
+    assert.equal(confirmLabel(html), "Publish now in Infrastructure (no section was chosen)");
   });
 
   it("leaves the plain confirm words alone when nothing was accepted", () => {
@@ -473,8 +496,10 @@ describe("TPU-1: the confirm panel says inside itself that nothing is published 
         onCancel: () => {},
       }),
     );
-    const at = html.indexOf(`<p role="status">${line}</p>`);
-    assert.ok(at >= 0, "the panel must say inside itself that nothing is published yet");
+    const status = html.match(/<p role="status"[^>]*>([^<]*)<\/p>/);
+    assert.ok(status, "the panel must say inside itself that nothing is published yet");
+    assert.equal(status![1], line);
+    const at = status!.index!;
     assert.ok(at < html.indexOf("This puts the story on the public paper"), "the line must come above the consequence text");
     assert.ok(at < html.search(/<button[^>]*class="action-btn btn solid/), "the line must come above the publish button");
   });
@@ -492,5 +517,28 @@ describe("TPU-1: the confirm panel says inside itself that nothing is published 
       );
       assert.equal(html.includes("Your acceptance of the unreviewed claims"), false);
     }
+  });
+});
+
+/*
+  TPV-2 (Oct 16, walk publish-truth-3/4): the panel's first line was drawn at the
+  note size, 14px in Normal, which the old-eyes rule rules out for text the editor
+  must read before pressing. It is the desk's body size now: 1rem (16px in
+  Normal), scaled by the Large setting like the rest of the page.
+*/
+describe("TPV-2: the panel's first line is drawn at the desk's body size", () => {
+  it("sets the line at 1rem or more, scaled by the text-size variable", () => {
+    const html = renderToStaticMarkup(
+      createElement(PublishConfirmation, {
+        blockers: publishBlockers({ ...CLEAN, unreviewedClaims: 3, unreviewedAccepted: true }),
+        sectionName: "Infrastructure",
+        claimsAccepted: true,
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    );
+    const status = html.match(/<p role="status" style="font-size:calc\(([\d.]+)rem \* var\(--ts\)\)"/);
+    assert.ok(status, "the line carries its own body size, not the 14px note size");
+    assert.ok(Number(status![1]) >= 1, "at least 1rem, which is 16px in Normal");
   });
 });

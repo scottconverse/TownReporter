@@ -188,6 +188,11 @@ export type PublishBlockerState = {
    * or blank adds no row.
    */
   meetingCitationNotice?: string;
+  /**
+   * TPW-2: when the saved draft was last written (its `updated_at`, ISO). A draft
+   * older than OLD_DRAFT_DAYS adds one warning; absent adds none.
+   */
+  draftWrittenAt?: string | null;
 };
 
 function empty(text: string): boolean {
@@ -259,6 +264,50 @@ export function publishAnywayLabel(sectionName: string | undefined, acceptWords:
   return `Publish anyway${where}${acceptWords}`;
 }
 
+/** TPU-2: the confirm press after an accepted claim says what it does now. */
+export function publishNowLabel(sectionName: string | undefined): string {
+  const where = sectionName?.trim() ? ` in ${sectionName.trim()}` : "";
+  return `Publish now${where}`;
+}
+
+/**
+ * TPU-4: the editor's acceptance of the unreviewed claims is recorded for this
+ * draft version and covers every claim still open. The server keeps the count
+ * on `leads.notes_json` and returns it on every page load, so a reload knows the
+ * acceptance too. Same rule `acceptedClaimsPublishState` uses to drop the warning.
+ * With nothing still open there is no acceptance to show: performPublish ignores
+ * one too (it only checks the acceptance while claims are outstanding).
+ */
+export function acceptanceRecordedFor(acceptedCount: number, openCount: number): boolean {
+  return openCount > 0 && acceptedCount >= openCount;
+}
+
+/**
+ * TPW-2: a draft last written more than this many days before the publish prints
+ * its own time words ("Saturday", "two days out") under today's date. The desk
+ * warns about that and never blocks: the editor may print after reading it.
+ */
+export const OLD_DRAFT_DAYS = 14;
+
+/**
+ * The old-draft warning's sentence, or null when the draft is recent enough or
+ * its date is missing. The server (desk.ts collectWarnings) and the page
+ * (publishBlockers) both call this, so the two lists say the same words.
+ */
+export function oldDraftSentence(writtenAt: string | null | undefined, now: Date): string | null {
+  if (!writtenAt) return null;
+  const written = new Date(writtenAt);
+  if (Number.isNaN(written.getTime())) return null;
+  const days = Math.floor((now.getTime() - written.getTime()) / 86_400_000);
+  if (days <= OLD_DRAFT_DAYS) return null;
+  const when = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "America/Denver",
+  }).format(written);
+  return `This draft was last written ${when} (${days} days ago). Check its dates and times words like "Saturday" or "two days out" before you publish.`;
+}
+
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
   if (draftLooksCutOff(state.body ?? "")) blockers.push({key:"draft-cut-off",kind:"warning",sentence:CUT_OFF_WARNING,action:{label:"Read the draft",target:{kind:"body"}}});
@@ -314,6 +363,15 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  const oldDraft = oldDraftSentence(state.draftWrittenAt, new Date());
+  if (oldDraft) {
+    blockers.push({
+      key: "draft-old",
+      kind: "warning",
+      sentence: oldDraft,
+      action: { label: "Read the draft", target: { kind: "body" } },
+    });
+  }
   if (state.evidenceLoading) blockers.push({ key: "evidence-loading",
       kind: "warning",
       sentence: "Loading evidence judgments.",
@@ -663,8 +721,9 @@ export function publishConfirmation(
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
-    confirmLabel:
-      warnings.length > 0 || acceptWords !== ""
+    confirmLabel: options.claimsAccepted
+      ? publishNowLabel(sectionName)
+      : warnings.length > 0 || acceptWords !== ""
         ? overrideLabel
         : `Yes, print it${sectionName.trim() ? ` in ${sectionName.trim()}` : ""}`,
   };
