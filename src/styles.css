@@ -2480,6 +2480,14 @@
   min-height: 44px;
   font-size: max(14px, 1em);
 }
+/* A link inside a running sentence is exempt from the 44px target (WCAG 2.5.8,
+   the "inline" exception). The box form broke the subtitle sentence: ". Already
+   written..." started a line of its own. The extra class makes this beat the
+   a[href] rule above (0,5,1 against 0,4,1), so it does not rely on order. */
+.desk-ltr.astra-modal-layer .astra-modal .astra-modal-sub a[href] {
+  display: inline;
+  min-height: 0;
+}
 
 /* The Queue's batch dialog (unit BF2, defect 8): the stack the old "Draft
    selected leads" panel held, now inside the one dialog. The portal is
