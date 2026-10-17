@@ -136,6 +136,28 @@ function isNotebookLine(line: string): boolean {
 
 /** Drop the reporter's own to-dos — list lines and prose sentences — from the story. */
 export function stripReporterNotebook(body: string): string {
+  return stripNotebook(body, YEAR_NOTE);
+}
+
+/** What readers are shown: the same cut, plus the wordings a public page printed (TPT-3). */
+export function stripReaderNotebook(body: string, writtenOn: Date = new Date()): string {
+  return stripNotebook(body, READER_YEAR_NOTE, writtenOn);
+}
+
+/*
+  The same reader cut for one line -- a headline or a dek (TPT-3 follow-up). Returns ""
+  when nothing is left; the caller decides what an empty line means (a headline keeps
+  its text as written, a dek may go empty). A line that ended without a period is not
+  given one by the cut.
+*/
+export function stripReaderYearNote(line: string, writtenOn: Date = new Date()): string {
+  if (!READER_YEAR_NOTE.test(line)) return line;
+  const trimmed = line.trim();
+  const cut = stripYearNotesFromParagraph(trimmed, writtenOn, READER_YEAR_NOTE).trim();
+  return /[.!?]$/.test(trimmed) ? cut : cut.replace(/[.!?]+$/, "");
+}
+
+function stripNotebook(body: string, yearNote: RegExp, writtenOn: Date = new Date()): string {
   const marker = body.search(TRAILER);
   const cut = marker >= 0 ? body.slice(0, marker) : body;
   return cut
@@ -148,7 +170,7 @@ export function stripReporterNotebook(body: string): string {
         .join("\n")
         .trim();
       if (!cleaned) return "";
-      return stripYearNotesFromParagraph(stripProcessNarration(cleaned)).trim();
+      return stripYearNotesFromParagraph(stripProcessNarration(cleaned), writtenOn, yearNote).trim();
     })
     .filter(Boolean)
     .join("\n\n")
@@ -165,6 +187,15 @@ export function stripReporterNotebook(body: string): string {
 */
 const YEAR_NOTE =
   /\b(?:(?:does not|doesn't|did not|didn't|do not|don't|fails? to)\s+(?:state|specify|say|give|list|include|provide|name|identify)\s+(?:the|a|an|which|what)\s+(?:[\w-]+\s+){0,2}year|(?:year|years)\b[^.!?;]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|given|listed|included|provided|named|identified|clear)|unstated|unspecified|unclear)|no\s+year\b[^.!?;]{0,40}\b(?:is\s+|was\s+)?(?:stated|specified|given|listed|provided))/i;
+/*
+  Scott, Oct 16 2026 (TPT-3): a public page printed "The pages show month and
+  day without a year." so readers also get the wordings below. The desk and the
+  writer keep YEAR_NOTE, so what they save does not change (Scott, Oct 14).
+  A sentence that only mentions a year (year-round, last year, a school year,
+  a year of training) is not a missing-year note and stays.
+*/
+const READER_YEAR_NOTE =
+  /\b(?:(?:does not|doesn't|did not|didn't|do not|don't|fails? to)\s+(?:state|specify|say|give|list|include|provide|name|identify)\s+(?:the|a|an|which|what)\s+(?:[\w-]+\s+){0,2}year|(?:year|years)(?![\w-])[^.!?;]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|given|listed|included|provided|named|identified|clear|shown|printed)|unstated|unspecified|unclear)|no\s+year(?![\w-])[^.!?;]{0,40}\b(?:is\s+|was\s+)?(?:stated|specified|given|listed|provided)|\bno\s+year\s+(?:is\s+|was\s+)?(?:attached|shown|printed|listed)\b|\bwithout\s+(?:the\s+|a\s+)?year(?![\w-])(?!\s+of\b)|\bwith\s+no\s+year(?![\w-])(?!\s+of\b)|\bmonth and day only\b|\b(?:show|list|give|name)s?\s+(?:only\s+)?(?:the\s+)?month and day(?!\s+(?:of|for|when)\b))/i;
 const TURN_OF_YEAR_DATE = /\b(?:Jan(?:uary)?|Feb(?:ruary)?)\b\.?/;
 const JOINED_TAIL = /,\s+(?:but|though|although|while|yet|and|so)\s+[^,]*$/i;
 
@@ -178,13 +209,13 @@ function endSentence(text: string): string {
 }
 
 /** Drop the clause that tells readers a year is missing; keep the rest of the sentence. */
-function stripYearNoteSentence(sentence: string, writtenOn: Date): string {
-  if (!YEAR_NOTE.test(sentence)) return sentence;
+function stripYearNoteSentence(sentence: string, writtenOn: Date, yearNote: RegExp): string {
+  if (!yearNote.test(sentence)) return sentence;
   if (writtenOn.getMonth() === 11 && TURN_OF_YEAR_DATE.test(sentence)) return sentence;
   const clauses = sentence.split(/;\s+/);
   const kept = clauses
     .map((clause) => {
-      const at = clause.search(YEAR_NOTE);
+      const at = clause.search(yearNote);
       if (at < 0) return clause;
       const before = clause.slice(0, at);
       const tail = JOINED_TAIL.exec(before);
@@ -197,14 +228,18 @@ function stripYearNoteSentence(sentence: string, writtenOn: Date): string {
   return endSentence(capitalizeFirst(kept.join("; ")));
 }
 
-function stripYearNotesFromParagraph(paragraph: string, writtenOn: Date = new Date()): string {
-  if (!YEAR_NOTE.test(paragraph)) return paragraph;
+function stripYearNotesFromParagraph(
+  paragraph: string,
+  writtenOn: Date = new Date(),
+  yearNote: RegExp = YEAR_NOTE,
+): string {
+  if (!yearNote.test(paragraph)) return paragraph;
   return paragraph
     .split("\n")
     .map((line) =>
-      YEAR_NOTE.test(line)
+      yearNote.test(line)
         ? splitSentences(line.replace(/[ \t]+/g, " "))
-            .map((sentence) => stripYearNoteSentence(sentence, writtenOn))
+            .map((sentence) => stripYearNoteSentence(sentence, writtenOn, yearNote))
             .filter(Boolean)
             .join(" ")
         : line,
