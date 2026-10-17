@@ -233,7 +233,7 @@ async function sweep(page, who) {
         const clicked = await page.evaluate(() =>
           Boolean(
             document
-              .querySelector('.astra-foot-btn[aria-label="Switch to dark appearance"]')
+              .querySelector('.astra-foot-btn[aria-label="Dark: switch to dark appearance"]')
               ?.dispatchEvent(new MouseEvent("click", { bubbles: true })),
           ),
         );
@@ -419,8 +419,8 @@ async function pressAndUndo(page, press, label, opts = {}) {
  * happened. Both directions are pressed and the desk is left where it started.
  */
 const APPEARANCE_TOGGLES = [
-  "Switch to dark appearance",
-  "Switch to light appearance",
+  "Dark: switch to dark appearance",
+  "Light: switch to light appearance",
   "Aa Large",
   "Aa Normal",
 ];

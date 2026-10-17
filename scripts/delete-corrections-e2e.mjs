@@ -1413,7 +1413,7 @@ async function main() {
     BF5 (redesign p2a) -- the text-size control moved and changed shape. The
     old shell put a `<select aria-label="Text size">` beside the account; the
     design draws it in the nav footer as "Aa Large"/"Aa Normal", whose
-    accessible name is "Switch to large text"/"Switch to normal text"
+    accessible name is "Aa Large: switch to large text"/"Aa Normal: switch to normal text"
     (src/components/desk-chrome.tsx:340-346, and
     scripts/desk-text-size-render.test.mjs asserts both). The footer lives in
     the nav, which at phone width is the closed drawer, so both controls are
@@ -1423,8 +1423,8 @@ async function main() {
     shot and measured at 390 in dark large-text mode, and the desk ends the
     section in light normal text.
   */
-  await page.getByRole("button", { name: "Switch to dark appearance", exact: true }).click();
-  await page.getByRole("button", { name: "Switch to large text", exact: true }).click();
+  await page.getByRole("button", { name: "Dark: switch to dark appearance", exact: true }).click();
+  await page.getByRole("button", { name: "Aa Large: switch to large text", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
     throw new Error("finding evidence review overflows at 390px dark large text");
@@ -1434,8 +1434,10 @@ async function main() {
       path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
     });
   if (originalViewport) await page.setViewportSize(originalViewport);
-  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
-  await page.getByRole("button", { name: "Switch to normal text", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Light: switch to light appearance", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Aa Normal: switch to normal text", exact: true }).click();
   const queuedDraftJob = await pool.query(
     `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
      values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,

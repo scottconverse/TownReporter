@@ -75,9 +75,9 @@ async function chooseDeskAppearance(who) {
   */
   await who.getByRole("button", { name: "Menu", exact: true }).click();
   const drawer = who.getByRole("dialog", { name: "Newsroom navigation" });
-  const dark = drawer.getByRole("button", { name: "Switch to dark appearance", exact: true });
+  const dark = drawer.getByRole("button", { name: "Dark: switch to dark appearance", exact: true });
   if (await dark.count()) await dark.click();
-  const large = drawer.getByRole("button", { name: "Switch to large text", exact: true });
+  const large = drawer.getByRole("button", { name: "Aa Large: switch to large text", exact: true });
   if (await large.count()) await large.click();
   await drawer.getByRole("button", { name: "Close navigation", exact: true }).click();
 }
