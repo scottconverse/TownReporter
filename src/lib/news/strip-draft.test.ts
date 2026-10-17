@@ -1,4 +1,5 @@
 import { it } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { cleanMissingFactNotes, stripReaderNotebook, stripReaderYearNote, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
 import { publicArticle } from "./public.ts";
@@ -178,4 +179,64 @@ it("gives the story page's headline and dek the same cut, and keeps a headline t
   const kept = row(onlyNote, "Open year-round at the library.");
   assert.equal(kept.headline, onlyNote);
   assert.equal(kept.dek, "Open year-round at the library.");
+});
+
+// TRB-3 (Oct 17 2026): article 116 printed seven research-note paragraphs ("Claim: ...") that carried citation markers.
+const leakedNotes = readFileSync(new URL("./fixtures/article-116-research-notes.txt", import.meta.url), "utf8");
+const markerCount = (text: string) => text.match(/:chatgpt-content-reference\{/g)?.length ?? 0;
+const paragraphsOf = (text: string) => text.split(/\r?\n\s*\r?\n/);
+const claimCount = (text: string) => paragraphsOf(text).filter((p) => p.startsWith("Claim:")).length;
+
+it("keeps the leaked research-note paragraphs from readers and leaves the desk's copy whole", () => {
+  const oct = new Date(2026, 9, 17);
+  assert.equal(markerCount(leakedNotes), 7);
+  assert.equal(claimCount(leakedNotes), 7);
+  const reader = stripReaderNotebook(leakedNotes, oct);
+  assert.equal(markerCount(reader), 0);
+  assert.equal(claimCount(reader), 0);
+  assert.ok(reader.startsWith("The city's June vote applies inside Longmont"));
+  const paragraph14 = paragraphsOf(leakedNotes)[13];
+  assert.ok(paragraph14.startsWith("For Longmont residents"));
+  assert.ok(reader.endsWith(paragraph14), reader.slice(-120));
+  assert.equal(reader.includes("CLAIMS AND SOURCES"), false);
+  assert.doesNotMatch(reader, /---$/);
+  const desk = stripReporterNotebook(leakedNotes);
+  assert.equal(markerCount(desk), 7);
+  // The desk cut runs on one CRLF blob here, so count the Claim lines wherever they sit.
+  assert.equal(desk.match(/Claim:/g)?.length, 7);
+});
+
+it("keeps a plain Claim paragraph that has no citation marker", () => {
+  const plain = "Claim: The vote passed 6 to 1.\n\nThe council meets Tuesday.";
+  assert.equal(stripReaderNotebook(plain, new Date(2026, 9, 17)), plain);
+});
+
+it("the public page's data carries the reader's cut body, not the stored research notes", () => {
+  const article = publicArticle({
+    id: 116,
+    slug: "longmont-barred-giant-data-centers",
+    headline: "Longmont barred giant data centers. Weld County approved one.",
+    dek: "",
+    body: leakedNotes,
+    topic: "opinion",
+    source_urls: "[]",
+    status: "published",
+    published_at: "2026-09-29T12:00:00Z",
+  });
+  assert.equal(markerCount(article.body), 0);
+  assert.equal(claimCount(article.body), 0);
+});
+it("keeps a Claims and sources heading that has text under it, and a body with no marker, as they are", () => {
+  const body = "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nreal claim text";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), body);
+});
+
+it("keeps the Claims and sources heading when a real paragraph follows it after the cut", () => {
+  const body = "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nA real source note.\n\nClaim: The vote was 6 to 1.:chatgpt-content-reference{index=\"0\"}";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nA real source note.");
+});
+
+it("drops a trailing ## Claims and sources heading and a *** rule left by the cut", () => {
+  const body = "The vote passed 6 to 1.\n\n## Claims and sources\n\n***\n\nClaim: The vote was 6 to 1.:chatgpt-content-reference{index=\"0\"}";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), "The vote passed 6 to 1.");
 });

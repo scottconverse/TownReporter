@@ -464,7 +464,9 @@ export function DeskShell({
                 type="button"
                 className="astra-foot-btn"
                 aria-label={
-                  mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
+                  mode === "dark"
+                    ? "Light: switch to light appearance"
+                    : "Dark: switch to dark appearance"
                 }
                 onClick={() => choose(mode === "dark" ? "light" : "dark")}
               >
@@ -481,7 +483,11 @@ export function DeskShell({
               type="button"
               className="astra-foot-btn"
               aria-pressed={size === "large"}
-              aria-label={size === "large" ? "Switch to normal text" : "Switch to large text"}
+              aria-label={
+                size === "large"
+                  ? "Aa Normal: switch to normal text"
+                  : "Aa Large: switch to large text"
+              }
               onClick={() => chooseSize(size === "large" ? "normal" : "large")}
             >
               {size === "large" ? "Aa Normal" : "Aa Large"}

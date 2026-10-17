@@ -246,8 +246,10 @@ async function largeQueueFiltersRemainClickable() {
     await firstPile.click();
     assert.equal(await firstPile.getAttribute("aria-pressed"), "true", `normal-text pile accepts a click at ${width}px`);
   }
-  await page.getByRole("button", { name: "Switch to large text", exact: true }).click();
-  await page.getByRole("button", { name: "Switch to normal text", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Aa Large: switch to large text", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Aa Normal: switch to normal text", exact: true })
+    .waitFor();
   assert.equal(
     await page.locator(".desk-ltr").evaluate((desk) => desk.classList.contains("large")),
     true,

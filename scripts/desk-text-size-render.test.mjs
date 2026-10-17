@@ -352,7 +352,7 @@ test("the desk exposes accessible appearance and text size controls alongside ev
   const html = renderToStaticMarkup(
     createElement(DeskShell, { title: "Queue" }, createElement("p", null, "body")),
   );
-  assert.match(html, /aria-label="Switch to dark appearance"/);
+  assert.match(html, /aria-label="Dark: switch to dark appearance"/);
   /*
     Unit BF2, defect 9: the footer is drawn as buttons -- "Dark" and "Aa Large"
     side by side -- not a text-size <select>. The Large/Normal behavior is the
@@ -360,7 +360,7 @@ test("the desk exposes accessible appearance and text size controls alongside ev
   */
   assert.match(html, /class="astra-foot-row"/);
   assert.match(html, />Dark</);
-  assert.match(html, /aria-label="Switch to large text"/);
+  assert.match(html, /aria-label="Aa Large: switch to large text"/);
   assert.match(html, /aria-pressed="false"[^>]*>Aa Large</);
   assert.match(html, /Press \? for keyboard shortcuts/);
   assert.doesNotMatch(html, /<select aria-label="Text size"/);
@@ -385,8 +385,8 @@ test("the Aa control still renders on a forced-night page (Dark Desk), which hid
     createElement(DeskShell, { title: "Dark Desk", night: true }, createElement("p", null, "body")),
   );
   assert.doesNotMatch(html, /aria-label="Light or dark"/);
-  assert.doesNotMatch(html, /aria-label="Switch to dark appearance"/);
-  assert.match(html, /aria-label="Switch to large text"/);
+  assert.doesNotMatch(html, /aria-label="Dark: switch to dark appearance"/);
+  assert.match(html, /aria-label="Aa Large: switch to large text"/);
 });
 
 test("deskShellClassName adds .large only when size is large, independent of theme", () => {

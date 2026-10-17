@@ -139,9 +139,36 @@ export function stripReporterNotebook(body: string): string {
   return stripNotebook(body, YEAR_NOTE);
 }
 
+/*
+  TRB-3 (Oct 17 2026): a model's research notes leaked into published stories as
+  paragraphs that still carry the citation marker the model printed, e.g. "Claim: ...
+  Accessed September 29, 2026. :chatgpt-content-reference{index="0"}". Readers are not
+  shown those paragraphs. The desk keeps the text: stripReporterNotebook does not cut them.
+*/
+const CITATION_MARKER = /:chatgpt-content-reference\{[^}]*\}/;
+
+/*
+  Scaffolding a cut can leave at the end with nothing under it: the "Claims and sources"
+  heading (story-body.tsx prints it as the claims block) or a horizontal rule. Only the
+  trailing ones go, and only when the cut dropped a paragraph; a real empty heading the
+  editor wrote is not touched.
+*/
+const EMPTY_SCAFFOLD = /^(?:## )?claims and sources\s*:?$|^(?:-{3,}|\*{3,}|_{3,})$/i;
+
+/** Drop each paragraph that carries a citation marker, then any scaffolding left at the end. A body with no marker is returned as it is. */
+function dropCitationParagraphs(body: string): string {
+  if (!CITATION_MARKER.test(body)) return body;
+  const paragraphs = body.split(/\r?\n\s*\r?\n/);
+  const kept = paragraphs.filter((paragraph) => !CITATION_MARKER.test(paragraph));
+  if (kept.length < paragraphs.length) {
+    while (kept.length && EMPTY_SCAFFOLD.test(kept[kept.length - 1].trim())) kept.pop();
+  }
+  return kept.join("\n\n");
+}
+
 /** What readers are shown: the same cut, plus the wordings a public page printed (TPT-3). */
 export function stripReaderNotebook(body: string, writtenOn: Date = new Date()): string {
-  return stripNotebook(body, READER_YEAR_NOTE, writtenOn);
+  return stripNotebook(dropCitationParagraphs(body), READER_YEAR_NOTE, writtenOn);
 }
 
 /*

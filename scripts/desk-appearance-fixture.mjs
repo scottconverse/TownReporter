@@ -13,7 +13,9 @@ export async function chooseDeskAppearance(page, appearance) {
   const current = await page.locator("html").getAttribute("data-appearance");
   if (current !== expected) {
     const buttonName =
-      appearance === "dark" ? "Switch to dark appearance" : "Switch to light appearance";
+      appearance === "dark"
+        ? "Dark: switch to dark appearance"
+        : "Light: switch to light appearance";
     const button = page.getByRole("button", { name: buttonName, exact: true });
     await button.waitFor({ state: "visible", timeout: 15_000 });
     await button.click();
