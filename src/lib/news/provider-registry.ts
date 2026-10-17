@@ -618,7 +618,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       transport actually chosen, not from this field.
     */
     kind: "claude-code",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     /*
       No `model` override on purpose. This option is CALLED "Claude Opus" in
       the picker, and an install that sets ANTHROPIC_MODEL to Sonnet must not

@@ -898,7 +898,7 @@ export async function testProvider(provider: ProviderId): Promise<ProviderTest> 
     result = await claudeCodeChat({
       system,
       user,
-      model: process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5",
+      model: process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5-5",
       timeoutMs: 30_000,
     });
   } else {

@@ -324,7 +324,7 @@ export function resolveAnthropic(): AnthropicConfig | null {
   const effort = (EFFORTS as readonly string[]).includes(raw ?? "") ? (raw as Effort) : "high";
   return {
     apiKey,
-    model: env("ANTHROPIC_MODEL") || "claude-opus-5",
+    model: env("ANTHROPIC_MODEL") || "claude-opus-5-5",
     effort,
     label: "Claude",
   };
@@ -343,7 +343,7 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
   if (typeof window !== "undefined") return null;
   if (env("TOWNREPORTER_CLAUDE_CODE") === "0") return null;
   return {
-    model: env("ANTHROPIC_MODEL") || "claude-opus-5",
+    model: env("ANTHROPIC_MODEL") || "claude-opus-5-5",
     label: "Claude Code",
   };
 }

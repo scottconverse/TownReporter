@@ -22,7 +22,7 @@ it("Opinion removes WebFetch from the actual CLI tool surface", async () => {
   const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_TOOLS: "1" });
   resetClaudeCliCache();
   try {
-    const result = await claudeCodeChat({ system: "Research", user: "Private editor paste", model: "claude-opus-5", allowedTools: EDITORIAL_TOOLS, timeoutMs: 10000 });
+    const result = await claudeCodeChat({ system: "Research", user: "Private editor paste", model: "claude-opus-5-5", allowedTools: EDITORIAL_TOOLS, timeoutMs: 10000 });
     assert.equal(result.ok, true);
     if (!result.ok) return;
     const echoed = JSON.parse(result.text);
@@ -207,7 +207,7 @@ describe("claudeCodeChat promotes a long inline system prompt to a file", () => 
       const result = await claudeCodeChat({
         system,
         user: "dig",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
@@ -232,7 +232,7 @@ describe("claudeCodeChat promotes a long inline system prompt to a file", () => 
       const result = await claudeCodeChat({
         system,
         user: "ok",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
@@ -262,7 +262,7 @@ describe("claudeCodeChat promotes a long inline system prompt to a file", () => 
         system: "S".repeat(40_000), // must be ignored: systemPromptFile wins
         systemPromptFile: voicePath,
         user: "draft",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
@@ -333,7 +333,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       const result = await claudeCodeChat({
         system: "Return JSON only.",
         user: "plan the next hop",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
         noTools: true,
       });
@@ -362,7 +362,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       const result = await claudeCodeChat({
         system: "Return JSON only.",
         user: "write the piece",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
@@ -386,7 +386,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       const result = await claudeCodeChat({
         system: "",
         user: "research the piece",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
         allowedTools: ["WebSearch", "WebFetch"],
       });
@@ -412,7 +412,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
         claudeCodeChat({
           system: "",
           user: "plan the next hop",
-          model: "claude-opus-5",
+          model: "claude-opus-5-5",
           timeoutMs: 10_000,
           noTools: true,
           allowedTools: ["WebFetch"],
@@ -428,7 +428,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
   it("refuses filesystem, command, browser, and agent tools at the reporting boundary", async () => {
     for (const tool of ["Read", "Write", "Edit", "Bash", "PowerShell", "Agent", "mcp__anything"]) {
       await assert.rejects(
-        claudeCodeChat({ system: "", user: "untrusted evidence", model: "claude-opus-5", timeoutMs: 1_000, allowedTools: [tool] }),
+        claudeCodeChat({ system: "", user: "untrusted evidence", model: "claude-opus-5-5", timeoutMs: 1_000, allowedTools: [tool] }),
         /outside the reporting boundary/i,
       );
     }
@@ -457,7 +457,7 @@ describe("claudeCodeReadChat sends --tools Read and names exactly one file", () 
       const result = await claudeCodeReadChat({
         prompt: "Transcribe this page verbatim.",
         filePath,
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
@@ -512,7 +512,7 @@ describe("claudeCodeChat runs a relative CLAUDE_CLI_PATH from the temp reporting
       const result = await claudeCodeChat({
         system: "Return JSON only.",
         user: "plan the next hop",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true, "the CLI must actually start, not merely exist");

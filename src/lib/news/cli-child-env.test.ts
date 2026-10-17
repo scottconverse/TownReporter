@@ -239,7 +239,7 @@ describe("a spawned provider CLI gets an allow-list, not this server's environme
             claudeCodeChat({
               system: "System",
               user: "User",
-              model: "claude-opus-5",
+              model: "claude-opus-5-5",
               timeoutMs: 20_000,
             }).catch(() => undefined),
           ),

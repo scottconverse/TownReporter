@@ -1088,7 +1088,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
   const STOPPED = { ok: false as const, error: "EDITORIAL_REFUSAL: stopped after the pair" };
 
   /** The answer a signed-in operator's machine gives, injected rather than read. */
-  const CLAUDE_AVAILABLE = { model: "claude-opus-5", label: "Claude Code" };
+  const CLAUDE_AVAILABLE = { model: "claude-opus-5-5", label: "Claude Code" };
 
   /**
    * A transport these tests must never reach.
