@@ -648,6 +648,12 @@ export function ModelPicker(props: Props) {
           </label>
           <select
             id={effortId}
+            /*
+              TMA-4: the box cuts a long effort name at its edge. The full
+              chosen text rides on the box (hover, and the accessible
+              description) and stays on the "Selected:" line below it.
+            */
+            title={chosenEffortText}
             value={selectedEffort ?? ""}
             disabled={props.disabled || effortOptions.length === 0}
             onChange={(event) =>

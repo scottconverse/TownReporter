@@ -1701,7 +1701,7 @@
 */
 .desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,300px)}
 .desk-ltr .model-picker-label {font-size:calc(0.875rem * var(--ts));letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-.desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--fg2);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+.desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--fg2);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px;overflow:hidden;text-overflow:ellipsis}
 .desk-ltr .model-picker select:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .model-picker-help {grid-column:1 / -1;font-size:calc(0.875rem * var(--ts));color:var(--mut)}
 .desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
