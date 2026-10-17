@@ -195,7 +195,11 @@ it("keeps the leaked research-note paragraphs from readers and leaves the desk's
   assert.equal(markerCount(reader), 0);
   assert.equal(claimCount(reader), 0);
   assert.ok(reader.startsWith("The city's June vote applies inside Longmont"));
-  assert.ok(reader.endsWith("---\n\nCLAIMS AND SOURCES"), reader.slice(-120));
+  const paragraph14 = paragraphsOf(leakedNotes)[13];
+  assert.ok(paragraph14.startsWith("For Longmont residents"));
+  assert.ok(reader.endsWith(paragraph14), reader.slice(-120));
+  assert.equal(reader.includes("CLAIMS AND SOURCES"), false);
+  assert.doesNotMatch(reader, /---$/);
   const desk = stripReporterNotebook(leakedNotes);
   assert.equal(markerCount(desk), 7);
   // The desk cut runs on one CRLF blob here, so count the Claim lines wherever they sit.
@@ -221,4 +225,18 @@ it("the public page's data carries the reader's cut body, not the stored researc
   });
   assert.equal(markerCount(article.body), 0);
   assert.equal(claimCount(article.body), 0);
+});
+it("keeps a Claims and sources heading that has text under it, and a body with no marker, as they are", () => {
+  const body = "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nreal claim text";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), body);
+});
+
+it("keeps the Claims and sources heading when a real paragraph follows it after the cut", () => {
+  const body = "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nA real source note.\n\nClaim: The vote was 6 to 1.:chatgpt-content-reference{index=\"0\"}";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), "The vote passed 6 to 1.\n\n---\n\nCLAIMS AND SOURCES\n\nA real source note.");
+});
+
+it("drops a trailing ## Claims and sources heading and a *** rule left by the cut", () => {
+  const body = "The vote passed 6 to 1.\n\n## Claims and sources\n\n***\n\nClaim: The vote was 6 to 1.:chatgpt-content-reference{index=\"0\"}";
+  assert.equal(stripReaderNotebook(body, new Date(2026, 9, 17)), "The vote passed 6 to 1.");
 });

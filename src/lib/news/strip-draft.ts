@@ -147,13 +147,23 @@ export function stripReporterNotebook(body: string): string {
 */
 const CITATION_MARKER = /:chatgpt-content-reference\{[^}]*\}/;
 
-/** Drop each paragraph that carries a citation marker. A body with no marker is returned as it is. */
+/*
+  Scaffolding a cut can leave at the end with nothing under it: the "Claims and sources"
+  heading (story-body.tsx prints it as the claims block) or a horizontal rule. Only the
+  trailing ones go, and only when the cut dropped a paragraph; a real empty heading the
+  editor wrote is not touched.
+*/
+const EMPTY_SCAFFOLD = /^(?:## )?claims and sources\s*:?$|^(?:-{3,}|\*{3,}|_{3,})$/i;
+
+/** Drop each paragraph that carries a citation marker, then any scaffolding left at the end. A body with no marker is returned as it is. */
 function dropCitationParagraphs(body: string): string {
   if (!CITATION_MARKER.test(body)) return body;
-  return body
-    .split(/\r?\n\s*\r?\n/)
-    .filter((paragraph) => !CITATION_MARKER.test(paragraph))
-    .join("\n\n");
+  const paragraphs = body.split(/\r?\n\s*\r?\n/);
+  const kept = paragraphs.filter((paragraph) => !CITATION_MARKER.test(paragraph));
+  if (kept.length < paragraphs.length) {
+    while (kept.length && EMPTY_SCAFFOLD.test(kept[kept.length - 1].trim())) kept.pop();
+  }
+  return kept.join("\n\n");
 }
 
 /** What readers are shown: the same cut, plus the wordings a public page printed (TPT-3). */
