@@ -18,7 +18,11 @@ import {
   suggestCorrectionWording,
   updateArticleHeadline,
 } from "@/lib/news/desk";
-import { editorActionError } from "@/lib/news/desk-copy";
+import {
+  PUBLISHED_TAKE_OFF_CONFIRM,
+  PUBLISHED_TAKE_OFF_OPENER,
+  editorActionError,
+} from "@/lib/news/desk-copy";
 import { refusedAnswer } from "@/lib/news/refused-answer";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { getViewStatsFn } from "@/lib/news/views";
@@ -1203,7 +1207,7 @@ function PublishedPage() {
                       workingLabel="Removing…"
                       onAct={() => remove.mutate(p.slug)}
                     >
-                      Yes, take it off
+                      {PUBLISHED_TAKE_OFF_CONFIRM}
                     </ActionButton>
                     <ActionButton
                       tone="quiet"
@@ -1248,7 +1252,7 @@ function PublishedPage() {
                         setKillFor(p.slug);
                       }}
                     >
-                      Delete
+                      {PUBLISHED_TAKE_OFF_OPENER}
                     </button>
                     {deskRole.data?.ok && deskRole.data.role === "owner" ? (
                       <button type="button" className="btn quiet" onClick={(event) => {

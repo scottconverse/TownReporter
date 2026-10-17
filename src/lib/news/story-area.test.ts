@@ -132,9 +132,22 @@ describe("the county ground in the paper's own words", () => {
   it("prints the configured county, and the ground's own word when none is set", () => {
     assert.equal(areaLabelsFor(paper, "Boulder County").county, "Boulder County");
     assert.equal(areaLabelsFor(paper, "  Boulder County  ").county, "Boulder County");
-    assert.equal(areaLabelsFor(paper, null).county, "County");
-    assert.equal(areaLabelsFor(paper, "").county, "County");
-    assert.equal(areaLabelsFor(paper).county, "County");
+    assert.equal(areaLabelsFor(paper, "").county, "Boulder County");
+    assert.equal(areaLabelsFor(paper).county, "Boulder County");
+  });
+
+  it("names the shipped Longmont paper's county when none is configured (TPT-1)", () => {
+    // The desk's Geography select read "County" beside "Longmont" and could not
+    // say which county it meant. Longmont is in Boulder County; say so.
+    assert.equal(areaLabelsFor(paper, null).county, "Boulder County");
+    assert.equal(areaLabelsFor({ city: "Longmont", state: "CO" }).county, "Boulder County");
+  });
+
+  it("keeps the generic 'County' for any other paper with no county configured", () => {
+    // The Riverbend leak rule: a paper that has not said its county never
+    // prints another town's county.
+    assert.equal(areaLabelsFor({ city: "Riverbend", state: "Ohio" }).county, "County");
+    assert.equal(areaLabelsFor({ city: "Riverbend", state: "Ohio" }, null).county, "County");
   });
 
   it("leaves the other three grounds to the paper's identity", () => {

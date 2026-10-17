@@ -4154,6 +4154,13 @@
   font-size: 14px;
   color: var(--fg);
 }
+/* TMA-3: the Start caption sits on the gold bulk strip (--a), and the rule above
+   paints it --fg, which is near-white in dark mode (#e8e6e1, about 1.6:1 on
+   #e6c35c). The strip carries its own ink, #111, in both themes, so the caption
+   takes that too. Same 4.5:1 floor in light mode (#111 on #ffd23f). */
+.desk-ltr.astra .queue-bulk .bulk-start-note {
+  color: #111;
+}
 /* THT-11: the one line that says what the "≈ Printed" count counts. Readable-first: not small or faint. */
 .desk-ltr.astra .queue-tab-note {
   display: block;

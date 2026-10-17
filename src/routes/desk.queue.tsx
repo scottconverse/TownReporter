@@ -42,6 +42,7 @@ import {
   mergeFocusSelection,
   PRINTED_TAB_NOTE,
   printedDupChip,
+  headlineForDesk,
   queueTabCountText,
   suggestFocusLeads,
   workingQueueEmptyCopy,
@@ -2419,7 +2420,7 @@ function QueuePage() {
           {selectedBatchLeadRows.length > 0 ? (
             <ul className="meta" aria-label="Leads in this batch">
               {selectedBatchLeadRows.map((lead) => (
-                <li key={lead.id}>{lead.headline}</li>
+                <li key={lead.id}>{headlineForDesk(lead.headline)}</li>
               ))}
             </ul>
           ) : null}

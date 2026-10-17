@@ -16,6 +16,8 @@ import {
   killRecordLine,
   KILL_THIS_ONE_LABEL,
   BULK_START_NOTE,
+  PUBLISHED_TAKE_OFF_CONFIRM,
+  PUBLISHED_TAKE_OFF_OPENER,
   MOVE_TO_NEW_LABEL,
   PRINTED_TAB_NOTE,
   queueTabCountText,
@@ -2109,6 +2111,12 @@ describe("Unit AK: duplicate and kill wording", () => {
 
   it("THT-21: the Start line says it starts AI drafts for the ticked leads", () => {
     assert.equal(BULK_START_NOTE, "Starts AI drafts for the ticked leads.");
+  });
+
+  it("TMA-1: the Published More opener says what it does, and the confirm it opens uses the same act", () => {
+    assert.equal(PUBLISHED_TAKE_OFF_OPENER, "Take off the paper");
+    assert.equal(PUBLISHED_TAKE_OFF_CONFIRM, "Yes, take it off");
+    assert.doesNotMatch(PUBLISHED_TAKE_OFF_OPENER, /delete/i);
   });
 
   it("names the Compare view's three presses in plain words", () => {

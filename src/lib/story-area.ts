@@ -13,7 +13,7 @@
  * mirror of migration 0098 that PGLite needs.
  */
 
-import { isLongmont, type NewsroomPlace } from "./news/dark-place.ts";
+import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./news/dark-place.ts";
 
 /** The stored value on `articles.area`. Stable keys; the labels are display. */
 export const STORY_AREAS = ["longmont", "nearby", "county", "colorado"] as const;
@@ -62,16 +62,21 @@ export type AreaLabels = Record<StoryArea, string>;
  * "Nearby" is the same kind of word -- which part of the map a story stands on
  * -- and asserting "Boulder County" on a paper that has never been told its
  * county would be the leak again in a different costume.
+ *
+ * The one exception is the shipped Longmont paper (TPT-1): Longmont is in
+ * Boulder County, and a bare "County" beside "Longmont" could not say which
+ * county the Geography select meant. Any other paper keeps "County".
  */
 export function areaLabelsFor(
   paper: { city: string; state: string },
   county?: string | null,
 ): AreaLabels {
   const countyName = (county ?? "").trim();
+  const shippedCounty = isLongmont(paper) ? `${LONGMONT_PLACE.county} County` : "County";
   return {
     longmont: paper.city.trim(),
     nearby: "Nearby",
-    county: countyName || "County",
+    county: countyName || shippedCounty,
     colorado: paper.state.trim(),
   };
 }
