@@ -15,6 +15,7 @@ import {
 } from "@/lib/news/check-gates";
 import {
   blockerPressState,
+  acceptanceRecordedFor,
   publishBlockers,
   publishConfirmation,
   publishPressState,
@@ -403,7 +404,8 @@ function StoryPage() {
     has come back for a NEW review would be the desk claiming a decision nobody
     made about this version.
   */
-  const [acceptedUnreviewed, setAcceptedUnreviewed] = useState(false);
+  /* TPU-4: this page's own press; the recorded acceptance is read from the server below. */
+  const [acceptedHere, setAcceptedUnreviewed] = useState(false);
   /*
     Unit UI1a2. "Redraft started" / "Draft started": the press's own done word,
     held only until the draft it started actually lands. Cleared by the effect
@@ -2496,6 +2498,8 @@ function StoryPage() {
        it defensively so this route compiles whether or not it has landed yet,
        and so a missing field is simply no warning. */
     meetingCitationNotice: data.meetingCitationNotice ?? undefined,
+    /* TPW-2: when the saved draft was last written; an old one draws one warning. */
+    draftWrittenAt: data.draft?.updated_at ?? null,
   });
   // Acceptance clears the Publish gate; it does not resolve the evidence claims.
   const acceptedPublishState = acceptedClaimsPublishState({
@@ -2503,6 +2507,13 @@ function StoryPage() {
     acceptedCount: data.unreviewedClaimsAcceptedCount, hasAiJudgments,
   });
   const blockers = acceptedPublishState.blockers;
+  /*
+    TPU-4: the acceptance is recorded on the server (leads.notes_json, read on
+    every load as `unreviewedClaimsAcceptedCount`), so a reload knows it too. The
+    page's own press still counts at once, before the reload comes back.
+  */
+  const acceptedUnreviewed =
+    acceptedHere || acceptanceRecordedFor(data.unreviewedClaimsAcceptedCount, evidenceState.toReview);
   /*
     ── THE MERGED WARNINGS THE DIALOG AND THE PRESS BOTH SEE (unit OH) ─────────
     The page's own blockers plus any warnings the SERVER returned on a refused

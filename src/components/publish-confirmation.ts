@@ -127,7 +127,8 @@ export function PublishConfirmation(props: {
   const acceptedLine = props.claimsAccepted
     ? createElement(
         "p",
-        { role: "status" },
+        /* TPV-2: the desk's body size (1rem), not the 14px note size; the old-eyes rule. */
+        { role: "status", style: { fontSize: "calc(1rem * var(--ts))" } },
         "Your acceptance of the unreviewed claims is recorded. Nothing is published yet: press the button below to publish.",
       )
     : null;

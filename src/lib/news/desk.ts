@@ -10,6 +10,7 @@ import {
   savedStoryReadiness,
   type StoryReadiness,
 } from "./story-readiness.ts";
+import { oldDraftSentence } from "./publish-blockers.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
@@ -6289,6 +6290,10 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         sentence: "No dek yet. You can add one, or publish without it.",
       });
     }
+
+    /* TPW-2: a warning, never a block. The same sentence the page shows (publishBlockers). */
+    const oldDraft = oldDraftSentence(row.updated_at, new Date());
+    if (oldDraft) warnings.push({ key: "draft-old", sentence: oldDraft });
 
     const openClaims = uncheckedGateTodos(notes);
     if (openClaims.length) {
