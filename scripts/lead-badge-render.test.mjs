@@ -311,6 +311,7 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+      "@/components/desk-triage": await sharedModuleUrl("src/components/desk-triage.ts"),
       "@/components/action-button": actionButtonUrl,
 
       "@/components/desk-toaster": deskToasterStub,

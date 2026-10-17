@@ -901,3 +901,95 @@ test("THU-6: the bulk strip's picker label is drawn by the real compact picker",
     await React.act(async () => root.unmount());
   }
 });
+
+/*
+  TPT-2. A click on a Queue row's body makes that row the keyboard cursor row,
+  so the next H, X, U or Enter acts on the row the editor clicked. The REAL
+  `LeadRowView` is mounted here. A click on a control in the row (a button, a
+  link, the checkbox) keeps its click to itself: the checkbox moves the cursor
+  through its own pick, and a button must not also move it onto its row.
+*/
+const rowUrl = await (async () => {
+  const chrome = stub(`
+    import React from "react";
+    export const Chip = ({s}) => React.createElement("span", null, s);
+    export const InkButton = ({children,onClick,disabled,ariaLabel}) => React.createElement("button", {type:"button",onClick,disabled,"aria-label":ariaLabel}, children);
+    export const DeskMoreMenu = ({ariaLabel}) => React.createElement("button", {type:"button","aria-label":ariaLabel}, "More");
+    export const Score = () => null;
+  `);
+  const action = stub(`
+    import React from "react";
+    export const ActionButton = ({children,onClick,disabled}) => React.createElement("button", {type:"button",onClick,disabled}, children);
+    export const rowActionPhase = () => "idle";
+  `);
+  const router = stub(`import React from "react"; export const Link=({children,...props})=>React.createElement("a",props,children);`);
+  const paperStub = stub(`
+    export const formatAge = () => "2h";
+    export const parseUrlList = (raw) => { try { const p = JSON.parse(raw || "[]"); return Array.isArray(p) ? p : []; } catch { return []; } };
+  `);
+  const copy = stub(`
+    export const editorTitle = (h) => h;
+    export const cameBackLabel = () => "";
+    export const DEVELOPING_LABEL = "";
+    export const dupAiReason = () => "";
+    export const duplicateLinkState = () => "ok";
+    export const killedAsDuplicateNote = () => "";
+    export const killRecordLine = () => "";
+    export const printedDuplicateLine = () => null;
+    export const leadSourceEvidenceLabel = () => "";
+    export const STALE_DUPLICATE_LABEL = "";
+    export const STALE_DUPLICATE_NOTICE = "";
+  `);
+  return moduleUrl("src/components/desk-leads.tsx", {
+    "@/components/desk-chrome": chrome,
+    "@/components/action-button": action,
+    "@tanstack/react-router": router,
+    "@/lib/paper": paperStub,
+    "@/lib/paper-context-state": stub(`
+      export const usePaper = () => ({ timezone: "America/Denver" });
+      export const usePaperDateFormatters = () => ({ formatShortDate: () => "Oct. 6" });
+    `),
+    "@/lib/news/desk-copy": copy,
+    "../lib/news/desk-warning.ts": stub("export const deskWarning = () => null;"),
+    "@/components/desk-triage": triageUrl,
+    "@/components/model-picker": stub("export const ModelPicker = () => null;"),
+    "@/components/use-job-model-assignment": stub("export const useJobModelAssignment = () => ({ hasAssignment: false });"),
+    "@/components/first-run-picker-default": stub("export const useFirstRunPickerSeed = () => {};"),
+    "@/lib/news/model-choice": stub("export const modelChoiceLabel = (c) => String(c);"),
+    "@/lib/news/provider-registry": stub("export const defaultModelEffort = () => null;"),
+    "@/components/states": stub(`import React from "react"; export const Notice=({children})=>React.createElement("div",null,children);`),
+  });
+})();
+const { LeadRowView } = await import(rowUrl);
+
+test("TPT-2: a click on a row's body moves the cursor there; a click on a control in the row does not", async () => {
+  const moved = [];
+  const picked = [];
+  const root = createRoot(document.getElementById("root"));
+  try {
+    await React.act(async () => root.render(React.createElement(LeadRowView, {
+      lead: lead({ id: 459, why: "Because it does" }),
+      sectionName: "Open",
+      onHold: () => {},
+      onKill: () => {},
+      onDeleteSelect: (selected) => picked.push(selected),
+      onSelectRow: () => moved.push("row"),
+    })));
+    const row = document.querySelector(".lead-row");
+    assert.ok(row, "the row is drawn");
+    const body = [...row.querySelectorAll("*")].find((el) => el.childElementCount === 0 && el.textContent.includes("Because it does"));
+    assert.ok(body, "the row's body text is drawn");
+    await React.act(async () => body.dispatchEvent(new window.Event("click", { bubbles: true })));
+    assert.deepEqual(moved, ["row"], "a click on the row's body moves the cursor to that row");
+
+    await React.act(async () => row.querySelector("button").dispatchEvent(new window.Event("click", { bubbles: true })));
+    assert.deepEqual(moved, ["row"], "a click on a button in the row keeps its click to itself");
+
+    await React.act(async () => row.querySelector("input[type='checkbox']").dispatchEvent(new window.Event("click", { bubbles: true })));
+    assert.equal(picked.length, 1, "the checkbox still reports its pick");
+    assert.deepEqual(moved, ["row"], "and the checkbox's click does not also fire the row's own cursor move");
+    assert.equal(row.getAttribute("data-triage-row"), "459", "the row names itself to the keys, so X and H on its controls find it");
+  } finally {
+    await React.act(async () => root.unmount());
+  }
+});

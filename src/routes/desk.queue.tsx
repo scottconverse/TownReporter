@@ -80,6 +80,9 @@ import {
   bringBackPress,
   restoreStatus,
   undoPressFor,
+  leadStatusToastName,
+  leadToastId,
+  UNDONE_TOAST_ID,
   type KillReasonRequest,
   type KillUndoPress,
   type LastPress,
@@ -340,9 +343,8 @@ function QueuePage() {
 
     Deliberately NOT the same name as `desk-restoring-<id>`, because the bulk
     path already owns that one for its own single line and the two must not
-    coalesce into each other.
+    coalesce into each other. The name itself is `leadToastId` in fast-kill.ts.
   */
-  const killToastId = (id: number) => `desk-kill-toast-${id}`;
   const undoKill = useDeskMutation({
     mutationFn: async (press: KillUndoPress) => {
       // The lead is being put back, so U must not aim at it again.
@@ -354,12 +356,12 @@ function QueuePage() {
         A bulk press owns its own outcome, so it stays quiet here.
 
         THU-2 / DHK-2: raised under the KILL toast's own name, which is what
-        makes it a replacement rather than a second card. `killToastId(press.id)`
+        makes it a replacement rather than a second card. `leadToastId(press.id)`
         is the same name `setStatus` gave the "The lead moved to Killed." toast,
         so sonner swaps that card's sentence where it stands: no stale "Undo"
         and no second line over the rows.
       */
-      const restoringId = killToastId(press.id);
+      const restoringId = leadToastId(press.id);
       if (!bulkMuted.current) deskToast("Restoring…", { id: restoringId, duration: Infinity });
       try {
         /*
@@ -379,6 +381,11 @@ function QueuePage() {
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…",
     done: () => "Undone: the lead is back on the Queue.",
+    /*
+      TNB-3: one name for every "Undone" card, so a second one replaces the
+      first instead of standing beside it (two showed at once after a hold's Undo).
+    */
+    toastId: () => UNDONE_TOAST_ID,
     failedLead: "Could not put that lead back. ",
     what: "put that lead back",
   });
@@ -511,10 +518,15 @@ function QueuePage() {
     /*
       THU-2 / DHK-2: a kill's toast is named for its lead, so the press's own
       Undo can replace it in place with "Restoring…" (`undoKill` raises that
-      under the same name). Nothing else on this screen names its toast, and a
-      Hold -- which has no follow-up sentence -- goes on stacking as before.
+      under the same name). Nothing else on this screen names its toast.
     */
-    toastId: (input) => (input.status === "killed" ? killToastId(input.id) : undefined),
+    /*
+      TNB-3: a HOLD's toast takes the lead's name too, so the Undo that answers
+      it replaces that toast in place (a hold's toast had no name, and its Undo
+      stayed on screen after U). A kill and a hold on one lead share the card.
+      The rule itself is `leadStatusToastName` in fast-kill.ts.
+    */
+    toastId: leadStatusToastName,
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -1004,7 +1016,11 @@ function QueuePage() {
         // the button beside it both leave a way back the Undo can read.
         // THU-3: `holdLeadById` reads the LEAD's own row for the status, the
         // projection the key holds has none (see `holdLeadById` above).
-        if (lead) setStatus.mutate(holdLeadById(lead.id));
+        // TNB-1: H on a control inside a row holds that row, the same as its X does.
+        {
+          const heldRow = action.rowId == null ? lead : shown.find((l) => String(l.id) === action.rowId);
+          if (heldRow) setStatus.mutate(holdLeadById(heldRow.id));
+        }
         break;
       case "kill":
         /*
@@ -2021,6 +2037,11 @@ function QueuePage() {
                     on Today.
                   */
                   selected={index === movedIndex(cursor, 0, shown.length)}
+                  /*
+                    TPT-2: a click on the row makes it the cursor row, so H, X, U and
+                    Enter act on the row the editor clicked (the row's checkbox already did).
+                  */
+                  onSelectRow={() => setCursor(index)}
                   /*
                     BF3: the `more` array that used to sit here (Open the story
                     workbench / Hold this lead / Kill this lead / Put it back /

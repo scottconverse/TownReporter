@@ -63,8 +63,9 @@ export const TRIAGE_LEGEND: [string, string][] = [
 export type TriageAction =
   | { kind: "move"; delta: -1 | 1 }
   | { kind: "start" }
-  | { kind: "hold" }
-  /* `rowId` is set when X was pressed on a row's own Kill button (THT-8): that row is the one to kill. */
+  /* `rowId` is set when H was pressed on a control inside a row (TNB-1): that row is the one to hold. */
+  | { kind: "hold"; rowId?: string }
+  /* `rowId` is set when X was pressed on a row's own Kill button (THT-8) or any control in a row (TNB-1): that row is the one to kill. */
   | { kind: "kill"; rowId?: string }
   | { kind: "undo" }
   | { kind: "open" }
@@ -142,6 +143,21 @@ export function rowKillIdOf(target: unknown): string | null {
 }
 
 /**
+ * The row a focused control sits in (TNB-1), or null when the target is not
+ * inside a row. Every Queue row carries `data-triage-row` (`LeadRowView`), so X
+ * and H on its checkbox, its Hold or its menu act on THAT row, the way a row's
+ * own Kill does (THT-8), and not on whichever row the cursor happens to be on.
+ */
+export function rowOwnerIdOf(target: unknown): string | null {
+  const el = target as Element | null;
+  if (!el) return null;
+  const closest = (el as Element).closest;
+  if (typeof closest !== "function") return null;
+  const owner = closest.call(el, "[data-triage-row]");
+  return owner ? owner.getAttribute("data-triage-row") : null;
+}
+
+/**
  * A surface standing over the list, in the shapes this desk draws them.
  *
  * The two dialog shapes are deliberately the same ones `desk-action.ts` names
@@ -198,9 +214,12 @@ export function triageAction(
   // H remains available after selecting a row; text fields and overlays own their keys.
   if (isTypingTarget(event.target)) return null;
   // THT-8: X on a focused row Kill button is the row's kill, not a stray press on a control.
-  const rowKill = event.key.toLowerCase() === "x" ? rowKillIdOf(event.target) : null;
-  if (isInteractiveTarget(event.target) && event.key.toLowerCase() !== "h" && rowKill === null) return null;
-  switch (event.key.toLowerCase()) {
+  // TNB-1: X and H on any other control inside a row act on that row too (its checkbox, its Hold).
+  const name = event.key.toLowerCase();
+  const rowKill = name === "x" ? rowKillIdOf(event.target) : null;
+  const ownRow = name === "x" || name === "h" ? (rowKill ?? rowOwnerIdOf(event.target)) : null;
+  if (isInteractiveTarget(event.target) && name !== "h" && ownRow === null) return null;
+  switch (name) {
     case "j":
       return { kind: "move", delta: 1 };
     case "k":
@@ -208,9 +227,9 @@ export function triageAction(
     case "s":
       return { kind: "start" };
     case "h":
-      return { kind: "hold" };
+      return ownRow === null ? { kind: "hold" } : { kind: "hold", rowId: ownRow };
     case "x":
-      return rowKill === null ? { kind: "kill" } : { kind: "kill", rowId: rowKill };
+      return ownRow === null ? { kind: "kill" } : { kind: "kill", rowId: ownRow };
     case "u":
       return { kind: "undo" };
     case "enter":

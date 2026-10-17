@@ -276,3 +276,25 @@ describe("N4 — the keys stand down on a control the editor is standing on", ()
     assert.deepEqual(triageAction(key("j"), false), { kind: "move", delta: 1 });
   });
 });
+
+describe("TNB-1 — X and H act on the row the focus is in", () => {
+  it("X on a row's own checkbox kills that row, and H holds that row", () => {
+    const { document } = parseHTML(
+      "<div data-triage-row='459'><label><input type='checkbox'></label><button>Hold</button></div>",
+    );
+    const box = document.querySelector("input");
+    assert.deepEqual(triageAction(key("x", { target: box })), { kind: "kill", rowId: "459" });
+    assert.deepEqual(triageAction(key("h", { target: box })), { kind: "hold", rowId: "459" });
+    const hold = document.querySelector("button");
+    assert.deepEqual(triageAction(key("h", { target: hold })), { kind: "hold", rowId: "459" });
+  });
+
+  it("leaves Enter and the other keys to the control, and controls outside a row keep the stand-down", () => {
+    const { document } = parseHTML("<div data-triage-row='459'><button>More</button></div>");
+    const button = document.querySelector("button");
+    assert.equal(triageAction(key("Enter", { target: button })), null);
+    assert.equal(triageAction(key("j", { target: button })), null);
+    assert.equal(triageAction(key("x", { target: element("<input type='checkbox'>") })), null);
+    assert.equal(triageAction(key("x", { target: element("<button>Kill</button>") })), null);
+  });
+});
