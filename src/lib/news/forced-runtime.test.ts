@@ -116,7 +116,7 @@ describe("forced runtime snapshots", () => {
     ["codex-balanced", "codex", "gpt-6.1-sol"],
     ["codex-luna", "codex", "gpt-6-luna"],
     ["claude-fable", "claude-code", "fable"],
-    ["claude-frontier", "claude-code", "claude-opus-5"],
+    ["claude-frontier", "claude-code", "claude-opus-5-5"],
     ["claude-sonnet", "claude-code", "sonnet"],
     ["claude-haiku", "claude-code", "haiku"],
   ] as const) {

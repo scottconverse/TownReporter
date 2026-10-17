@@ -214,10 +214,10 @@ describe("resolveAnthropic", () => {
     withEnv({}, () => assert.equal(resolveAnthropic(), null));
   });
 
-  it("defaults to Opus 5 at high effort", () => {
+  it("defaults to Opus 5.5 at high effort", () => {
     withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
       const c = resolveAnthropic();
-      assert.equal(c?.model, "claude-opus-5");
+      assert.equal(c?.model, "claude-opus-5-5");
       assert.equal(c?.effort, "high");
       assert.equal(c?.label, "Claude");
     });
@@ -242,7 +242,7 @@ describe("resolveProvider", () => {
         ["codex-balanced", "gpt-6.1-sol"],
         ["codex-luna", "gpt-6-luna"],
         ["claude-fable", "fable"],
-        ["claude-frontier", "claude-opus-5"],
+        ["claude-frontier", "claude-opus-5-5"],
         ["claude-sonnet", "sonnet"],
         ["claude-haiku", "haiku"],
       ] as const) {
@@ -279,7 +279,7 @@ describe("resolveProvider", () => {
       ) => ReturnType<typeof resolveProvider>;
       assert.equal(choose("codex-balanced")?.model, "gpt-6.1-sol");
       assert.equal(choose("codex-frontier")?.model, "gpt-6.1-sol");
-      assert.equal(choose("claude-frontier")?.model, "claude-opus-5");
+      assert.equal(choose("claude-frontier")?.model, "claude-opus-5-5");
     });
   });
 
@@ -339,7 +339,7 @@ describe("resolveProvider", () => {
       const p = resolveProvider();
       assert.equal(p?.kind, "claude-code");
       assert.equal(p?.label, "Claude Code");
-      assert.equal(p?.model, "claude-opus-5");
+      assert.equal(p?.model, "claude-opus-5-5");
     });
   });
 

@@ -258,7 +258,7 @@ running on their default ports. See
 | Choice | Default identity | Prerequisite / boundary |
 | ------ | ---------------- | ----------------------- |
 | Codex Astra / Sol / Terra / Luna | `gpt-6-astra` / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
-| Claude Fable / Opus / Sonnet / Haiku | Claude CLI aliases `fable` / `claude-opus-5` / `sonnet` / `haiku` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+| Claude Fable / Opus / Sonnet / Haiku | Claude CLI aliases `fable` / `claude-opus-5-5` / `sonnet` / `haiku` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
 | Local model | whatever `LLM_MODEL` names | Discovered LM Studio/Ollama/llama.cpp model, or `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
 Compatibility overrides:

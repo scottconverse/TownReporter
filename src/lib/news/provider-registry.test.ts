@@ -430,12 +430,16 @@ describe("environment overrides are config, not code", () => {
     });
   });
 
+  it("the registry entry called Claude Opus runs Opus 5.5 (claude-opus-5-5)", () => {
+    assert.equal(providerEntry("claude-frontier")?.model, "claude-opus-5-5");
+  });
+
   it("does not let ANTHROPIC_MODEL redefine the entry called Claude Opus", () => {
     // The menu says "Claude Opus". An install that points ANTHROPIC_MODEL at
     // Sonnet must not make that label a lie; the variable still steers the
     // no-explicit-choice default path in resolveProvider().
     withEnv({ ANTHROPIC_MODEL: "claude-sonnet-5" }, () => {
-      assert.equal(providerModel(providerEntry("claude-frontier")!), "claude-opus-5");
+      assert.equal(providerModel(providerEntry("claude-frontier")!), "claude-opus-5-5");
     });
   });
 

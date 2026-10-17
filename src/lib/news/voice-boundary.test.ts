@@ -201,7 +201,7 @@ describe("the editorial voice rides with the web tools it needs", () => {
       system: "",
       systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
       user: "Verify sources",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
       timeoutMs: 1_000,
       allowedTools: ["WebSearch", "WebFetch"],
     });
