@@ -1,0 +1,45 @@
+The city's June vote applies inside Longmont, including its neighborhoods in Weld County. A separate county decision near Windsor shows how much depends on which side of a municipal boundary a project occupies.
+
+LONGMONT, Colo. - Longmont's ban on the largest data centers does not apply to unincorporated Weld County. In September, Weld commissioners approved a data center near Windsor after the county had repeatedly ordered its developer to stop unpermitted work.
+
+The Windsor-area project is not next to Longmont. No public record examined for this story establishes that it has damaged Longmont's water supply or electric system. It provides a documented example of what Longmont's ordinance cannot control beyond city limits.
+
+Longmont City Council adopted its hyperscale ordinance on June 9 by a 6 to 1 vote, following a 5 to 1 first-reading vote on May 19. The city describes the measure as a ban on hyperscale data centers as a land use and says it addresses growth through later phases. Council members also amended the proposal to tie the threshold to 5 percent of Platte River Power Authority's nameplate capacity or 100 megawatts, whichever is lower.
+
+Smaller facilities remain possible in the city's Primary Employment areas under use-specific standards addressing such matters as water, cooling, noise and lighting. Server rooms weren't banned.
+
+Longmont occupies parts of both Boulder and Weld counties. A Weld County address within Longmont city limits is subject to the city's land-use code. Unincorporated Weld land outside those limits is governed by county land-use decisions, even when its environmental or infrastructure questions concern nearby communities.
+
+Weld commissioners chose a different approach in April. They voted 4 to 1 to allow data centers in industrial zones, subject to different review procedures by zone, and barred them from agricultural zoning. The county requires proof of water availability, an electric utility "will serve" letter and noise limits, including a 65-decibel limit for low-frequency sound at the property line.
+
+That is a permit process, not a ban.
+
+That new process received an early test at the former Kodak and Carestream industrial property near Windsor. On September 9, commissioners voted 5 to 0 to grant Global AI (Colorado), LLC, a Use by Special Review land-use permit for a first phase in an existing building. Weld County says the proposed first phase would employ about 20 people and use a closed-loop, air-cooled system.
+
+The land-use permit doesn't authorize construction without the remaining building, utility and environmental approvals. The county also says any later expansion must return for review. The September vote approved one phase.
+
+There was a documented problem before that vote. In reporting based on records it obtained, Colorado Public Radio's Cassis Tingley found that Weld County had issued Global AI three stop-work orders and a later order to abate after data-center equipment was installed without the necessary approvals. At the September hearing, county officials said the company had complied in August; Global AI told commissioners it had resolved the matter.
+
+That history records a permitting violation and a county enforcement response. It doesn't establish contaminated water, increased household electric bills or measured noise from an operating data center. Residents raised concerns about those possible effects, and the county says its approval still carries water, electric-service and noise requirements.
+
+Wisconsin's Green Fire and partner organizations published a community toolkit in December 2025 that asks residents to scrutinize land-use approvals, utility rates and water service. Wisconsin's statutes don't govern Colorado. The useful question travels: Who pays for the infrastructure a new industrial customer requires, and what permits must it obtain before operating?
+
+For Longmont residents, the next Weld proposal's location will determine which government takes the land-use vote. City records identify the Longmont rule; Weld's planning and commissioner records show applications in unincorporated areas. Neither a Longmont mailing address nor a Weld County address, by itself, settles which code applies.
+
+---
+
+CLAIMS AND SOURCES
+
+Claim: Longmont approved its hyperscale ordinance June 9, 2026, after a May 19 first reading; the final vote was 6 to 1 and the first-reading vote was 5 to 1. Sources: https://longmontcolorado.gov/planning-and-development-services/development-code-updates/ (Data Centers section, primary city summary); https://longmontcitycouncil.org/meetings/2026-06-09/ and https://longmontcitycouncil.org/meetings/2026-05-19/ (meeting-vote transcription, secondary). Status: city adoption verified; vote counts corroborated by Denver7 at https://www.denver7.com/news/front-range/longmont/longmont-bans-hyperscale-data-centers-amid-concerns-about-energy-and-water-use and by meeting transcription. Accessed September 29, 2026. :chatgpt-content-reference{index="0"}
+
+Claim: The Longmont threshold includes the lower of 5 percent of Platte River Power Authority nameplate capacity and 100 megawatts; the measure considers phased growth. Sources: https://longmontcitycouncil.org/meetings/2026-05-19/ (amendment motions); https://longmontcitycouncil.org/meetings/2026-06-09/ (final amendments and vote); https://www.denver7.com/news/front-range/longmont/longmont-bans-hyperscale-data-centers-amid-concerns-about-energy-and-water-use (Maggie Bryan, Denver7, June 10). Status: corroborated meeting transcription and original reporting; the city's summary at https://longmontcolorado.gov/planning-and-development-services/development-code-updates/ emphasizes 100 megawatts and does not explain the 5 percent clause. Accessed September 29, 2026. :chatgpt-content-reference{index="1"}
+
+Claim: Smaller facilities are subject to use-specific standards in Primary Employment areas; Longmont occupies parts of Boulder and Weld counties, and city boundaries determine which local land-use rules apply. Sources: https://longmontcolorado.gov/planning-and-development-services/development-code-updates/ (Data Centers); https://longmontcolorado.gov/information/outside-agency-resources/ (two counties); https://longmontcolorado.gov/longmont-power-communications/renewable-energy/solar-energy/ (Weld County addresses within city limits). Status: city primary records; the boundary consequence is an inference from jurisdiction, not a finding that the Windsor project affects Longmont. Accessed September 29, 2026. :chatgpt-content-reference{index="2"}
+
+Claim: Weld commissioners approved their data-center ordinance by 4 to 1 in April, allowing data centers in industrial zones with review requirements and prohibiting them in agricultural zoning; electric, water and noise requirements apply. Source: https://www.weld.gov/Newsroom/2026-News/Weld-County-Commissioners-approve-addition-of-data-centers-to-code (Weld County statement, April 6). Status: primary county account of its adopted ordinance. Accessed September 29, 2026. :chatgpt-content-reference{index="3"}
+
+Claim: Weld commissioners approved Global AI's first-phase land-use permit 5 to 0 on September 9 near Windsor; the county projected about 20 first-phase jobs, described closed-loop air cooling and said additional permits and review of later phases are required. Source: https://www.weld.gov/Newsroom/2026-News/Weld-County-Commissioners-approve-Global-AI-data-center-permit (Weld County, September 10). Status: primary county statement, fetched directly; employment is an estimate, not an observed job count. Accessed September 29, 2026. :chatgpt-content-reference{index="4"}
+
+Claim: Weld County issued three stop-work orders and an order to abate for unpermitted data-center work; county officials said Global AI had complied in August. Origin: Cassis Tingley, Colorado Public Radio, August 7 and September 10, 2026. Sources: https://www.cpr.org/2026/08/07/weld-county-ai-data-center/ and https://www.cpr.org/2026/09/10/weld-county-officials-approve-data-center/ (original reporting from obtained enforcement records and the September hearing). Status: attributed to CPR; the original county orders were not separately obtained for this story. No environmental harm or higher Longmont utility bills from the project have been established here. Accessed September 29, 2026. :chatgpt-content-reference{index="5"}
+
+Claim: Wisconsin's Green Fire and partners released a data-center community toolkit in December 2025 addressing municipal approvals and utility costs. Source: https://wigreenfire.org/big-tech-unchecked-toolkit-data-centers/ (publisher announcement, December 16, 2025). Status: primary publisher statement; Wisconsin guidance is background, not Colorado law. Accessed September 29, 2026. :chatgpt-content-reference{index="6"}

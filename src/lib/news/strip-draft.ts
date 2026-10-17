@@ -139,9 +139,26 @@ export function stripReporterNotebook(body: string): string {
   return stripNotebook(body, YEAR_NOTE);
 }
 
+/*
+  TRB-3 (Oct 17 2026): a model's research notes leaked into published stories as
+  paragraphs that still carry the citation marker the model printed, e.g. "Claim: ...
+  Accessed September 29, 2026. :chatgpt-content-reference{index="0"}". Readers are not
+  shown those paragraphs. The desk keeps the text: stripReporterNotebook does not cut them.
+*/
+const CITATION_MARKER = /:chatgpt-content-reference\{[^}]*\}/;
+
+/** Drop each paragraph that carries a citation marker. A body with no marker is returned as it is. */
+function dropCitationParagraphs(body: string): string {
+  if (!CITATION_MARKER.test(body)) return body;
+  return body
+    .split(/\r?\n\s*\r?\n/)
+    .filter((paragraph) => !CITATION_MARKER.test(paragraph))
+    .join("\n\n");
+}
+
 /** What readers are shown: the same cut, plus the wordings a public page printed (TPT-3). */
 export function stripReaderNotebook(body: string, writtenOn: Date = new Date()): string {
-  return stripNotebook(body, READER_YEAR_NOTE, writtenOn);
+  return stripNotebook(dropCitationParagraphs(body), READER_YEAR_NOTE, writtenOn);
 }
 
 /*

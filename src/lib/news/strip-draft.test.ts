@@ -1,4 +1,5 @@
 import { it } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { cleanMissingFactNotes, stripReaderNotebook, stripReaderYearNote, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
 import { publicArticle } from "./public.ts";
@@ -178,4 +179,46 @@ it("gives the story page's headline and dek the same cut, and keeps a headline t
   const kept = row(onlyNote, "Open year-round at the library.");
   assert.equal(kept.headline, onlyNote);
   assert.equal(kept.dek, "Open year-round at the library.");
+});
+
+// TRB-3 (Oct 17 2026): article 116 printed seven research-note paragraphs ("Claim: ...") that carried citation markers.
+const leakedNotes = readFileSync(new URL("./fixtures/article-116-research-notes.txt", import.meta.url), "utf8");
+const markerCount = (text: string) => text.match(/:chatgpt-content-reference\{/g)?.length ?? 0;
+const paragraphsOf = (text: string) => text.split(/\r?\n\s*\r?\n/);
+const claimCount = (text: string) => paragraphsOf(text).filter((p) => p.startsWith("Claim:")).length;
+
+it("keeps the leaked research-note paragraphs from readers and leaves the desk's copy whole", () => {
+  const oct = new Date(2026, 9, 17);
+  assert.equal(markerCount(leakedNotes), 7);
+  assert.equal(claimCount(leakedNotes), 7);
+  const reader = stripReaderNotebook(leakedNotes, oct);
+  assert.equal(markerCount(reader), 0);
+  assert.equal(claimCount(reader), 0);
+  assert.ok(reader.startsWith("The city's June vote applies inside Longmont"));
+  assert.ok(reader.endsWith("---\n\nCLAIMS AND SOURCES"), reader.slice(-120));
+  const desk = stripReporterNotebook(leakedNotes);
+  assert.equal(markerCount(desk), 7);
+  // The desk cut runs on one CRLF blob here, so count the Claim lines wherever they sit.
+  assert.equal(desk.match(/Claim:/g)?.length, 7);
+});
+
+it("keeps a plain Claim paragraph that has no citation marker", () => {
+  const plain = "Claim: The vote passed 6 to 1.\n\nThe council meets Tuesday.";
+  assert.equal(stripReaderNotebook(plain, new Date(2026, 9, 17)), plain);
+});
+
+it("the public page's data carries the reader's cut body, not the stored research notes", () => {
+  const article = publicArticle({
+    id: 116,
+    slug: "longmont-barred-giant-data-centers",
+    headline: "Longmont barred giant data centers. Weld County approved one.",
+    dek: "",
+    body: leakedNotes,
+    topic: "opinion",
+    source_urls: "[]",
+    status: "published",
+    published_at: "2026-09-29T12:00:00Z",
+  });
+  assert.equal(markerCount(article.body), 0);
+  assert.equal(claimCount(article.body), 0);
 });
