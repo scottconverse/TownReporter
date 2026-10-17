@@ -3,7 +3,7 @@ import { resolveSectionKey } from "./sections.server.ts";
 import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
-import { cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
+import { cleanMissingFactNotes, stripReaderNotebook } from "./strip-draft.ts";
 import { readerAppendixText } from "./reader-source-names.ts";
 import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
@@ -104,7 +104,7 @@ function readerText<T extends ArticleRow>(row: T) {
   const summary = cleanMissingFactNotes(u.headline, u.dek);
   u.headline = summary.headline;
   u.dek = summary.dek;
-  u.body = readerAppendixText(stripReporterNotebook(u.body));
+  u.body = readerAppendixText(stripReaderNotebook(u.body));
   return { u, missingFactNotes: summary.notes };
 }
 

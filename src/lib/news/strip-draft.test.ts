@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { cleanMissingFactNotes, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
+import { cleanMissingFactNotes, stripReaderNotebook, stripReporterNotebook, stripYearNotes } from "./strip-draft.ts";
 import { publicArticle } from "./public.ts";
 
 it("moves the Pace Street schedule-year note out of the reader summary and leaves news copy intact", () => {
@@ -75,4 +75,64 @@ it("keeps a year note at the turn of the year: a December story about a January 
   const body = "The listing gives Jan. 8 for the hearing but does not state the year; the city calendar puts it in 2027.";
   assert.equal(stripYearNotes(body, new Date(2026, 11, 20)), body);
   assert.doesNotMatch(stripYearNotes(body, new Date(2026, 9, 12)), /does not state the year/);
+});
+
+// Scott, Oct 16 2026 (TPT-3): the Test public page printed "The pages show month and day
+// without a year." Same rule: the sentence goes, and the paragraph's other sentences stay.
+const womensCircleBody =
+  "Women's Recovery Circle meets weekly at Recovery Café Longmont for peer support. The pages show month and day without a year. Doors open at 6 p.m.";
+
+it("drops 'The pages show month and day without a year.' from the public story body and keeps the other sentences", () => {
+  assert.equal(
+    stripReaderNotebook(womensCircleBody),
+    "Women's Recovery Circle meets weekly at Recovery Café Longmont for peer support. Doors open at 6 p.m.",
+  );
+});
+
+it("leaves that sentence in the desk and writer text, so what they save does not change", () => {
+  assert.equal(stripReporterNotebook(womensCircleBody), womensCircleBody);
+});
+
+it("drops the other missing-year wordings a story can print", () => {
+  const oct = new Date(2026, 9, 16);
+  const wordings = [
+    "The flyer lists Thursday, Oct. 16 without the year.",
+    "The sign-up page gives the month and day with no year attached.",
+    "The calendar shows only the month and day.",
+    "Dates are listed as month and day only.",
+    "The year is not shown on the flyer.",
+    "The notice names the month and day but no year is printed.",
+  ];
+  for (const sentence of wordings) {
+    assert.equal(stripReaderNotebook(`${sentence} Doors open at 6 p.m.`, oct), "Doors open at 6 p.m.", sentence);
+  }
+});
+
+it("keeps a missing-year wording at the turn of the year when the date is January or February", () => {
+  const janBody = "The listing shows Jan. 8 without a year. Doors open at 6 p.m.";
+  const febBody = "The calendar shows only the month and day: Feb. 3. Doors open at 6 p.m.";
+  assert.equal(stripReaderNotebook(janBody, new Date(2026, 11, 20)), janBody);
+  assert.equal(stripReaderNotebook(febBody, new Date(2026, 11, 20)), febBody);
+  assert.equal(stripReaderNotebook(janBody, new Date(2026, 9, 16)), "Doors open at 6 p.m.");
+  assert.equal(stripReaderNotebook(febBody, new Date(2026, 9, 16)), "Doors open at 6 p.m.");
+});
+
+it("keeps sentences that only mention a year, a school year, a fiscal year, or a month and day", () => {
+  const oct = new Date(2026, 9, 16);
+  const keep = [
+    "The program runs year-round at the library.",
+    "The pool is open year-round, but the schedule is not listed online.",
+    "Attendance rose from last year.",
+    "The city adopted its fiscal year 2027 budget on Tuesday.",
+    "Classes start Aug. 18, the first day of the school year.",
+    "The farm had a year without rain, so crews are replanting.",
+    "The crew had worked there without a year of training.",
+    "The program with no years of experience is open to all.",
+    "The council will review the year-end report next month.",
+    "The year-end report is unclear on the parking budget.",
+    "The ordinance lists the month and day of each holiday.",
+  ];
+  for (const sentence of keep) {
+    assert.equal(stripReaderNotebook(sentence, oct), sentence);
+  }
 });

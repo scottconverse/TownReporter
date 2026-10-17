@@ -2,7 +2,7 @@ import { getSql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
 import { resolveSectionKey } from "./sections.server.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { stripReaderNotebook } from "./strip-draft.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
 import {
   MAX_BATCH,
@@ -120,7 +120,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
         slug: row.slug,
         headline: u.headline,
         dek: u.dek,
-        body: stripReporterNotebook(u.body),
+        body: stripReaderNotebook(u.body),
         topic: u.topic,
         published_at: row.published_at,
         area: readStoryArea(row.area),
