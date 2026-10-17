@@ -20,6 +20,7 @@ import {
   type PrintedDup,
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
+import { isInteractiveTarget } from "@/components/desk-triage";
 import { ModelPicker } from "@/components/model-picker";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
@@ -55,6 +56,7 @@ export function LeadRowView({
   deleteReason = null,
   bulkDeleteReason = null,
   onDeleteSelect,
+  onSelectRow,
   onDraft,
   drafting = false,
   draftNotice = null,
@@ -112,6 +114,12 @@ export function LeadRowView({
   /** A bulk refusal belongs beside this lead's controls, outside its menu. */
   bulkDeleteReason?: string | null;
   onDeleteSelect?: (selected: boolean) => void;
+  /**
+   * TPT-2: a click on the row itself (not on a button, link, menu or box that
+   * acts by itself) makes it the keyboard cursor row, so the next H, X, U or
+   * Enter acts on the row the editor clicked and not on the one the cursor was on.
+   */
+  onSelectRow?: () => void;
   /**
    * FB6, item 5: the Release/Bring-back press is in flight.
    *
@@ -522,6 +530,17 @@ export function LeadRowView({
         (deleteSelected ? " picked" : "") +
         (selected ? " sel" : "")
       }
+      /*
+        TNB-1 / TPT-2: the row names itself to the keys. X and H on a control in
+        the row act on this row (`rowOwnerIdOf`); a click on the row's own body
+        moves the keyboard cursor here. A control that acts by itself keeps its
+        click to itself, so the press that removes or opens a row does not also
+        move the cursor onto it.
+      */
+      data-triage-row={lead.id}
+      onClick={(event) => {
+        if (onSelectRow && !isInteractiveTarget(event.target)) onSelectRow();
+      }}
     >
       {/*
         The row's one selection box (defect 1): the design's checkbox in the

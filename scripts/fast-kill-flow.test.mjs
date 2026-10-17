@@ -206,6 +206,7 @@ const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
 });
 
 const deskLeadsUrl = await moduleUrl("src/components/desk-leads.tsx", {
+  "@/components/desk-triage": await moduleUrl("src/components/desk-triage.ts", {}),
   "@tanstack/react-router": reactRouterStub,
   "@/components/desk-chrome": deskChromeUrl,
   "@/components/action-button": actionButtonUrl,

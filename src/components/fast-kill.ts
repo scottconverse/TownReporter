@@ -251,6 +251,24 @@ export function killReasonKept(chip: KillReasonChip): string {
  */
 export const KILL_TOAST_MS = 15_000;
 
+/*
+  The name a Queue toast is raised under (TNB-3). A kill and a hold on one lead
+  share the lead's card, so the Undo that answers either one replaces it in
+  place; every "Undone: ..." card shares one name, so a second one replaces the
+  first instead of standing beside it.
+*/
+export function leadToastId(id: number): string {
+  return `desk-kill-toast-${id}`;
+}
+
+/** The one name every "Undone" card is raised under (TNB-3). */
+export const UNDONE_TOAST_ID = "desk-undone-toast";
+
+/** The name a status toast takes: a kill or a hold names the lead's card; any other status is left unnamed, as before. */
+export function leadStatusToastName(input: { id: number; status: string }): string | undefined {
+  return input.status === "killed" || input.status === "held" ? leadToastId(input.id) : undefined;
+}
+
 /** The lead-in above the chips. Says a reason is optional, in words. */
 export const KILL_CHIPS_ASK = "Say why, if you want to:";
 
