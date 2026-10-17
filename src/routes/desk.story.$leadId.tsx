@@ -51,7 +51,7 @@ import { areaPills, cleanStoryArea, defaultStoryArea, HOME_AREA, type StoryArea 
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { draftNotSavedWords, draftWaitingWords, editorTitle, headlineForDesk, sharedModelWaitWords } from "@/lib/news/desk-copy";
+import { draftNotSavedWords, draftWaitingWords, editorTitle, sharedModelWaitWords } from "@/lib/news/desk-copy";
 import { showDraftRunning } from "@/lib/desk/draft-running";
 import { useDeskJobs } from "@/components/job-card-state";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
@@ -4582,7 +4582,7 @@ function StoryPage() {
         </div>
         <article className="astra-dialog-body" tabIndex={0}>
           <p className="kick">{topic} · Draft for review</p>
-          <h1>{headlineForDesk(headline)}</h1>
+          <h1>{editorTitle(headline)}</h1>
           <p className="astra-preview-dek">{dek}</p>
           <div className="astra-preview-body">
             <StoryBody body={body} />

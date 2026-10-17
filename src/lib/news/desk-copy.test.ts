@@ -91,6 +91,7 @@ import {
   elapsedLabel,
   redditPostStateLabel,
   buildScanUserMessage,
+  editorTitle,
   mergeFocusSelection,
   suggestFocusLeads,
   validationFieldLabel,
@@ -2419,5 +2420,14 @@ describe("stopped draft words on the story page (DHI-3)", () => {
     // Without a stop the old lines are unchanged, so nothing was taken away.
     assert.match(draftNotSavedWords(true, false), /^The meeting draft failed/);
     assert.match(draftNotSavedWords(false, false), /^The draft did not finish and was not saved/);
+  });
+});
+
+describe("editorTitle", () => {
+  it("drops the capture stamp so a meeting headline reads the same on every desk screen", () => {
+    assert.equal(
+      editorTitle("Historic Preservation Commission - Sept 3, 2026 (2026-09-04T12:19:51Z)"),
+      "Historic Preservation Commission - Sept 3, 2026",
+    );
   });
 });

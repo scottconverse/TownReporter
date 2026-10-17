@@ -738,7 +738,7 @@ export function LeadRowView({
                   pending={killPending}
                   pendingLabel="Killing…"
                   onClick={onKillNow}
-                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                  ariaLabel={`Kill the lead: ${editorTitle(lead.headline)}`}
                 >
                   Kill
                 </InkButton>
@@ -781,7 +781,7 @@ export function LeadRowView({
                   pending={killPending}
                   pendingLabel="Killing…"
                   onClick={onKillNow}
-                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                  ariaLabel={`Kill the lead: ${editorTitle(lead.headline)}`}
                 >
                   Kill
                 </InkButton>

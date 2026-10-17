@@ -3291,32 +3291,6 @@ export function editorTitle(text: string): string {
   return title === title.toUpperCase() ? agendaTitle(title) : title;
 }
 
-/*
-  TNB-5: a lead headline can end in the database's raw UTC stamp, "(2026-09-30T06:45:38Z)".
-  Display only: the stored headline is not touched. The stamp becomes the Mountain-time
-  date ("(Sept. 30, 2026)"), or goes when the headline already names that day.
-*/
-const TRAILING_STAMP = /\s*\((\d{4}-\d{2}-\d{2})(T[\d:.]+Z)?\)\s*$/;
-const DESK_MONTHS = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
-
-export function headlineForDesk(text: string): string {
-  const stamp = TRAILING_STAMP.exec(text);
-  if (!stamp) return text;
-  const instant = new Date(stamp[2] ? stamp[1] + stamp[2] : `${stamp[1]}T12:00:00Z`);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Denver",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-  }).formatToParts(instant);
-  const field = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  const [year, month, day] = [field("year"), field("month"), field("day")];
-  const monthLong = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", month: "long" }).format(instant);
-  const head = text.slice(0, stamp.index).trimEnd();
-  const namesDay = new RegExp(`\\b${monthLong}\\b|\\b${DESK_MONTHS[month - 1]}`).test(head) && new RegExp(`\\b${day}\\b`).test(head);
-  return namesDay ? head : `${head} (${DESK_MONTHS[month - 1]} ${day}, ${year})`;
-}
-
 export function leadScoreLabel(score: number | null): string {
   return `Lead score ${score ?? 0}/20`;
 }
