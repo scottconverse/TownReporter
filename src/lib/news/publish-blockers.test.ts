@@ -169,10 +169,31 @@ describe("publishBlockers", () => {
     });
   });
 
-  it("names each transient gate that turns the button off while it runs", () => {
+  it("names each transient gate while it runs", () => {
     assert.deepEqual(keys({ reconcileActive: true }), ["reconcile-running"]);
     assert.deepEqual(keys({ reviewingEvidence: true }), ["evidence-review-saving"]);
     assert.deepEqual(keys({ publishing: true }), ["publishing"]);
+  });
+
+  /*
+    ENG-2: a running evidence check is a warning, so its row offers the same
+    "Publish anyway" press as every other warning, with "See the running check"
+    as the second press. The confirm stays live and asks for the acknowledgement.
+  */
+  it("offers Publish anyway over a running evidence check, and the check as the second press", () => {
+    const blockers = publishBlockers(withState({ reconcileActive: true, sectionName: "Council" }));
+    assert.deepEqual(blockers.map((b) => b.key), ["reconcile-running"]);
+    const [row] = blockers;
+    assert.equal(row?.kind, "warning");
+    assert.equal(
+      row?.sentence,
+      "An evidence check is running on this draft. Its answer is not in yet. Publish anyway prints it before that answer comes in.",
+    );
+    assert.deepEqual(row?.action, { label: "Publish anyway in Council", target: { kind: "publish-now" } });
+    assert.deepEqual(row?.altAction, { label: "See the running check", target: { kind: "running-check" } });
+    const decision = publishConfirmation(blockers, "Council");
+    assert.equal(decision.enabled, true, "a running check does not turn the press off");
+    assert.deepEqual(decision.acknowledgedWarningKeys, ["reconcile-running"]);
   });
 
   /*

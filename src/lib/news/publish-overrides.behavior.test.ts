@@ -38,6 +38,7 @@ let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
 let performPublish: typeof import("./desk.ts").performPublish;
 let performOverrideNamedOutlet: typeof import("./desk.ts").performOverrideNamedOutlet;
+let STALE_RUNNING_SECONDS: number;
 
 before(async () => {
   vite = await createServer({
@@ -48,6 +49,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ performPublish, performOverrideNamedOutlet } =
     await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ STALE_RUNNING_SECONDS } = await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
 });
 
 after(async () => vite.close());
@@ -98,6 +100,10 @@ type FixtureInput = {
   research?: unknown;
   unchecked?: boolean;
   evidenceCheckJob?: "queued" | "running" | null;
+  /** The check's last heartbeat, as an ISO time. Absent means just now. */
+  evidenceCheckUpdatedAt?: string;
+  /** The editor pressed Cancel on the check and the worker has not acknowledged it yet. */
+  evidenceCheckCancelled?: boolean;
 };
 
 /**
@@ -132,8 +138,15 @@ async function fixture(input: FixtureInput = {}) {
   }
   if (input.evidenceCheckJob) {
     await sql.query(
-      "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status) values($1,$2,'reconcile',$3,$4)",
-      [NEWSROOM, USER, draft.id, input.evidenceCheckJob],
+      "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,updated_at,cancel_requested) values($1,$2,'reconcile',$3,$4,$5,$6)",
+      [
+        NEWSROOM,
+        USER,
+        draft.id,
+        input.evidenceCheckJob,
+        input.evidenceCheckUpdatedAt ?? new Date().toISOString(),
+        input.evidenceCheckCancelled ?? false,
+      ],
     );
   }
   return { leadId: lead.id, draftId: draft.id };
@@ -620,32 +633,53 @@ it("refuses a missing lead even when acknowledged", async () => {
   assert.equal(refused.ok, false, "there is no lead to print");
 });
 
-it("refuses a running evidence check even when acknowledged", async () => {
-  const { leadId } = await fixture({ notes: { todo: [] }, evidenceCheckJob: "running" });
-  const refused = await performPublish(
-    { userId: USER, newsroomId: NEWSROOM },
-    leadId,
-    "council",
-    undefined,
-    {},
-    ALL_KEYS,
-  );
-  assert.equal(refused.ok, false, "an active evidence check is a true impossibility");
-  assert.equal(await articleCount(leadId), 0);
+/* A live evidence check is a warning: Publish anyway prints the draft before
+   its answer comes in, and the override is audited like any other warning. */
+const publishWith = (leadId: number, acknowledged: string[]) =>
+  performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, "council", undefined, {}, acknowledged);
+const CHECK_WARNING = /Publish anyway prints it before that answer comes in\./;
+
+it("warns on a running evidence check, then prints it acknowledged, and audits it", async () => {
+  await provesWarning({
+    key: "reconcile-running",
+    setup: () => fixture({ notes: { todo: [] }, evidenceCheckJob: "running" }),
+    publish: publishWith,
+    refusalMatches: CHECK_WARNING,
+  });
 });
 
-it("refuses a queued evidence check even when acknowledged", async () => {
-  const { leadId } = await fixture({ notes: { todo: [] }, evidenceCheckJob: "queued" });
-  const refused = await performPublish(
-    { userId: USER, newsroomId: NEWSROOM },
-    leadId,
-    "council",
-    undefined,
-    {},
-    ALL_KEYS,
-  );
-  assert.equal(refused.ok, false, "a queued evidence check is a true impossibility");
-  assert.equal(await articleCount(leadId), 0);
+it("warns on a queued evidence check, then prints it acknowledged, and audits it", async () => {
+  await provesWarning({
+    key: "reconcile-running",
+    setup: () => fixture({ notes: { todo: [] }, evidenceCheckJob: "queued" }),
+    publish: publishWith,
+    refusalMatches: CHECK_WARNING,
+  });
+});
+
+it("does not hold Publish for a running evidence check whose worker stopped beating", async () => {
+  const stale = new Date(Date.now() - (STALE_RUNNING_SECONDS + 1) * 1000).toISOString();
+  const { leadId } = await fixture({
+    notes: { todo: [] },
+    evidenceCheckJob: "running",
+    evidenceCheckUpdatedAt: stale,
+  });
+  const published = await publishWith(leadId, []);
+  assert.equal(published.ok, true, `a stale check is not one anyone waits on: ${refusalOf(published)}`);
+  assert.equal(await articleCount(leadId), 1, "the print has to reach the paper");
+  assert.equal((await overrideRows(leadId)).length, 0, "nothing was overridden, so nothing is audited");
+});
+
+it("does not hold Publish for an evidence check the editor cancelled", async () => {
+  const { leadId } = await fixture({
+    notes: { todo: [] },
+    evidenceCheckJob: "running",
+    evidenceCheckCancelled: true,
+  });
+  const published = await publishWith(leadId, []);
+  assert.equal(published.ok, true, `a cancelled check is not one anyone waits on: ${refusalOf(published)}`);
+  assert.equal(await articleCount(leadId), 1, "the print has to reach the paper");
+  assert.equal((await overrideRows(leadId)).length, 0, "nothing was overridden, so nothing is audited");
 });
 
 /* ------------------------------------------------------------------------ */

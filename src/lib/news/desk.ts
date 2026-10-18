@@ -246,6 +246,7 @@ import {
   enqueueJob,
   countedStep,
   findOpenJob,
+  jobHeartbeatStale,
   kickJobs,
   latestJob,
   PROGRESS_WRITE_MIN_MS,
@@ -6141,7 +6142,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       error: string;
       warnings?: { key: string; sentence: string }[];
       /* A hard refusal is NOT a warning: it carries the key of the true
-         impossibility (empty headline/body, no draft, a running check) so the
+         impossibility (empty headline/body, no draft) so the
          UI can treat it as a wall, not a checkbox. */
       hard?: string;
     }
@@ -6411,7 +6412,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
        claims-unreviewed warning above. The page uses that live review too;
        adding the old memo under a second key would refuse Publish anyway.
        Other readiness memos remain warnings, and package holds are recomputed
-       below independently. The live reconcile job remains a hard gate. */
+       below independently. The live reconcile job is a warning too (below). */
     const readiness = savedStoryReadiness(row.research_json);
     if (!liveClaimsOwnReadiness(row.research_json) && (
       readiness.state === "checking" ||
@@ -6508,28 +6509,23 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       });
     }
 
-    /* The live evidence check job is a hard gate: nothing can print while a
-       check the editor is waiting on is still queued or running. The job kind
-       is `reconcile` (jobs.ts) and its subject is the DRAFT row. */
-    const [liveCheck] = await tx<{ id: number }>`
-      select id from desk_jobs
+    /* A live evidence check is a WARNING, not a wall (ENG-2): the editor can
+       print over it, and that override is recorded like every other warning.
+       Live is the job system's own rule (jobs.ts): queued, or running with a
+       heartbeat inside its window and no cancel request. A cancelled check, or
+       a running row whose worker is gone, is not a check anyone is waiting on.
+       The job kind is `reconcile` (jobs.ts) and its subject is the DRAFT row. */
+    const checks = await tx<Pick<DeskJob, "status" | "updated_at" | "cancel_requested">>`
+      select status, updated_at, cancel_requested from desk_jobs
       where newsroom_id = ${owned(context)} and kind = 'reconcile' and subject_id = ${row.id}
         and status in ('queued','running')
-      limit 1
     `;
-    if (liveCheck) {
-      return {
-        warnings,
-        hard: {
-          key: "reconcile-running",
-          sentence: "An evidence check is running on this draft. Its answer is not in yet.",
-        },
-        outstandingClaims,
-        confirmSection: false,
-        draftTopic,
-        area,
-        evidence,
-      };
+    if (checks.some((check) => !check.cancel_requested && !jobHeartbeatStale(check))) {
+      warnings.push({
+        key: "reconcile-running",
+        sentence:
+          "An evidence check is running on this draft. Its answer is not in yet. Publish anyway prints it before that answer comes in.",
+      });
     }
 
     return { warnings, hard: null, outstandingClaims, confirmSection, draftTopic, area, evidence };
