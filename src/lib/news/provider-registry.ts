@@ -566,17 +566,21 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
     /*
-      No ladderRank as of 0.6.63 (Unit Y item 1). Sonnet was Automatic's
-      rank-3 rung; Claude leaves the ladder and stays a hand pick on every
-      surface -- the bake-off scored it 13.1 against DeepSeek's 30.9, and the
-      owner's ladder is DeepSeek, then Qwen on this computer, then Codex
-      Terra. It is still offered everywhere an editor chooses a model.
+      Automatic uses any model the user has a subscription to (Scott, Oct 18
+      2026), so Claude Sonnet is the LAST rung on the desk's ladder, after
+      DeepSeek, the local model, Codex Sol and Gemini. A rung that is not ready
+      is skipped, so a desk with DeepSeek ready never reaches Claude; a desk
+      whose only signed-in model is Claude still writes.
 
-      Opinion is the exception, and it is a written product decision rather
-      than a leftover: an editorial is the paper's own voice, and Sonnet is
-      the last thing Opinion tries before a piece fails (0.6.52; unit U29 put
-      DeepSeek ahead of it). Every other surface leaves Claude to a hand pick.
+      It had been off the ladder since 0.6.63 (Unit Y item 1), when the bake-off
+      scored it 13.1 against DeepSeek's 30.9. That result still stands: DeepSeek
+      stays first, and Claude is reached only after the four rungs above it.
+
+      Opinion is a separate ladder and keeps its own place: an editorial is the
+      paper's own voice, and Sonnet is the last thing Opinion tries before a
+      piece fails (0.6.52; unit U29 put DeepSeek ahead of it).
     */
+    ladderRank: 5,
     opinionLadderRank: 3,
   },
   {

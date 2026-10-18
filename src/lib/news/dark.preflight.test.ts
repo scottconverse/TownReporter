@@ -179,10 +179,10 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
       await withEnv(
         {
           /*
-            DeepSeek is the configured provider here, not Claude: since 0.6.63
-            (Unit Y item 1) Claude Sonnet is a hand pick, so a reachable Claude
-            key no longer makes a rung ready and this test would now be
-            asserting a refusal it did not mean to describe.
+            DeepSeek is the configured provider here, not Claude. Claude Sonnet
+            is Automatic's LAST rung again (Scott, Oct 18 2026), so a reachable
+            Claude key is reached only after DeepSeek fails; this test describes
+            the DeepSeek-ready case and must not depend on Claude's state.
           */
           TOWNREPORTER_DEEPSEEK_BASE_URL: DEEPSEEK_URL,
           // The other two rungs are off, so this test never runs the Codex CLI
