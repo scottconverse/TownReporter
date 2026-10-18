@@ -168,10 +168,13 @@ export async function listThisWeekDates(): Promise<StoryDateItem[]> {
  * Published in the last seven days on the paper's own calendar, leaving out
  * the story the front page leads with (`skipSlug`). When none of the paper's
  * stories is that recent, the box prints the newest ones anyway rather than
- * nothing. A row is its story's headline and the day the story was published.
+ * nothing, and `withinWeek` comes back false so the caller titles the panel for
+ * what it holds. A row is its story's headline and the day the story was published.
  */
-export async function listNewestStories(skipSlug: string): Promise<StoryDateItem[]> {
-  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [];
+export async function listNewestStories(
+  skipSlug: string,
+): Promise<{ stories: StoryDateItem[]; withinWeek: boolean }> {
+  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return { stories: [], withinWeek: false };
   const config = await getPaperConfig(DEFAULT_NEWSROOM_ID);
   const today = localDay(config.timezone, new Date());
   const from = addDays(today, -(WEEK_DAYS - 1));
@@ -188,7 +191,8 @@ export async function listNewestStories(skipSlug: string): Promise<StoryDateItem
       slug: row.slug,
     }));
   const recent = stories.filter((story) => story.date >= from && story.date <= today);
-  return (recent.length ? recent : stories).slice(0, FRONT_WEEK_LIMIT);
+  const withinWeek = recent.length > 0;
+  return { stories: (withinWeek ? recent : stories).slice(0, FRONT_WEEK_LIMIT), withinWeek };
 }
 
 /**

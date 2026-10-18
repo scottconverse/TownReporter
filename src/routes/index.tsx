@@ -14,7 +14,7 @@ import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { newestStories } from "@/lib/news/story-dates-public";
-import { storyDateRows } from "@/lib/story-dates";
+import { frontWeekTitle, storyDateRows } from "@/lib/story-dates";
 import { headlineWithTag, opinionHeadlineDisplay } from "@/lib/news/editorial";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { HOME_AREA, STORY_AREAS } from "@/lib/story-area";
@@ -135,7 +135,7 @@ export const Route = createFileRoute("/")({
         ...(listing ? {} : { notTopic: "opinion" }),
       },
     });
-    if (listing) return { listing: page, river: null, opinion: null, week: [], region: [] };
+    if (listing) return { listing: page, river: null, opinion: null, week: { stories: [], withinWeek: false }, region: [] };
     // The lead and the six cells: what is printed above the band and the river.
     const above = page.stories.slice(0, TOP_STORIES).map((s) => s.id);
     /*
@@ -160,14 +160,14 @@ export const Route = createFileRoute("/")({
       see `listNewestStories`. It is read here rather than in the opinion query
       because it sweeps the whole paper, not one section.
     */
-    const week = await newestStories({ data: { skipSlug: page.stories[0]?.slug ?? "" } });
+    const newest = await newestStories({ data: { skipSlug: page.stories[0]?.slug ?? "" } });
     /*
       The lead column's own rows under the button (unit CN, item 1(b)). Read
       here rather than in the component because the river has to leave them
       out: `alsoUnderLead` is the same rule both callers apply to the same
       stories, so what the lead prints is exactly what the river does not.
     */
-    const also = alsoUnderLead(page.stories, week, opinion.stories[0]?.slug).map((s) => s.id);
+    const also = alsoUnderLead(page.stories, newest.stories, opinion.stories[0]?.slug).map((s) => s.id);
     const region = await readRegion();
     const river = await readerArticles({
       data: editionRiverQuery(area!, RIVER_BATCH,
@@ -182,7 +182,7 @@ export const Route = createFileRoute("/")({
         ],
       ),
     });
-    return { listing: page, river, opinion, week, region };
+    return { listing: page, river, opinion, week: newest, region };
   },
   component: FrontPage,
 });
@@ -299,7 +299,8 @@ function Home() {
     takes the rows already split into the weekday and day columns; see
     `listNewestStories` for which stories and in what order.
   */
-  const week = storyDateRows(initial.week);
+  const week = storyDateRows(initial.week.stories);
+  const weekTitle = frontWeekTitle(initial.week.withinWeek);
   /*
     The lead column's own rows, under its button (unit CN, item 1(b)). The same
     rule the loader applied to the same stories, so what the lead prints is
@@ -542,7 +543,7 @@ function Home() {
                   whose only content is a note about why it has nothing to say
                   tells the reader about the newsroom's filing, not about their town.
                 */}
-                {week.length ? <DatesPanel title="This week" items={week} /> : null}
+                {week.length ? <DatesPanel title={weekTitle} items={week} /> : null}
               </section>
               {/*
                 The ruled story grid: three across on a desktop, two on a

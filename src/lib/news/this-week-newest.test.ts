@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { getPglite, getSql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { listNewestStories } from "./story-dates.server.ts";
-import { storyDateRows } from "../story-dates.ts";
+import { frontWeekTitle, storyDateRows } from "../story-dates.ts";
 
 /**
  * "This week" on the front page: the paper's newest printed stories.
@@ -93,7 +93,7 @@ describe("this week on the front page: the newest stories", () => {
     const { timezone } = await getPaperConfig(1);
 
     // The lead is the front page's top story; the box skips it.
-    const items = await listNewestStories("week-lead");
+    const { stories: items, withinWeek } = await listNewestStories("week-lead");
     const rows = storyDateRows(items);
 
     assert.deepEqual(
@@ -117,6 +117,9 @@ describe("this week on the front page: the newest stories", () => {
       rows.map((row) => row.slug),
       ["week-second", "week-third"],
     );
+    // The second story is from two days ago, inside the week, so the title stays.
+    assert.equal(withinWeek, true);
+    assert.equal(frontWeekTitle(withinWeek), "This week");
   });
 
   it("still lists the newest stories when none was published in the last seven days", async () => {
@@ -130,12 +133,15 @@ describe("this week on the front page: the newest stories", () => {
       { slug: "old-6", publishedAt: ago(80) },
     ]);
 
-    const items = await listNewestStories("old-lead");
+    const { stories: items, withinWeek } = await listNewestStories("old-lead");
 
     // Five rows at most, the newest of what is left after the lead.
     assert.deepEqual(
       items.map((item) => item.slug),
       ["old-1", "old-2", "old-3", "old-4", "old-5"],
     );
+    // Nothing was printed in the last seven days, so the fallback fired and the panel says so.
+    assert.equal(withinWeek, false);
+    assert.equal(frontWeekTitle(withinWeek), "Latest stories");
   });
 });

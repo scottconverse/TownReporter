@@ -1042,3 +1042,12 @@ export function storyDateRows(items: StoryDateItem[], selfSlug = ""): StoryDateR
     return row;
   });
 }
+
+/**
+ * The front page's dated-stories panel is titled for what it holds: "This week"
+ * when every row is from the last seven days, "Latest stories" when nothing was
+ * printed that recently and the panel fell back to the newest of any age.
+ */
+export function frontWeekTitle(withinWeek: boolean): string {
+  return withinWeek ? "This week" : "Latest stories";
+}
