@@ -191,6 +191,19 @@ export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * Where the npm-global CLIs (`claude`, `codex`) are installed on Windows: the
+ * APPDATA the operator's own session has. A server started at boot, before
+ * anyone logs in, can have no APPDATA, and the lookup then had nowhere to look.
+ * Without it, the root is the one `withCodexHome` names (USERPROFILE, else HOME).
+ */
+export function cliAppData(): string | undefined {
+  const appData = process.env.APPDATA?.trim();
+  if (appData) return appData;
+  const userRoot = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
+  return userRoot ? path.join(userRoot, "AppData", "Roaming") : undefined;
+}
+
 /** The environment for a Codex child: the allow-list plus the home defaults. */
 export function codexChildEnv(): NodeJS.ProcessEnv {
   return withCodexHome(cliChildEnv());

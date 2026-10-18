@@ -156,6 +156,9 @@ if (-not (Test-TownReporterPort $port)) {
     $name = if ($proc) { $proc.Name } else { "unknown" }
     "port $port has an IPv6-only listener PID $($o.OwningProcess) ($name) from another program; it does not block the paper" | Add-Content $appLog
   }
+  # A boot start (before anyone logs in) can have no APPDATA or LOCALAPPDATA; name them from the profile.
+  if (-not $env:APPDATA -and $env:USERPROFILE) { $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming' }
+  if (-not $env:LOCALAPPDATA -and $env:USERPROFILE) { $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local' }
   # Start-Process, not `| Add-Content`: a PowerShell pipeline holds an exclusive
   # write handle for as long as the app runs, so the log could not be read while
   # the thing you wanted to debug was happening. Redirected process handles allow

@@ -180,11 +180,50 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
   });
 
   it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
-    const lookup = await withEnv(
-      { CODEX_CLI_PATH: undefined, APPDATA: undefined },
-      () => findCodexCli(),
+    // An empty profile, so the AppData derived from USERPROFILE holds no Codex.
+    const profile = await mkdtemp(path.join(tmpdir(), "codex-empty-profile-"));
+    try {
+      const lookup = await withEnv(
+        { CODEX_CLI_PATH: undefined, APPDATA: undefined, USERPROFILE: profile, HOME: undefined },
+        () => findCodexCli(),
+      );
+      assert.deepEqual(lookup, { ok: true, bin: "codex" });
+    } finally {
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+
+  // A server started at boot (before anyone logs in) can run with no APPDATA;
+  // the npm-global Codex is then looked for under USERPROFILE instead.
+  it("finds the npm-global Codex under <USERPROFILE>\\AppData\\Roaming when APPDATA is unset", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "codex-boot-profile-"));
+    const vendor = path.join(
+      profile,
+      "AppData",
+      "Roaming",
+      "npm",
+      "node_modules",
+      "@openai",
+      "codex",
+      "node_modules",
+      "@openai",
+      "codex-win32-x64",
+      "vendor",
+      "x86_64-pc-windows-msvc",
+      "bin",
+      "codex.exe",
     );
-    assert.deepEqual(lookup, { ok: true, bin: "codex" });
+    try {
+      await mkdir(path.dirname(vendor), { recursive: true });
+      await writeFile(vendor, "");
+      const lookup = await withEnv(
+        { CODEX_CLI_PATH: undefined, APPDATA: undefined, USERPROFILE: profile, HOME: undefined },
+        () => findCodexCli(),
+      );
+      assert.deepEqual(lookup, { ok: true, bin: vendor });
+    } finally {
+      await rm(profile, { recursive: true, force: true });
+    }
   });
 
   /*

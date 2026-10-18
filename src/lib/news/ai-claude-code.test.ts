@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { EDITORIAL_TOOLS } from "./editorial.ts";
 import {
@@ -164,6 +164,62 @@ describe("claudeCliCandidates", () => {
       assert.ok(found.every((p) => p.includes("claude")));
     } finally {
       if (prev !== undefined) process.env.CLAUDE_CLI_PATH = prev;
+    }
+  });
+});
+
+/*
+  A server started at boot (an S4U scheduled task, before anyone logs in) can
+  run with no APPDATA. The npm-global Claude was then never looked for, and a
+  miss was memoized, so the desk said "not installed" until a restart.
+*/
+describe("Claude CLI lookup when the paper starts at boot (no APPDATA)", () => {
+  const npmGlobalClaude = (profile: string) =>
+    `${join(profile, "AppData", "Roaming")}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+
+  it("looks under <USERPROFILE>\\AppData\\Roaming when APPDATA is unset", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "claude-boot-profile-"));
+    const restore = withEnv({ APPDATA: undefined, HOME: undefined, USERPROFILE: profile, CLAUDE_CLI_PATH: undefined });
+    try {
+      assert.ok(
+        claudeCliCandidates().includes(npmGlobalClaude(profile)),
+        "with no APPDATA, the npm-global binary under USERPROFILE must be a candidate",
+      );
+    } finally {
+      restore();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+
+  it("finds that binary once it is installed, with no APPDATA set", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "claude-boot-profile-"));
+    const restore = withEnv({ APPDATA: undefined, HOME: undefined, USERPROFILE: profile, CLAUDE_CLI_PATH: undefined });
+    resetClaudeCliCache();
+    try {
+      const bin = npmGlobalClaude(profile);
+      await mkdir(dirname(bin), { recursive: true });
+      await writeFile(bin, "");
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+
+  it("does not remember a miss: a CLI installed after a failed lookup is found on the next call", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "claude-miss-memo-"));
+    const late = join(dir, "claude-installed-later");
+    const restore = withEnv({ CLAUDE_CLI_PATH: late });
+    resetClaudeCliCache();
+    try {
+      assert.equal(await findClaudeCli(), null, "nothing is installed yet");
+      await writeFile(late, "");
+      assert.equal(await findClaudeCli(), late, "the next call must look again, not reuse the miss");
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
