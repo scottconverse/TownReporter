@@ -15,8 +15,8 @@ test("Gemini Pro plan models are named picks on every writing surface", () => {
   assert.equal(providerEntry("gemini-flash")?.label, "Gemini 3.8 Flash (Pro plan)");
   assert.equal(modelEffort("gemini-pro", "medium"), "medium");
 });
-test("Automatic adds Gemini Flash after balanced Codex", () => {
-  assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
+test("Automatic adds Gemini Flash after balanced Codex, and Claude Sonnet last", () => {
+  assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash", "claude-sonnet"]);
 });
 test("the selected Gemini program returns its own failure words to the hop", async () => {
   let called = false;

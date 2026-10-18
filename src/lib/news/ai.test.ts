@@ -1429,6 +1429,64 @@ describe("model-picker provider readiness", () => {
     });
   });
 
+  it("Automatic reaches Claude Sonnet, its last rung, when Claude is the only model signed in", async () => {
+    // Scott, Oct 18 2026: Automatic uses any model the user has a subscription
+    // to. DeepSeek, the local model and both Codex/Gemini rungs are off or not
+    // signed in here, so the walk has to arrive at Claude Sonnet and stop there.
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input: string | URL | Request) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.startsWith("https://api.anthropic.com/v1/models")) return new Response("{}", { status: 200 });
+      throw new TypeError(`unexpected readiness probe: ${url}`);
+    };
+    try {
+      await withEnvAsync(
+        { ...BARE, ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_DEEPSEEK: "0", TOWNREPORTER_CODEX: "0" },
+        async () => {
+          const result = await probeProvider("auto");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "claude-sonnet");
+        },
+      );
+      assert.equal(urls.filter((url) => url.includes("anthropic")).length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("Automatic stops at DeepSeek and never checks Claude while DeepSeek is ready", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input: string | URL | Request) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.startsWith("http://127.0.0.1:11434/")) {
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), { status: 200 });
+      }
+      throw new TypeError(`unexpected readiness probe: ${url}`);
+    };
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          ANTHROPIC_API_KEY: "sk-ant-test",
+          TOWNREPORTER_DEEPSEEK_BASE_URL: "http://127.0.0.1:11434/v1",
+          TOWNREPORTER_CODEX: "0",
+        },
+        async () => {
+          const result = await probeProvider("auto");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "deepseek-flash");
+        },
+      );
+      assert.equal(urls.filter((url) => url.includes("anthropic")).length, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("distinguishes an unreachable provider from a timeout", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {

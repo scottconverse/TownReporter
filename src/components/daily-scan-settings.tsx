@@ -9,7 +9,7 @@ import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
 import { getDailyScanPolicy, pauseDailyScan, resumeDailyScan, type DailyScanPolicy, type DailyScanRuntime } from "@/lib/news/daily-scan";
 import { ModelPicker } from "@/components/model-picker";
-import { modelChoiceLabel, pastRunModelName } from "@/lib/news/model-choice";
+import { automaticOrderSentence, modelChoiceLabel, pastRunModelName } from "@/lib/news/model-choice";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 
@@ -308,9 +308,8 @@ export function DailyScanSettings() {
         sub="A scheduled reporter pass for leads only. It does not draft or publish anything."
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
-        Choose the model for every scheduled run. Automatic works down the writing ladder — DeepSeek
-        v4.1 Flash first, then a model on this computer if one is already loaded, then Codex Sol 6.1 (balanced) —
-        and the run record names the model that actually ran. If the chosen model is unavailable, out of quota,
+        Choose the model for every scheduled run. {automaticOrderSentence()} The run record names the model
+        that actually ran. If the chosen model is unavailable, out of quota,
         signed out, or returns no output, the unfinished model call can move to the next ready
         writing model and the run records that switch. A content refusal stops the run. Saved Custom
         AI connections, including OpenAI-compatible Gemini endpoints, resolve their encrypted
