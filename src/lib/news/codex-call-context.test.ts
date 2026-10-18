@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createCodexCallContext } from "./codex-call-context.server.ts";
@@ -62,6 +62,123 @@ describe("Codex newsroom context", () => {
       assert.equal((await stat(join(home, "auth.json"))).nlink, originalAuth.nlink);
       for (const name of ["plugins", "skills", "memories", "hooks", "sessions"]) await access(join(home, name, "sentinel.txt"));
       assert.equal(await readFile(join(home, "AGENTS.md"), "utf8"), "PERSONAL_INSTRUCTIONS");
+    });
+  });
+
+  // Fixed timestamps make renewal ordering independent of clock resolution and sleeps.
+  const time = (seconds: number) => new Date(1_700_000_000_000 + seconds * 1_000);
+  async function authA(home: string) {
+    const path = join(home, "auth.json");
+    await writeFile(path, "A");
+    await utimes(path, time(0), time(0));
+    return stat(path);
+  }
+  async function replaceAuth(home: string, seconds: number) {
+    const staging = join(home, "replacement.json");
+    await writeFile(staging, "B");
+    await utimes(staging, time(seconds), time(seconds));
+    await rename(staging, join(home, "auth.json"));
+  }
+
+  it("keeps in-place renewal B on the original inode without copying", async () => {
+    await fixture(async home => {
+      const original = await authA(home);
+      const context = await createCodexCallContext({ system: "Desk" });
+      try {
+        await writeFile(join(context.env.CODEX_HOME, "auth.json"), "B");
+        await utimes(join(context.env.CODEX_HOME, "auth.json"), time(10), time(10));
+        await context.dispose();
+        const current = await stat(join(home, "auth.json"));
+        assert.equal(current.ino, original.ino);
+        assert.equal(current.dev, original.dev);
+        assert.equal(await readFile(join(home, "auth.json"), "utf8"), "B");
+      } finally { await rm(context.env.CODEX_HOME, { recursive: true, force: true }); }
+    });
+  });
+
+  it("atomically copies replacement renewal B back and disposes idempotently", async () => {
+    await fixture(async home => {
+      const original = await authA(home);
+      const context = await createCodexCallContext({ system: "Desk" });
+      try {
+        await replaceAuth(context.env.CODEX_HOME, 10);
+        const renewed = await stat(join(context.env.CODEX_HOME, "auth.json"));
+        await context.dispose();
+        const current = await stat(join(home, "auth.json"));
+        assert.equal(await readFile(join(home, "auth.json"), "utf8"), "B");
+        assert.notEqual(current.ino, original.ino);
+        assert.notEqual(current.ino, renewed.ino); // Copy to a sibling, then rename; never move the call's auth.
+        await context.dispose();
+        await assert.rejects(access(context.env.CODEX_HOME), { code: "ENOENT" });
+        assert.equal((await readdir(home)).some(name => name.startsWith(".auth-renewal-")), false);
+      } finally { await rm(context.env.CODEX_HOME, { recursive: true, force: true }); }
+    });
+  });
+
+  for (const [label, realTime, tempTime, expected] of [
+    ["real is newer", 20, 10, "A"],
+    ["temp is newer", 10, 20, "B"],
+    ["timestamps tie", 20, 20, "A"],
+  ] as const) {
+    it(`preserves the newer auth after external real replacement: ${label}`, async () => {
+      await fixture(async home => {
+        await authA(home);
+        const context = await createCodexCallContext({ system: "Desk" });
+        try {
+          await replaceAuth(context.env.CODEX_HOME, tempTime);
+          await replaceAuth(home, realTime);
+          await writeFile(join(home, "auth.json"), "A");
+          await utimes(join(home, "auth.json"), time(realTime), time(realTime));
+          const external = await stat(join(home, "auth.json"));
+          await context.dispose();
+          assert.equal(await readFile(join(home, "auth.json"), "utf8"), expected);
+          if (expected === "A") assert.equal((await stat(join(home, "auth.json"))).ino, external.ino);
+        } finally { await rm(context.env.CODEX_HOME, { recursive: true, force: true }); }
+      });
+    });
+  }
+
+  it("keeps real auth when temporary auth is missing", async () => {
+    await fixture(async home => {
+      const original = await authA(home);
+      const context = await createCodexCallContext({ system: "Desk" });
+      await rm(join(context.env.CODEX_HOME, "auth.json"));
+      await context.dispose();
+      assert.equal((await stat(join(home, "auth.json"))).ino, original.ino);
+      assert.equal(await readFile(join(home, "auth.json"), "utf8"), "A");
+    });
+  });
+
+  it("does not recreate real auth after operator signout", async () => {
+    await fixture(async home => {
+      await authA(home);
+      const context = await createCodexCallContext({ system: "Desk" });
+      await replaceAuth(context.env.CODEX_HOME, 10);
+      await rm(join(home, "auth.json"));
+      await context.dispose();
+      await assert.rejects(access(join(home, "auth.json")), { code: "ENOENT" });
+    });
+  });
+
+  it("preserves real auth and the temporary source when staging copy fails", async () => {
+    await fixture(async home => {
+      const original = await authA(home);
+      const context = await createCodexCallContext({ system: "Desk" });
+      const tempAuth = join(context.env.CODEX_HOME, "auth.json");
+      try {
+        await rm(tempAuth);
+        await mkdir(tempAuth); // A directory cannot be copied with copyFile on Windows or POSIX.
+        await writeFile(join(tempAuth, "renewal.txt"), "B");
+        await utimes(tempAuth, time(10), time(10));
+        await assert.rejects(context.dispose());
+        assert.equal((await stat(join(home, "auth.json"))).ino, original.ino);
+        assert.equal(await readFile(join(home, "auth.json"), "utf8"), "A");
+        assert.equal(await readFile(join(tempAuth, "renewal.txt"), "utf8"), "B");
+      } finally {
+        // Dispose after removing the intentionally invalid source to unlink tool junctions safely.
+        await rm(tempAuth, { recursive: true, force: true });
+        await context.dispose();
+      }
     });
   });
 
