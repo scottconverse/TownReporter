@@ -19,7 +19,7 @@ import {
   writerIsReady,
   writerUnavailableReason,
 } from "./writer-bar.ts";
-import { lastDraftModelName } from "./model-choice.ts";
+import { pastRunModelName } from "./model-choice.ts";
 
 /**
  * The Writer / Effort bar's lines (unit CW, 0.6.81).
@@ -441,7 +441,7 @@ describe("the Last draft line names the model that ran (the story page's composi
       hasDraft: true,
       civicReporting: false,
       jobStatus: "completed",
-      modelLabel: lastDraftModelName({ choice, actualModelId: recordedActualModelId(resultJson), choiceLabel }),
+      modelLabel: pastRunModelName({ choice, actualModelId: recordedActualModelId(resultJson), choiceLabel }),
       finishedAt,
     });
   it("names an old claude-frontier draft without a version when its receipt recorded no model", () => {

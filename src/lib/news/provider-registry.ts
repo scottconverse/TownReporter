@@ -195,7 +195,7 @@ export type ProviderEntry = {
    * story page's "Last draft" line prints it for a draft whose receipt recorded
    * no model id: a draft written before the desk recorded one never showed
    * which version ran, so the line does not claim one. Set only where `label`
-   * carries a version; see `lastDraftModelName` in ./model-choice.ts.
+   * carries a version; see `pastRunModelName` in ./model-choice.ts.
    */
   familyLabel?: string;
   /** The half-line under the label in the picker. */

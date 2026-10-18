@@ -8,6 +8,7 @@ import type {
   ManualClaimEvidenceRow,
 } from "./finding-evidence-review.ts";
 import type { NameCheck } from "./name-check.ts";
+import { pastRunModelName } from "./model-choice.ts";
 import {
   captureIsReadable,
   citedCaptureCount,
@@ -219,6 +220,18 @@ describe("evidenceRanLine", () => {
     assert.equal(
       evidenceRanLine({ state: RAN, checkedAt: null, modelLabel: "Claude Sonnet", captures: 0 }),
       "Claude Sonnet",
+    );
+  });
+
+  it("names an old claude-frontier reconcile job without a version, because reconcile jobs record no model id", () => {
+    assert.equal(
+      evidenceRanLine({
+        state: RAN,
+        checkedAt: null,
+        modelLabel: pastRunModelName({ choice: "claude-frontier", actualModelId: null, choiceLabel: "Claude Opus 5.5" }),
+        captures: 4,
+      }),
+      "Claude Opus · checked against 4 captures",
     );
   });
 

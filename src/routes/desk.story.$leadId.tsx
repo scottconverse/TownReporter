@@ -128,8 +128,8 @@ import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review
 import { evidenceReviewDisabled, takeDownPressDisabled } from "@/lib/news/finding-evidence-locks";
 import { evidenceDetailId, STYLE_ROW_KEY } from "@/lib/news/evidence-check-list";
 import {
-  lastDraftModelName,
   modelChoiceLabel,
+  pastRunModelName,
   rememberedStoryModelChoice,
   retiredModelChoiceNote,
   type StoryModelChoice,
@@ -698,18 +698,20 @@ function StoryPage() {
     The Reporting package shows its own run status; until the page has a
     truthful reporting receipt line, suppress this stale attribution.
   */
+  /* The writer of the stored job, named with the model its run recorded: a past run never gets a version it did not record. */
+  const storedWriterName = data?.job?.model_choice
+    ? pastRunModelName({
+      choice: data.job.model_choice,
+      actualModelId: recordedActualModelId(data.job.result_json),
+      choiceLabel: storyModelLabel(data.job.model_choice),
+    })
+    : storyModelLabel(data?.job?.model_choice);
   /* The model that finished the draft: a failover note's destination, else the job's model_choice (the model that ran). */
   const lastDraft = lastDraftInHand({
     hasDraft: Boolean(data?.draft),
     civicReporting: civicReportingDraft,
     jobStatus: data?.job?.status,
-    modelLabel: data?.job?.model_choice
-      ? lastDraftModelName({
-        choice: data.job.model_choice,
-        actualModelId: recordedActualModelId(data.job.result_json),
-        choiceLabel: storyModelLabel(data.job.model_choice),
-      })
-      : "",
+    modelLabel: data?.job?.model_choice ? storedWriterName : "",
     failoverNote: data?.job?.failover_note,
     finishedAt: data?.job?.finished_at,
   });
@@ -719,7 +721,7 @@ function StoryPage() {
   const fallbackAttribution = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed"
     ? draftFallbackAttribution({
         pickedModel: storyModelLabel(requestedDraftModelChoice),
-        writerModel: storyModelLabel(data.job.model_choice),
+        writerModel: storedWriterName,
         failoverNote: data.job.failover_note,
       })
     : undefined;
@@ -738,7 +740,7 @@ function StoryPage() {
     : "";
   /* THU-7: the button names the model that wrote the saved draft. */
   const savedDraftWriter = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed" && data.job.model_choice
-    ? storyModelLabel(data.job.model_choice)
+    ? storedWriterName
     : "";
   const modelAndResearchText = modelAndResearchLabel({
     runningLine: runningWriterLine,
@@ -2810,7 +2812,10 @@ function StoryPage() {
     noteWarning: reconcileNoteWarning,
     checkedDraftReady,
     checkedDraftStale,
-    modelLabel: storyModelLabel(reconcileStatus.data?.modelChoice ?? modelChoice),
+    /* A stored check names its model with no version: reconcile jobs record none. A live check keeps its current choice. */
+    modelLabel: reconcileStatus.data?.modelChoice && !reconcileActive
+      ? pastRunModelName({ choice: reconcileStatus.data.modelChoice, choiceLabel: storyModelLabel(reconcileStatus.data.modelChoice) })
+      : storyModelLabel(reconcileStatus.data?.modelChoice ?? modelChoice),
     review: evidenceReview,
     reviewOpen: evidenceReviewOpen,
     onStart: () => reconcile.mutate(),
@@ -3112,7 +3117,9 @@ function StoryPage() {
                 list={{
                   checkedAt: evidenceCheckedAt,
                   modelLabel: reconcileStatus.data?.modelChoice
-                    ? storyModelLabel(reconcileStatus.data.modelChoice)
+                    ? reconcileActive
+                      ? storyModelLabel(reconcileStatus.data.modelChoice)
+                      : pastRunModelName({ choice: reconcileStatus.data.modelChoice, choiceLabel: storyModelLabel(reconcileStatus.data.modelChoice) })
                     : "",
                   openClaims,
                   nameCheck,

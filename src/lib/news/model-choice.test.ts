@@ -5,7 +5,7 @@ import {
   DEFAULT_OPINION_MODEL,
   effectiveStoryModelChoice,
   darkModelChoice,
-  lastDraftModelName,
+  pastRunModelName,
   localModelOptionLabel,
   modelChoiceLabel,
   modelChoiceHelp,
@@ -534,72 +534,93 @@ describe("the Writing models panel's ladder sentence", () => {
   });
 });
 
-describe("lastDraftModelName: the Last draft line names the model that ran", () => {
+describe("pastRunModelName: the Last draft line names the model that ran", () => {
   it("names a draft that recorded no model id without a version, because the desk never saw which version ran", () => {
     assert.equal(
-      lastDraftModelName({ choice: "claude-frontier", choiceLabel: "Claude Opus 5.5" }),
+      pastRunModelName({ choice: "claude-frontier", choiceLabel: "Claude Opus 5.5" }),
       "Claude Opus",
     );
     assert.equal(
-      lastDraftModelName({ choice: "claude-sonnet", actualModelId: null, choiceLabel: "Claude Sonnet 5.5" }),
+      pastRunModelName({ choice: "claude-sonnet", actualModelId: null, choiceLabel: "Claude Sonnet 5.5" }),
       "Claude Sonnet",
     );
   });
 
   it("names the recorded model by its versioned picker label when the registry knows the id", () => {
     assert.equal(
-      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5-5", choiceLabel: "Claude Opus 5.5" }),
+      pastRunModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5-5", choiceLabel: "Claude Opus 5.5" }),
       "Claude Opus 5.5",
     );
   });
 
   it("names an unknown recorded model id as the raw id", () => {
     assert.equal(
-      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5", choiceLabel: "Claude Opus 5.5" }),
+      pastRunModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5", choiceLabel: "Claude Opus 5.5" }),
       "claude-opus-5",
     );
   });
 
   it("keeps the label of a choice whose name no version change touched", () => {
     assert.equal(
-      lastDraftModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
+      pastRunModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
       "DeepSeek v4.1 Flash",
     );
   });
 
   it("keeps a local or custom run's own label, which already names its model", () => {
     assert.equal(
-      lastDraftModelName({ choice: "local-model", actualModelId: "qwen-local", choiceLabel: "Local model (qwen2.5:7b)" }),
+      pastRunModelName({ choice: "local-model", actualModelId: "qwen-local", choiceLabel: "Local model (qwen2.5:7b)" }),
       "Local model (qwen2.5:7b)",
     );
     assert.equal(
-      lastDraftModelName({ choice: "custom:abc", choiceLabel: "Lab gateway (gpt-x)" }),
+      pastRunModelName({ choice: "custom:abc", choiceLabel: "Lab gateway (gpt-x)" }),
       "Lab gateway (gpt-x)",
     );
   });
 
   it("names the choice that ran when two choices share one model id", () => {
     assert.equal(
-      lastDraftModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
+      pastRunModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
       "Codex Sol 6.1",
     );
     assert.equal(
-      lastDraftModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
+      pastRunModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
       "Codex Sol 6.1 (balanced)",
     );
   });
 
   it("names a failover-like model by the one registry entry that serves it, not by the choice that asked", () => {
     assert.equal(
-      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
+      pastRunModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
       "Claude Sonnet 5.5",
     );
   });
 
   it("names a model two choices share by its raw id when the choice that ran does not serve it", () => {
     assert.equal(
-      lastDraftModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      pastRunModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
       "gpt-6.1-sol",
+    );
+  });
+
+  it("names a recorded id that lacks the registry tag (:cloud) by the choice that ran", () => {
+    assert.equal(
+      pastRunModelName({ choice: "deepseek-flash", actualModelId: "deepseek-v4.1-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "DeepSeek v4.1 Flash",
+    );
+  });
+
+  it("names a recorded date snapshot of the choice's model by the choice that ran", () => {
+    assert.equal(
+      pastRunModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5-5-20261001", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Opus 5.5",
+    );
+  });
+
+  it("does not read a version digit run that is not a date snapshot as one", () => {
+    assert.equal(
+      pastRunModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5-5-beta", choiceLabel: "Claude Opus 5.5" }),
+      "claude-opus-5-5-beta",
     );
   });
 });

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
-import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel, pastRunModelName, storyModelChoice } from "./model-choice.ts";
+import { recordedActualModelId } from "./writer-bar.ts";
 import type { ModelEffort } from "./provider-registry.ts";
 import {
   jobStages,
@@ -284,7 +285,12 @@ export function jobProgressView(
     cutOff = receipt.draftCutOff === true;
     darkStop = typeof receipt.darkStop === "string" ? receipt.darkStop : "";
   } catch { /* Legacy receipt. */ }
-  let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
+  const choice = effectiveStoryModelChoice(row.model_choice);
+  const choiceLabel = modelChoiceLabel(choice);
+  // A finished run names the model it recorded; a live row names its current choice.
+  let model = row.status === "queued" || row.status === "running"
+    ? choiceLabel
+    : pastRunModelName({ choice, actualModelId: recordedActualModelId(row.result_json), choiceLabel });
   if (typeof row.model_choice === "string" && row.model_choice.startsWith("custom:")) {
     try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
   }
@@ -420,9 +426,14 @@ export const listFollowUpJobProgress = createServerFn({ method: "GET" })
       // real and its progress bar is worth showing, so it falls back to the
       // resolver's own word for "no opinion" rather than dropping the card.
       const resolved = await resolveFollowUpModel(followUp).catch(() => null);
+      const resolvedChoice = resolved?.providerId ?? "auto";
+      const resolvedLabel = modelChoiceLabel(resolvedChoice);
       out.push({
         followUpId: row.subject_id,
-        view: followUpJobProgressView(row, modelChoiceLabel(resolved?.providerId ?? "auto")),
+        // A finished follow-up names the model its run recorded; a live one names its current choice.
+        view: followUpJobProgressView(row, row.status === "queued" || row.status === "running"
+          ? resolvedLabel
+          : pastRunModelName({ choice: resolvedChoice, actualModelId: recordedActualModelId(row.result_json), choiceLabel: resolvedLabel })),
       });
     }
     return out;

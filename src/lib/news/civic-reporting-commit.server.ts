@@ -42,6 +42,7 @@ import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import {
   effectiveStoryModelChoice,
   modelChoiceLabel,
+  pastRunModelName,
   storyModelChoice,
   type EffectiveStoryModelChoice,
   type StoryModelChoice,
@@ -811,7 +812,7 @@ export async function loadLeadReportingPackageForEditor(
     requestId: Number(latest.id), status: latest.run_status,
     error: typeof receipt.reason === "string" && receipt.reason.trim() ? receipt.reason : latest.error,
     assignment: latest.assignment, finishedAt: latest.finished_at,
-    modelLabel: typeof receipt.modelLabel === "string" ? receipt.modelLabel : modelChoiceLabel(latest.model_choice),
+    modelLabel: typeof receipt.modelLabel === "string" ? receipt.modelLabel : pastRunModelName({ choice: latest.model_choice, choiceLabel: modelChoiceLabel(latest.model_choice) }),
   } : null;
   if (!loaded) return latestRun ? {
     requestId: latestRun.requestId, draftId: null, pkg: null, latestRun,

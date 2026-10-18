@@ -1,9 +1,9 @@
-import { modelChoiceLabel } from "./model-choice.ts";
+import { modelChoiceLabel, pastRunModelName } from "./model-choice.ts";
 
 export function editorialAttribution(row: { source_kind: string; model_choice: unknown }): string {
   return row.source_kind === "written-by-the-editor"
     ? "Written by the editor"
-    : modelChoiceLabel(row.model_choice);
+    : pastRunModelName({ choice: row.model_choice, choiceLabel: modelChoiceLabel(row.model_choice) });
 }
 
 /** The reader stores a draft ID, not the ID of the request that created it. */

@@ -301,7 +301,7 @@ export function lastDraftInHand(input: {
   hasDraft: boolean;
   civicReporting: boolean;
   jobStatus: string | null | undefined;
-  /** The model that ran, named by `lastDraftModelName`; "" when the desk records none. */
+  /** The model that ran, named by `pastRunModelName`; "" when the desk records none. */
   modelLabel: string;
   failoverNote?: string | null;
   finishedAt: string | null | undefined;

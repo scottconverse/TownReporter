@@ -329,18 +329,33 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
 }
 
 /**
- * The model the "Last draft" line names for a draft job. A receipt that
- * recorded the model that served the run names that model: the label of the
- * choice that ran when that choice serves the model ("claude-opus-5-5" ->
- * "Claude Opus 5.5"); else the label of the only registry entry that serves it;
- * else the raw id ("claude-opus-5", or "gpt-6.1-sol" when two choices share it,
- * because the id alone cannot say which one ran). A receipt that recorded none
- * -- every draft written before the desk recorded one -- names the choice
- * without a version ("Claude Opus"), because the desk never saw which version
- * ran. A local model or a custom connection already names its own model in
- * `choiceLabel`, so it keeps that.
+ * Does a model id a run recorded name the registry model `registryModel`? The
+ * recorded id may carry a ":tag" the registry does not ("deepseek-v4.1-flash"
+ * ran as "deepseek-v4.1-flash:cloud"), or a date snapshot after the model
+ * ("claude-opus-5-5-20261001"); either side's tag is dropped before comparing.
  */
-export function lastDraftModelName(input: {
+function servesRecordedModel(registryModel: string, recordedId: string): boolean {
+  const bare = (id: string) => id.replace(/:[^:]*$/, "");
+  const model = bare(registryModel);
+  const recorded = bare(recordedId);
+  if (recorded === model) return true;
+  return recorded.startsWith(`${model}-`) && /^\d+$/.test(recorded.slice(model.length + 1));
+}
+
+/**
+ * The model a PAST run's screen names: the Last draft line, the evidence line,
+ * the job cards, the scan's last run. A run that recorded the model that served
+ * it names that model: the label of the choice that ran when that choice serves
+ * the model ("claude-opus-5-5-20261001" -> "Claude Opus 5.5"); else the label of
+ * the only registry entry that serves it ("deepseek-v4.1-flash" ->
+ * "DeepSeek v4.1 Flash"); else the raw id ("claude-opus-5", or "gpt-6.1-sol"
+ * when two choices share it, because the id alone cannot say which one ran).
+ * A run that recorded none -- every run before the desk recorded one, and every
+ * reconcile or scan run -- names the choice without a version ("Claude Opus"),
+ * because the desk never saw which version ran. A local model or a custom
+ * connection already names its own model in `choiceLabel`, so it keeps that.
+ */
+export function pastRunModelName(input: {
   choice: unknown;
   actualModelId?: string | null;
   choiceLabel: string;
@@ -348,15 +363,15 @@ export function lastDraftModelName(input: {
   const { choice, choiceLabel } = input;
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
-  if (actualModelId) {
-    // Two choices can serve one model id (codex-balanced and codex-frontier both
-    // run gpt-6.1-sol), so the choice that ran names it before the registry does.
-    const choiceEntry = typeof choice === "string" ? providerEntry(choice) : null;
-    if (choiceEntry?.model === actualModelId) return choiceLabel;
-    const owners = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
-    return owners.length === 1 ? owners[0].label : actualModelId;
+  if (!actualModelId) {
+    return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
   }
-  return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
+  // Two choices can serve one model id (codex-balanced and codex-frontier both
+  // run gpt-6.1-sol), so the choice that ran names it before the registry does.
+  const choiceEntry = typeof choice === "string" ? providerEntry(choice) : null;
+  if (choiceEntry && servesRecordedModel(choiceEntry.model, actualModelId)) return choiceLabel;
+  const owners = PROVIDER_REGISTRY.filter((entry) => servesRecordedModel(entry.model, actualModelId));
+  return owners.length === 1 ? owners[0].label : actualModelId;
 }
 
 /**

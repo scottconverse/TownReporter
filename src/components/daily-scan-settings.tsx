@@ -9,7 +9,7 @@ import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
 import { getDailyScanPolicy, pauseDailyScan, resumeDailyScan, type DailyScanPolicy, type DailyScanRuntime } from "@/lib/news/daily-scan";
 import { ModelPicker } from "@/components/model-picker";
-import { modelChoiceLabel } from "@/lib/news/model-choice";
+import { modelChoiceLabel, pastRunModelName } from "@/lib/news/model-choice";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 
@@ -70,6 +70,11 @@ function runStatus(policy: DailyScanPolicy): string {
   if (!policy.lastRun) return "No daily scan has run yet.";
   const run = policy.lastRun;
   return `${run.status} for ${run.localDay}${run.error ? `: ${run.error}` : ""}`;
+}
+
+/** A scan run records no model id, so its last run names the choice without a version. */
+function lastRunModelName(choice: unknown): string {
+  return pastRunModelName({ choice, choiceLabel: modelChoiceLabel(choice) });
 }
 
 /** Owner-only editor for the daily lead scan; authorization also lives in the RPCs. */
@@ -556,8 +561,8 @@ export function DailyScanSettings() {
             <span className="text-muted">Model:</span>{" "}
             {current.lastRun.requestedRuntime &&
             current.lastRun.requestedRuntime !== current.lastRun.resolvedRuntime
-              ? `${modelChoiceLabel(current.lastRun.requestedRuntime)} → ${modelChoiceLabel(current.lastRun.resolvedRuntime)}`
-              : modelChoiceLabel(current.lastRun.resolvedRuntime)}
+              ? `${lastRunModelName(current.lastRun.requestedRuntime)} → ${lastRunModelName(current.lastRun.resolvedRuntime)}`
+              : lastRunModelName(current.lastRun.resolvedRuntime)}
           </p>
         ) : null}
         {current.lastRun?.failoverNote ? (
