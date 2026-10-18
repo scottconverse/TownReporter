@@ -80,7 +80,7 @@ export async function checkEditorialNames(opts:Options):Promise<CheckedEditorial
       }
     },
     timeLeft:()=>Math.max(0,totalMs-(Date.now()-started)),stage:opts.stage,
-    chat:opts.chat ?? ((system,user,maxTokens)=>grokChat(system,user,maxTokens,{choice:opts.modelChoice,newsroomId:opts.newsroomId,timeoutMs:120_000,noTools:true,localModel:opts.modelChoice === "local-model" ? opts.localModel : undefined})),
+    chat:opts.chat ?? ((system,user,maxTokens)=>grokChat(system,user,maxTokens,{choice:opts.modelChoice,newsroomId:opts.newsroomId,timeoutMs:120_000,localModel:opts.modelChoice === "local-model" ? opts.localModel : undefined})),
   });
   const split=checked.draft.body.split(divider);
   const editorial={...opts.editorial,headline:checked.draft.headline,appendix:checked.draft.dek,body:split[0] ?? "",factSheet:split.slice(1).join(divider)};

@@ -381,6 +381,7 @@ export type ForcedChatAdapters<T> = {
     user: string;
     model: string;
     timeoutMs: number;
+    /** @deprecated Compatibility no-op; CLI calls always retain full tools. */
     noTools?: boolean;
     reasoningEffort?: ModelEffort | null;
   }) => Promise<T>;
@@ -397,6 +398,7 @@ export type ForcedChatAdapters<T> = {
       choice: "local-model"| AutomaticRungId;
       rungModel?: string;
       localModel: { baseUrl: string; id: string };
+      /** @deprecated Compatibility no-op; CLI calls always retain full tools. */
       noTools?: boolean;
       reasoningEffort?: ModelEffort | null;
     },
@@ -410,6 +412,7 @@ export type ForcedChatAdapters<T> = {
       choice: CustomModelChoice;
       newsroomId: number;
       model: string;
+      /** @deprecated Compatibility no-op; CLI calls always retain full tools. */
       noTools?: boolean;
       reasoningEffort?: ModelEffort | null;
     },
@@ -454,7 +457,6 @@ export async function runForcedChat<T>(
       user,
       model: valid.model,
       timeoutMs,
-      noTools: options?.noTools,
       reasoningEffort: valid.modelEffort,
     });
   }

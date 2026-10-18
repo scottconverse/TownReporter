@@ -1999,8 +1999,7 @@ export async function synthesizeSignals(
       newsroomId,
       localModel: overrides?.["local-model"]?.localModel,
       // Dark Desk F1: synthesis reads the pack already assembled above and
-      // returns JSON only — it never fetches or searches itself.
-      noTools: true,
+      // returns JSON; full CLI tools remain available for verification.
       reasoningEffort,
     });
   } catch (err) {
@@ -2270,7 +2269,6 @@ async function runVerificationStage(
         choice: snapshot.modelChoice,
         newsroomId,
         localModel: overrides?.["local-model"]?.localModel,
-        noTools: true,
         reasoningEffort: snapshot.modelEffort,
       }),
       probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
@@ -4886,8 +4884,7 @@ export async function buildBrief(
       newsroomId,
       localModel: overrides?.["local-model"]?.localModel,
       // Dark Desk F1: the brief reads the file already assembled above and
-      // returns JSON only — it never fetches or searches itself.
-      noTools: true,
+      // returns JSON; full CLI tools remain available for verification.
       reasoningEffort,
     });
   } catch (err) {

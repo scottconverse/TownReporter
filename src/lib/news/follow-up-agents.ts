@@ -373,7 +373,7 @@ export async function runRecheckAgent(
 
 const SEARCH_JUDGE_SYSTEM = [
   "You decide whether a set of web search results answers one specific question a local newsroom is following up.",
-  "You do not guess and you do not browse. If none of the results answers the question, answer false.",
+  "You do not guess. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. If none of the results answers the question, answer false.",
   "Answer with one JSON object and nothing else:",
   '{"answers": true|false, "url": "<the single best result URL, or \\"\\">", "title": "<its title>", "summary": "<one sentence, at most 240 characters, saying what it establishes, or why none of them answers it>", "relevant": <how many of the results above are about the question\'s subject at all>}',
   "Only set answers to true when a result actually establishes the fact asked for. A related page, a directory listing or an older story about the same topic is false.",
@@ -418,7 +418,6 @@ async function judgeSearchHits(input: SearchJudgeInput): Promise<SearchJudgeResu
         newsroomId: input.newsroomId,
         localModel: input.localModel,
         reasoningEffort: input.modelEffort,
-        noTools: true,
       },
     );
     if (!ai.ok) {

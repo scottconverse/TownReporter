@@ -131,7 +131,7 @@ it("actual draft worker uses only the persisted forced transport", async () => {
       },
       batchChatAdapters: {
         claude: async (input) => {
-          assert.equal(input.noTools, true);
+          assert.equal(input.noTools, undefined);
           assert.equal(input.timeoutMs, 12_345);
           calls.push("claude:" + input.model);
           return { ok: true, text: "answer" };

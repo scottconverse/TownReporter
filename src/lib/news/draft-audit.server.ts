@@ -201,7 +201,6 @@ export async function fixDraftStyleForEditor(
             choice: snapshot.modelChoice,
             newsroomId: context.newsroomId,
             timeoutMs: DRAFT_STYLE_TIMEOUT_MS,
-            noTools: true,
             reasoningEffort: snapshot.modelEffort,
           }),
         resolve: async (next) => ({ modelChoice: next, modelEffort: modelEffort(next, effort) }),

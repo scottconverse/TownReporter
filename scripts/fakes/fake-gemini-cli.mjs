@@ -36,30 +36,14 @@ function argValue(name) {
 
 const model = argValue("--model");
 if (!model) fail("Missing --model.");
-if (argv.length !== 10) fail("Unexpected argument count.");
+if (argv.length !== 11) fail("Unexpected argument count.");
 if (argv[0] !== "--model" || argv[1] !== model) fail("Missing --model value.");
-if (argv[2] !== "--disable-slash-commands") fail("Missing --disable-slash-commands.");
-if (argv[3] !== "--input-format" || argv[4] !== "stream-json")
-  fail("Missing --input-format stream-json.");
-if (argv[5] !== "--output-format" || argv[6] !== "stream-json")
-  fail("Missing --output-format stream-json.");
-if (
-  argv[7] !== "--print-timeout" ||
-  !/^(?:[0-9]+(?:\.[0-9]+)?)s$/.test(argv[8] ?? "") ||
-  !(Number.parseFloat(argv[8]) > 0)
-)
-  fail("Missing --print-timeout <seconds>s.");
-if (argv[9] !== "--print=") fail("Missing --print=.");
-
-const forbidden = [
-  "--yolo",
-  "--dangerously-skip-permissions",
-  "--skip-tools-permission",
-  "--allow-tools",
-];
-for (const flag of forbidden) {
-  if (argv.includes(flag)) fail("Tools permission skip is not allowed.");
-}
+if (argv[2] !== "--dangerously-skip-permissions") fail("Missing tool permission bypass.");
+if (argv[3] !== "--disable-slash-commands") fail("Missing --disable-slash-commands.");
+if (argv[4] !== "--input-format" || argv[5] !== "stream-json") fail("Missing input format.");
+if (argv[6] !== "--output-format" || argv[7] !== "stream-json") fail("Missing output format.");
+if (argv[8] !== "--print-timeout" || !/^(?:[0-9]+(?:\.[0-9]+)?)s$/.test(argv[9] ?? "") || !(Number.parseFloat(argv[9]) > 0)) fail("Missing print timeout.");
+if (argv[10] !== "--print=") fail("Missing --print=.");
 
 function readStdin() {
   return new Promise((resolve, reject) => {

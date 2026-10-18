@@ -111,7 +111,7 @@ describe("performFindReplacement", () => {
     });
   });
 
-  it("makes exactly one call, with no tools, and asks the beat's question", async () => {
+  it("makes exactly one call, with full CLI tools, and asks the beat's question", async () => {
     const f = makeDeps({
       source: [SOURCE],
       filed: [{ section_key: "planning" }, { section_key: "budget" }],
@@ -121,7 +121,7 @@ describe("performFindReplacement", () => {
     const result = await performFindReplacement(context, { sourceId: 7 }, f.deps);
     assert.equal(result.ok, true);
     assert.equal(f.calls.length, 1, "one press is one model call");
-    assert.equal(f.calls[0]!.opts.noTools, true, "the desk is asking for a list, not a reader");
+    assert.equal(f.calls[0]!.opts.noTools, undefined, "the caller must not restrict CLI tools");
     assert.equal(f.calls[0]!.maxTokens, 1400);
     // The topic is the beat, named the way the newsroom names it, then the
     // source being replaced.

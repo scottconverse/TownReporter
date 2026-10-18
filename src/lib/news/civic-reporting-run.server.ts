@@ -1133,7 +1133,6 @@ export async function gatherIndependentSources(input: {
         reasoningEffort: input.researchRuntime.effort,
         timeoutMs: Math.max(45_000, input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
           await readProviderOverrides(input.request.newsroom_id, "story")).callMs),
-        noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };
     });
@@ -1831,7 +1830,6 @@ export async function performReportingWork(
     newsroomId: request.newsroom_id,
     localModel: model.localModel,
     reasoningEffort: model.effort,
-    noTools: false,
     timeoutMs: callMs,
   };
 
@@ -5194,7 +5192,6 @@ export async function furtherResearchPass(input: {
         reasoningEffort: input.researchRuntime.effort,
         timeoutMs: Math.max(45_000, input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
           await readProviderOverrides(input.request.newsroom_id, "story")).callMs),
-        noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };
     });

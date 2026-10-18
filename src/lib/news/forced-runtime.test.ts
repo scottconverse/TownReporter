@@ -85,7 +85,7 @@ describe("forced runtime snapshots", () => {
     });
   }
 
-  it("preserves noTools on forced Claude Code calls", async () => {
+  it("ignores legacy noTools on forced Claude Code calls", async () => {
     let received: unknown;
     const result = await runForcedChat(
       claude,
@@ -107,7 +107,7 @@ describe("forced runtime snapshots", () => {
       },
     );
     assert.equal(result.ok, true);
-    assert.equal((received as { noTools?: boolean }).noTools, true);
+    assert.equal((received as { noTools?: boolean }).noTools, undefined);
   });
 
   for (const [modelChoice, transport, model] of [
