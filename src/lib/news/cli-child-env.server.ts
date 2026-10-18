@@ -158,7 +158,7 @@ export function cliChildEnv(extra: readonly string[] = []): NodeJS.ProcessEnv {
  * -- a sign-in that reports success and changes nothing. So the desk names the
  * home itself, on every host, rather than leaving it to the CLI's own fallback.
  */
-export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function cliUserRoots() {
   const appData = process.env.APPDATA?.trim();
   /*
     The user root, named the way this host names it: USERPROFILE on Windows (or
@@ -172,6 +172,20 @@ export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     process.env.USERPROFILE?.trim() ||
     (appData ? path.resolve(appData, "..", "..") : undefined);
   const userRoot = windowsRoot || process.env.HOME?.trim();
+  return { windowsRoot, userRoot };
+}
+
+/** Roaming app data may be absent when a Windows task starts before login. */
+export function cliAppData(): string | undefined {
+  const appData = process.env.APPDATA?.trim();
+  if (appData) return appData;
+  const { userRoot } = cliUserRoots();
+  return userRoot ? path.join(userRoot, "AppData", "Roaming") : undefined;
+}
+
+/** Add the shared user-root defaults to a Codex child's environment. */
+export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { windowsRoot, userRoot } = cliUserRoots();
   return {
     ...env,
     /*

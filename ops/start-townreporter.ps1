@@ -118,6 +118,16 @@ if ((Test-Path $appLog) -and ((Get-Item $appLog).Length -gt 5MB)) {
 #>
 . (Join-Path $PSScriptRoot "lib-migrate.ps1")
 
+# Boot start before login can leave the app-data environment variables empty.
+if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+  if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming'
+  }
+  if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local'
+  }
+}
+
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCommand) {
   "the paper was not started: node.exe is not on this machine's PATH." | Add-Content $appLog

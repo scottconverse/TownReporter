@@ -66,6 +66,28 @@ function nodeImport(source: string): string {
 }
 
 describe("Codex native drafting launch", { concurrency: false }, () => {
+  for (const appData of [undefined, "", "   "]) {
+    for (const rootName of ["USERPROFILE", "HOME"]) {
+      it(`finds a newly installed Codex under ${rootName} with APPDATA ${JSON.stringify(appData)}`, async () => {
+        const root = await mkdtemp(path.join(process.cwd(), "codex-lookup-test-"));
+        const bin = path.join(root, "AppData", "Roaming", "npm", "node_modules",
+          "@openai", "codex", "node_modules", "@openai", "codex-win32-x64",
+          "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe");
+        try {
+          await withEnv({
+            CODEX_CLI_PATH: undefined, APPDATA: appData,
+            USERPROFILE: undefined, HOME: undefined, [rootName]: root,
+          }, async () => {
+            assert.deepEqual(await findCodexCli(), { ok: true, bin: "codex" });
+            await mkdir(path.dirname(bin), { recursive: true });
+            await writeFile(bin, "");
+            assert.deepEqual(await findCodexCli(), { ok: true, bin });
+          });
+        } finally { await rm(root, { recursive: true, force: true }); }
+      });
+    }
+  }
+
   it("extracts the final JSONL agent message and exact reported usage", () => {
     const parsed = parseCodexJsonl([
       JSON.stringify({ type: "thread.started", thread_id: "t_123" }),
@@ -181,7 +203,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
 
   it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
     const lookup = await withEnv(
-      { CODEX_CLI_PATH: undefined, APPDATA: undefined },
+      { CODEX_CLI_PATH: undefined, APPDATA: undefined, USERPROFILE: undefined, HOME: undefined },
       () => findCodexCli(),
     );
     assert.deepEqual(lookup, { ok: true, bin: "codex" });

@@ -144,6 +144,41 @@ describe("parseCliEnvelope", () => {
 });
 
 describe("claudeCliCandidates", () => {
+  for (const appData of [undefined, "", "   "]) {
+    for (const rootName of ["USERPROFILE", "HOME"]) {
+      it(`derives roaming app data from ${rootName} when APPDATA is ${JSON.stringify(appData)}`, () => {
+        const root = join(ROOT, "boot-user");
+        const restore = withEnv({
+          CLAUDE_CLI_PATH: undefined, APPDATA: appData,
+          USERPROFILE: undefined, HOME: undefined, [rootName]: root,
+        });
+        try {
+          assert.ok(claudeCliCandidates().includes(
+            `${join(root, "AppData", "Roaming")}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`,
+          ));
+        } finally { restore(); }
+      });
+    }
+  }
+
+  it("finds a program created after a miss and memoizes only the found path", async () => {
+    const dir = await mkdtemp(join(ROOT, "claude-lookup-test-"));
+    const bin = join(dir, "claude.exe");
+    const restore = withEnv({ CLAUDE_CLI_PATH: bin });
+    resetClaudeCliCache();
+    try {
+      assert.equal(await findClaudeCli(), null);
+      await writeFile(bin, "");
+      assert.equal(await findClaudeCli(), bin);
+      await rm(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("honours an explicit CLAUDE_CLI_PATH and looks nowhere else", () => {
     const prev = process.env.CLAUDE_CLI_PATH;
     process.env.CLAUDE_CLI_PATH = "/custom/claude";
