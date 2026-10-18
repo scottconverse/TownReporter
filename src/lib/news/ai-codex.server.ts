@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
-import { codexChildEnv } from "./cli-child-env.server.ts";
+import { cliAppDataDir, codexChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
 
@@ -135,7 +135,9 @@ export async function findCodexCli(): Promise<CodexCliLookup> {
     if (await exists(named)) return { ok: true, bin: resolveCliPath(named) };
     return { ok: false, error: codexCliPathMissing(named) };
   }
-  const appData = process.env.APPDATA?.trim();
+  // APPDATA, or the folder derived from the profile when a boot-started server has
+  // none (see cliAppDataDir). Not memoized here, so every call looks again.
+  const appData = cliAppDataDir();
   if (appData) {
     const vendor = path.join(
       appData,

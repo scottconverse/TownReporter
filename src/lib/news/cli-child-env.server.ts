@@ -191,6 +191,23 @@ export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * The Roaming AppData folder the CLI lookups read: where the npm global installs
+ * of Claude Code and Codex live on Windows.
+ *
+ * APPDATA is the normal source. A server started at boot, before anyone logs in,
+ * can have none, and a lookup that reads only APPDATA then looks nowhere and
+ * reports the CLI missing. So the folder is named from the user profile instead,
+ * in the same order `withCodexHome` names its user root: USERPROFILE, then HOME.
+ * Undefined only when there is no profile at all.
+ */
+export function cliAppDataDir(): string | undefined {
+  const appData = process.env.APPDATA?.trim();
+  if (appData) return appData;
+  const profile = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
+  return profile ? path.join(profile, "AppData", "Roaming") : undefined;
+}
+
 /** The environment for a Codex child: the allow-list plus the home defaults. */
 export function codexChildEnv(): NodeJS.ProcessEnv {
   return withCodexHome(cliChildEnv());

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { EDITORIAL_TOOLS } from "./editorial.ts";
 import {
@@ -164,6 +164,37 @@ describe("claudeCliCandidates", () => {
       assert.ok(found.every((p) => p.includes("claude")));
     } finally {
       if (prev !== undefined) process.env.CLAUDE_CLI_PATH = prev;
+    }
+  });
+
+  it("names the npm install under the profile when APPDATA is unset (a boot-started server)", () => {
+    const profile = join(tmpdir(), "tr-profile-no-appdata");
+    const restore = withEnv({ APPDATA: undefined, CLAUDE_CLI_PATH: undefined, HOME: undefined, USERPROFILE: profile });
+    try {
+      assert.ok(
+        claudeCliCandidates().includes(
+          `${join(profile, "AppData", "Roaming")}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`,
+        ),
+      );
+    } finally { restore(); }
+  });
+});
+
+describe("findClaudeCli looks again after a miss", () => {
+  it("returns null before the CLI exists, then finds it once it appears", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-profile-"));
+    const bin = `${join(profile, "AppData", "Roaming")}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+    const restore = withEnv({ APPDATA: undefined, CLAUDE_CLI_PATH: undefined, HOME: undefined, USERPROFILE: profile });
+    resetClaudeCliCache();
+    try {
+      assert.equal(await findClaudeCli(), null);
+      await mkdir(dirname(bin), { recursive: true });
+      await writeFile(bin, "");
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
     }
   });
 });

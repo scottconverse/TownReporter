@@ -181,10 +181,26 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
 
   it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
     const lookup = await withEnv(
-      { CODEX_CLI_PATH: undefined, APPDATA: undefined },
+      { CODEX_CLI_PATH: undefined, APPDATA: undefined, HOME: undefined, USERPROFILE: undefined },
       () => findCodexCli(),
     );
     assert.deepEqual(lookup, { ok: true, bin: "codex" });
+  });
+
+  it("finds the npm shim under the profile when APPDATA is unset (a boot-started server)", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "tr-codex-profile-"));
+    const shim = path.join(profile, "AppData", "Roaming", "npm", process.platform === "win32" ? "codex.cmd" : "codex");
+    try {
+      await mkdir(path.dirname(shim), { recursive: true });
+      await writeFile(shim, "");
+      const lookup = await withEnv(
+        { CODEX_CLI_PATH: undefined, APPDATA: undefined, HOME: undefined, USERPROFILE: profile },
+        () => findCodexCli(),
+      );
+      assert.deepEqual(lookup, { ok: true, bin: shim });
+    } finally {
+      await rm(profile, { recursive: true, force: true });
+    }
   });
 
   /*

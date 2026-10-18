@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
-import { claudeChildEnv } from "./cli-child-env.server.ts";
+import { cliAppDataDir, claudeChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
@@ -94,7 +94,7 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
 export function claudeCliCandidates(): string[] {
   const explicit = process.env.CLAUDE_CLI_PATH?.trim();
   if (explicit) return [explicit];
-  const appData = process.env.APPDATA;
+  const appData = cliAppDataDir();
   const home = process.env.HOME || process.env.USERPROFILE;
   const out: string[] = [];
   if (appData) {
@@ -109,9 +109,13 @@ export function claudeCliCandidates(): string[] {
   return out;
 }
 
-let resolvedBin: string | null | undefined;
+let resolvedBin: string | undefined;
 
-/** First candidate that exists on disk, or null. Memoized. */
+/**
+ * First candidate that exists on disk, or null. A found path is memoized; a miss
+ * is not, so a CLI installed after the first look (or a boot-time look made
+ * before the profile was readable) is found on the next call, not at restart.
+ */
 export async function findClaudeCli(): Promise<string | null> {
   if (resolvedBin !== undefined) return resolvedBin;
   const { access } = await import("node:fs/promises");
@@ -127,7 +131,6 @@ export async function findClaudeCli(): Promise<string | null> {
       /* try the next one */
     }
   }
-  resolvedBin = null;
   return null;
 }
 

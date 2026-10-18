@@ -118,6 +118,12 @@ if ((Test-Path $appLog) -and ((Get-Item $appLog).Length -gt 5MB)) {
 #>
 . (Join-Path $PSScriptRoot "lib-migrate.ps1")
 
+# A boot-started task can run before anyone logs in, with APPDATA or LOCALAPPDATA
+# unset. The desk finds Claude and Codex under APPDATA, so name both folders from
+# the profile when they are missing.
+if (-not $env:APPDATA -and $env:USERPROFILE) { $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming' }
+if (-not $env:LOCALAPPDATA -and $env:USERPROFILE) { $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local' }
+
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCommand) {
   "the paper was not started: node.exe is not on this machine's PATH." | Add-Content $appLog
