@@ -180,11 +180,40 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
   });
 
   it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
+    const profile = process.env.USERPROFILE;
     const lookup = await withEnv(
-      { CODEX_CLI_PATH: undefined, APPDATA: undefined },
+      // A root that names no npm install: derived APPDATA must not conjure one.
+      { CODEX_CLI_PATH: undefined, APPDATA: undefined, USERPROFILE: path.join(tmpdir(), "codex-no-profile-here") },
       () => findCodexCli(),
     );
+    if (profile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = profile;
     assert.deepEqual(lookup, { ok: true, bin: "codex" });
+  });
+
+  /*
+    Same boot-start failure as Claude's (see ai-claude-code.test.ts): the npm
+    vendor binary was found only through APPDATA, which a boot-started process
+    does not carry. With APPDATA unset, the install under
+    `<USERPROFILE>\AppData\Roaming\npm` must still be found.
+  */
+  it("finds the npm-installed Codex when APPDATA is unset, deriving it from USERPROFILE", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "codex-boot-profile-"));
+    const vendor = path.join(
+      profile, "AppData", "Roaming", "npm", "node_modules", "@openai", "codex",
+      "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe",
+    );
+    try {
+      await mkdir(path.dirname(vendor), { recursive: true });
+      await writeFile(vendor, "");
+      const lookup = await withEnv(
+        { CODEX_CLI_PATH: undefined, APPDATA: undefined, USERPROFILE: profile },
+        () => findCodexCli(),
+      );
+      assert.deepEqual(lookup, { ok: true, bin: vendor });
+    } finally {
+      await rm(profile, { recursive: true, force: true });
+    }
   });
 
   /*

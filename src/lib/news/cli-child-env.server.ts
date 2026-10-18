@@ -148,6 +148,40 @@ export function cliChildEnv(extra: readonly string[] = []): NodeJS.ProcessEnv {
 }
 
 /**
+ * The Windows roaming-profile directory (`%APPDATA%`), derived when the
+ * environment does not set one.
+ *
+ * A server started at boot by a scheduled task -- before anyone logs in -- gets
+ * no APPDATA: it is a per-login variable, and S4U tasks do not get the user's
+ * profile environment block. The npm installs of both provider CLIs live under
+ * `<APPDATA>\npm`, so a lookup that reads only `process.env.APPDATA` reports
+ * "not installed" on a machine that has them. Derive it from the user root the
+ * same way `withCodexHome` does: USERPROFILE, then POSIX HOME (named the
+ * Windows way, because the npm layout below it is the Windows one). Undefined
+ * when the host names no root at all.
+ */
+export function resolveWindowsAppData(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const named = env.APPDATA?.trim();
+  if (named) return named;
+  const windowsRoot = env.USERPROFILE?.trim();
+  if (windowsRoot) return windowsJoin(windowsRoot, "AppData", "Roaming");
+  const home = env.HOME?.trim();
+  if (!home) return undefined;
+  return process.platform === "win32"
+    ? path.join(home, "AppData", "Roaming")
+    : windowsJoin(home, "AppData", "Roaming");
+}
+
+/**
+ * A path joined with backslashes, as the Windows npm layout is written. Both
+ * provider lookups below build `<appData>\npm\...` by hand, and the candidate
+ * a test compares against is written the same way.
+ */
+export function windowsJoin(root: string, ...parts: string[]): string {
+  return [root.replace(/[\\/]+$/, ""), ...parts].join("\\");
+}
+
+/**
  * Add the home directory a Codex-family CLI needs, the way the desk derives it.
  *
  * A server launched by the Windows installer has no USERPROFILE of its own, and

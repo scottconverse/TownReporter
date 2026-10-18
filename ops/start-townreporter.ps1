@@ -163,6 +163,16 @@ if (-not (Test-TownReporterPort $port)) {
   #
   # node.exe directly rather than the `npm` shim - Start-Process cannot execute
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
+  # A boot start (scheduled task, before login) gets no per-login profile block, so APPDATA
+  # and LOCALAPPDATA are empty and node could not find the npm-installed Claude/Codex CLIs.
+  # Name them from the profile path the task does carry; Start-Process (no -UseNewEnvironment)
+  # hands this process's environment to the app.
+  if ([string]::IsNullOrWhiteSpace($env:APPDATA) -and $env:USERPROFILE) {
+    $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming'
+  }
+  if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA) -and $env:USERPROFILE) {
+    $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local'
+  }
   "[app] starting the paper on port $port" | Add-Content $appLog
   Start-Process -FilePath $node `
     -ArgumentList "scripts/with-app-env.mjs","node",('"' + (Join-Path $app '.output\server\index.mjs') + '"') `

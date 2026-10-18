@@ -166,6 +166,54 @@ describe("claudeCliCandidates", () => {
       if (prev !== undefined) process.env.CLAUDE_CLI_PATH = prev;
     }
   });
+
+  /*
+    Live failure (Oct 17): the app was started at boot by an S4U scheduled task,
+    chose Claude Opus and reported "Claude Code is not installed on this
+    server" while the npm install was on disk. A boot-started process carries no
+    APPDATA, and the candidate was built only from it, so the install was never
+    looked at. A restart from a logged-in session fixed it -- which is the
+    signature of an environment-derived miss, not a missing install.
+  */
+  it("still finds the npm install when APPDATA is unset, deriving it from USERPROFILE", () => {
+    const restore = withEnv({ CLAUDE_CLI_PATH: undefined, APPDATA: undefined });
+    const profile = process.env.USERPROFILE;
+    try {
+      process.env.USERPROFILE = "C:\\Users\\boot";
+      const expected = "C:\\Users\\boot\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe";
+      assert.ok(claudeCliCandidates().includes(expected), JSON.stringify(claudeCliCandidates()));
+    } finally {
+      if (profile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = profile;
+      restore();
+    }
+  });
+});
+
+describe("findClaudeCli", () => {
+  /*
+    A miss must not be memoized. The memo held `null` too, so one lookup taken
+    before the CLI was visible -- the boot start racing the profile that holds
+    the npm install -- kept reporting "not installed" until the server was
+    restarted. Only a found path may stick.
+  */
+  it("looks again after a miss, and remembers the path once it is found", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "claude-cli-miss-"));
+    const bin = join(dir, "claude.exe");
+    const restore = withEnv({ CLAUDE_CLI_PATH: bin });
+    resetClaudeCliCache();
+    try {
+      assert.equal(await findClaudeCli(), null, "nothing on disk yet: a miss");
+      await writeFile(bin, "");
+      assert.equal(await findClaudeCli(), bin, "the second call must look again rather than reuse the miss");
+      await rm(bin);
+      assert.equal(await findClaudeCli(), bin, "a found path stays memoized");
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("CLAUDE_CLI_MISSING", () => {

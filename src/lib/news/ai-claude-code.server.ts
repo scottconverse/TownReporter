@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
-import { claudeChildEnv } from "./cli-child-env.server.ts";
+import { claudeChildEnv, resolveWindowsAppData, windowsJoin } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
@@ -94,11 +94,13 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
 export function claudeCliCandidates(): string[] {
   const explicit = process.env.CLAUDE_CLI_PATH?.trim();
   if (explicit) return [explicit];
-  const appData = process.env.APPDATA;
+  // Derived, not read straight from APPDATA: a boot-started server has none.
+  // See `resolveWindowsAppData`.
+  const appData = resolveWindowsAppData();
   const home = process.env.HOME || process.env.USERPROFILE;
   const out: string[] = [];
   if (appData) {
-    out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
+    out.push(windowsJoin(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"));
   }
   if (home) {
     out.push(`${home}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude`);
@@ -111,7 +113,14 @@ export function claudeCliCandidates(): string[] {
 
 let resolvedBin: string | null | undefined;
 
-/** First candidate that exists on disk, or null. Memoized. */
+/**
+ * First candidate that exists on disk, or null.
+ *
+ * Only a FOUND path is memoized. A miss is re-looked-up on the next call: the
+ * memo used to hold `null` too, so one lookup made while the CLI was not yet
+ * visible -- a boot start racing the profile that holds the npm install --
+ * reported "not installed" until the server was restarted.
+ */
 export async function findClaudeCli(): Promise<string | null> {
   if (resolvedBin !== undefined) return resolvedBin;
   const { access } = await import("node:fs/promises");
@@ -127,7 +136,6 @@ export async function findClaudeCli(): Promise<string | null> {
       /* try the next one */
     }
   }
-  resolvedBin = null;
   return null;
 }
 
