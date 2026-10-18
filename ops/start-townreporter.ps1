@@ -163,6 +163,11 @@ if (-not (Test-TownReporterPort $port)) {
   #
   # node.exe directly rather than the `npm` shim - Start-Process cannot execute
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
+  # A boot start before login may omit these profile paths.
+  if ($env:USERPROFILE) {
+    if ([string]::IsNullOrWhiteSpace($env:APPDATA)) { $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming' }
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local' }
+  }
   "[app] starting the paper on port $port" | Add-Content $appLog
   Start-Process -FilePath $node `
     -ArgumentList "scripts/with-app-env.mjs","node",('"' + (Join-Path $app '.output\server\index.mjs') + '"') `

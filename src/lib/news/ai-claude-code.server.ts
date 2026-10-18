@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
-import { claudeChildEnv } from "./cli-child-env.server.ts";
+import { cliAppDataDirectory, claudeChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
@@ -94,11 +94,11 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
 export function claudeCliCandidates(): string[] {
   const explicit = process.env.CLAUDE_CLI_PATH?.trim();
   if (explicit) return [explicit];
-  const appData = process.env.APPDATA;
+  const appData = cliAppDataDirectory();
   const home = process.env.HOME || process.env.USERPROFILE;
   const out: string[] = [];
   if (appData) {
-    out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
+    out.push(join(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"));
   }
   if (home) {
     out.push(`${home}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude`);
@@ -109,11 +109,11 @@ export function claudeCliCandidates(): string[] {
   return out;
 }
 
-let resolvedBin: string | null | undefined;
+let resolvedBin: string | undefined;
 
-/** First candidate that exists on disk, or null. Memoized. */
+/** First candidate that exists on disk, or null. Only a found path is memoized. */
 export async function findClaudeCli(): Promise<string | null> {
-  if (resolvedBin !== undefined) return resolvedBin;
+  if (resolvedBin) return resolvedBin;
   const { access } = await import("node:fs/promises");
   for (const candidate of claudeCliCandidates()) {
     try {
@@ -127,7 +127,6 @@ export async function findClaudeCli(): Promise<string | null> {
       /* try the next one */
     }
   }
-  resolvedBin = null;
   return null;
 }
 

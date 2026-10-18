@@ -147,6 +147,14 @@ export function cliChildEnv(extra: readonly string[] = []): NodeJS.ProcessEnv {
   return out;
 }
 
+/** The Windows roaming app-data directory, including when boot omits APPDATA. */
+export function cliAppDataDirectory(): string | undefined {
+  const appData = process.env.APPDATA?.trim();
+  if (appData) return appData;
+  const userRoot = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
+  return userRoot ? path.join(userRoot, "AppData", "Roaming") : undefined;
+}
+
 /**
  * Add the home directory a Codex-family CLI needs, the way the desk derives it.
  *

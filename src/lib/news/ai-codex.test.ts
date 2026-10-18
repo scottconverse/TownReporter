@@ -187,6 +187,37 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.deepEqual(lookup, { ok: true, bin: "codex" });
   });
 
+  it("finds the npm install under USERPROFILE when APPDATA is missing", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "codex-profile-test-"));
+    const vendor = path.join(
+      profile,
+      "AppData",
+      "Roaming",
+      "npm",
+      "node_modules",
+      "@openai",
+      "codex",
+      "node_modules",
+      "@openai",
+      "codex-win32-x64",
+      "vendor",
+      "x86_64-pc-windows-msvc",
+      "bin",
+      "codex.exe",
+    );
+    try {
+      await mkdir(path.dirname(vendor), { recursive: true });
+      await writeFile(vendor, "");
+      const lookup = await withEnv(
+        { APPDATA: undefined, CODEX_CLI_PATH: undefined, HOME: undefined, USERPROFILE: profile },
+        () => findCodexCli(),
+      );
+      assert.deepEqual(lookup, { ok: true, bin: vendor });
+    } finally {
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+
   /*
     An explicit path is an instruction about WHICH Codex runs, not a hint.
 

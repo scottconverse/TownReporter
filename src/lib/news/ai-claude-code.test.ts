@@ -166,6 +166,48 @@ describe("claudeCliCandidates", () => {
       if (prev !== undefined) process.env.CLAUDE_CLI_PATH = prev;
     }
   });
+
+  it("derives the npm candidate from USERPROFILE when APPDATA is missing", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "claude-profile-test-"));
+    const restore = withEnv({
+      APPDATA: undefined,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+    });
+    try {
+      assert.ok(claudeCliCandidates().includes(join(
+        profile,
+        "AppData",
+        "Roaming",
+        "npm",
+        "node_modules",
+        "@anthropic-ai",
+        "claude-code",
+        "bin",
+        "claude.exe",
+      )));
+    } finally {
+      restore();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+});
+
+it("retries Claude CLI discovery after a miss", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "claude-retry-test-"));
+  const cliPath = join(dir, "claude.exe");
+  const restore = withEnv({ CLAUDE_CLI_PATH: cliPath });
+  resetClaudeCliCache();
+  try {
+    assert.equal(await findClaudeCli(), null);
+    await writeFile(cliPath, "");
+    assert.equal(await findClaudeCli(), cliPath);
+  } finally {
+    restore();
+    resetClaudeCliCache();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 describe("CLAUDE_CLI_MISSING", () => {
