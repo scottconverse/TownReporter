@@ -577,4 +577,29 @@ describe("lastDraftModelName: the Last draft line names the model that ran", () 
       "Lab gateway (gpt-x)",
     );
   });
+
+  it("names the choice that ran when two choices share one model id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
+      "Codex Sol 6.1",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
+      "Codex Sol 6.1 (balanced)",
+    );
+  });
+
+  it("names a failover-like model by the one registry entry that serves it, not by the choice that asked", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Sonnet 5.5",
+    );
+  });
+
+  it("names a model two choices share by its raw id when the choice that ran does not serve it", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "gpt-6.1-sol",
+    );
+  });
 });

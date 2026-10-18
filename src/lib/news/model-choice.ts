@@ -330,13 +330,15 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
 
 /**
  * The model the "Last draft" line names for a draft job. A receipt that
- * recorded the model that served the run names that model: its picker label
- * when the registry knows the id ("claude-opus-5-5" -> "Claude Opus 5.5"), else
- * the raw id ("claude-opus-5"). A receipt that recorded none -- every draft
- * written before the desk recorded one -- names the choice without a version
- * ("Claude Opus"), because the desk never saw which version ran. A local model
- * or a custom connection already names its own model in `choiceLabel`, so it
- * keeps that.
+ * recorded the model that served the run names that model: the label of the
+ * choice that ran when that choice serves the model ("claude-opus-5-5" ->
+ * "Claude Opus 5.5"); else the label of the only registry entry that serves it;
+ * else the raw id ("claude-opus-5", or "gpt-6.1-sol" when two choices share it,
+ * because the id alone cannot say which one ran). A receipt that recorded none
+ * -- every draft written before the desk recorded one -- names the choice
+ * without a version ("Claude Opus"), because the desk never saw which version
+ * ran. A local model or a custom connection already names its own model in
+ * `choiceLabel`, so it keeps that.
  */
 export function lastDraftModelName(input: {
   choice: unknown;
@@ -347,7 +349,12 @@ export function lastDraftModelName(input: {
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
   if (actualModelId) {
-    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+    // Two choices can serve one model id (codex-balanced and codex-frontier both
+    // run gpt-6.1-sol), so the choice that ran names it before the registry does.
+    const choiceEntry = typeof choice === "string" ? providerEntry(choice) : null;
+    if (choiceEntry?.model === actualModelId) return choiceLabel;
+    const owners = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
+    return owners.length === 1 ? owners[0].label : actualModelId;
   }
   return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }
