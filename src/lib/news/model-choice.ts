@@ -330,9 +330,9 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
 
 /**
  * The model the "Last draft" line names for a draft job. A receipt that
- * recorded the model that served the run names that model: its picker label
- * when the registry knows the id ("claude-opus-5-5" -> "Claude Opus 5.5"), else
- * the raw id ("claude-opus-5"). A receipt that recorded none -- every draft
+ * recorded model id uses the selected choice label when that choice maps to
+ * the id; otherwise, a unique registry match supplies the label, and an
+ * ambiguous or unknown id stays raw. A receipt that recorded none -- every draft
  * written before the desk recorded one -- names the choice without a version
  * ("Claude Opus"), because the desk never saw which version ran. A local model
  * or a custom connection already names its own model in `choiceLabel`, so it
@@ -347,7 +347,10 @@ export function lastDraftModelName(input: {
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
   if (actualModelId) {
-    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+    const choiceEntry = typeof choice === "string" ? providerEntry(choice) : null;
+    if (choiceEntry?.model === actualModelId) return choiceLabel;
+    const matchingEntries = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
+    return matchingEntries.length === 1 ? matchingEntries[0].label : actualModelId;
   }
   return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }

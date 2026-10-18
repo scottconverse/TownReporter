@@ -553,6 +553,24 @@ describe("lastDraftModelName: the Last draft line names the model that ran", () 
     );
   });
 
+  it("uses the choice label for a shared id and only infers a unique registry label on mismatch", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
+      "Codex Sol 6.1",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
+      "Codex Sol 6.1 (balanced)",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Sonnet 5.5",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "gpt-6.1-sol",
+    );
+  });
   it("names an unknown recorded model id as the raw id", () => {
     assert.equal(
       lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5", choiceLabel: "Claude Opus 5.5" }),
