@@ -128,6 +128,7 @@ import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review
 import { evidenceReviewDisabled, takeDownPressDisabled } from "@/lib/news/finding-evidence-locks";
 import { evidenceDetailId, STYLE_ROW_KEY } from "@/lib/news/evidence-check-list";
 import {
+  lastDraftModelName,
   modelChoiceLabel,
   rememberedStoryModelChoice,
   retiredModelChoiceNote,
@@ -151,6 +152,7 @@ import {
   modelAndResearchLabel,
   lastDraftInHand,
   lastDraftWhen,
+  recordedActualModelId,
   requestedModelChoice,
   readinessDot,
   saveState,
@@ -701,7 +703,13 @@ function StoryPage() {
     hasDraft: Boolean(data?.draft),
     civicReporting: civicReportingDraft,
     jobStatus: data?.job?.status,
-    modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
+    modelLabel: data?.job?.model_choice
+      ? lastDraftModelName({
+        choice: data.job.model_choice,
+        actualModelId: recordedActualModelId(data.job.result_json),
+        choiceLabel: storyModelLabel(data.job.model_choice),
+      })
+      : "",
     failoverNote: data?.job?.failover_note,
     finishedAt: data?.job?.finished_at,
   });

@@ -257,3 +257,29 @@ test("the atomic final-draft commit exposes a review-required terminal stage",as
   const [stored]=await sql.query<{status:string;stage:string}>("select status,stage from desk_jobs where id=$1",[job.id]);
   assert.deepEqual(stored,{status:"completed",stage:"Draft saved — review required"});
 });
+
+test("the draft receipt records the model the runner reported as actualModelId",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88407,user="served-model-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Served model room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Served model lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'claude-frontier','editor','supplied','default','running','Writing','served-model-claim') returning id",[user,room,lead.id]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"claude-frontier",model_choice_source:"editor",research_scope:"supplied",lane:"default",status:"running",stage:"Writing",claim_token:"served-model-claim"} as DeskJob;
+  await performDraftWork(job,{
+    readStoryDocuments:async()=>"",
+    reportAndDraft:async(_input,deps)=>{
+      const written=await deps!.chat?.("writer system","assembled research packet",2200);
+      assert.equal(written?.ok,true);
+      return {headline:"Served model lead",dek:"",body:"The runner reported the model it ran.",topic:"council",source_urls:[],integrity_notes:"",memory_entities:[],form:"news",provenance:[],found_note:"",findings:[],unanswered:[],claims:[],research_memo:{}} as unknown as ReportedDraftResult;
+    },
+    chat:async()=>({ok:true as const,text:"writer result",meta:{provider:"claude-code",model:"claude-opus-5-5",durationMs:1,timedOut:false}}),
+    probe:async(choice)=>({ok:true,label:modelChoiceLabel(choice),choice:choice as EffectiveProviderChoice}),
+    setJobStage:async()=>undefined,
+    setJobModelChoice:async(_id,choice)=>{job.model_choice=choice;},
+    setJobFailoverNote:async()=>undefined,
+  });
+  const [stored]=await sql.query<{status:string;result_json:string}>("select status,result_json from desk_jobs where id=$1",[job.id]);
+  assert.equal(stored.status,"completed");
+  assert.equal(JSON.parse(stored.result_json).actualModelId,"claude-opus-5-5");
+});

@@ -9,6 +9,7 @@
 */
 
 import {
+  PROVIDER_REGISTRY,
   RETIRED_PROVIDER_IDS,
   automaticLadder,
   isAutomaticChoiceId,
@@ -325,6 +326,30 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
   // the draft. Read it from the registry instead.
   if (isAutomaticRungId(value)) return providerEntry(value)?.label ?? value;
   return "Automatic";
+}
+
+/**
+ * The model the "Last draft" line names for a draft job. A receipt that
+ * recorded the model that served the run names that model: its picker label
+ * when the registry knows the id ("claude-opus-5-5" -> "Claude Opus 5.5"), else
+ * the raw id ("claude-opus-5"). A receipt that recorded none -- every draft
+ * written before the desk recorded one -- names the choice without a version
+ * ("Claude Opus"), because the desk never saw which version ran. A local model
+ * or a custom connection already names its own model in `choiceLabel`, so it
+ * keeps that.
+ */
+export function lastDraftModelName(input: {
+  choice: unknown;
+  actualModelId?: string | null;
+  choiceLabel: string;
+}): string {
+  const { choice, choiceLabel } = input;
+  if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
+  const actualModelId = input.actualModelId?.trim();
+  if (actualModelId) {
+    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+  }
+  return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }
 
 /**

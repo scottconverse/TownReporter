@@ -5,6 +5,7 @@ import {
   DEFAULT_OPINION_MODEL,
   effectiveStoryModelChoice,
   darkModelChoice,
+  lastDraftModelName,
   localModelOptionLabel,
   modelChoiceLabel,
   modelChoiceHelp,
@@ -530,5 +531,50 @@ describe("the Writing models panel's ladder sentence", () => {
       "Automatic uses Codex Sol 6.1 (balanced) first, then DeepSeek v4.1 Flash.",
     );
     assert.equal(sentence([]), "Automatic has no writing model set up on this machine.");
+  });
+});
+
+describe("lastDraftModelName: the Last draft line names the model that ran", () => {
+  it("names a draft that recorded no model id without a version, because the desk never saw which version ran", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Opus",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "claude-sonnet", actualModelId: null, choiceLabel: "Claude Sonnet 5.5" }),
+      "Claude Sonnet",
+    );
+  });
+
+  it("names the recorded model by its versioned picker label when the registry knows the id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5-5", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Opus 5.5",
+    );
+  });
+
+  it("names an unknown recorded model id as the raw id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5", choiceLabel: "Claude Opus 5.5" }),
+      "claude-opus-5",
+    );
+  });
+
+  it("keeps the label of a choice whose name no version change touched", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "DeepSeek v4.1 Flash",
+    );
+  });
+
+  it("keeps a local or custom run's own label, which already names its model", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "local-model", actualModelId: "qwen-local", choiceLabel: "Local model (qwen2.5:7b)" }),
+      "Local model (qwen2.5:7b)",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "custom:abc", choiceLabel: "Lab gateway (gpt-x)" }),
+      "Lab gateway (gpt-x)",
+    );
   });
 });

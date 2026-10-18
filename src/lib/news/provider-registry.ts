@@ -190,6 +190,14 @@ export type ProviderEntry = {
   id: ProviderId;
   /** What the picker shows. */
   label: string;
+  /**
+   * The same name with no version ("Claude Opus" for "Claude Opus 5.5"). The
+   * story page's "Last draft" line prints it for a draft whose receipt recorded
+   * no model id: a draft written before the desk recorded one never showed
+   * which version ran, so the line does not claim one. Set only where `label`
+   * carries a version; see `lastDraftModelName` in ./model-choice.ts.
+   */
+  familyLabel?: string;
   /** The half-line under the label in the picker. */
   detail: string;
   /**
@@ -446,6 +454,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "codex-astra",
     label: "Codex Astra 6",
+    familyLabel: "Codex Astra",
     detail: "Runs gpt-6-astra",
     kind: "codex",
     model: "gpt-6-astra",
@@ -459,6 +468,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "codex-luna",
     label: "Codex Luna 6",
+    familyLabel: "Codex Luna",
     detail: "Runs gpt-6-luna",
     kind: "codex",
     model: CODEX_LUNA_MODEL,
@@ -531,6 +541,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "claude-fable",
     label: "Claude Fable 5.1",
+    familyLabel: "Claude Fable",
     detail: "Fast",
     kind: "claude-code",
     model: "claude-fable-5-1",
@@ -544,6 +555,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "claude-sonnet",
     label: "Claude Sonnet 5.5",
+    familyLabel: "Claude Sonnet",
     detail: "Balanced",
     kind: "claude-code",
     model: "claude-sonnet-5-5",
@@ -570,6 +582,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "claude-haiku",
     label: "Claude Haiku 5.5",
+    familyLabel: "Claude Haiku",
     detail: "Fastest",
     kind: "claude-code",
     model: "claude-haiku-5-5",
@@ -607,6 +620,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "claude-frontier",
     label: "Claude Opus 5.5",
+    familyLabel: "Claude Opus",
     detail: "Frontier",
     /*
       `claude-code` is the kind that actually runs on the operator's machine:

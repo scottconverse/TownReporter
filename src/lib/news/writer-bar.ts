@@ -301,7 +301,7 @@ export function lastDraftInHand(input: {
   hasDraft: boolean;
   civicReporting: boolean;
   jobStatus: string | null | undefined;
-  /** The receipt's recorded runtime, labeled; "" when the receipt records none. */
+  /** The model that ran, named by `lastDraftModelName`; "" when the desk records none. */
   modelLabel: string;
   failoverNote?: string | null;
   finishedAt: string | null | undefined;
@@ -317,6 +317,16 @@ export function recordedRuntime(resultJson: string | null | undefined): string |
   try {
     const receipt = JSON.parse(resultJson ?? "{}") as { actualRuntime?: unknown };
     return typeof receipt.actualRuntime === "string" && receipt.actualRuntime.trim() ? receipt.actualRuntime.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The model id the job's receipt records as having served the run (`actualModelId`), or null when it records none. */
+export function recordedActualModelId(resultJson: string | null | undefined): string | null {
+  try {
+    const receipt = JSON.parse(resultJson ?? "{}") as { actualModelId?: unknown };
+    return typeof receipt.actualModelId === "string" && receipt.actualModelId.trim() ? receipt.actualModelId.trim() : null;
   } catch {
     return null;
   }

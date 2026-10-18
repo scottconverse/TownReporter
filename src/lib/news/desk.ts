@@ -3361,6 +3361,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`
     )[0] ?? null;
   let checkpointDraftId: number | null = null;
+  // The model the draft's last successful call reports it ran on (`meta.model`),
+  // written into the completion receipt as `actualModelId`.
+  let servedModelId: string | null = null;
   const draftStillExpected = (current: DraftRow | null) =>
     current?.id === expectedDraft?.id &&
     String(current?.updated_at ?? "") === String(expectedDraft?.updated_at ?? "") &&
@@ -3708,6 +3711,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           await persistReportSwitch(nextChoice as EffectiveProviderChoice, reason, nextLabel, error);
         },
       });
+      if (attempted.result.ok) servedModelId = attempted.result.meta?.model?.trim() || servedModelId;
       activeReportSnapshot = attempted.snapshot;
       return attempted.result;
     };
@@ -3772,6 +3776,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           };
         },
       });
+      // Not every batch adapter's ok result carries `meta`; only one that does can name the model.
+      const servedModel = attempted.result.ok ? (attempted.result as { meta?: { model?: string } }).meta?.model?.trim() : undefined;
+      if (servedModel) servedModelId = servedModel;
       activeBatchSnapshot = attempted.snapshot;
       if (switchState.receipt) {
         const receipt = switchState.receipt;
@@ -4317,6 +4324,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           }),
           draftCutOff: draftLooksCutOff(reported.body) || reported.research_memo.storyReadiness?.reason === CUT_OFF_WARNING,
           ...(meetingMaterial ? { meetingArtifactId: meetingMaterial.meeting.artifactId } : {}),
+          ...(servedModelId ? { actualModelId: servedModelId } : {}),
         }),
       );
       await sql`

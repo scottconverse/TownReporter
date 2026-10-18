@@ -10,6 +10,7 @@ import {
   modelAndResearchLabel,
   readinessDot,
   readinessFailureMessage,
+  recordedActualModelId,
   recordedRuntime,
   requestedModelChoice,
   runningWriterSentence,
@@ -18,6 +19,7 @@ import {
   writerIsReady,
   writerUnavailableReason,
 } from "./writer-bar.ts";
+import { lastDraftModelName } from "./model-choice.ts";
 
 /**
  * The Writer / Effort bar's lines (unit CW, 0.6.81).
@@ -429,5 +431,35 @@ describe("lastDraftInHand: the model that finished the draft (DHK-1)", () => {
     assert.equal(recordedRuntime("{}"), null);
     assert.equal(recordedRuntime(null), null);
     assert.equal(recordedRuntime("not json"), null);
+  });
+});
+
+describe("the Last draft line names the model that ran (the story page's composition)", () => {
+  const finishedAt = "2026-09-10T16:53:00.000Z";
+  const lastDraftFor = (choice: string, resultJson: string | null, choiceLabel: string) =>
+    lastDraftInHand({
+      hasDraft: true,
+      civicReporting: false,
+      jobStatus: "completed",
+      modelLabel: lastDraftModelName({ choice, actualModelId: recordedActualModelId(resultJson), choiceLabel }),
+      finishedAt,
+    });
+  it("names an old claude-frontier draft without a version when its receipt recorded no model", () => {
+    assert.match(
+      lastDraftFor("claude-frontier", JSON.stringify({ checkpointDraftId: 100 }), "Claude Opus 5.5"),
+      /^Last draft: Claude Opus, /,
+    );
+  });
+  it("names the recorded model with its version when the receipt recorded a known id", () => {
+    assert.match(
+      lastDraftFor("claude-frontier", JSON.stringify({ actualModelId: "claude-opus-5-5" }), "Claude Opus 5.5"),
+      /^Last draft: Claude Opus 5\.5, /,
+    );
+  });
+  it("names an unknown recorded model id as the raw id", () => {
+    assert.match(
+      lastDraftFor("claude-frontier", JSON.stringify({ actualModelId: "claude-opus-5" }), "Claude Opus 5.5"),
+      /^Last draft: claude-opus-5, /,
+    );
   });
 });
