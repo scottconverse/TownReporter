@@ -148,6 +148,21 @@ export function cliChildEnv(extra: readonly string[] = []): NodeJS.ProcessEnv {
 }
 
 /**
+ * The npm global prefix's parent (`%APPDATA%`) for the CLI lookups.
+ *
+ * A paper started at boot by a scheduled task runs before anyone logs in and
+ * can have no APPDATA at all, although the CLIs are installed under the user's
+ * AppData\Roaming. When APPDATA is missing or empty, name it from USERPROFILE
+ * (or HOME), the way Windows would. Undefined when neither exists.
+ */
+export function npmRoamingDir(): string | undefined {
+  const appData = process.env.APPDATA?.trim();
+  if (appData) return appData;
+  const home = process.env.USERPROFILE?.trim() || process.env.HOME?.trim();
+  return home ? path.join(home, "AppData", "Roaming") : undefined;
+}
+
+/**
  * Add the home directory a Codex-family CLI needs, the way the desk derives it.
  *
  * A server launched by the Windows installer has no USERPROFILE of its own, and

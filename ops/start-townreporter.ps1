@@ -164,6 +164,11 @@ if (-not (Test-TownReporterPort $port)) {
   # node.exe directly rather than the `npm` shim - Start-Process cannot execute
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
   "[app] starting the paper on port $port" | Add-Content $appLog
+  # A boot-time start (before login) has no APPDATA/LOCALAPPDATA, so the app could not find the Claude/Codex programs.
+  if ($env:USERPROFILE) {
+    if (-not $env:APPDATA) { $env:APPDATA = Join-Path $env:USERPROFILE 'AppData\Roaming' }
+    if (-not $env:LOCALAPPDATA) { $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local' }
+  }
   Start-Process -FilePath $node `
     -ArgumentList "scripts/with-app-env.mjs","node",('"' + (Join-Path $app '.output\server\index.mjs') + '"') `
     -WorkingDirectory $app `
