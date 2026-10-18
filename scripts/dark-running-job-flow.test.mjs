@@ -14,7 +14,7 @@ const { jobProgressView } = await import(await moduleUrl("src/lib/news/job-progr
   "@tanstack/react-start": transpileToUrl('export const createServerFn = () => ({ middleware() { return this; }, validator() { return this; }, handler(fn) { return fn; } });', "stub.js"),
   "../db.ts": transpileToUrl('export const getSql = () => { throw new Error("No database in this card flow"); };', "stub.js"),
   "./desk-auth.ts": transpileToUrl('export const deskMiddleware = {};', "stub.js"),
-  "./model-choice.ts": transpileToUrl('export const effectiveStoryModelChoice = x => x; export const storyModelChoice = x => x; export const modelChoiceLabel = () => "Codex Sol 6.1";', "stub.js"),
+  "./model-choice.ts": transpileToUrl('export const effectiveStoryModelChoice = x => x; export const storyModelChoice = x => x; export const modelChoiceLabel = () => "Codex Sol 6.1"; export const pastRunModelName = ({ choiceLabel }) => choiceLabel;', "stub.js"),
   "./jobs.ts": transpileToUrl('export const jobStages = () => []; export const requestJobCancel = () => {}; export const queuedJobWaitReason = () => { throw new Error("No queued job in this running-card flow"); };', "stub.js"),
 }));
 test("a running investigation shows its case stages and can be stopped in either card", async () => {
