@@ -14,7 +14,7 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
           Something went wrong
         </h1>
         <p className="mt-3 max-w-md text-pretty break-words text-ink-2">
-          {error.message || "An unexpected error occurred. Try reloading the page."}
+          {(error instanceof Error ? error.message : "") || "An unexpected error occurred. Try reloading the page."}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Link to="/" className={inkSolid}>
