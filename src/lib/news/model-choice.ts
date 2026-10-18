@@ -347,7 +347,9 @@ export function lastDraftModelName(input: {
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
   if (actualModelId) {
-    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+    if (typeof choice === "string" && providerEntry(choice)?.model === actualModelId) return choiceLabel;
+    const matches = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
+    return matches.length === 1 ? matches[0].label : actualModelId;
   }
   return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }

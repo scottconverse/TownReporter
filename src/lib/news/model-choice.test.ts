@@ -553,6 +553,34 @@ describe("lastDraftModelName: the Last draft line names the model that ran", () 
     );
   });
 
+  it("keeps the frontier choice label when Codex choices share a model id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
+      "Codex Sol 6.1",
+    );
+  });
+
+  it("keeps the balanced choice label when Codex choices share a model id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
+      "Codex Sol 6.1 (balanced)",
+    );
+  });
+
+  it("names a different recorded model by its unique registry label", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Sonnet 5.5",
+    );
+  });
+
+  it("keeps an ambiguous recorded model id raw when it differs from the choice", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "gpt-6.1-sol",
+    );
+  });
+
   it("names an unknown recorded model id as the raw id", () => {
     assert.equal(
       lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-opus-5", choiceLabel: "Claude Opus 5.5" }),
