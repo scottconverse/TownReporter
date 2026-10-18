@@ -347,7 +347,11 @@ export function lastDraftModelName(input: {
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
   if (actualModelId) {
-    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+    // Two choices can share one model id (Codex Sol balanced and frontier), so
+    // the choice that ran names it first; the registry only when one entry owns it.
+    if (typeof choice === "string" && providerEntry(choice)?.model === actualModelId) return choiceLabel;
+    const owners = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
+    return owners.length === 1 ? owners[0].label : actualModelId;
   }
   return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }
