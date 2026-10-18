@@ -265,15 +265,19 @@ export const STRUCTURED_SOURCE_TEXT_LIMIT = 40_000;
 
 export async function fetchSourceText(
   rawUrl: string,
+  signal?: AbortSignal,
 ): Promise<{ text: string; titleHint: string }> {
+  signal?.throwIfAborted();
   const url = await assertPublicHttpUrl(rawUrl);
+  signal?.throwIfAborted();
   if (/youtube\.com|youtu\.be/i.test(url.hostname)) {
     const { ingestYoutube } = await import("./youtube.ts");
     const yt = await ingestYoutube(url);
+    signal?.throwIfAborted();
     if (yt) return { text: yt.text, titleHint: yt.title };
   }
 
-  const res = await fetchPublicHttp(url);
+  const res = await fetchPublicHttp(url, 4, signal);
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const ctype = res.headers.get("content-type") ?? "";
   const mediaType = ctype.split(";", 1)[0].trim().toLowerCase();
@@ -289,6 +293,7 @@ export async function fetchSourceText(
     throw new Error(`Unsupported content type: ${ctype}`);
   }
   const html = await res.text();
+  signal?.throwIfAborted();
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
   const isStructured =

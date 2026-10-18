@@ -8,6 +8,7 @@ async function recordOllamaCloudCall(endpoint: string, model: string, status: nu
 const geminiServer = createServerOnlyFn(() => import("./ai-gemini-cli.server.ts"));
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
+const modelToolsServer = createServerOnlyFn(() => import("./model-tools.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
 
 export type { ChatResultMetadata } from "./ai-result-metadata.ts";
@@ -913,11 +914,16 @@ async function anthropicChat(
   reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<GrokOk | GrokErr> {
   const startedAt = Date.now();
+  const signal = AbortSignal.timeout(timeoutMs);
+  const toolExecutions: Record<string, number> = {};
+  let toolsFallback = false;
   const meta = (
     usage?: { input_tokens?: number; output_tokens?: number },
     timedOut = false,
   ): ChatResultMetadata => {
     const result: ChatResultMetadata = {
+      toolExecutions: { ...toolExecutions },
+      toolsFallback,
       provider: "anthropic",
       model: cfg.model,
       durationMs: Math.max(0, Date.now() - startedAt),
@@ -927,6 +933,7 @@ async function anthropicChat(
     if (Number.isFinite(usage?.output_tokens)) result.outputTokens = usage!.output_tokens;
     return result;
   };
+  const tools = await modelToolsServer();
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({
     apiKey: cfg.apiKey,
@@ -934,39 +941,76 @@ async function anthropicChat(
     maxRetries: 1,
   });
   try {
-    const res = await client.messages.create({
-      model: cfg.model,
-      max_tokens: anthropicCeiling(maxTokens),
-      // Array form so the desk's stable system prompt can be cached. Prompts
-      // under the ~1k-token minimum simply will not cache — no error, no cost.
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      thinking: { type: "adaptive" },
-      output_config: { effort: (reasoningEffort ?? cfg.effort) as typeof cfg.effort },
-      messages: [{ role: "user", content: user }],
-    });
+    return await tools.withinDeadline(signal, async () => {
+      const messages: import("@anthropic-ai/sdk/resources/messages").MessageParam[] = [
+        { role: "user", content: user },
+      ];
+      while (true) {
+        signal.throwIfAborted();
+        const request = {
+          model: cfg.model,
+          max_tokens: anthropicCeiling(maxTokens),
+          // Preserve the cached system prompt and model's thinking/effort settings.
+          system: [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }],
+          thinking: { type: "adaptive" as const },
+          output_config: { effort: (reasoningEffort ?? cfg.effort) as typeof cfg.effort },
+          messages,
+          ...(!toolsFallback ? { tools: tools.modelTools } : {}),
+        };
+        let res;
+        try {
+          res = await client.messages.create(request, { signal });
+        } catch (error) {
+          if (
+            !toolsFallback &&
+            error instanceof Anthropic.APIError &&
+            tools.rejectsTools(error.status, error.message)
+          ) {
+            toolsFallback = true;
+            res = await client.messages.create({ ...request, tools: undefined }, { signal });
+          } else throw error;
+        }
+        const calls = res.content.filter((block) => block.type === "tool_use");
+        if (calls.length) {
+          messages.push({ role: "assistant", content: res.content });
+          const results: import("@anthropic-ai/sdk/resources/messages").ToolResultBlockParam[] = [];
+          for (const call of calls) {
+            signal.throwIfAborted();
+            toolExecutions[call.name] = (toolExecutions[call.name] ?? 0) + 1;
+            results.push({
+              type: "tool_result",
+              tool_use_id: call.id,
+              content: await tools.executeModelTool(call.name, call.input, signal),
+            });
+          }
+          messages.push({ role: "user", content: results });
+          continue;
+        }
 
-    if (res.stop_reason === "refusal") {
-      const why = res.stop_details?.category ?? "unspecified";
-      return {
-        ok: false,
-        error: `${cfg.label} declined this request (${why})`,
-        meta: meta(res.usage),
-      };
-    }
-    const text = res.content
-      .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-      .map((b) => b.text)
-      .join("")
-      .trim();
-    if (res.stop_reason === "max_tokens" && !text) {
-      return {
-        ok: false,
-        error: `${cfg.label} hit the token ceiling before answering`,
-        meta: meta(res.usage),
-      };
-    }
-    if (!text) return { ok: false, error: "Empty model response", meta: meta(res.usage) };
-    return { ok: true, text, meta: meta(res.usage) };
+        if (res.stop_reason === "refusal") {
+          const why = res.stop_details?.category ?? "unspecified";
+          return {
+            ok: false,
+            error: `${cfg.label} declined this request (${why})`,
+            meta: meta(res.usage),
+          };
+        }
+        const text = res.content
+          .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+          .map((b) => b.text)
+          .join("")
+          .trim();
+        if (res.stop_reason === "max_tokens" && !text) {
+          return {
+            ok: false,
+            error: `${cfg.label} hit the token ceiling before answering`,
+            meta: meta(res.usage),
+          };
+        }
+        if (!text) return { ok: false, error: "Empty model response", meta: meta(res.usage) };
+        return { ok: true, text, meta: meta(res.usage) };
+      }
+    });
   } catch (err) {
     const A = (await import("@anthropic-ai/sdk")).default;
     if (err instanceof A.AuthenticationError) {
@@ -975,7 +1019,7 @@ async function anthropicChat(
     if (err instanceof A.RateLimitError) {
       return { ok: false, error: `${cfg.label} rate limit — try again shortly`, meta: meta() };
     }
-    if (err instanceof A.APIConnectionTimeoutError) {
+    if (signal.aborted || err instanceof A.APIConnectionTimeoutError) {
       return { ok: false, error: `${cfg.label} request timed out`, meta: meta(undefined, true) };
     }
     if (err instanceof A.APIError) {
@@ -1139,6 +1183,9 @@ export async function grokChat(
   }
 
   const startedAt = Date.now();
+  const signal = AbortSignal.timeout(timeoutMs);
+  const toolExecutions: Record<string, number> = {};
+  let toolsFallback = false;
   const openAiMeta = (
     body?: {
       model?: string;
@@ -1147,6 +1194,8 @@ export async function grokChat(
     timedOut = false,
   ): ChatResultMetadata => {
     const result: ChatResultMetadata = {
+      toolExecutions: { ...toolExecutions },
+      toolsFallback,
       provider: "openai-compatible",
       model: body?.model?.trim() || model,
       durationMs: Math.max(0, Date.now() - startedAt),
@@ -1167,166 +1216,231 @@ export async function grokChat(
     const message = isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err);
     return retryFailureDetail ? `${message}\n\n${retryFailureDetail}` : message;
   };
-  let res: Response;
+  const tools = await modelToolsServer();
+  payload.tools = tools.openAiModelTools;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(remaining()),
+    return await tools.withinDeadline(signal, async () => {
+      while (true) {
+        signal.throwIfAborted();
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+            signal,
+          });
+        } catch (err) {
+          return {
+            ok: false,
+            error: transportError(err),
+            meta: openAiMeta(undefined, isTimeout(err)),
+          };
+        }
+        if (!toolsFallback && payload.tools && [400, 404, 422, 501].includes(res.status)) {
+          const detail = await res.clone().text();
+          if (tools.rejectsTools(res.status, detail)) {
+            toolsFallback = true;
+            delete payload.tools;
+            continue;
+          }
+        }
+        if (res.status === 429 || res.status >= 500) {
+          let rejectedBody: string;
+          try {
+            rejectedBody = await res.text();
+          } catch (err) {
+            return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
+          }
+          retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
+          await recordOllamaCloudCall(llm.baseUrl, model, res.status, rejectedBody, llm.apiKey);
+          if (timeoutMs < 30_000 || remaining() <= 1_000) {
+            return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
+          }
+          await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
+          try {
+            signal.throwIfAborted();
+            res = await fetch(url, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(payload),
+              signal,
+            });
+          } catch (err) {
+            return {
+              ok: false,
+              error: transportError(err),
+              meta: openAiMeta(undefined, isTimeout(err)),
+            };
+          }
+        }
+        let body: {
+          error?: { message?: string; type?: string; code?: string | number } | string;
+          model?: string;
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+          choices?: {
+            finish_reason?: string;
+            message?: {
+              content?: string;
+              reasoning_content?: string;
+              reasoning?: string;
+              tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+            };
+          }[];
+        };
+        let responseText: string;
+        try {
+          responseText = await res.text();
+        } catch (err) {
+          return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
+        }
+        if (!toolsFallback && payload.tools && tools.rejectsTools(res.status, responseText)) {
+          toolsFallback = true;
+          delete payload.tools;
+          continue;
+        }
+        if (!res.ok) await recordOllamaCloudCall(llm.baseUrl, model, res.status, responseText, llm.apiKey);
+        try {
+          body = JSON.parse(responseText) as typeof body;
+        } catch {
+          return {
+            ok: false,
+            error: res.ok
+              ? `${failureLabel} returned an unreadable response`
+              : providerHttpError(failureLabel, res.status, responseText, llm.apiKey),
+            meta: openAiMeta(),
+          };
+        }
+        if (!res.ok) {
+          // Preserve the provider's words, redacting the credential sent to it.
+          // For the loopback local model, recognize the actionable structured
+          // failure an editor can fix by choosing a larger-context model or reducing
+          // the supplied record. This also replaces the opaque "API error 400" that
+          // hid a measured 35k-token request against a 32k context.
+          const detail = typeof body.error === "string" ? body.error : body.error?.message;
+          const kind = typeof body.error === "object" ? body.error?.type : "";
+          let localEndpoint = false;
+          try {
+            localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(llm.baseUrl).hostname);
+          } catch {
+            localEndpoint = false;
+          }
+          const localContextFailure =
+            llm.label !== "Custom AI" &&
+            localEndpoint &&
+            (/context/i.test(kind ?? "") ||
+              /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
+          return {
+            ok: false,
+            error: localContextFailure
+              ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
+              : providerHttpError(failureLabel, res.status, body, llm.apiKey),
+            meta: openAiMeta(body),
+          };
+        }
+        if (body.error) {
+          await recordOllamaCloudCall(llm.baseUrl, model, 500, body, llm.apiKey);
+          const detail = typeof body.error === "string" ? body.error : body.error.message;
+          // A custom endpoint is outside TownReporter's control. Its error body may
+          // reflect an Authorization header; retain its message after redacting the key.
+          if (custom?.ok)
+            return {
+              ok: false,
+              error: `${failureLabel} API error\n\n${providerErrorDetail(body, llm.apiKey)}`,
+              meta: openAiMeta(body),
+            };
+          return {
+            ok: false,
+            error: `${failureLabel} API error${detail ? `: ${detail}` : ""}`,
+            meta: openAiMeta(body),
+          };
+        }
+        // A DeepSeek reply that runs to the output ceiling with thinking off is a
+        // repetition loop, not a long answer: the Oct 12 2026 edit-stage call wrote
+        // the same "The release does not state ..." note ~370 times (81k characters
+        // at 16,384 tokens), while the same request re-run finished in 1,420 tokens.
+        // The loop is intermittent, so one retry at a warmer temperature breaks it
+        // here and keeps the draft on DeepSeek, instead of paying Local and Codex for
+        // it. Only when the deadline leaves room for a second full attempt.
+        const firstAttemptMs = Date.now() - startedAt;
+        if (
+          body.choices?.[0]?.finish_reason === "length" &&
+          isDeepSeekFlashModel(model) &&
+          remaining() >= Math.max(15_000, firstAttemptMs)
+        ) {
+          try {
+            const again = await fetch(url, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ ...payload, temperature: LOOP_RETRY_TEMPERATURE }),
+              signal,
+            });
+            const againBody = again.ok ? (JSON.parse(await again.text()) as typeof body) : null;
+            if (againBody && !againBody.error && againBody.choices?.[0]?.finish_reason !== "length")
+              body = againBody;
+          } catch {
+            // Keep the first reply; the ladder reports the cut-off honestly.
+          }
+        }
+        const message = body.choices?.[0]?.message;
+        if (message?.tool_calls?.length && body.choices?.[0]?.finish_reason !== "length") {
+          const messages = payload.messages as Record<string, unknown>[];
+          messages.push({ ...message, role: "assistant" });
+          for (const call of message.tool_calls) {
+            signal.throwIfAborted();
+            toolExecutions[call.function.name] = (toolExecutions[call.function.name] ?? 0) + 1;
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: await tools.executeModelTool(call.function.name, call.function.arguments, signal),
+            });
+          }
+          continue;
+        }
+        const text = message?.content?.trim() ?? "";
+        if (body.choices?.[0]?.finish_reason === "length") {
+          return {
+            ok: false,
+            error: `${failureLabel}: ${isGeminiOpenAiEndpoint(llm.baseUrl) ? "Google" : "Provider"} says: reply was cut off because the output token limit was reached (finish reason: length).`,
+            ...(text ? { partialText: text } : {}),
+            meta: openAiMeta(body),
+          };
+        }
+        if (!text) {
+          // A "thinking" model (gemma4, qwen3.x, ...) can spend its whole
+          // `max_tokens` budget on `reasoning_content` (most OpenAI-compatible
+          // servers) or `reasoning` (Ollama) and answer with `content: ""` and
+          // `finish_reason: "length"`. Measured on this machine: silent-looking
+          // failure, no HTTP error, just an empty draft -- and "Empty model
+          // response" told the editor nothing about why. `reasoningEffortFor`
+          // above should already prevent this for a model flagged `thinking`, but
+          // an unlisted model, a different quantization, or an explicit
+          // LLM_REASONING_EFFORT override can still hit it, so this checks the
+          // actual response rather than trusting the flag.
+          if (custom?.ok)
+            return { ok: false, error: `${failureLabel} returned no model output.`, meta: openAiMeta(body) };
+          const reasoning = (message?.reasoning_content ?? message?.reasoning ?? "").trim();
+          if (reasoning) {
+            return {
+              ok: false,
+              error:
+                "The local model spent its whole answer thinking and never wrote the draft. Turn thinking off for it (LLM_REASONING_EFFORT=none) or pick a different local model.",
+              meta: openAiMeta(body),
+            };
+          }
+          return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
+        }
+        await recordOllamaCloudCall(llm.baseUrl, model, res.status, "");
+        return { ok: true, text, meta: openAiMeta(body) };
+      }
     });
   } catch (err) {
     return {
       ok: false,
       error: transportError(err),
-      meta: openAiMeta(undefined, isTimeout(err)),
+      meta: openAiMeta(undefined, signal.aborted || isTimeout(err)),
     };
   }
-  if (res.status === 429 || res.status >= 500) {
-    let rejectedBody: string;
-    try { rejectedBody = await res.text(); } catch (err) {
-      return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
-    }
-    retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
-    await recordOllamaCloudCall(llm.baseUrl, model, res.status, rejectedBody, llm.apiKey);
-    if (timeoutMs < 30_000 || remaining() <= 1_000) {
-      return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
-    }
-    await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(remaining()),
-      });
-    } catch (err) {
-      return {
-        ok: false,
-        error: transportError(err),
-        meta: openAiMeta(undefined, isTimeout(err)),
-      };
-    }
-  }
-  let body: {
-    error?: { message?: string; type?: string; code?: string | number } | string;
-    model?: string;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    choices?: { finish_reason?: string; message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
-  };
-  let responseText: string;
-  try { responseText = await res.text(); } catch (err) {
-    return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
-  }
-  if (!res.ok) await recordOllamaCloudCall(llm.baseUrl, model, res.status, responseText, llm.apiKey);
-  try {
-    body = JSON.parse(responseText) as typeof body;
-  } catch {
-    return {
-      ok: false,
-      error: res.ok ? `${failureLabel} returned an unreadable response` : providerHttpError(failureLabel, res.status, responseText, llm.apiKey),
-      meta: openAiMeta(),
-    };
-  }
-  if (!res.ok) {
-    // Preserve the provider's words, redacting the credential sent to it.
-    // For the loopback local model, recognize the actionable structured
-    // failure an editor can fix by choosing a larger-context model or reducing
-    // the supplied record. This also replaces the opaque "API error 400" that
-    // hid a measured 35k-token request against a 32k context.
-    const detail = typeof body.error === "string" ? body.error : body.error?.message;
-    const kind = typeof body.error === "object" ? body.error?.type : "";
-    let localEndpoint = false;
-    try {
-      localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(llm.baseUrl).hostname);
-    } catch {
-      localEndpoint = false;
-    }
-    const localContextFailure =
-      llm.label !== "Custom AI" && localEndpoint &&
-      (/context/i.test(kind ?? "") || /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
-    return {
-      ok: false,
-      error: localContextFailure
-        ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
-        : providerHttpError(failureLabel, res.status, body, llm.apiKey),
-      meta: openAiMeta(body),
-    };
-  }
-  if (body.error) {
-    await recordOllamaCloudCall(llm.baseUrl, model, 500, body, llm.apiKey);
-    const detail = typeof body.error === "string" ? body.error : body.error.message;
-    // A custom endpoint is outside TownReporter's control. Its error body may
-    // reflect an Authorization header; retain its message after redacting the key.
-    if (custom?.ok)
-      return { ok: false, error: `${failureLabel} API error\n\n${providerErrorDetail(body, llm.apiKey)}`, meta: openAiMeta(body) };
-    return {
-      ok: false,
-      error: `${failureLabel} API error${detail ? `: ${detail}` : ""}`,
-      meta: openAiMeta(body),
-    };
-  }
-  // A DeepSeek reply that runs to the output ceiling with thinking off is a
-  // repetition loop, not a long answer: the Oct 12 2026 edit-stage call wrote
-  // the same "The release does not state ..." note ~370 times (81k characters
-  // at 16,384 tokens), while the same request re-run finished in 1,420 tokens.
-  // The loop is intermittent, so one retry at a warmer temperature breaks it
-  // here and keeps the draft on DeepSeek, instead of paying Local and Codex for
-  // it. Only when the deadline leaves room for a second full attempt.
-  const firstAttemptMs = Date.now() - startedAt;
-  if (
-    body.choices?.[0]?.finish_reason === "length" &&
-    isDeepSeekFlashModel(model) &&
-    remaining() >= Math.max(15_000, firstAttemptMs)
-  ) {
-    try {
-      const again = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...payload, temperature: LOOP_RETRY_TEMPERATURE }),
-        signal: AbortSignal.timeout(remaining()),
-      });
-      const againBody = again.ok ? (JSON.parse(await again.text()) as typeof body) : null;
-      if (againBody && !againBody.error && againBody.choices?.[0]?.finish_reason !== "length") body = againBody;
-    } catch {
-      // Keep the first reply; the ladder reports the cut-off honestly.
-    }
-  }
-  const message = body.choices?.[0]?.message;
-  const text = message?.content?.trim() ?? "";
-  if (body.choices?.[0]?.finish_reason === "length") {
-    return {
-      ok: false,
-      error: `${failureLabel}: ${isGeminiOpenAiEndpoint(llm.baseUrl) ? "Google" : "Provider"} says: reply was cut off because the output token limit was reached (finish reason: length).`,
-      ...(text ? { partialText: text } : {}),
-      meta: openAiMeta(body),
-    };
-  }
-  if (!text) {
-    // A "thinking" model (gemma4, qwen3.x, ...) can spend its whole
-    // `max_tokens` budget on `reasoning_content` (most OpenAI-compatible
-    // servers) or `reasoning` (Ollama) and answer with `content: ""` and
-    // `finish_reason: "length"`. Measured on this machine: silent-looking
-    // failure, no HTTP error, just an empty draft -- and "Empty model
-    // response" told the editor nothing about why. `reasoningEffortFor`
-    // above should already prevent this for a model flagged `thinking`, but
-    // an unlisted model, a different quantization, or an explicit
-    // LLM_REASONING_EFFORT override can still hit it, so this checks the
-    // actual response rather than trusting the flag.
-    if (custom?.ok) return { ok: false, error: `${failureLabel} returned no model output.`, meta: openAiMeta(body) };
-    const reasoning = (message?.reasoning_content ?? message?.reasoning ?? "").trim();
-    if (reasoning) {
-      return {
-        ok: false,
-        error:
-          "The local model spent its whole answer thinking and never wrote the draft. Turn thinking off for it (LLM_REASONING_EFFORT=none) or pick a different local model.",
-        meta: openAiMeta(body),
-      };
-    }
-    return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
-  }
-  await recordOllamaCloudCall(llm.baseUrl, model, res.status, "");
-  return { ok: true, text, meta: openAiMeta(body) };
 }
 
 const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"]);
