@@ -219,6 +219,15 @@ export function buildClaudeCodeArgs(input: {
     "--dangerously-skip-permissions",
     "--permission-mode", "bypassPermissions",
     "--no-session-persistence",
+    // Override personal prompt inputs per call while leaving settings sources,
+    // plugins, credentials and configured MCP servers loaded by the CLI.
+    "--settings", JSON.stringify({
+      claudeMdExcludes: ["**"],
+      disableAllHooks: true,
+      autoMemoryEnabled: false,
+      outputStyle: "default",
+      attribution: { commit: "", pr: "" },
+    }),
     ...(input.systemPromptFile
       ? ["--system-prompt-file", input.systemPromptFile]
       : input.system !== undefined ? ["--system-prompt", input.system] : []),

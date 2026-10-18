@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexChat } from "./ai-codex.server.ts";
-import { probeClaudeCode, claudeCodeChat } from "./ai-claude-code.server.ts";
+import { buildClaudeCodeArgs, probeClaudeCode, claudeCodeChat, claudeCodeReadChat } from "./ai-claude-code.server.ts";
 import { codexChildEnv } from "./cli-child-env.server.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -131,6 +131,30 @@ function assertNoSecrets(
   the parent.
 */
 describe("a spawned provider CLI gets an allow-list, not this server's environment", () => {
+  it("Claude chat and OCR suppress personal context without relocating sign-in or MCP configuration", async () => {
+    // Synthetic paths and credentials only: never read the operator's files.
+    const profile = {
+      HOME: join(tmpdir(), "tr-fixture-home"),
+      USERPROFILE: join(tmpdir(), "tr-fixture-profile"),
+      CLAUDE_CONFIG_DIR: join(tmpdir(), "tr-fixture-claude-config"),
+      CODEX_HOME: join(tmpdir(), "tr-fixture-codex-config"),
+      ANTHROPIC_API_KEY: "fixture-anthropic-key",
+      ANTHROPIC_AUTH_TOKEN: "fixture-anthropic-token",
+    };
+    const page = join(tmpdir(), "tr-fixture-page.jpg");
+    for (const run of [
+      () => claudeCodeChat({ system: "Desk instructions", user: "Source", model: "claude-haiku-5-5", timeoutMs: 10_000 }),
+      () => claudeCodeReadChat({ prompt: "Transcribe", filePath: page, model: "claude-haiku-5-5", timeoutMs: 10_000 }),
+    ]) {
+      const env = await childEnvOf(() => withEnv({ CLAUDE_CLI_PATH: FAKE_ENV_CLI }, async () => {
+        const args = buildClaudeCodeArgs({ model: "claude-haiku-5-5" });
+        assert.equal(JSON.parse(args[args.indexOf("--settings") + 1]!).autoMemoryEnabled, false);
+        await run();
+        for (const [name, value] of Object.entries(profile)) assert.equal(process.env[name], value);
+      }), profile);
+      for (const [name, value] of Object.entries(profile)) assert.equal(env[name], value, name);
+    }
+  });
   it("a Codex draft child never sees a secret, and can still find its login", async () => {
     const env = await childEnvOf(
       () =>

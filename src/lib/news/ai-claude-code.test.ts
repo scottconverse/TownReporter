@@ -344,15 +344,38 @@ describe("claudeCodeChat per-run effort", () => {
   });
 });
 
+function assertNewsroomClaudeSettings(args: string[]) {
+  assert.equal(args.filter((arg) => arg === "--settings").length, 1);
+  assert.deepEqual(JSON.parse(args[args.indexOf("--settings") + 1]!), {
+    claudeMdExcludes: ["**"],
+    disableAllHooks: true,
+    autoMemoryEnabled: false,
+    outputStyle: "default",
+    attribution: { commit: "", pr: "" },
+  });
+}
+
 function assertFullClaudeTools(args: string[]) {
+  assertNewsroomClaudeSettings(args);
   assert.ok(args.includes("--dangerously-skip-permissions"));
   assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
-  for (const flag of ["--restricted", "--safe-mode", "--strict-mcp-config", "--setting-sources", "--tools", "--allowed-tools", "--permission-prompts", "--disable-slash-commands", "--no-chrome"]) {
+  for (const flag of ["--bare", "--mcp-config", "--disallowed-tools", "--restricted", "--safe-mode", "--strict-mcp-config", "--setting-sources", "--tools", "--allowed-tools", "--permission-prompts", "--disable-slash-commands", "--no-chrome"]) {
     assert.equal(args.includes(flag), false, `${flag} must not restrict tools or MCP`);
   }
 }
 
 describe("full Claude tools for every call", () => {
+  it("isolates personal context for inline, file and OCR-style prompts without changing desk inputs", () => {
+    for (const prompt of [{ system: "Desk instructions" }, { systemPromptFile: "C:/fixture/desk.txt" }, {}]) {
+      const input = { model: "claude-haiku-5-5", reasoningEffort: "high" as const, ...prompt };
+      const args = buildClaudeCodeArgs(input);
+      assertFullClaudeTools(args);
+      assert.equal(args[args.indexOf("--model") + 1], input.model);
+      assert.equal(args[args.indexOf("--effort") + 1], "high");
+      if ("system" in prompt) assert.equal(args[args.indexOf("--system-prompt") + 1], prompt.system);
+      if ("systemPromptFile" in prompt) assert.equal(args[args.indexOf("--system-prompt-file") + 1], prompt.systemPromptFile);
+    }
+  });
   it("uses the production builder without tool restrictions", () => {
     assertFullClaudeTools(buildClaudeCodeArgs({ model: "claude-haiku-5-5", system: "Return JSON only." }));
     assertFullClaudeTools(buildClaudeCodeArgs({ model: "claude-haiku-5-5" }));

@@ -21,6 +21,14 @@ const EXPECTED_NATIVE_ARGS = [
   "exec",
   "--dangerously-bypass-approvals-and-sandbox",
   "--skip-git-repo-check",
+  "-c", "project_doc_max_bytes=0",
+  "-c", 'developer_instructions=""',
+  "-c", 'personality="none"',
+  "-c", "features.hooks=false",
+  "-c", "features.memories=false",
+  "-c", "memories.use_memories=false",
+  "-c", "memories.generate_memories=false",
+  "-c", "notify=[]",
   "--model",
   "gpt-5.6-sol",
   "--ephemeral",
@@ -85,16 +93,13 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
   });
 
   it("returns JSONL metadata and starts even a normal draft outside the application cwd", async () => {
-    const expectedCwd = tmpdir();
-    const childAnswer = JSON.stringify({ cwd: expectedCwd });
-    const jsonl = [
-      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: childAnswer } }),
-      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 210, output_tokens: 33 } }),
-    ].join("\n") + "\n";
     const dir = await mkdtemp(path.join(tmpdir(), "codex-jsonl-test-"));
     const fakePath = path.join(dir, "jsonl-cli.mjs");
     const applicationCwd = process.cwd();
-    await writeFile(fakePath, `process.stdout.write(${JSON.stringify(jsonl)});`);
+    await writeFile(fakePath, `
+      console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ cwd: process.cwd() }) } }));
+      console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 210, output_tokens: 33 } }));
+    `);
     try {
       process.chdir(dir);
       const result = await withEnv(
@@ -103,8 +108,9 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       );
       assert.equal(result.ok, true);
       if (!result.ok) return;
-      assert.deepEqual(JSON.parse(result.text), { cwd: expectedCwd });
-      assert.notEqual(expectedCwd, dir);
+      const receivedCwd = JSON.parse(result.text).cwd;
+      assert.equal(path.dirname(path.dirname(receivedCwd)), path.resolve(tmpdir()));
+      assert.notEqual(receivedCwd, dir);
       assert.equal(result.meta?.provider, "codex");
       assert.equal(result.meta?.model, "gpt-5.6-terra");
       assert.equal(result.meta?.timedOut, false);
@@ -518,7 +524,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       assert.equal(received.input, user, "the task must not be wrapped or mixed with the voice");
       assert.equal(received.bytes, Buffer.byteLength(voice));
       assert.equal(received.hash, createHash("sha256").update(voice).digest("hex"));
-      assert.equal(path.resolve(received.cwd), path.resolve(tmpdir()));
+      assert.equal(path.dirname(path.dirname(received.cwd)), path.resolve(tmpdir()));
       assert.ok(received.args.includes("--search"));
       assert.ok(received.args.includes("--dangerously-bypass-approvals-and-sandbox"));
       assert.equal(received.args.includes("--disable"), false);

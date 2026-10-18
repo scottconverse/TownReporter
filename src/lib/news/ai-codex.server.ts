@@ -1,11 +1,11 @@
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
 import { cliAppDataDir, codexChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
+import { createCodexCallContext } from "./codex-call-context.server.ts";
 
 
 /** Safe, bounded labels for opt-in native transport diagnostics. */
@@ -130,7 +130,7 @@ export async function findCodexCli(): Promise<CodexCliLookup> {
   const named = process.env.CODEX_CLI_PATH?.trim();
   if (named) {
     // `exists()` resolves a relative path against this process's cwd; every
-    // draft call is spawned with `cwd: tmpdir()`. Absolute before it leaves
+    // draft call is spawned from a fresh temporary directory. Absolute before it leaves
     // here, or the two disagree and the CLI is never actually started.
     if (await exists(named)) return { ok: true, bin: resolveCliPath(named) };
     return { ok: false, error: codexCliPathMissing(named) };
@@ -206,6 +206,7 @@ function run(
   input: string,
   timeoutMs: number,
   cwd?: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -217,7 +218,7 @@ function run(
       every stored model connection. See cli-child-env.server.ts for what a CLI
       does need.
     */
-    const childEnv = codexChildEnv();
+    const childEnv = env ?? codexChildEnv();
     let child: ReturnType<typeof spawn>;
     try {
       const plan = spawnPlan(bin, args);
@@ -342,11 +343,21 @@ export function buildCodexArgs(input: {
     // is the Codex CLI's documented opt-out for that repository check; it
     // does not alter the chosen sandbox, approval, or user configuration.
     "--skip-git-repo-check",
+    // Supported per-call overrides; retain all tools and configured MCP.
+    "-c", "project_doc_max_bytes=0",
+    "-c", 'developer_instructions=""',
+    "-c", 'personality="none"',
+    "-c", "features.hooks=false",
+    "-c", "features.memories=false",
+    "-c", "memories.use_memories=false",
+    "-c", "memories.generate_memories=false",
+    "-c", "notify=[]",
     ...(input.imagePaths?.length ? input.imagePaths.flatMap((p) => ["--image", p]) : []),
     "--model",
     input.model,
     ...(input.systemPromptFile
-      ? ["-c", `model_instructions_file=${JSON.stringify(input.systemPromptFile)}`]
+      ? ["-c", `model_instructions_file=${JSON.stringify(input.systemPromptFile)}`,
+         "-c", `experimental_compact_prompt_file=${JSON.stringify(input.systemPromptFile)}`]
       : []),
     ...(configuredReasoning ? ["-c", `model_reasoning_effort=${configuredReasoning}`] : []),
     "--ephemeral",
@@ -457,17 +468,25 @@ export async function codexChat(input: {
       (!path.isAbsolute(input.systemPromptFile) || !(await exists(input.systemPromptFile)))) {
     return { ok: false, error: "Codex's instruction file must be an existing absolute file path." };
   }
-  const result = await run(
-    bin,
-    buildCodexArgs({ model: input.model, systemPromptFile: input.systemPromptFile, webSearch: input.webSearch, imagePaths: input.imagePaths, reasoningEffort: input.reasoningEffort }),
-    buildCodexPrompt(input),
-    input.timeoutMs,
-    // Start every reporting call outside the application checkout and the
-    // operator's project tree. The user's OAuth state remains available for
-    // authentication, but repository instructions and local project files do
-    // not become an accidental part of a newsroom assignment.
-    tmpdir(),
-  );
+  let context: Awaited<ReturnType<typeof createCodexCallContext>>;
+  try {
+    context = await createCodexCallContext(input);
+  } catch {
+    return { ok: false, error: "Codex could not prepare its newsroom call context." };
+  }
+  let result: Awaited<ReturnType<typeof run>>;
+  try {
+    result = await run(
+      bin,
+      buildCodexArgs({ model: input.model, systemPromptFile: context.instructionFile, webSearch: input.webSearch, imagePaths: input.imagePaths, reasoningEffort: input.reasoningEffort }),
+      buildCodexPrompt(input),
+      input.timeoutMs,
+      context.cwd,
+      context.env,
+    );
+  } finally {
+    await context.dispose();
+  }
   const parsed = parseCodexJsonl(result.stdout);
   const meta: ChatResultMetadata = {
     provider: "codex",
