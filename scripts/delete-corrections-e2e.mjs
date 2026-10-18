@@ -45,7 +45,6 @@ import {
   awaitServerFnCall,
   createServerFnLog,
 } from "./lib/serverfn-traffic.mjs";
-import { PUBLISHED_TAKE_OFF_OPENER } from "../src/lib/news/desk-copy.ts";
 
 const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -1695,7 +1694,11 @@ async function main() {
   // the correction survived the story it belonged to.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
   const pubRow2 = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
-  await pressInMore(pubRow2, PUBLISHED_TAKE_OFF_OPENER);
+  // "Take off the paper" is PUBLISHED_TAKE_OFF_OPENER in src/lib/news/desk-copy.ts.
+  // The words are written out here because the delete-corrections CI job runs
+  // this script with plain node (no --experimental-strip-types), so it does not
+  // import the .ts module.
+  await pressInMore(pubRow2, "Take off the paper");
   await pubRow2.getByRole("button", { name: /Yes, take it off/ }).click();
   await page.getByText(/Taken off the paper, and kept for 30 days/).waitFor({ timeout: 20_000 });
   step("deleting a story asks once and says the copy is kept");
