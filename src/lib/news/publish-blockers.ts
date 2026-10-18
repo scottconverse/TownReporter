@@ -88,18 +88,18 @@ export type PublishBlocker = {
    * ── WHICH KIND OF REASON THIS IS (unit OH) ────────────────────────────────
    *
    * `"hard"` -- the desk itself refuses this, so there is nothing for a person
-   * to weigh: an empty headline or body, a press already in flight, a check
-   * already running or saving, or a lead this page cannot even find. These are
+   * to weigh: an empty headline or body, a press already in flight, an evidence
+   * decision still saving, or a lead this page cannot even find. These are
    * the ONLY reasons that turn the Publish button off.
    *
    * `"warning"` -- a judgement call the editor is paid to make: an unnamed
-   * source for a named outlet, an unreviewed or contradicted claim, a stale
-   * evidence check, an AI readiness verdict, a held or killed draft, a missing
+   * source for a named outlet, an unreviewed or contradicted claim, a live or
+   * stale evidence check, an AI readiness verdict, a held or killed draft, a missing
    * dek or section. A warning is DRAWN in the confirm dialog and the editor
    * prints over it; it never disables the button by itself.
    *
-   * The six hard keys are exactly: `headline`, `body`, `publishing`,
-   * `reconcile-running`, `evidence-review-saving`, `lead-not-found`. Everything
+   * The five hard keys are exactly: `headline`, `body`, `publishing`,
+   * `evidence-review-saving`, `lead-not-found`. Everything
    * else is a warning.
    */
   kind: "warning" | "hard";
@@ -114,10 +114,10 @@ export type PublishBlocker = {
 
 /**
  * The page state the publish button reads. Every field is already computed on
- * the page for some other reason; this adds no new ones. `publishing`,
- * `reviewingEvidence` and `reconcileActive` are the three transient gates --
- * they clear themselves, so their rows say so rather than asking for a press
- * that does nothing.
+ * the page for some other reason; this adds no new ones. `publishing` and
+ * `reviewingEvidence` are the two transient gates -- they clear themselves, so
+ * their rows say so rather than asking for a press that does nothing. A running
+ * evidence check (`reconcileActive`) is a warning: its row offers Publish anyway.
  */
 export type PublishBlockerState = {
   evidenceLoading?: boolean;
@@ -526,12 +526,22 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  /*
+    ── A RUNNING EVIDENCE CHECK (ENG-2, warning) ─────────────────────────────
+    The desk does not refuse a press over a check that is still running. The
+    press prints over it and the server records that override like any other
+    warning; the sentence is the server's own (desk.ts performPublish). The page
+    cannot see a check's cancel request or heartbeat, so it warns for any queued
+    or running check and the server is the judge of which ones count.
+  */
   if (state.reconcileActive) {
     blockers.push({
       key: "reconcile-running",
-      kind: "hard",
-      sentence: "An evidence check is running on this draft. Its answer is not in yet.",
-      action: { label: "See the running check", target: { kind: "running-check" } },
+      kind: "warning",
+      sentence:
+        "An evidence check is running on this draft. Its answer is not in yet. Publish anyway prints it before that answer comes in.",
+      action: { label: publishAnywayLabel(state.sectionName, ""), target: { kind: "publish-now" } },
+      altAction: { label: "See the running check", target: { kind: "running-check" } },
     });
   }
 

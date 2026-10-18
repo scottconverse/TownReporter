@@ -17,7 +17,7 @@ import { cleanPublishRequest } from "./request-input.ts";
  * press meets it, without reading a single source file:
  *
  *   - EVERY warning key leaves the confirm press ENABLED, listed, and labelled
- *     "Publish anyway in <section>"; the six hard keys turn it off.
+ *     "Publish anyway in <section>"; the five hard keys turn it off.
  *   - with no warnings the label is the desk's own unchanged words.
  *   - a held or killed draft KEEPS its bar (the prep list and a live press).
  *   - a warning the SERVER returned on a refusal is shown on the stale tab, its
@@ -51,7 +51,6 @@ const HARD_KEYS = [
   "headline",
   "body",
   "publishing",
-  "reconcile-running",
   "evidence-review-saving",
   "lead-not-found",
 ] as const;
@@ -65,6 +64,7 @@ const WARNING_STATES: { key: string; patch: Partial<PublishBlockerState> }[] = [
   { key: "evidence-stale", patch: { evidenceStale: true } },
   { key: "readiness", patch: { readiness: "not-ready", readinessReason: "Not ready." } },
   { key: "evidence-loading", patch: { evidenceLoading: true } },
+  { key: "reconcile-running", patch: { reconcileActive: true } },
   { key: "meeting-citation-stale", patch: { meetingCitationNotice: "The citation drifted." } },
   { key: "lead-held", patch: { leadStatus: "held" } },
   { key: "lead-killed", patch: { leadStatus: "killed" } },
@@ -74,17 +74,16 @@ const HARD_STATES: { key: string; patch: Partial<PublishBlockerState> }[] = [
   { key: "headline", patch: { headline: "" } },
   { key: "body", patch: { body: "" } },
   { key: "publishing", patch: { publishing: true } },
-  { key: "reconcile-running", patch: { reconcileActive: true } },
   { key: "evidence-review-saving", patch: { reviewingEvidence: true } },
   { key: "lead-not-found", patch: { leadStatus: "missing" } },
 ];
 
-describe("OH: the hard keys are exactly the six, and every other key is a warning", () => {
+describe("OH: the hard keys are exactly the five, and every other key is a warning", () => {
   it("classifies each hard key as hard and each warning key as warning", () => {
     for (const { key, patch } of HARD_STATES) {
       const row = withState(patch).find((blocker) => blocker.key === key);
       assert.ok(row, `${key} must be produced by its state`);
-      assert.equal(row!.kind, "hard", `${key} is one of the six hard keys`);
+      assert.equal(row!.kind, "hard", `${key} is one of the five hard keys`);
     }
     for (const { key, patch } of WARNING_STATES) {
       const row = withState(patch).find((blocker) => blocker.key === key);
@@ -92,7 +91,7 @@ describe("OH: the hard keys are exactly the six, and every other key is a warnin
       assert.equal(row!.kind, "warning", `${key} is a judgement, not a wall`);
       assert.ok(
         !(HARD_KEYS as readonly string[]).includes(key),
-        `${key} must not be one of the six hard keys`,
+        `${key} must not be one of the five hard keys`,
       );
     }
   });
@@ -111,6 +110,7 @@ describe("OH: the hard keys are exactly the six, and every other key is a warnin
         "evidence-stale",
         "readiness",
         "evidence-loading",
+        "reconcile-running",
         "meeting-citation-stale",
         "lead-held",
         "lead-killed",
