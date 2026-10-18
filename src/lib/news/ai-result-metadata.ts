@@ -8,6 +8,10 @@
 export type ChatResultMetadata = {
   /** Provider transport that completed (for example, `claude-code`). */
   provider: string;
+  /** Actual model-requested tool invocations, including failed executions. */
+  toolExecutions?: Record<string, number>;
+  /** Endpoint explicitly rejected tools and was retried once without them. */
+  toolsFallback?: boolean;
   /** Provider-reported model ID when available; otherwise the CLI model selector. */
   model: string;
   /** CLI-reported duration when available, otherwise this process's elapsed wall time. */
