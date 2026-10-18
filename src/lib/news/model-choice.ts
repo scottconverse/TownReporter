@@ -347,7 +347,14 @@ export function lastDraftModelName(input: {
   if (isCustomModelChoice(choice) || choice === "local-model") return choiceLabel;
   const actualModelId = input.actualModelId?.trim();
   if (actualModelId) {
-    return PROVIDER_REGISTRY.find((entry) => entry.model === actualModelId)?.label ?? actualModelId;
+    // Two choices can run one model id (codex-balanced and codex-frontier both
+    // run gpt-6.1-sol). When the choice that ran recorded that same id, its
+    // own label is the true one; a registry-wide lookup would hand back
+    // whichever entry comes first and print the other choice's name.
+    const own = typeof choice === "string" ? providerEntry(choice) : null;
+    if (own?.model === actualModelId) return choiceLabel;
+    const matching = PROVIDER_REGISTRY.filter((entry) => entry.model === actualModelId);
+    return matching.length === 1 ? matching[0].label : actualModelId;
   }
   return (typeof choice === "string" ? providerEntry(choice)?.familyLabel : undefined) ?? choiceLabel;
 }

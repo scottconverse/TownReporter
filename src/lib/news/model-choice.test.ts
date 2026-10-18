@@ -560,6 +560,31 @@ describe("lastDraftModelName: the Last draft line names the model that ran", () 
     );
   });
 
+  it("names the choice that ran when two choices share one model id", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "codex-frontier", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1" }),
+      "Codex Sol 6.1",
+    );
+    assert.equal(
+      lastDraftModelName({ choice: "codex-balanced", actualModelId: "gpt-6.1-sol", choiceLabel: "Codex Sol 6.1 (balanced)" }),
+      "Codex Sol 6.1 (balanced)",
+    );
+  });
+
+  it("names a failover-like mismatch by the recorded model's own label", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "claude-frontier", actualModelId: "claude-sonnet-5-5", choiceLabel: "Claude Opus 5.5" }),
+      "Claude Sonnet 5.5",
+    );
+  });
+
+  it("names an ambiguous recorded id as the raw id when the choice that ran is another", () => {
+    assert.equal(
+      lastDraftModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      "gpt-6.1-sol",
+    );
+  });
+
   it("keeps the label of a choice whose name no version change touched", () => {
     assert.equal(
       lastDraftModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
