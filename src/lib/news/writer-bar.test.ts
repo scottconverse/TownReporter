@@ -8,6 +8,7 @@ import {
   lastDraftLine,
   lastDraftWhen,
   modelAndResearchLabel,
+  pastDraftPickName,
   readinessDot,
   readinessFailureMessage,
   recordedActualModelId,
@@ -460,6 +461,54 @@ describe("the Last draft line names the model that ran (the story page's composi
     assert.match(
       lastDraftFor("claude-frontier", JSON.stringify({ actualModelId: "claude-opus-5" }), "Claude Opus 5.5"),
       /^Last draft: claude-opus-5, /,
+    );
+  });
+});
+
+describe("a saved draft's 'you picked' names the pick as its run recorded it", () => {
+  const failoverNote = "Claude Opus request timed out. -> DeepSeek v4.1 Flash";
+  const writerOf = (choice: string, resultJson: string | null, choiceLabel: string) =>
+    pastRunModelName({ choice, actualModelId: recordedActualModelId(resultJson), choiceLabel });
+  it("an old claude-frontier job with no recorded id says 'You picked Claude Opus', with no version", () => {
+    const resultJson = JSON.stringify({ requestedRuntime: "claude-frontier" });
+    const pick = pastDraftPickName({ status: "completed", requestedChoice: "claude-frontier", ranChoice: "deepseek-flash", resultJson, choiceLabel: "Claude Opus 5.5" });
+    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash");
+    assert.equal(pick, "Claude Opus");
+    assert.equal(
+      draftFallbackAttribution({ pickedModel: pick, writerModel: writer, failoverNote }),
+      "You picked Claude Opus. DeepSeek v4.1 Flash wrote this draft because Claude Opus timed out.",
+    );
+    assert.equal(
+      modelAndResearchLabel({ runningLine: "", pickerModel: "Claude Opus 5.5", pickerModelChoice: "claude-frontier", requestedModelChoice: "claude-frontier", requestedModel: pick, writerModel: writer }),
+      "DeepSeek v4.1 Flash (you picked Claude Opus; it fell back)",
+    );
+  });
+  it("an old claude-frontier job that ran unchanged names no version and adds no attribution sentence", () => {
+    const resultJson = JSON.stringify({ checkpointDraftId: 100 });
+    const pick = pastDraftPickName({ status: "completed", requestedChoice: "claude-frontier", ranChoice: "claude-frontier", resultJson, choiceLabel: "Claude Opus 5.5" });
+    const writer = writerOf("claude-frontier", resultJson, "Claude Opus 5.5");
+    assert.equal(draftFallbackAttribution({ pickedModel: pick, writerModel: writer, failoverNote }), undefined);
+    assert.equal(
+      modelAndResearchLabel({ runningLine: "", pickerModel: "Claude Opus 5.5", pickerModelChoice: "claude-frontier", requestedModelChoice: "claude-frontier", requestedModel: pick, writerModel: writer }),
+      "Claude Opus",
+    );
+  });
+  it("a new deepseek-flash job that recorded its model and ran its pick adds no attribution sentence", () => {
+    const resultJson = JSON.stringify({ actualModelId: "deepseek-v4.1-flash" });
+    const pick = pastDraftPickName({ status: "completed", requestedChoice: "deepseek-flash", ranChoice: "deepseek-flash", resultJson, choiceLabel: "DeepSeek v4.1 Flash" });
+    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash");
+    assert.equal(pick, "DeepSeek v4.1 Flash");
+    assert.equal(draftFallbackAttribution({ pickedModel: pick, writerModel: writer, failoverNote: null }), undefined);
+  });
+  it("a live job keeps today's label for its pick", () => {
+    const resultJson = JSON.stringify({ actualModelId: "claude-opus-5-5" });
+    assert.equal(pastDraftPickName({ status: "running", requestedChoice: "claude-frontier", ranChoice: "claude-frontier", resultJson, choiceLabel: "Claude Opus 5.5" }), "Claude Opus 5.5");
+    assert.equal(pastDraftPickName({ status: undefined, requestedChoice: "", ranChoice: undefined, resultJson: null, choiceLabel: "Automatic" }), "Automatic");
+  });
+  it("a picker that moved to another model still shows the picker", () => {
+    assert.equal(
+      modelAndResearchLabel({ runningLine: "", pickerModel: "DeepSeek v4.1 Flash", pickerModelChoice: "deepseek-flash", requestedModelChoice: "claude-frontier", requestedModel: "Claude Opus", writerModel: "Claude Opus" }),
+      "DeepSeek v4.1 Flash",
     );
   });
 });

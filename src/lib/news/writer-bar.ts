@@ -18,7 +18,7 @@
  * cannot answer it differently) and the words are the picker's words.
  */
 
-import { FAILOVER_TRAIL_SEPARATOR, isCustomModelChoice } from "./model-choice.ts";
+import { FAILOVER_TRAIL_SEPARATOR, isCustomModelChoice, pastRunModelName } from "./model-choice.ts";
 import { clockLabel } from "./follow-up-copy.ts";
 
 /** Reasons use the existing availability check, with no extra probes. */
@@ -154,6 +154,27 @@ export function requestedModelChoice(resultJson: string | null | undefined, pers
   } catch {
     return persistedChoice;
   }
+}
+
+/**
+ * The name a saved draft's job gives the model the editor picked. A completed
+ * job names the pick the way its run recorded it (`pastRunModelName`); the
+ * recorded model id counts only when the pick is the choice that ran. A live
+ * or missing job keeps today's label.
+ */
+export function pastDraftPickName(input: {
+  status: string | undefined;
+  requestedChoice: string;
+  ranChoice: string | null | undefined;
+  resultJson: string | null | undefined;
+  choiceLabel: string;
+}): string {
+  if (input.status !== "completed") return input.choiceLabel;
+  return pastRunModelName({
+    choice: input.requestedChoice,
+    actualModelId: input.requestedChoice === input.ranChoice ? recordedActualModelId(input.resultJson) : null,
+    choiceLabel: input.choiceLabel,
+  });
 }
 
 /** Explain the first technical failure without mislabeling the model that wrote the saved draft. */
@@ -373,6 +394,12 @@ export function modelAndResearchLabel(input: {
    * Automatic is named by the id and not by whatever its label happens to say.
    */
   requestedModelChoice?: string;
+  /**
+   * The picker's current choice id. With `requestedModelChoice` it decides
+   * whether the picker moved, so a version that a past run's label names (or
+   * does not) is not taken for the picker moving.
+   */
+  pickerModelChoice?: string;
   /** The model the editor asked the saved draft's job for. */
   requestedModel: string;
   /** The model that wrote the saved draft, or "" when no draft job finished. */
@@ -382,7 +409,10 @@ export function modelAndResearchLabel(input: {
   const writer = input.writerModel.trim();
   if (!writer) return input.pickerModel;
   const requested = input.requestedModel.trim();
-  if (input.pickerModel !== requested && input.pickerModel !== writer) return input.pickerModel;
+  const pickerMoved = input.pickerModelChoice !== undefined && input.requestedModelChoice !== undefined
+    ? input.pickerModelChoice !== input.requestedModelChoice
+    : input.pickerModel !== requested;
+  if (pickerMoved && input.pickerModel !== writer) return input.pickerModel;
   if (writer === requested) return writer;
   /*
     TJA-3: Automatic is a choice, not a model. When it runs its first choice --

@@ -148,6 +148,7 @@ import { resolveJobModel } from "@/lib/news/model-assignments";
 */
 import {
   draftFallbackAttribution,
+  pastDraftPickName,
   runningWriterSentence,
   modelAndResearchLabel,
   lastDraftInHand,
@@ -718,9 +719,17 @@ function StoryPage() {
   const requestedDraftModelChoice = data?.job
     ? requestedModelChoice(data.job.result_json, data.job.model_choice)
     : "";
+  /* The pick, named as a completed job's run recorded it; a live job or no job keeps today's label. */
+  const pickedWriterLabel = pastDraftPickName({
+    status: data?.job?.status,
+    requestedChoice: requestedDraftModelChoice,
+    ranChoice: data?.job?.model_choice,
+    resultJson: data?.job?.result_json,
+    choiceLabel: storyModelLabel(requestedDraftModelChoice),
+  });
   const fallbackAttribution = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed"
     ? draftFallbackAttribution({
-        pickedModel: storyModelLabel(requestedDraftModelChoice),
+        pickedModel: pickedWriterLabel,
         writerModel: storedWriterName,
         failoverNote: data.job.failover_note,
       })
@@ -734,7 +743,6 @@ function StoryPage() {
   const runningWriter = data?.job && (data.job.status === "running" || data.job.status === "queued")
     ? storyModelLabel(data.job.model_choice)
     : "";
-  const pickedWriterLabel = storyModelLabel(requestedDraftModelChoice);
   const runningWriterLine = runningWriter && runningWriter !== pickedWriterLabel
     ? `Writer: ${runningWriter} · picked: ${pickedWriterLabel}`
     : "";
@@ -746,6 +754,7 @@ function StoryPage() {
     runningLine: runningWriterLine,
     pickerModel: storyModelLabel(modelChoice),
     requestedModelChoice: requestedDraftModelChoice,
+    pickerModelChoice: modelChoice,
     requestedModel: pickedWriterLabel,
     writerModel: savedDraftWriter,
   });
