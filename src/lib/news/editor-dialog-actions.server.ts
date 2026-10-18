@@ -611,7 +611,7 @@ export type FindReplacementResult =
  * `proposedBy: "desk"` so the editor knows what they are looking at.
  *
  * EXACTLY ONE MODEL CALL, ON AN EXPLICIT PRESS. Same shape as its neighbour:
- * one `deps.chat`, 1400 tokens, `noTools: true` -- the desk is asking for a
+ * one `deps.chat`, 1400 tokens, with full CLI tools -- the desk is asking for a
  * list of pages, not for an agent to go and read them. The model comes from the
  * newsroom's own picker through `resolveFor`, never from a constant here, so
  * the editor's Automatic choice is what decides.
@@ -724,12 +724,6 @@ export async function performFindReplacement(
     newsroomId: context.newsroomId,
     reasoningEffort: resolution.effort,
     localModel,
-    /*
-      No tools, deliberately. This is a "name some pages" question; an agent
-      that can fetch would go and read the very host that just refused the
-      desk, which is the one thing the whole feature is built not to do.
-    */
-    noTools: true,
   });
   if (!got.ok) {
     return {

@@ -36,7 +36,6 @@ import {
   persistEditorialSuccess,
 } from "./editorial-result-persistence.ts";
 import {
-  EDITORIAL_TOOLS,
   RESEARCH_INSTRUCTIONS,
   buildEditorialPack,
   buildWritingPack,
@@ -197,8 +196,8 @@ export type EditorialWriterDeps = {
    * this type: a test that wants the desk pass to run without a socket fakes
    * the search and the fetch, and a test that wants to watch every call the
    * piece makes leaves `plan`/`read` alone so they arrive through `grokChat`
-   * alongside the writing call -- which is how SEC-3 is asserted (the research
-   * calls must not carry the voice, and the writing call must not carry tools).
+   * alongside the writing call, so tests can verify the prompt and transport
+   * used by each pass. CLI calls retain full tools.
    */
   deskResearch?: DeskResearchDeps;
 };
@@ -354,7 +353,6 @@ export async function writeEditorial(
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
           model: plannerModelFor(choice) || providerModel(entry),
-          allowedTools: EDITORIAL_TOOLS,
           timeoutMs: editorialTimeoutMs(),
           reasoningEffort: modelEffort(choice, editorialInput.modelEffort),
         });
@@ -364,7 +362,7 @@ export async function writeEditorial(
       await reportStage(editorialInput)("Writing the editorial");
       return chat({
         system: suppliedOnly
-          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          ? "The editor selected supplied-only scope. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Name missing facts in EDITOR CHECKS rather than inventing them."
           : "",
         systemPromptFile: found.voice.path,
         /*
@@ -387,7 +385,6 @@ export async function writeEditorial(
           logged (see `voice.server.ts`), and the path is validated before it
           is read.
         */
-        allowedTools: suppliedOnly ? [] : EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -425,22 +422,11 @@ export async function writeEditorial(
       await reportStage(editorialInput)("Writing the editorial");
       return codexChat({
         system: suppliedOnly
-          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          ? "The editor selected supplied-only scope. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Name missing facts in EDITOR CHECKS rather than inventing them."
           : "",
         systemPromptFile: found.voice.path,
-        /*
-          UNIT U31 -- the writer gets its web search back (U12b took it away).
-
-          U12b passed `--disable standalone_web_search` here so the writing
-          call could not search. That is the capability the voice's research
-          protocol needs, so it is asked for again -- and asked for BY NAME
-          rather than left to the CLI: before U12 this call named nothing at
-          all and inherited codex-cli 0.145.0's own default, which is `false`
-          for `standalone_web_search`. Stating `webSearch: true` is what makes
-          the restored capability a property a test can hold instead of a
-          default the installed CLI is free to change.
-        */
-        webSearch: !suppliedOnly,
+        // Full native web search is available even with supplied research.
+        webSearch: true,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -548,7 +534,7 @@ export async function writeEditorial(
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
         suppliedOnly
-          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Name missing facts in EDITOR CHECKS rather than inventing them.`
           : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
@@ -596,7 +582,7 @@ export async function writeEditorial(
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
         suppliedOnly
-          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Name missing facts in EDITOR CHECKS rather than inventing them.`
           : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
@@ -744,7 +730,6 @@ export async function fileEditorial(
           choice: snapshot.modelChoice,
           newsroomId: input.newsroomId,
           timeoutMs: options?.timeoutMs,
-          noTools: true,
           reasoningEffort: snapshot.modelEffort,
           localModel: snapshot.modelChoice === "local-model" ? input.localModel : undefined,
         }),

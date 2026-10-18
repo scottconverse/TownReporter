@@ -704,7 +704,7 @@ export function newsworthinessWords(n: Newsworthiness | null): string {
 
 export const DARK_VERIFY_SYSTEM = `TOWNREPORTER — DARK SIGNAL DESK: STRUCTURED VERIFICATION
 
-YOU HAVE NO TOOLS IN THIS CALL. Do NOT attempt Bash, WebSearch, WebFetch or any MCP tool — they will be refused. The application has ALREADY run the adversarial searches for you and the results are in the pack below. Read them. Return ONLY the JSON described at the end.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below.
 
 This is stage two. Stage one (the Black Desk) was speculative by design and everything it filed is capped at 0.5 confidence. Nothing it filed may be treated as finalized until you complete these gates.
 

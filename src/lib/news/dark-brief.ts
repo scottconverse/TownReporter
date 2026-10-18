@@ -207,7 +207,7 @@ export function briefIsUseful(b: InvestigationBrief | null | undefined): boolean
 }
 
 export const BRIEF_SYSTEM = `TOWNREPORTER — DARK DESK HYPOTHESIS BRIEF.
-YOU HAVE NO TOOLS IN THIS CALL. Do NOT attempt Bash, WebSearch, WebFetch, or any MCP tool — they will be refused and are not part of your job. This is a synthesis pass over the file already assembled below; you do not fetch or search anything yourself. Return ONLY the JSON described below.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below.
 
 You are writing the read-me-first block above an investigation file for ONE editor with limited time.
 

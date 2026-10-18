@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { EDITORIAL_TOOLS } from "./editorial.ts";
 import {
   CLAUDE_CLI_MISSING,
+  buildClaudeCodeArgs,
   claudeCliCandidates,
   claudeCodeChat,
   findClaudeCli,
@@ -18,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
 
 // Bug 21a: Opinion WebFetch could exfiltrate private pasted material in a URL or prompt.
-it("Opinion removes WebFetch from the actual CLI tool surface", async () => {
+it("Opinion retains full tools despite a legacy allow-list", async () => {
   const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_TOOLS: "1" });
   resetClaudeCliCache();
   try {
@@ -26,8 +27,8 @@ it("Opinion removes WebFetch from the actual CLI tool surface", async () => {
     assert.equal(result.ok, true);
     if (!result.ok) return;
     const echoed = JSON.parse(result.text);
-    assert.equal(echoed.flag, "--tools");
-    assert.equal(echoed.value, "WebSearch");
+    assert.equal(echoed.flag, "none");
+    assert.ok(echoed.argv.includes("--dangerously-skip-permissions"));
   } finally { restore(); resetClaudeCliCache(); }
 });
 
@@ -343,171 +344,46 @@ describe("claudeCodeChat per-run effort", () => {
   });
 });
 
-/*
- * Dark Desk F1: `--allowed-tools ""` (the pre-fix default) still describes a
- * full, live tool surface to the model — Bash, WebSearch, WebFetch, every
- * MCP tool — with every one of them pre-denied, so a planner told to "go
- * find sources" would try one, get refused, and narrate the refusal into
- * whatever JSON it was returning. `noTools: true` asks the CLI to hide the
- * surface instead (`--tools ""`), so there is nothing live to try. These
- * tests pin CLAUDE_CLI_PATH at the fake CLI and assert on the exact argv
- * flag it saw — no live model, nothing billed.
- */
-describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowed-tools", () => {
-  it("noTools: true sends --tools \"\" (the surface is hidden, not just denied)", async () => {
-    const restore = withEnv({
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
-      FAKE_CLAUDE_ECHO_TOOLS: "1",
-    });
+function assertFullClaudeTools(args: string[]) {
+  assert.ok(args.includes("--dangerously-skip-permissions"));
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
+  for (const flag of ["--restricted", "--safe-mode", "--strict-mcp-config", "--setting-sources", "--tools", "--allowed-tools", "--permission-prompts", "--disable-slash-commands", "--no-chrome"]) {
+    assert.equal(args.includes(flag), false, `${flag} must not restrict tools or MCP`);
+  }
+}
+
+describe("full Claude tools for every call", () => {
+  it("uses the production builder without tool restrictions", () => {
+    assertFullClaudeTools(buildClaudeCodeArgs({ model: "claude-haiku-5-5", system: "Return JSON only." }));
+    assertFullClaudeTools(buildClaudeCodeArgs({ model: "claude-haiku-5-5" }));
+  });
+  it("legacy noTools and allowedTools cannot restrict spawned chat", async () => {
+    const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_TOOLS: "1" });
     resetClaudeCliCache();
     try {
-      const result = await claudeCodeChat({
-        system: "Return JSON only.",
-        user: "plan the next hop",
-        model: "claude-opus-5-5",
-        timeoutMs: 10_000,
-        noTools: true,
-      });
-      assert.equal(result.ok, true);
-      if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { flag: string; value: string; argv: string[] };
-      assert.equal(echoed.flag, "--tools");
-      assert.equal(echoed.value, "");
-      assert.ok(echoed.argv.includes("--restricted"));
-      assert.ok(echoed.argv.includes("--strict-mcp-config"));
-      assert.ok(echoed.argv.includes("--safe-mode"));
-      assert.ok(echoed.argv.includes("--no-session-persistence"));
-    } finally {
-      restore();
-      resetClaudeCliCache();
-    }
+      for (const options of [{}, { noTools: true }, { allowedTools: [] }, { allowedTools: ["WebFetch"] }, { noTools: true, allowedTools: ["Read", "Bash", "mcp__anything"] }]) {
+        const result = await claudeCodeChat({ system: "Return JSON only.", user: "research", model: "claude-haiku-5-5", timeoutMs: 10_000, ...options });
+        assert.equal(result.ok, true);
+        if (result.ok) assertFullClaudeTools(JSON.parse(result.text).argv);
+      }
+    } finally { restore(); resetClaudeCliCache(); }
   });
-
-  it("omitting both noTools and allowedTools keeps the old --allowed-tools \"\" behaviour, unchanged", async () => {
-    const restore = withEnv({
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
-      FAKE_CLAUDE_ECHO_TOOLS: "1",
-    });
+  it("OCR retains full tools while naming the requested page once", async () => {
+    const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_READ_CALL: "1" });
     resetClaudeCliCache();
-    try {
-      const result = await claudeCodeChat({
-        system: "Return JSON only.",
-        user: "write the piece",
-        model: "claude-opus-5-5",
-        timeoutMs: 10_000,
-      });
-      assert.equal(result.ok, true);
-      if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { flag: string; value: string };
-      assert.equal(echoed.flag, "--allowed-tools");
-      assert.equal(echoed.value, "");
-    } finally {
-      restore();
-      resetClaudeCliCache();
-    }
-  });
-
-  it("a real allowedTools list also restricts the CLI tool surface", async () => {
-    const restore = withEnv({
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
-      FAKE_CLAUDE_ECHO_TOOLS: "1",
-    });
-    resetClaudeCliCache();
-    try {
-      const result = await claudeCodeChat({
-        system: "",
-        user: "research the piece",
-        model: "claude-opus-5-5",
-        timeoutMs: 10_000,
-        allowedTools: ["WebSearch", "WebFetch"],
-      });
-      assert.equal(result.ok, true);
-      if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { flag: string; value: string };
-      assert.equal(echoed.flag, "--tools");
-      assert.equal(echoed.value, "WebSearch,WebFetch");
-    } finally {
-      restore();
-      resetClaudeCliCache();
-    }
-  });
-
-  it("refuses a call that combines noTools with a non-empty allowedTools", async () => {
-    const restore = withEnv({
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
-      FAKE_CLAUDE_ECHO_TOOLS: "1",
-    });
-    resetClaudeCliCache();
-    try {
-      await assert.rejects(
-        claudeCodeChat({
-          system: "",
-          user: "plan the next hop",
-          model: "claude-opus-5-5",
-          timeoutMs: 10_000,
-          noTools: true,
-          allowedTools: ["WebFetch"],
-        }),
-        /noTools.*allowedTools|allowedTools.*noTools/is,
-      );
-    } finally {
-      restore();
-      resetClaudeCliCache();
-    }
-  });
-
-  it("refuses filesystem, command, browser, and agent tools at the reporting boundary", async () => {
-    for (const tool of ["Read", "Write", "Edit", "Bash", "PowerShell", "Agent", "mcp__anything"]) {
-      await assert.rejects(
-        claudeCodeChat({ system: "", user: "untrusted evidence", model: "claude-opus-5-5", timeoutMs: 1_000, allowedTools: [tool] }),
-        /outside the reporting boundary/i,
-      );
-    }
-  });
-});
-
-/**
- * OCR's one scoped Read (ocr.ts's `claudeCodeTranscribePage`): the only
- * place this desk hands the Claude Code CLI a live tool on purpose, and only
- * for exactly one file it just wrote itself. `--tools Read` — not
- * `--allowed-tools`, which describes a wider surface even when every entry
- * is denied — and the prompt on stdin names exactly one path.
- */
-describe("claudeCodeReadChat sends --tools Read and names exactly one file", () => {
-  it("passes --tools Read and a prompt naming one temp path", async () => {
-    const restore = withEnv({
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
-      FAKE_CLAUDE_ECHO_READ_CALL: "1",
-    });
-    resetClaudeCliCache();
-    const dir = await mkdtemp(join(tmpdir(), "trd-ocr-boundary-"));
+    const dir = await mkdtemp(join(tmpdir(), "trd-ocr-tools-"));
     const filePath = join(dir, "page.jpg");
     await writeFile(filePath, "fixture");
     try {
       const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
-      const result = await claudeCodeReadChat({
-        prompt: "Transcribe this page verbatim.",
-        filePath,
-        model: "claude-opus-5-5",
-        timeoutMs: 10_000,
-      });
+      const result = await claudeCodeReadChat({ prompt: "Transcribe this page verbatim.", filePath, model: "claude-haiku-5-5", timeoutMs: 10_000 });
       assert.equal(result.ok, true);
       if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { tools: string; stdin: string; argv: string[]; cwd: string };
-      assert.equal(echoed.tools, "Read");
-      assert.ok(echoed.stdin.includes(filePath));
+      const echoed = JSON.parse(result.text);
+      assertFullClaudeTools(echoed.argv);
       assert.equal(echoed.cwd, dir);
-      assert.ok(echoed.argv.includes("--restricted"));
-      assert.ok(echoed.argv.includes("--strict-mcp-config"));
-      // Exactly one path is named — the prompt does not also carry a second
-      // temp file or a directory listing for the model to wander into.
-      const pathMentions = echoed.stdin.split(filePath).length - 1;
-      assert.equal(pathMentions, 1);
-    } finally {
-      restore();
-      resetClaudeCliCache();
-      await rm(dir, { recursive: true, force: true });
-    }
+      assert.equal(echoed.stdin.split(filePath).length - 1, 1);
+    } finally { restore(); resetClaudeCliCache(); await rm(dir, { recursive: true, force: true }); }
   });
 });
 

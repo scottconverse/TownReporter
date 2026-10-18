@@ -142,7 +142,6 @@ export async function readImportStructure(
         choice: snapshot.modelChoice,
         newsroomId: input.newsroomId,
         timeoutMs: 180_000,
-        noTools: true,
         reasoningEffort: snapshot.modelEffort,
         localModel: snapshot.modelChoice === "local-model" ? input.localModel : undefined,
       }),

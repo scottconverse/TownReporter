@@ -3743,7 +3743,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         [system, retryInstruction].filter(Boolean).join("\n\n"),
         user,
         maxTokens,
-        { noTools: true, timeoutMs: options?.timeoutMs },
+        { timeoutMs: options?.timeoutMs },
         adapters,
       );
       const attempted = await runPinnedCallWithFailover({

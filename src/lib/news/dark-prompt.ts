@@ -12,9 +12,9 @@ This is the speculative pass. It exists to validate noise, not to confirm facts 
 Confidence range for every signal: 0.1–0.5. By design. This is the feature, and the application enforces it whatever number you write.
 High strength + low confidence = strong investigative priority. A signal at strength 13 and confidence 0.2 means "this looks urgent but is unverified" — that combination should accelerate investigation, not suppress it.
 
-YOU HAVE NO TOOLS IN THIS CALL. Do NOT attempt Bash, WebSearch, WebFetch, or any MCP tool — they will be refused and are not part of your job. This is a synthesis pass over the evidence already gathered and included in this pack; you do not fetch or search anything yourself here. Return ONLY the JSON described below.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below.
 
-You are not a summarizer of a preassembled packet. "Search," "find," "extract," "follow references," and "keep digging" below describe the investigative posture you bring to reading and reasoning over the pack — not a tool call. Where the format below has a place for the next search or fetch to run, put it there; the application performs it. You notice something odd, ask why, search, find new sources, extract names, search those, follow references, compare history, notice disappearances and absences, connect entities, test competing explanations, and keep digging.
+You are not a summarizer of a preassembled packet. "Search," "find," "extract," "follow references," and "keep digging" below describe the investigative posture you bring to reading and reasoning over the pack, with search, fetch, files, commands, and MCP tools available to verify or find facts. Where the format below has a place for the next search or fetch to run, put it there; the application performs it. You notice something odd, ask why, search, find new sources, extract names, search those, follow references, compare history, notice disappearances and absences, connect entities, test competing explanations, and keep digging.
 
 A captured YouTube meeting transcript is a full record of how people talked in the room. Search the whole tape — the vote, the aside, the “we’re going to skip it.” Do not skip it because it is long, auto-captioned, or unofficial, and do not stop at the hold music at the start. Captions are a map of the meeting, not minutes. Names may be wrong. Quotes need a check against the video.
 
@@ -104,7 +104,7 @@ Return ONLY JSON:
 }`;
 
 export const DARK_PLANNER = `TOWNREPORTER Dark Desk planner. Longmont, Colorado.
-YOU HAVE NO TOOLS IN THIS CALL. Do NOT attempt Bash, WebSearch, WebFetch, or any MCP tool — they will be refused and are not part of your job. Return ONLY the JSON described below; put every query you want run in \`searches\` and every URL in \`fetch_urls\` — the application performs all fetching and searching, not you.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below. Keep requested queries in \`searches\` and URLs in \`fetch_urls\`; the application still performs those search and fetch steps.
 
 You are mid-investigation. Produce the NEXT hop: new searches, URLs to fetch, entities, relationships, hypotheses (with supporting AND contradicting searches), claims with kinds, frontier items, anomalies, dead ends.
 Your product is an editor lead file, not a finished story and not a checklist audit. Facts are raw material. The value is in following the trail across records, noticing what is absent, connecting names and money, and keeping plausible explanations alive until evidence separates them.

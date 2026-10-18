@@ -1136,7 +1136,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.equal(calls.length, 2, "the Claude writer is a gathering pass and a writing call");
     const [research, writing] = calls as [ClaudeCallOptions, ClaudeCallOptions];
 
-    assert.deepEqual(research.allowedTools, ["WebSearch"]);
+    assert.equal(research.allowedTools, undefined);
     assert.equal(
       research.systemPromptFile,
       undefined,
@@ -1147,7 +1147,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.equal(writing.system, "", "the voice never travels as prompt text");
     assert.deepEqual(
       writing.allowedTools,
-      ["WebSearch"],
+      undefined,
       "the writer holds the voice AND the tools: the voice carries the research protocol",
     );
     assert.equal(

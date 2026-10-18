@@ -17,23 +17,12 @@ import {
 } from "./ai-codex.server.ts";
 
 const EXPECTED_NATIVE_ARGS = [
-  "--ask-for-approval",
-  "never",
-  "--disable", "shell_tool",
-  "--disable", "computer_use",
-  "--disable", "browser_use",
-  "--disable", "apps",
-  "--disable", "plugins",
-  "--disable", "multi_agent",
-  "--disable", "hooks",
-  "--disable", "standalone_web_search",
+  "--search",
   "exec",
-  "--ignore-user-config",
+  "--dangerously-bypass-approvals-and-sandbox",
   "--skip-git-repo-check",
   "--model",
   "gpt-5.6-sol",
-  "--sandbox",
-  "read-only",
   "--ephemeral",
   "--color",
   "never",
@@ -349,9 +338,9 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     const args = buildCodexArgs({ model: "gpt-5.6-sol" });
 
     assert.deepEqual(args, [...EXPECTED_NATIVE_ARGS]);
-    assert.equal(args.includes("--disable"), true);
-    assert.equal(args.includes("read-only"), true);
-    assert.equal(args.includes("--ignore-user-config"), true);
+    assert.equal((args as string[]).includes("--disable"), false);
+    assert.equal((args as string[]).includes("read-only"), false);
+    assert.equal((args as string[]).includes("--ignore-user-config"), false);
     assert.equal((args as string[]).includes("--ignore-rules"), false);
     assert.equal(args.includes("--skip-git-repo-check"), true);
   });
@@ -362,21 +351,21 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     });
     await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: "high" }, async () => {
       const args = buildCodexArgs({ model: "gpt-5.6-sol" });
-      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--ephemeral")), [
         "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high",
       ]);
-      assert.equal(args.includes("--search"), false);
+      assert.equal(args.includes("--search"), true);
       assert.equal(args.includes("danger-full-access"), false);
     });
     await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
       const args = buildCodexArgs({ model: "gpt-5.6-sol", reasoningEffort: "none" });
-      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--ephemeral")), [
         "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=none",
       ]);
     });
     await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
       const args = buildCodexArgs({ model: "gpt-6-astra", reasoningEffort: "max" });
-      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--ephemeral")), [
         "--model", "gpt-6-astra", "-c", "model_reasoning_effort=max",
       ]);
     });
@@ -393,58 +382,14 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     );
   });
 
-  it("enables native web search only for an explicitly authorized research call", () => {
-    assert.deepEqual(buildCodexArgs({ model: "gpt-5.6-sol", webSearch: false }), [
-      ...EXPECTED_NATIVE_ARGS,
-    ]);
-    assert.deepEqual(buildCodexArgs({ model: "gpt-5.6-sol", webSearch: undefined }), [
-      ...EXPECTED_NATIVE_ARGS,
-    ]);
-    const researched = buildCodexArgs({ model: "gpt-5.6-sol", webSearch: true });
-    const searchFlag = researched.indexOf("--enable");
-    assert.ok(searchFlag >= 0);
-    assert.equal(researched[searchFlag + 1], "standalone_web_search");
-  });
-
-  /*
-    The off direction has to be stated, not inherited. Codex's own default for
-    `standalone_web_search` happens to be off (codex-cli 0.145.0: `codex
-    features list` reports it "under development", effective `false`), but a
-    writing call holds the private voice and the gathering pass's untrusted
-    page text, and a default is a thing the installed CLI — or the operator's
-    own config.toml — is free to change. SEC-3 closed exactly this channel on
-    the Claude side by removing the tools from the call; here the equivalent
-    is naming the flag.
-
-    `--disable <FEATURE>` is the CLI's documented spelling (`codex --help`:
-    "Equivalent to `-c features.<name>=false`"), and the installed CLI both
-    accepts it (exit 0) and rejects a near-miss name with "Unknown feature
-    flag", so this is a flag that does something rather than one that is
-    silently ignored.
-  */
-  it("turns standalone web search off explicitly when the call is not authorized to search", () => {
-    for (const webSearch of [false, undefined]) {
+  it("always enables live search, commands and configured MCP, including legacy false", () => {
+    for (const webSearch of [false, undefined, true]) {
       const args = buildCodexArgs({ model: "gpt-5.6-sol", webSearch });
-      const last = args.lastIndexOf("--disable");
-      assert.equal(
-        args[last + 1],
-        "standalone_web_search",
-        "a call with no authorization to search must disable web search by name",
-      );
-      assert.equal(
-        args.includes("--enable"),
-        false,
-        "a call with no authorization to search must not enable any feature",
-      );
+      assert.deepEqual(args, [...EXPECTED_NATIVE_ARGS]);
+      assert.ok(args.includes("--search"));
+      assert.ok(args.includes("--dangerously-bypass-approvals-and-sandbox"));
+      for (const flag of ["--disable", "--sandbox", "--ignore-user-config"]) assert.equal((args as string[]).includes(flag), false);
     }
-
-    const researched = buildCodexArgs({ model: "gpt-5.6-sol", webSearch: true });
-    assert.equal(researched[researched.lastIndexOf("--enable") + 1], "standalone_web_search");
-    assert.equal(
-      researched[researched.lastIndexOf("--disable") + 1],
-      "hooks",
-      "the authorized research call must not also carry a web-search disable",
-    );
   });
 
   it("attaches page images via the verified `codex exec -i/--image <FILE>...` flag, after `exec`", () => {
@@ -453,7 +398,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     const imageIdx = args.indexOf("--image");
     assert.ok(execIdx >= 0, "exec subcommand must be present");
     assert.ok(imageIdx > execIdx, "--image must come after the exec subcommand");
-    assert.equal(args[execIdx + 1], "--ignore-user-config");
+    assert.equal(args[execIdx + 1], "--dangerously-bypass-approvals-and-sandbox");
     assert.ok(args.indexOf("--skip-git-repo-check") > execIdx);
     assert.equal(args[imageIdx + 1], "C:\\tmp\\page.jpg");
     assert.equal(args.includes("--model"), true);
@@ -531,13 +476,10 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       args.some((arg) => arg.includes(instructions) || arg.includes("secrets")),
       false,
     );
-    assert.equal(args.includes("read-only"), true, "the host filesystem must not be writable");
-    assert.equal(args.includes("--search"), false, "an ordinary draft must not gain network research from source text");
-    assert.ok(args.indexOf("exec") < args.indexOf("--ignore-user-config"), "exec-scoped CLI flags must follow exec");
-    for (const feature of ["shell_tool", "computer_use", "browser_use", "apps", "plugins", "multi_agent", "hooks", "standalone_web_search"]) {
-      const index = args.indexOf(feature);
-      assert.ok(index > 0 && args[index - 1] === "--disable", `${feature} must be disabled at the CLI boundary`);
-    }
+    assert.ok(args.includes("--dangerously-bypass-approvals-and-sandbox"));
+    assert.ok(args.includes("--search"));
+    assert.equal(args.includes("--ignore-user-config"), false);
+    assert.equal(args.includes("--disable"), false);
     assert.equal(args.at(-1), "-");
   });
 
@@ -577,9 +519,9 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       assert.equal(received.bytes, Buffer.byteLength(voice));
       assert.equal(received.hash, createHash("sha256").update(voice).digest("hex"));
       assert.equal(path.resolve(received.cwd), path.resolve(tmpdir()));
-      assert.ok(!received.args.includes("--search"));
-      assert.ok(received.args.includes("read-only"));
-      assert.ok(received.args.includes("shell_tool"));
+      assert.ok(received.args.includes("--search"));
+      assert.ok(received.args.includes("--dangerously-bypass-approvals-and-sandbox"));
+      assert.equal(received.args.includes("--disable"), false);
       assert.ok(!received.args.includes("danger-full-access"));
       assert.ok(!JSON.stringify(received.args).includes("EDITOR VOICE"));
       assert.equal(await readFile(voicePath, "utf8"), voice, "the operator's file remains unchanged");

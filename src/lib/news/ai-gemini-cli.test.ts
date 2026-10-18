@@ -277,6 +277,7 @@ test(
       assert.deepEqual(echo.argv, [
         "--model",
         "gemini-3.8-flash-low",
+        "--dangerously-skip-permissions",
         "--disable-slash-commands",
         "--input-format",
         "stream-json",
@@ -411,7 +412,7 @@ test(
         geminiChat({ ...CHAT, timeoutMs: 1500 }),
       );
       const { echo } = echoOf(result);
-      assert.equal(echo.argv[8], "1.5s");
+      assert.equal(echo.argv[echo.argv.indexOf("--print-timeout") + 1], "1.5s");
     });
   },
 );
@@ -472,3 +473,14 @@ test(
     });
   },
 );
+
+
+test("production Gemini builders retain tools and bypass tool approvals", async () => {
+  const { buildGeminiArgs, buildGeminiPrompt } = await import("./ai-gemini-cli.server.ts");
+  const args = buildGeminiArgs({ model: "gemini-3.8-flash-low", timeoutMs: 10_000 });
+  assert.ok(args.includes("--dangerously-skip-permissions"));
+  assert.equal(args.includes("--sandbox"), false);
+  const prompt = buildGeminiPrompt("Verify facts.", "Search and echo TOOLS-OK.");
+  assert.doesNotMatch(prompt, /Do not use tools, shell, files, or external services/);
+  assert.match(prompt, /Answer only with the requested response content\./);
+});

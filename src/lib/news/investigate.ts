@@ -1226,10 +1226,7 @@ export async function grokPlanner(
     choice,
     newsroomId,
     localModel: overrides?.["local-model"]?.localModel,
-    // Dark Desk F1: the planner only ever returns JSON (searches/fetch_urls
-    // for the app to run) — it must never be handed a live tool surface to
-    // try and get denied on. See ai-claude-code.server.ts's noTools comment.
-    noTools: true,
+    // Keep searches/fetch_urls for the app; CLI tools also permit verification.
     reasoningEffort,
   });
   if (call) {
@@ -4006,7 +4003,6 @@ async function defaultResearchActionChooser(
       choice: opts.choice,
       newsroomId: opts.newsroomId,
       localModel: opts.providerOverrides?.["local-model"]?.localModel,
-      noTools: true,
       reasoningEffort: opts.reasoningEffort,
     },
   );

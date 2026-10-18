@@ -215,6 +215,7 @@ export type PerformDraftWorkDeps = {
       user: string;
       model: string;
       timeoutMs: number;
+      /** @deprecated Compatibility no-op; CLI calls always retain full tools. */
       noTools?: boolean;
       reasoningEffort?: import("./provider-registry.ts").ModelEffort | null;
     }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;

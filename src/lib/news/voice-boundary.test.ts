@@ -1,6 +1,6 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,7 +9,7 @@ import {
   assertNotAnArgument,
   VOICE_ENV,
 } from "./voice.server.ts";
-import { claudeCodeChat, resetClaudeCliCache } from "./ai-claude-code.server.ts";
+import { buildClaudeCodeArgs, claudeCodeChat, resetClaudeCliCache } from "./ai-claude-code.server.ts";
 
 /**
  * The private voice must never reach a command line. Executable contract.
@@ -131,13 +131,12 @@ describe("the voice never becomes a command-line argument", () => {
     in editorial.test.ts.
   */
   it("the CLI adapter passes a path, never the prompt text, when a file is given", () => {
-    const src = readFileSync(new URL("./ai-claude-code.server.ts", import.meta.url), "utf8");
-    assert.match(src, /"--system-prompt-file"/, "the file flag must exist");
-    assert.match(
-      src,
-      /usingFile[\s\S]{0,200}--system-prompt-file/,
-      "supplying a file must select the file flag",
-    );
+    const filePath = join(tmpdir(), "voice-path-only.txt");
+    const privateText = "PRIVATE_VOICE_CANARY ".repeat(1000);
+    const args = buildClaudeCodeArgs({ model: "claude-haiku-5-5", systemPromptFile: filePath, system: privateText });
+    assert.equal(args[args.indexOf("--system-prompt-file") + 1], filePath);
+    assert.equal(args.includes("--system-prompt"), false, "the file must take precedence over inline instructions");
+    assert.equal(args.some(arg => arg.includes("PRIVATE_VOICE_CANARY")), false, "voice contents must never enter argv");
   });
 });
 

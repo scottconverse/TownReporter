@@ -315,6 +315,7 @@ export async function probeCodex(
 export function buildCodexArgs(input: {
   model: string;
   systemPromptFile?: string;
+  /** @deprecated Compatibility no-op: live web search is always enabled. */
   webSearch?: boolean;
   /**
    * Page images to attach via `codex exec`'s `-i/--image <FILE>...` flag
@@ -334,33 +335,9 @@ export function buildCodexArgs(input: {
     );
   }
   return [
-    "--ask-for-approval",
-    "never",
-    "--disable", "shell_tool",
-    "--disable", "computer_use",
-    "--disable", "browser_use",
-    "--disable", "apps",
-    "--disable", "plugins",
-    "--disable", "multi_agent",
-    "--disable", "hooks",
-    /*
-      Web search is stated in both directions, never left to the CLI default.
-      The writing pass holds the private voice and the gathering pass's
-      untrusted page text, so an inherited-on search there would be the same
-      exfiltration channel SEC-3 closed on the Claude side.
-
-      `--disable <FEATURE>` is the CLI's own documented spelling
-      (`codex --help`: "Equivalent to `-c features.<name>=false`") and the
-      exact counterpart of the `--enable` in the other branch of this same
-      expression. Verified against codex-cli 0.145.0: the flag is accepted
-      (exit 0, no warning) and a near-miss name is rejected with "Unknown
-      feature flag", so this line does work rather than being ignored.
-    */
-    ...(input.webSearch
-      ? ["--enable", "standalone_web_search"]
-      : ["--disable", "standalone_web_search"]),
+    "--search",
     "exec",
-    "--ignore-user-config",
+    "--dangerously-bypass-approvals-and-sandbox",
     // Packaged installations run from an extracted, non-Git directory. This
     // is the Codex CLI's documented opt-out for that repository check; it
     // does not alter the chosen sandbox, approval, or user configuration.
@@ -372,8 +349,6 @@ export function buildCodexArgs(input: {
       ? ["-c", `model_instructions_file=${JSON.stringify(input.systemPromptFile)}`]
       : []),
     ...(configuredReasoning ? ["-c", `model_reasoning_effort=${configuredReasoning}`] : []),
-    "--sandbox",
-    "read-only",
     "--ephemeral",
     "--color",
     "never",
@@ -467,6 +442,7 @@ export async function codexChat(input: {
   timeoutMs: number;
   /** Complete writer instructions, loaded by Codex itself; never in argv. */
   systemPromptFile?: string;
+  /** @deprecated Compatibility no-op: live web search is always enabled. */
   webSearch?: boolean;
   imagePaths?: string[];
   reasoningEffort?: ModelEffort | null;

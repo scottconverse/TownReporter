@@ -494,8 +494,7 @@ export async function verifyRunSignals(opts: {
           choice: opts.choice,
           newsroomId: opts.newsroomId,
           localModel: opts.overrides?.["local-model"]?.localModel,
-          // Stage 2 reads what the app already fetched. It never searches.
-          noTools: true,
+          // Stage 2 starts with what the app already fetched; full CLI tools remain available.
           reasoningEffort: opts.reasoningEffort,
         });
         if (!ai?.ok) throw new Error(ai && "error" in ai ? ai.error : "empty model response");

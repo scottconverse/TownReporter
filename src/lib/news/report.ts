@@ -303,7 +303,7 @@ Do not invent facts, votes, dollars, names or dates. If it is not in the evidenc
 ${EVIDENCE_RECONCILIATION_RULES}
 Source quality affects confidence and attribution, never whether you may look. Unknown means keep investigating.
 
-YOU HAVE NO TOOLS. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the follow field and nothing else. A missing document is never a fact about the world: never write that something does not exist, was not published, was not obtained, or is unverified. What is not yet opened is an ask for the follow field, not a finding.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the follow field and nothing else. A missing document is never a fact about the world: never write that something does not exist, was not published, was not obtained, or is unverified. What is not yet opened is an ask for the follow field, not a finding.
 
 Research in this order (stop a lane only when it is honestly empty):
 1. CORE EVENT — primary documents first: the named company’s or agency’s own press release / newsroom page, then agendas, minutes, permits, filings, packets.
@@ -375,7 +375,7 @@ Caveats: keep every caveat, limit and date the source gives — "may not be exha
 The story is about the city, never about the reporting. Do not describe the search, the capture, the feed, or what was reviewed — "the public materials reviewed" and "the available records" name something the reader cannot see. Do not write "${p.name} has not yet opened X" in the body; that sentence is reporting notes. An open question is a fact about the city ("the council has not set a date"), not a note about what was looked at.
 If something important is unknown, say so — as an open question, never as a claim that the thing does not exist. Do not fill the hole with generic language.
 
-YOU HAVE NO TOOLS. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the unanswered list and nothing else. A missing document is never a fact about the world: never write in the body that something does not exist, was not published, was not obtained, or is unverified. The body states only what the evidence shows; what is not yet opened goes to reporting notes as “${p.name} has not yet opened X”.
+You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the unanswered list and nothing else. A missing document is never a fact about the world: never write in the body that something does not exist, was not published, was not obtained, or is unverified. The body states only what the evidence shows; what is not yet opened goes to reporting notes as “${p.name} has not yet opened X”.
 
 form:
 - brief: 150–350 useful words. A genuinely small item after you opened the primary source. Do not manufacture context.
@@ -1424,7 +1424,6 @@ export async function reportAndDraft(
         timeoutMs: options?.timeoutMs ?? limits.callMs,
         choice: effectiveModelChoice,
         newsroomId,
-        noTools: suppliedOnly,
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
         reasoningEffort: effectiveModelEffort,
       });
@@ -1753,7 +1752,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       assignmentBlock,
       editorNotesBlock,
       topicContext,
-      suppliedOnly ? "EDITOR SCOPE: Use only supplied text and supplied URLs. Do not research, invent sources, or substitute a different subject. State uncertainties honestly." : "",
+      suppliedOnly ? "EDITOR SCOPE: Use only supplied text and supplied URLs. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Do not invent sources or substitute a different subject. State uncertainties honestly." : "",
       `NEWS ANGLE: ${meetingFocus?.summary || research?.angle || opts.lead.headline}`,
       opts.extraEvidenceMode === "meeting-transcript"
         ? `${meetingFocus ? `MEETING STORY SUBJECT IS LOCKED: ${meetingFocus.summary}. Its source segments are ${meetingFocus.segmentIndexes.join(", ")}. ` : "MEETING STORY FOCUS: Choose one consequential verified decision. "}Write one coherent story about that action, not a meeting roundup. Include another agenda item only when it directly explains the chosen action, its impact, or next step. Put other possible stories, closing announcements, and personal scheduling details in FOLLOW/reporting notes, never in the article body. For any vote you mention, verify the transcript's explicit carries/fails outcome; a tally alone does not tell you whether the motion passed. If the outcome is unclear, omit it from the body and note the uncertainty for the editor. Auto-captions alone do not verify a person's name or role. Until a written record identifies the person, report the action or the number of votes without naming or gendering individual speakers; avoid a chain of anonymous-speaker attributions. If a recording runs longer than an hour, write any timecode in hours:minutes:seconds so 2:45 cannot be mistaken for two minutes and 45 seconds.`
