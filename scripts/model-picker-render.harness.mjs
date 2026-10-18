@@ -3,6 +3,12 @@ import ts from "typescript";
 
 // Render the real component; the test does not assert on TSX source spelling.
 // Transpile in memory so this test neither builds nor writes into a live server.
+/**
+ * @param {string} source TypeScript source text of the module.
+ * @param {string} fileName File name handed to the transpiler.
+ * @param {Record<string, string>} [imports] Import specifier to data: URL map.
+ * @returns {string} A data: URL that loads the transpiled module.
+ */
 function moduleUrl(source, fileName, imports = {}) {
   let output = ts.transpileModule(source, {
     fileName,

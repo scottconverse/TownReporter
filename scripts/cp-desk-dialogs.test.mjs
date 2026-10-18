@@ -333,7 +333,11 @@ const writeStoryUrl = await load("src/lib/news/write-story.ts", {
 const notesUrl = await load("src/lib/news/notes.ts", {
   "./write-story.ts": writeStoryUrl,
 });
-const storyAreaUrl = await load("src/lib/story-area.ts");
+/* dark-place.ts imports nothing, so the real module loads as it is. */
+const darkPlaceUrl = await load("src/lib/news/dark-place.ts");
+const storyAreaUrl = await load("src/lib/story-area.ts", {
+  "./news/dark-place.ts": darkPlaceUrl,
+});
 const requestInputUrl = await load("src/lib/news/request-input.ts", {
   "zod": import.meta.resolve("zod"),
   "./provider-registry.ts": providerRegistryUrl,
