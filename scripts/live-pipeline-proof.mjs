@@ -25,7 +25,7 @@ const MODEL_LABELS = {
   auto: "Automatic",
   "codex-balanced": "Codex Terra",
   "codex-frontier": "Codex Sol",
-  "claude-frontier": "Claude Opus",
+  "claude-frontier": "Claude Opus 5.5",
   "local-model": "Local model",
 };
 const labelFor = (choice) => MODEL_LABELS[choice] ?? choice ?? "unknown";

@@ -435,7 +435,7 @@ describe("environment overrides are config, not code", () => {
   });
 
   it("does not let ANTHROPIC_MODEL redefine the entry called Claude Opus", () => {
-    // The menu says "Claude Opus". An install that points ANTHROPIC_MODEL at
+    // The menu says "Claude Opus 5.5". An install that points ANTHROPIC_MODEL at
     // Sonnet must not make that label a lie; the variable still steers the
     // no-explicit-choice default path in resolveProvider().
     withEnv({ ANTHROPIC_MODEL: "claude-sonnet-5" }, () => {

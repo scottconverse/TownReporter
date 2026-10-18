@@ -241,10 +241,10 @@ describe("resolveProvider", () => {
         ["codex-frontier", "gpt-6.1-sol"],
         ["codex-balanced", "gpt-6.1-sol"],
         ["codex-luna", "gpt-6-luna"],
-        ["claude-fable", "fable"],
+        ["claude-fable", "claude-fable-5-1"],
         ["claude-frontier", "claude-opus-5-5"],
-        ["claude-sonnet", "sonnet"],
-        ["claude-haiku", "haiku"],
+        ["claude-sonnet", "claude-sonnet-5-5"],
+        ["claude-haiku", "claude-haiku-5-5"],
       ] as const) {
         const provider = resolveProvider(choice);
         assert.equal(provider?.model, model, choice);
@@ -497,10 +497,10 @@ describe("grokChat", () => {
       {
         choice: "claude-frontier",
         kind: "anthropic",
-        label: "Claude Opus",
+        label: "Claude Opus 5.5",
         vars: { ...BARE, ANTHROPIC_API_KEY: "sk-ant-test" },
       },
-      { choice: "claude-frontier", kind: "claude-code", label: "Claude Opus", vars: {} },
+      { choice: "claude-frontier", kind: "claude-code", label: "Claude Opus 5.5", vars: {} },
       {
         choice: "local-model",
         kind: "openai",

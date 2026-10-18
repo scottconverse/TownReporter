@@ -94,7 +94,7 @@ async function probeClaudeFrontier(): Promise<CandidateProbe> {
     };
   }
   const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
-  const result = await probeClaudeCode("Claude Opus");
+  const result = await probeClaudeCode("Claude Opus 5.5");
   return result.ok ? { ...result, choice: "claude-frontier" } : result;
 }
 

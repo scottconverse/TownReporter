@@ -105,14 +105,14 @@ async function thePickerIsThere() {
   const names = labels.map((line) => line.split("—")[0].trim());
   const expected = [
     "Automatic",
-    "Codex Astra",
+    "Codex Astra 6",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
-    "Codex Luna",
-    "Claude Fable",
-    "Claude Opus",
-    "Claude Sonnet",
-    "Claude Haiku",
+    "Codex Luna 6",
+    "Claude Fable 5.1",
+    "Claude Opus 5.5",
+    "Claude Sonnet 5.5",
+    "Claude Haiku 5.5",
     "Local model",
     "DeepSeek v4.1 Flash",
   ];

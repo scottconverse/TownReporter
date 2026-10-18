@@ -18,7 +18,7 @@ test("pasted human-authored Opinion is attributed to the editor, not the schema'
   );
   assert.equal(
     editorialAttribution({ source_kind: "article", model_choice: "claude-frontier" }),
-    "Claude Opus",
+    "Claude Opus 5.5",
   );
   assert.equal(editorialAttribution({ source_kind: "paste", model_choice: "auto" }), "Automatic");
 });

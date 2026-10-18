@@ -35,16 +35,16 @@ const password = "desk-flows-e2e-pass";
 const leadHeadline = `Planning board meets on the Kimbark parcel ${stamp}`;
 const expectedModelNames = [
   "Automatic",
-  "Codex Astra",
+  "Codex Astra 6",
   "Codex Sol 6.1",
   "Codex Sol 6.1 (balanced)",
-  "Codex Luna",
+  "Codex Luna 6",
   "Gemini 3.8 Flash (Pro plan)",
   "Gemini 3.1 Pro (Pro plan)",
-  "Claude Fable",
-  "Claude Opus",
-  "Claude Sonnet",
-  "Claude Haiku",
+  "Claude Fable 5.1",
+  "Claude Opus 5.5",
+  "Claude Sonnet 5.5",
+  "Claude Haiku 5.5",
   "Local model",
   "DeepSeek v4.1 Flash",
 ];

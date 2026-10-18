@@ -53,16 +53,16 @@ describe("model choice contract", () => {
       STORY_MODEL_CHOICES.map((choice) => choice.label),
       [
         "Automatic",
-        "Codex Astra",
+        "Codex Astra 6",
         "Codex Sol 6.1",
         "Codex Sol 6.1 (balanced)",
-        "Codex Luna",
+        "Codex Luna 6",
         "Gemini 3.8 Flash (Pro plan)",
         "Gemini 3.1 Pro (Pro plan)",
-        "Claude Fable",
-        "Claude Opus",
-        "Claude Sonnet",
-        "Claude Haiku",
+        "Claude Fable 5.1",
+        "Claude Opus 5.5",
+        "Claude Sonnet 5.5",
+        "Claude Haiku 5.5",
         "Local model",
         "DeepSeek v4.1 Flash",
       ],
@@ -337,7 +337,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries DeepSeek v4.1 Flash, Codex Sol 6.1, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
+      "Tries DeepSeek v4.1 Flash, Codex Sol 6.1, then Claude Sonnet 5.5. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
     );
     /*
       0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed

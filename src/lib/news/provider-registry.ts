@@ -445,7 +445,7 @@ const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "hig
 export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "codex-astra",
-    label: "Codex Astra",
+    label: "Codex Astra 6",
     detail: "Runs gpt-6-astra",
     kind: "codex",
     model: "gpt-6-astra",
@@ -458,7 +458,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "codex-luna",
-    label: "Codex Luna",
+    label: "Codex Luna 6",
     detail: "Runs gpt-6-luna",
     kind: "codex",
     model: CODEX_LUNA_MODEL,
@@ -530,10 +530,10 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "claude-fable",
-    label: "Claude Fable",
+    label: "Claude Fable 5.1",
     detail: "Fast",
     kind: "claude-code",
-    model: "fable",
+    model: "claude-fable-5-1",
     envOverrides: {},
     budget: KIND_BUDGETS["claude-code"],
     plannerModel: CLAUDE_PLANNER_MODEL,
@@ -543,10 +543,10 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "claude-sonnet",
-    label: "Claude Sonnet",
+    label: "Claude Sonnet 5.5",
     detail: "Balanced",
     kind: "claude-code",
-    model: "sonnet",
+    model: "claude-sonnet-5-5",
     envOverrides: {},
     budget: KIND_BUDGETS["claude-code"],
     plannerModel: CLAUDE_PLANNER_MODEL,
@@ -569,10 +569,10 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "claude-haiku",
-    label: "Claude Haiku",
+    label: "Claude Haiku 5.5",
     detail: "Fastest",
     kind: "claude-code",
-    model: "haiku",
+    model: "claude-haiku-5-5",
     envOverrides: {},
     budget: KIND_BUDGETS["claude-code"],
     plannerModel: CLAUDE_PLANNER_MODEL,
@@ -606,7 +606,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "claude-frontier",
-    label: "Claude Opus",
+    label: "Claude Opus 5.5",
     detail: "Frontier",
     /*
       `claude-code` is the kind that actually runs on the operator's machine:
@@ -620,7 +620,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     kind: "claude-code",
     model: "claude-opus-5-5",
     /*
-      No `model` override on purpose. This option is CALLED "Claude Opus" in
+      No `model` override on purpose. This option is CALLED "Claude Opus 5.5" in
       the picker, and an install that sets ANTHROPIC_MODEL to Sonnet must not
       silently make that label a lie. ANTHROPIC_MODEL still steers the
       no-explicit-choice default path in `resolveProvider()`; it does not

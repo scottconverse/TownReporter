@@ -253,14 +253,14 @@ async function dailySettingsJourney(context, observePage) {
   // further down this walk also offers Automatic before the explicit providers.
   const expected = [
     "Automatic",
-    "Codex Astra",
+    "Codex Astra 6",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
-    "Codex Luna",
-    "Claude Fable",
-    "Claude Opus",
-    "Claude Sonnet",
-    "Claude Haiku",
+    "Codex Luna 6",
+    "Claude Fable 5.1",
+    "Claude Opus 5.5",
+    "Claude Sonnet 5.5",
+    "Claude Haiku 5.5",
     "Local model",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
@@ -570,14 +570,14 @@ async function draftBatchJourney() {
   );
   const expected = [
     "Automatic",
-    "Codex Astra",
+    "Codex Astra 6",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
-    "Codex Luna",
-    "Claude Fable",
-    "Claude Opus",
-    "Claude Sonnet",
-    "Claude Haiku",
+    "Codex Luna 6",
+    "Claude Fable 5.1",
+    "Claude Opus 5.5",
+    "Claude Sonnet 5.5",
+    "Claude Haiku 5.5",
     "Local model",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
@@ -585,7 +585,7 @@ async function draftBatchJourney() {
   }
   await runtime.selectOption("claude-sonnet");
   await batch.getByRole("button", { name: "Start 2 stories", exact: true }).click();
-  await batch.getByText("Draft batch started with Claude Sonnet.").waitFor();
+  await batch.getByText("Draft batch started with Claude Sonnet 5.5.").waitFor();
 
   // The batch's own results render inside the dialog too, so the walk reloads
   // and opens it again -- on one lead that is still New, since starting the

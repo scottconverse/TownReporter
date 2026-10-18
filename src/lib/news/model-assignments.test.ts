@@ -462,8 +462,10 @@ describe("the lines the who-does-what selects show", () => {
       return jobOptionLabel(option);
     };
     assert.equal(label("codex-frontier"), "Codex Sol 6.1 · sign-in");
-    assert.equal(label("claude-frontier"), "Claude Opus · sign-in");
-    assert.equal(label("claude-sonnet"), "Claude Sonnet · sign-in");
+    // "Claude Opus 5.5 · sign-in" is past JOB_OPTION_LABEL_MAX, so the compact
+    // select shows the bare name; the option's title keeps the sign-in half.
+    assert.equal(label("claude-frontier"), "Claude Opus 5.5");
+    assert.equal(label("claude-sonnet"), "Claude Sonnet 5.5");
     assert.equal(label("auto"), "Automatic (ladder)");
   });
 
@@ -515,7 +517,7 @@ describe("the lines the who-does-what selects show", () => {
     }
     const frontier = jobModelOptions("story-draft").find((one) => one.value === "codex-astra");
     assert.ok(frontier);
-    assert.equal(jobOptionLabel(frontier), "Codex Astra · sign-in");
+    assert.equal(jobOptionLabel(frontier), "Codex Astra 6 · sign-in");
     assert.match(jobOptionTitle(frontier), /Runs gpt-6-astra/);
   });
 
