@@ -1,3 +1,13 @@
+import { DARK_PLANNER } from "./dark-prompt.ts";
+import { BRIEF_SYSTEM } from "./dark-brief.ts";
+import { DARK_VERIFY_SYSTEM } from "./dark-gates.ts";
+import { DESK_PLAN_ASK } from "./editorial.ts";
+import { responsiveActionPrompt } from "./research-actions.ts";
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
+import { reportResearchSystem, REPORT_EDIT_SYSTEM, CITATION_REPAIR_SYSTEM } from "./report.ts";
+import { NAME_EVIDENCE_SYSTEM } from "./name-check-work.ts";
+import { DARK_SYSTEM } from "./dark-prompt.ts";
+import { scanSystem } from "./ai.ts";
 import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -1016,4 +1026,18 @@ describe("provenance titles", () => {
     const [item] = provenanceFromUrls([URL_]);
     assert.match(item!.title, /Church Commits/i);
   });
+});
+
+it("ENG-4 all shared stage prompts carry the same research guidance and retain their stage contract", () => {
+  const paper = { name: "Test Paper", city: "Test City", state: "Test State" };
+  const prompts = [reportWriteSystem(paper), reportResearchSystem(paper), REPORT_EDIT_SYSTEM, CITATION_REPAIR_SYSTEM, NAME_INVENTORY_SYSTEM, NAME_EVIDENCE_SYSTEM, DARK_SYSTEM, scanSystem(paper), DARK_PLANNER, BRIEF_SYSTEM, DARK_VERIFY_SYSTEM, DESK_PLAN_ASK, responsiveActionPrompt({investigation:"fixture",receiptHistory:[],availableLinks:[],decision:1,limit:2})];
+  for (const prompt of prompts) {
+    assert.ok(prompt.includes(RESEARCH_GUIDANCE));
+    assert.match(prompt, /JSON/);
+    assert.equal(prompt.split(RESEARCH_GUIDANCE).length, 2);
+  }
+  assert.match(prompts[0], /AFTER a research pass/);
+  assert.match(prompts[1], /RESEARCH pass/);
+  assert.match(prompts[2], /newsroom editor/);
+  assert.match(prompts[6], /STAGE 1 OF 2/);
 });

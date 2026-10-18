@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -1800,7 +1801,7 @@ describe("the DeepSeek rung's writing call", () => {
     assert.deepEqual(
       request!.body.messages,
       [
-        { role: "system", content: VOICE },
+        { role: "system", content: VOICE + "\n\n" + RESEARCH_GUIDANCE },
         { role: "user", content: "the writing pack" },
       ],
       "the voice is the system message, and there is nothing before it",

@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 /**
  * The Dark Desk doctrine, restored.
  *
@@ -702,7 +703,9 @@ export function newsworthinessWords(n: Newsworthiness | null): string {
    The Stage 2 prompt
    ------------------------------------------------------------------------- */
 
-export const DARK_VERIFY_SYSTEM = `TOWNREPORTER — DARK SIGNAL DESK: STRUCTURED VERIFICATION
+export const DARK_VERIFY_SYSTEM = `${RESEARCH_GUIDANCE}
+
+TOWNREPORTER — DARK SIGNAL DESK: STRUCTURED VERIFICATION
 
 You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below.
 

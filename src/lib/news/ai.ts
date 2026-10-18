@@ -1,3 +1,5 @@
+import { researchSystem, RESEARCH_GUIDANCE } from "./research-guidance.ts";
+import { createToolUsage } from "./tool-usage.ts";
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
 import { providerErrorDetail, providerResponseDetail, providerHttpError } from "./provider-error-detail.ts";
@@ -914,15 +916,16 @@ async function anthropicChat(
   reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<GrokOk | GrokErr> {
   const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   const signal = AbortSignal.timeout(timeoutMs);
-  const toolExecutions: Record<string, number> = {};
+  const toolUsage = createToolUsage();
   let toolsFallback = false;
   const meta = (
     usage?: { input_tokens?: number; output_tokens?: number },
     timedOut = false,
   ): ChatResultMetadata => {
     const result: ChatResultMetadata = {
-      toolExecutions: { ...toolExecutions },
+      ...toolUsage.snapshot(),
       toolsFallback,
       provider: "anthropic",
       model: cfg.model,
@@ -974,13 +977,14 @@ async function anthropicChat(
         if (calls.length) {
           messages.push({ role: "assistant", content: res.content });
           const results: import("@anthropic-ai/sdk/resources/messages").ToolResultBlockParam[] = [];
+          const round = toolUsage.round(Math.max(0, Date.now() - startedAt));
           for (const call of calls) {
             signal.throwIfAborted();
-            toolExecutions[call.name] = (toolExecutions[call.name] ?? 0) + 1;
             results.push({
               type: "tool_result",
               tool_use_id: call.id,
-              content: await tools.executeModelTool(call.name, call.input, signal),
+              content: await toolUsage.execute(round, call.name, call.input,
+                () => tools.executeModelTool(call.name, call.input, signal), deadline, timeoutMs),
             });
           }
           messages.push({ role: "user", content: results });
@@ -1115,6 +1119,7 @@ export async function grokChat(
   // PLANNER_MODEL: planning and judging are different jobs with different
   // prices, and one provider setting for both overpays for one of them.
   const model = opts?.model?.trim() || provider.model;
+  system = researchSystem(system);
   const selectedAdapter = adapters?.[provider.kind];
   if (selectedAdapter) {
     return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
@@ -1184,7 +1189,7 @@ export async function grokChat(
 
   const startedAt = Date.now();
   const signal = AbortSignal.timeout(timeoutMs);
-  const toolExecutions: Record<string, number> = {};
+  const toolUsage = createToolUsage();
   let toolsFallback = false;
   const openAiMeta = (
     body?: {
@@ -1194,7 +1199,7 @@ export async function grokChat(
     timedOut = false,
   ): ChatResultMetadata => {
     const result: ChatResultMetadata = {
-      toolExecutions: { ...toolExecutions },
+      ...toolUsage.snapshot(),
       toolsFallback,
       provider: "openai-compatible",
       model: body?.model?.trim() || model,
@@ -1386,13 +1391,14 @@ export async function grokChat(
         if (message?.tool_calls?.length && body.choices?.[0]?.finish_reason !== "length") {
           const messages = payload.messages as Record<string, unknown>[];
           messages.push({ ...message, role: "assistant" });
+          const round = toolUsage.round(Math.max(0, Date.now() - startedAt));
           for (const call of message.tool_calls) {
             signal.throwIfAborted();
-            toolExecutions[call.function.name] = (toolExecutions[call.function.name] ?? 0) + 1;
             messages.push({
               role: "tool",
               tool_call_id: call.id,
-              content: await tools.executeModelTool(call.function.name, call.function.arguments, signal),
+              content: await toolUsage.execute(round, call.function.name, call.function.arguments,
+                () => tools.executeModelTool(call.function.name, call.function.arguments, signal), deadline, timeoutMs),
             });
           }
           continue;
@@ -1917,7 +1923,9 @@ export async function readableReplyOrRetry<T>(input: {
   default, for tests.
 */
 export function scanSystem(p: { name: string; city: string; state: string }): string {
-  return `You are a civic reporter for ${p.name}, a ${p.city}, ${p.state} newspaper.
+  return `${RESEARCH_GUIDANCE}
+
+You are a civic reporter for ${p.name}, a ${p.city}, ${p.state} newspaper.
 Wire-service rules: attributed claims only, no editorializing, no loaded language, no invented votes/dollars/names.
 A lead must be a news EVENT, not a page that exists: something happened, will happen on a date, was decided, changed, was announced or was disputed, or a number moved. A directory, a list of funds, opening hours, an index, an about page or an obituaries page has no event and is not a lead. When your source is an index, listing or feed, report the specific NEW item on it, never the page itself.
 Tier A (official records) may support publication.

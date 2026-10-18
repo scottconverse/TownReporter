@@ -1,9 +1,12 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./dark-place.ts";
 import { budgetFor, clampDials, jurisdictionsFor, stanceFor, type DarkDials } from "./dark-dials.ts";
 import { taxonomyPrompt } from "./dark-taxonomy.ts";
 import { CLAIM_HYGIENE_RULES } from "./claim-hygiene.ts";
 
-export const DARK_SYSTEM = `TOWNREPORTER — BLACK DESK: SPECULATIVE SIGNAL RADAR (STAGE 1 OF 2)
+export const DARK_SYSTEM = `${RESEARCH_GUIDANCE}
+
+TOWNREPORTER — BLACK DESK: SPECULATIVE SIGNAL RADAR (STAGE 1 OF 2)
 CITY: Longmont, Colorado.
 Governing principle: Search broadly. Dig recursively. Preserve evidence. Challenge conclusions. Report accurately.
 
@@ -103,7 +106,9 @@ Return ONLY JSON:
   }]
 }`;
 
-export const DARK_PLANNER = `TOWNREPORTER Dark Desk planner. Longmont, Colorado.
+export const DARK_PLANNER = `${RESEARCH_GUIDANCE}
+
+TOWNREPORTER Dark Desk planner. Longmont, Colorado.
 You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below. Keep requested queries in \`searches\` and URLs in \`fetch_urls\`; the application still performs those search and fetch steps.
 
 You are mid-investigation. Produce the NEXT hop: new searches, URLs to fetch, entities, relationships, hypotheses (with supporting AND contradicting searches), claims with kinds, frontier items, anomalies, dead ends.

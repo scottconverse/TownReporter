@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { parseJsonBlock } from "./ai.ts";
 
 export type ResearchFinding = {
@@ -76,6 +77,7 @@ export function responsiveActionPrompt(args: {
   limit: number;
 }): string {
   return [
+    RESEARCH_GUIDANCE,
     `Choose responsive research action ${args.decision} of ${args.limit}.`,
     "Return one JSON object only. Allowed shapes:",
     '{"type":"search","query":"...","reason":"..."}',
