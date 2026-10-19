@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 // guards: an unsupported or invented quotation could silently clear a draft's evidence gate.
 import assert from "node:assert/strict";
 import { it } from "node:test";
@@ -45,4 +46,15 @@ it("checks retained passages in bounded batches and leaves ungrounded claims for
   );
   assert.ok(failed.every((row) => row.verdict === "Needs a human" && row.reason));
   assert.equal(calls, 3);
+});
+
+it("ENG-4 retained-claim checker gives CLI calls the shared guidance and preserves its evidence-only instructions", async () => {
+  let prompt = "";
+  await judgeEvidenceClaims([{text:"A fact.",urls:["https://example.org/record"]}], [{url:"https://example.org/record",text:"A fact."}], async text => {
+    prompt=text;
+    return {ok:true,text:'{"rows":[]}'};
+  });
+  assert.ok(prompt.includes(RESEARCH_GUIDANCE));
+  assert.match(prompt,/Use only supplied passages/);
+  assert.match(prompt,/Return JSON/);
 });

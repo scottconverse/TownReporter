@@ -1751,7 +1751,7 @@ describe("the DeepSeek rung's writing call", () => {
   const VOICE = "the operator's editorial voice, in prose.";
   const RUNG_BASE = "http://127.0.0.1:11434/v1";
 
-  it("sends the voice as the system message, with all six D149 tools, to the rung's own endpoint", async () => {
+  it("sends the voice as the system message, without tools or research guidance, to the rung's own endpoint", async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = async (input, init) => {
@@ -1805,10 +1805,10 @@ describe("the DeepSeek rung's writing call", () => {
       ],
       "the voice is the system message, and there is nothing before it",
     );
-    assert.deepEqual(
-      (request!.body.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name),
-      ["web_search", "fetch_page", "read_file", "write_file", "list_dir", "run_command"],
-      "the writing call offers all six D149 tools",
+    assert.equal(
+      request!.body.tools,
+      undefined,
+      "the D151 writing call does not offer tools",
     );
     assert.equal(
       request!.body.reasoning_effort,

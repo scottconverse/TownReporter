@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 /**
  * Turning a desk item into an editorial, and an editorial back into a draft.
  *
@@ -539,7 +540,9 @@ export type DeskResearchRecord = {
  * what shape the answer must take, and nothing about how to research -- that is
  * the protocol's, and the protocol is already in front of the model.
  */
-export const DESK_PLAN_ASK = `THE DESK'S REQUEST. You are the desk researcher's planner for one TownReporter
+export const DESK_PLAN_ASK = `${RESEARCH_GUIDANCE}
+
+THE DESK'S REQUEST. You are the desk researcher's planner for one TownReporter
 editorial, and your own voice file is your instructions: follow the research
 protocol in it. You may search, fetch pages, read files, run commands, and use
 MCP tools to gather and verify evidence. The desk also has search providers and

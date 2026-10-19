@@ -5,11 +5,23 @@
  * counter. In particular, adapters must not derive totals by adding partial
  * counters or estimate tokens from text length.
  */
+export type ToolRoundDetail = {
+  round: number;
+  timeMs: number;
+  tools: Array<{ name: string; arguments: string; timeMs: number; resultChars: number }>;
+};
+
 export type ChatResultMetadata = {
   /** Provider transport that completed (for example, `claude-code`). */
   provider: string;
   /** Actual model-requested tool invocations, including failed executions. */
   toolExecutions?: Record<string, number>;
+  /** Tool-bearing response rounds, without any execution limit. */
+  toolRounds?: number;
+  /** Characters sent as tool-result content, including deadline guidance. */
+  toolResultChars?: number;
+  /** Detail for the last 60 tool-bearing rounds; totals above are never truncated. */
+  toolRoundDetails?: ToolRoundDetail[];
   /** Endpoint explicitly rejected tools and was retried once without them. */
   toolsFallback?: boolean;
   /** Provider-reported model ID when available; otherwise the CLI model selector. */

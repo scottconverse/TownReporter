@@ -1,3 +1,4 @@
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 /**
  * The read-me-first block for an investigation.
  *
@@ -206,7 +207,9 @@ export function briefIsUseful(b: InvestigationBrief | null | undefined): boolean
   return Boolean(b.tldr.trim() || b.headline.trim());
 }
 
-export const BRIEF_SYSTEM = `TOWNREPORTER — DARK DESK HYPOTHESIS BRIEF.
+export const BRIEF_SYSTEM = `${RESEARCH_GUIDANCE}
+
+TOWNREPORTER — DARK DESK HYPOTHESIS BRIEF.
 You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Use the application-gathered evidence first. Return ONLY the JSON described below.
 
 You are writing the read-me-first block above an investigation file for ONE editor with limited time.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile, readdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { grokChat } from "./ai.ts";
 import { executeModelTool, rejectsTools } from "./model-tools.server.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
@@ -118,7 +119,7 @@ it("OpenAI web_search executes desk search exactly once and returns results to t
         });
       }
       modelCalls++;
-      assert.equal(body.messages[0].content, "original system");
+      assert.equal(body.messages[0].content, "original system\n\n" + RESEARCH_GUIDANCE);
       if (modelCalls === 1) {
         assert.equal(body.tools.length, 6);
         return tool("web_search", { query: "town election" });
@@ -165,7 +166,7 @@ for (const api of [false, true]) {
           return anthropic([{ type: "text", text: "Finished." }]);
         }
         assert.match(body.messages[3].content, /D149-command-proof/);
-        assert.equal(JSON.parse(body.messages[3].content).code, 0);
+        assert.equal(JSON.parse(body.messages[3].content.split("\n\nTime left")[0]).code, 0);
         return answer();
       },
       async () => {
@@ -435,3 +436,45 @@ it("a 501 tools rejection retries directly without tools", async () => {
     },
   );
 });
+
+for (const api of [false, true]) for (const fraction of [0, 0.75, 0.8]) {
+  it(`ENG-4 ${api ? "Anthropic" : "OpenAI"} deadline guidance at ${fraction * 100}% elapsed retains tools and reports usage`, async () => {
+    const originalNow = Date.now;
+    const start = originalNow();
+    let now = start;
+    let calls = 0;
+    let resultChars = 0;
+    await fixture(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const system = api ? body.system[0].text : body.messages[0].content;
+      assert.ok(system.startsWith("original system"));
+      assert.equal(body.tools.length, 6);
+      if (++calls === 1) {
+        now = start + fraction * 10000;
+        return api ? anthropic([{ type: "tool_use", id: "call-1", name: "unknown_test_tool", input: { test: "x".repeat(250) } }], "tool_use")
+          : tool("unknown_test_tool", { test: "x".repeat(250) });
+      }
+      const content = api ? body.messages[2].content[0].content : body.messages[3].content;
+      assert.match(content, new RegExp("Time left for this answer: about " + Math.ceil((1-fraction)*10) + " seconds\\."));
+      assert.equal(content.includes("Write your final answer now."), fraction > 0.75);
+      assert.ok(system.includes(RESEARCH_GUIDANCE));
+      assert.match(content, /Unknown tool/);
+      resultChars = content.length;
+      return api ? anthropic([{ type: "text", text: "Finished." }]) : answer();
+    }, async () => {
+      Date.now = () => now;
+      try {
+        const result = await chat(api, 10000);
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.meta?.toolExecutions, { unknown_test_tool: 1 });
+        assert.equal(result.meta?.toolRounds, 1);
+        assert.equal(result.meta?.toolResultChars, resultChars);
+        const detail = result.meta?.toolRoundDetails?.[0];
+        assert.equal(detail?.round, 1);
+        assert.equal(detail?.tools[0].arguments.length, 200);
+        assert.equal(detail?.tools[0].resultChars, resultChars);
+        assert.equal(detail?.tools[0].name, "unknown_test_tool");
+      } finally { Date.now = originalNow; }
+    }, api);
+  });
+}

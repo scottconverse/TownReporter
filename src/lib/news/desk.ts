@@ -1,3 +1,4 @@
+import { jobToolRecorder } from "./tool-usage.ts";
 import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { disclosureForPublishedStory } from "./ai-disclosure.ts";
 import { runDraftReply } from "./draft-reply.ts";
@@ -1782,7 +1783,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
   try {
-    const runChat = deps.grokChat ?? grokChat;
+    const recordTools = jobToolRecorder(await getSql(), job);
+    const rawChat = deps.grokChat ?? grokChat;
+    const runChat: typeof grokChat = async (...args) => recordTools(await rawChat(...args));
     const probe = deps.probe ?? probeProvider;
     const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
     /*
@@ -3331,6 +3334,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
   const sql = await getSql();
+  const recordTools = jobToolRecorder(sql, job);
   const batchServer = await import("./draft-batch.server.ts");
   let batchSnapshot = await batchServer.assertDraftBatchCanContinue(sql, job);
   const batchGuard = async () => {
@@ -3640,7 +3644,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       modelChoice: effectiveStoryModelChoice(job.model_choice),
       modelEffort: draftInput.modelEffort,
     };
-    const storyChat = deps.chat ?? grokChat;
+    const rawStoryChat = deps.chat ?? grokChat;
+    const storyChat: typeof grokChat = async (...args) => recordTools(await rawStoryChat(...args));
     const persistReportSwitch = async (
       nextChoice: EffectiveProviderChoice,
       reason: import("./automatic-failover.ts").AutomaticFailoverReason,
@@ -3738,14 +3743,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         switchNote: string;
       };
       } = { receipt: null };
-      const run = (snapshot: typeof activeBatchSnapshot, retryInstruction?: string) => runForcedChat(
+      const run = async (snapshot: typeof activeBatchSnapshot, retryInstruction?: string) => recordTools(await runForcedChat(
         snapshot,
         [system, retryInstruction].filter(Boolean).join("\n\n"),
         user,
         maxTokens,
         { timeoutMs: options?.timeoutMs },
         adapters,
-      );
+      ));
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeBatchSnapshot,
         source: batchWasAutomatic(activeBatchSnapshot) ? "auto" : "editor",

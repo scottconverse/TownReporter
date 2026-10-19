@@ -1,3 +1,4 @@
+import { researchSystem } from "./research-guidance.ts";
 import { resolveLocalModelChoice } from "./provider-settings.ts";
 import { isCustomModelChoice, type CustomModelChoice } from "./model-choice.ts";
 import {
@@ -429,6 +430,7 @@ export async function runForcedChat<T>(
 ): Promise<T> {
   const valid = parseForcedRuntimeSnapshot(snapshot, { automaticRung: true });
   if (!valid) throw new Error("The forced runtime snapshot is invalid.");
+  system = researchSystem(system);
   const timeoutMs = options?.timeoutMs ?? 150000;
   if (valid.transport === "local") {
     return adapters.local(system, user, maxTokens, {
