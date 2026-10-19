@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { resetClaudeCliCache } from "./ai-claude-code.server.ts";
 import { grokChat, scanSystem, DRAFT_OUTPUT_TOKEN_FLOOR } from "./ai.ts";
 import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { reportResearchSystem, reportWriteSystem, REPORT_EDIT_SYSTEM, CITATION_REPAIR_SYSTEM } from "./report.ts";
@@ -30,11 +31,12 @@ type Request = { model: string; tools?: unknown[]; reasoning_effort?: string; ma
 
 // Every transport is intercepted. Unknown tool names cannot execute commands or contact MCP.
 async function fixture(work: (requests: Request[]) => Promise<void>, unsolicitedTool = false) {
-  const vars = { TOWNREPORTER_LOCAL: "1", TOWNREPORTER_DEEPSEEK: "1", TOWNREPORTER_DEEPSEEK_BASE_URL: "http://127.0.0.1:9/v1", TOWNREPORTER_DEEPSEEK_MODEL: ids[0], LLM_REASONING_EFFORT: "" };
+  const vars = { CLAUDE_CLI_PATH: "d153-missing-claude-binary", TOWNREPORTER_LOCAL: "1", TOWNREPORTER_DEEPSEEK: "1", TOWNREPORTER_DEEPSEEK_BASE_URL: "http://127.0.0.1:9/v1", TOWNREPORTER_DEEPSEEK_MODEL: ids[0], LLM_REASONING_EFFORT: "" };
   const previous = Object.fromEntries(Object.keys(vars).map(key => [key, process.env[key]]));
   const fetch = globalThis.fetch;
   const requests: Request[] = [];
   Object.assign(process.env, vars);
+  resetClaudeCliCache();
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), "http://127.0.0.1:9/v1/chat/completions");
     requests.push(JSON.parse(String(init?.body)));
@@ -43,6 +45,7 @@ async function fixture(work: (requests: Request[]) => Promise<void>, unsolicited
   try { await work(requests); }
   finally {
     globalThis.fetch = fetch;
+    resetClaudeCliCache();
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
@@ -52,7 +55,7 @@ const deepseek = (model: string, system = systems[0], user = "Supplied evidence"
   grokChat(system, user, 200, { choice: "deepseek-flash", model, rungModel: null, timeoutMs: 3000, reasoningEffort: "none" });
 
 for (const model of ids) {
-  it(`D151 ${model} actual request omits tools and retains effort, output floor and returned model`, async () => {
+  it(`D151 missing-CLI fallback ${model} actual request omits tools and retains effort, output floor and returned model`, async () => {
     await fixture(async requests => {
       const result = await deepseek(model);
       assert.equal(result.ok, true);
@@ -67,7 +70,7 @@ for (const model of ids) {
     });
   });
 
-  it(`D151 ${model} excludes shared guidance from every stage and user prompt on the wire`, async () => {
+  it(`D151 missing-CLI fallback ${model} excludes shared guidance from every stage and user prompt on the wire`, async () => {
     await fixture(async requests => {
       for (const system of systems) {
         const result = await deepseek(model, system, action);
@@ -82,7 +85,7 @@ for (const model of ids) {
     });
   });
 
-  it(`D151 ${model} ignores unsolicited tool calls without a tool loop or time-left results`, async () => {
+  it(`D151 missing-CLI fallback ${model} ignores unsolicited tool calls without a tool loop or time-left results`, async () => {
     await fixture(async requests => {
       const result = await deepseek(model);
       assert.equal(result.ok, true);
@@ -95,7 +98,7 @@ for (const model of ids) {
     }, true);
   });
 
-  it(`D151 forced ${model} removes upstream guidance before the actual request`, async () => {
+  it(`D151 missing-CLI fallback forced ${model} removes upstream guidance before the actual request`, async () => {
     await fixture(async requests => {
       const result = await runForcedChat({ runtime: "deepseek-flash", modelChoice: "deepseek-flash", transport: "local", localModel: { baseUrl: "http://127.0.0.1:9/v1", id: model }, modelEffort: "none" }, reportWriteSystem(paper), action, 200, { timeoutMs: 3000 }, {
         local: (system, user, maxTokens, options) => grokChat(system, user, maxTokens, options),

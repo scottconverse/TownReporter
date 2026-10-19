@@ -42,6 +42,8 @@ type CliEnvelope = {
   model?: unknown;
   modelUsage?: unknown;
   usage?: unknown;
+  num_turns?: unknown;
+  toolExecutions?: unknown;
 };
 
 type CliResultContext = Omit<ChatResultMetadata, "durationMs"> & { durationMs: number };
@@ -61,6 +63,10 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
       : undefined;
   return {
     ...fallback,
+    ...(reportedCount(envelope.num_turns) !== undefined ? { toolRounds: reportedCount(envelope.num_turns) } : {}),
+    ...(envelope.toolExecutions && typeof envelope.toolExecutions === "object" && !Array.isArray(envelope.toolExecutions)
+      ? { toolExecutions: Object.fromEntries(Object.entries(envelope.toolExecutions).filter(([, count]) => reportedCount(count) !== undefined)) as Record<string, number> }
+      : {}),
     model: reportedModel ?? fallback.model,
     durationMs: reportedCount(envelope.duration_ms) ?? fallback.durationMs,
     ...(reportedCount(usage?.input_tokens) !== undefined ? { inputTokens: reportedCount(usage?.input_tokens) } : {}),
@@ -243,6 +249,12 @@ export function buildClaudeCodeArgs(input: {
  * sends packs up to ~28k characters and Windows caps a command line at ~32k.
  */
 export async function claudeCodeChat(opts: {
+  /** DeepSeek uses the same full-tool CLI with a per-call relay and credentials. */
+  deepSeek?: {
+    baseUrl: string;
+    apiKey?: string;
+    onEvidence?: import("./deepseek-relay.server.ts").DeepSeekRelayObserver;
+  };
   /** Inline system prompt. Ignored when `systemPromptFile` is given. */
   system: string;
   user: string;
@@ -304,7 +316,7 @@ export async function claudeCodeChat(opts: {
   // file is a transport mechanism, not a reason to remove requested web tools.
   // Fetched pages remain untrusted evidence, never instructions.
 
-  if (opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
+  if (!opts.deepSeek && opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
     cleanupTempDir();
     throw new Error(
       `Unsupported Claude effort ${opts.reasoningEffort}. Supported values: ${CLAUDE_CLI_EFFORTS.join(", ")}.`,
@@ -331,10 +343,32 @@ export async function claudeCodeChat(opts: {
 
   const args = buildClaudeCodeArgs({
     model: opts.model,
-    reasoningEffort: opts.reasoningEffort,
+    reasoningEffort: opts.deepSeek ? undefined : opts.reasoningEffort,
     system: usingFile ? undefined : opts.system,
     systemPromptFile,
   });
+
+  const relay = opts.deepSeek
+    ? await (await import("./deepseek-relay.server.ts")).deepSeekRelayRoute(opts.deepSeek).catch(error => {
+      cleanupTempDir();
+      throw error;
+    })
+    : undefined;
+  const childEnv = claudeChildEnv();
+  if (opts.deepSeek && relay) {
+    Object.assign(childEnv, {
+      ANTHROPIC_BASE_URL: relay.baseUrl,
+      ANTHROPIC_AUTH_TOKEN: opts.deepSeek.apiKey || "ollama",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: opts.model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: opts.model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: opts.model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: opts.model,
+      ANTHROPIC_SMALL_FAST_MODEL: opts.model,
+      CLAUDE_CODE_SUBAGENT_MODEL: opts.model,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    });
+  }
 
   return new Promise<ClaudeCodeResult>((resolve) => {
     const startedAt = Date.now();
@@ -355,10 +389,11 @@ export async function claudeCodeChat(opts: {
         // An allow-list, not this process's whole environment: the child is a
         // program that reads what it is given, and it does not need the
         // paper's secrets. See cli-child-env.server.ts.
-        env: claudeChildEnv(),
+        env: childEnv,
       });
     } catch {
       cleanupTempDir();
+      relay?.release();
       resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });
       return;
     }
@@ -371,6 +406,7 @@ export async function claudeCodeChat(opts: {
       settled = true;
       clearTimeout(timer);
       cleanupTempDir();
+      relay?.release();
       resolve(r);
     };
 

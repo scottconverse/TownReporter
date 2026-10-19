@@ -132,6 +132,8 @@ type GrokChatAdapter = (
 
 /** Injectable runtime boundary for hermetic provider-dispatch tests. */
 export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>> & {
+  claudeCode?: typeof import("./ai-claude-code.server.ts").claudeCodeChat;
+  findClaudeCli?: () => Promise<string | null>;
   probe?: (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe>;
   /** Test-only seam for the server-only custom-connection resolver. */
   resolveCustom?: (
@@ -1109,7 +1111,7 @@ export async function grokChat(
       ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
       : null;
   if (custom && !custom.ok) return custom;
-  const provider = custom?.ok
+  let provider = custom?.ok
     ? custom.provider
     : resolveProvider(opts?.choice, opts?.localModel, rungModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
@@ -1121,6 +1123,27 @@ export async function grokChat(
   const model = opts?.model?.trim() || provider.model;
   // Resolve by the actual model, including Local/Custom overrides and failover.
   // Stage callers (notably report.ts) may already embed the shared guidance.
+  if (isDeepSeekFlashModel(model)) {
+    const endpoint = "baseUrl" in provider ? provider : resolveProvider("deepseek-flash");
+    if (!endpoint || !("baseUrl" in endpoint)) return { ok: false, error: GROK_UNAVAILABLE };
+    try {
+      const cli = await claudeServer();
+      if (await (adapters?.findClaudeCli ?? cli.findClaudeCli)()) {
+        const result = await (adapters?.claudeCode ?? cli.claudeCodeChat)({
+          system: researchSystem(system, true), user, model, timeoutMs,
+          deepSeek: { baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey === "not-needed" ? undefined : endpoint.apiKey },
+        });
+        return {
+          ...result,
+          ...(result.meta ? { meta: { ...result.meta, provider: "deepseek-flash", model } } : {}),
+        };
+      }
+    } catch {
+      return { ok: false, error: "DeepSeek Claude Code request failed." };
+    }
+    // Only a missing binary retains the original no-tools HTTP fallback.
+    provider = { ...endpoint, kind: "openai" };
+  }
   const toolsEnabled = !isDeepSeekFlashModel(model);
   system = researchSystem(system, toolsEnabled);
   if (!toolsEnabled) user = researchSystem(user, false);

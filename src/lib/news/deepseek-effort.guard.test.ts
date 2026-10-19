@@ -80,7 +80,7 @@ describe("DeepSeek effort is Off by default (Scott's standing rule)", () => {
             choice: "local-model",
             localModel: DEEPSEEK_LOCAL,
             reasoningEffort: resolved.effort,
-          });
+          }, { findClaudeCli: async () => null });
           assert.equal(result.ok, true, `${jobKey}: request failed`);
         });
       } finally {

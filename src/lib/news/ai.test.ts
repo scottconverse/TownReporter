@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { resetClaudeCliCache } from "./ai-claude-code.server.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import type { LocalCatalog, LocalModelEntry, LocalModelKind, LocalServerKind } from "./local-models.ts";
 import {
@@ -52,6 +53,8 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
+  process.env.CLAUDE_CLI_PATH = "d153-missing-claude-binary";
+  resetClaudeCliCache();
   for (const [k, v] of Object.entries(vars)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -61,6 +64,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   try {
     fn();
   } finally {
+    resetClaudeCliCache();
     for (const k of keys) {
       if (prev[k] === undefined) delete process.env[k];
       else process.env[k] = prev[k];
@@ -102,6 +106,8 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
+  process.env.CLAUDE_CLI_PATH = "d153-missing-claude-binary";
+  resetClaudeCliCache();
   for (const [k, v] of Object.entries(vars)) {
     if (v !== undefined) process.env[k] = v;
   }
@@ -110,6 +116,7 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
   try {
     return await fn();
   } finally {
+    resetClaudeCliCache();
     for (const k of keys) {
       if (prev[k] === undefined) delete process.env[k];
       else process.env[k] = prev[k];
@@ -735,6 +742,7 @@ describe("model-picker provider readiness", () => {
           newsroomId: 44,
           reasoningEffort: effort,
         }, {
+          findClaudeCli: async () => null,
           resolveCustom: async () => ({
             baseUrl: "http://127.0.0.1:11434/v1",
             modelId: "deepseek-v4.1-flash:cloud",

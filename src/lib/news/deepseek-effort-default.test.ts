@@ -94,7 +94,7 @@ describe("DeepSeek v4.1 Flash effort defaults to None", () => {
     const result = await withEnvAndFetch(
       { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "deepseek-v4.1-flash:cloud" },
       bodies,
-      () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model", reasoningEffort: effort }),
+      () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model", reasoningEffort: effort }, { findClaudeCli: async () => null }),
     );
     assert.equal(result.ok, true);
     assert.equal(bodies[0]?.reasoning_effort, "none");
@@ -105,7 +105,7 @@ describe("DeepSeek v4.1 Flash effort defaults to None", () => {
     await withEnvAndFetch(
       { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "deepseek-v4.1-flash:cloud" },
       bodies,
-      () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model", reasoningEffort: "medium" }),
+      () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model", reasoningEffort: "medium" }, { findClaudeCli: async () => null }),
     );
     assert.equal(bodies[0]?.reasoning_effort, "none");
   });
