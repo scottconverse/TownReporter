@@ -80,7 +80,7 @@ function fromObject(
 /**
  * Turn a Grok draft reply into fields. Never return the raw JSON blob as body.
  */
-export function coerceDraft(
+function coerceDraftFields(
   raw: string,
   fallback: { headline: string; dek: string; topic: string },
 ): CoercedDraft {
@@ -117,6 +117,16 @@ export function coerceDraft(
     integrity_notes: notes,
     memory_entities: [],
   };
+}
+
+/** Decode model-double-escaped newlines only in the shared draft body. */
+export function coerceDraft(
+  raw: string,
+  fallback: { headline: string; dek: string; topic: string },
+): CoercedDraft {
+  const draft = coerceDraftFields(raw, fallback);
+  draft.body = draft.body.replace(/\\n/g, "\n");
+  return draft;
 }
 
 export function unpackStoredDraft<T extends { headline: string; dek: string; body: string; topic: string }>(
