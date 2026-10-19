@@ -79,7 +79,7 @@ function withFetch<T>(handler: typeof fetch, fn: () => Promise<T>): Promise<T> {
 const OLLAMA_BASE = "http://127.0.0.1:11434/v1";
 const CURRENT_MODELS = { data: [{ id: "gemma4:12b" }, { id: "gemma4:e4b" }] };
 const CLOUD_MODELS = [
-  "deepseek-v4.1-flash:cloud",
+  "deepseek-v4.1-flash:1017-cloud",
   "glm-5.2:cloud",
   "glm-5.3-flash:cloud",
   "qwen3.5:397b-cloud",
@@ -190,13 +190,13 @@ describe("the per-newsroom local-model override resolves against the live catalo
     await addDeskMembers();
     const scopes = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const;
     const expectedDefault: Record<(typeof scopes)[number], string> = {
-      story: "deepseek-v4.1-flash:cloud",
-      scan: "deepseek-v4.1-flash:cloud",
-      "follow-up": "deepseek-v4.1-flash:cloud",
-      opinion: "deepseek-v4.1-flash:cloud",
-      dark: "deepseek-v4.1-flash:cloud",
-      ocr: "deepseek-v4.1-flash:cloud",
-      forced: "deepseek-v4.1-flash:cloud",
+      story: "deepseek-v4.1-flash:1017-cloud",
+      scan: "deepseek-v4.1-flash:1017-cloud",
+      "follow-up": "deepseek-v4.1-flash:1017-cloud",
+      opinion: "deepseek-v4.1-flash:1017-cloud",
+      dark: "deepseek-v4.1-flash:1017-cloud",
+      ocr: "deepseek-v4.1-flash:1017-cloud",
+      forced: "deepseek-v4.1-flash:1017-cloud",
     };
 
     await withFetch(fetchWithModels(CLOUD_MODELS), async () => {
@@ -220,13 +220,13 @@ describe("the per-newsroom local-model override resolves against the live catalo
   it("does not replace an unavailable scoped cloud choice with the catalog default", async () => {
     const sql = await getSql();
     await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
-    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
+    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:1017-cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
     const result = await withFetch(fetchWithOllamaOnly(), async () => ({
       scan: await readProviderOverrides(NEWSROOM_ID, "scan"),
       picker: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
     }));
-    assert.equal(result.scan["local-model"]?.localModel?.id, "deepseek-v4.1-flash:cloud");
-    assert.equal(result.picker.override?.id, "deepseek-v4.1-flash:cloud");
+    assert.equal(result.scan["local-model"]?.localModel?.id, "deepseek-v4.1-flash:1017-cloud");
+    assert.equal(result.picker.override?.id, "deepseek-v4.1-flash:1017-cloud");
     assert.match(result.picker.notice ?? "", /not reachable or listed/);
   });
 
@@ -252,9 +252,9 @@ describe("the per-newsroom local-model override resolves against the live catalo
   it("fails a saved scoped Ollama pick closed when /models returns malformed data", async () => {
     const sql = await getSql();
     await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
-    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
+    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:1017-cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response(JSON.stringify({ models: [{ name: "deepseek-v4.1-flash:cloud" }] }), {
+    globalThis.fetch = async () => new Response(JSON.stringify({ models: [{ name: "deepseek-v4.1-flash:1017-cloud" }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });

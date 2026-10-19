@@ -692,7 +692,7 @@ describe("model-picker provider readiness", () => {
     globalThis.fetch = async (_input, init) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(JSON.stringify({
-        model: "deepseek-v4.1-flash:cloud",
+        model: "deepseek-v4.1-flash:1017-cloud",
         choices: [{ message: { content: "ok" } }],
       }), { status: 200 });
     };
@@ -700,7 +700,7 @@ describe("model-picker provider readiness", () => {
       await withEnvAsync(BARE, async () => {
         const localModel = {
           baseUrl: "http://127.0.0.1:11434/v1",
-          id: "deepseek-v4.1-flash:cloud",
+          id: "deepseek-v4.1-flash:1017-cloud",
         };
         assert.equal((await grokChat("S", "U", 8, {
           choice: "local-model",
@@ -731,7 +731,7 @@ describe("model-picker provider readiness", () => {
     globalThis.fetch = async (_input, init) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(JSON.stringify({
-        model: "deepseek-v4.1-flash:cloud",
+        model: "deepseek-v4.1-flash:1017-cloud",
         choices: [{ message: { content: "ok" } }],
       }), { status: 200 });
     };
@@ -745,7 +745,7 @@ describe("model-picker provider readiness", () => {
           findClaudeCli: async () => null,
           resolveCustom: async () => ({
             baseUrl: "http://127.0.0.1:11434/v1",
-            modelId: "deepseek-v4.1-flash:cloud",
+            modelId: "deepseek-v4.1-flash:1017-cloud",
             apiKey: "test-key",
           }),
         });
@@ -1471,7 +1471,7 @@ describe("model-picker provider readiness", () => {
       const url = String(input);
       urls.push(url);
       if (url.startsWith("http://127.0.0.1:11434/")) {
-        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), { status: 200 });
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:1017-cloud" }] }), { status: 200 });
       }
       throw new TypeError(`unexpected readiness probe: ${url}`);
     };
@@ -1769,7 +1769,7 @@ describe("the DeepSeek rung's writing call", () => {
       });
       return new Response(
         JSON.stringify({
-          model: "deepseek-v4.1-flash:cloud",
+          model: "deepseek-v4.1-flash:1017-cloud",
           choices: [{ message: { content: "an editorial" } }],
         }),
         { status: 200 },
@@ -1804,7 +1804,7 @@ describe("the DeepSeek rung's writing call", () => {
       `${RUNG_BASE}/chat/completions`,
       "the rung carries its own endpoint; it must never read LLM_BASE_URL",
     );
-    assert.equal(request!.body.model, "deepseek-v4.1-flash:cloud");
+    assert.equal(request!.body.model, "deepseek-v4.1-flash:1017-cloud");
     assert.deepEqual(
       request!.body.messages,
       [

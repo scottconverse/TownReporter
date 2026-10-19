@@ -35,7 +35,7 @@ const LM_BASE = "http://127.0.0.1:1234/v1";
 const LM_ROOT = "http://127.0.0.1:1234";
 const OLLAMA_BASE = "http://127.0.0.1:11434/v1";
 const OLLAMA_ROOT = "http://127.0.0.1:11434";
-const CLOUD_IDS = ["deepseek-v4.1-flash:cloud", "glm-5.3-flash:cloud"];
+const CLOUD_IDS = ["deepseek-v4.1-flash:1017-cloud", "glm-5.3-flash:cloud"];
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -297,7 +297,7 @@ describe("Unit BB: local model picker load state", () => {
   });
 
   it("never blocks an Ollama Cloud pick, even when it is not held in memory", async () => {
-    await storeRawScopedChoice("story", OLLAMA_BASE, "deepseek-v4.1-flash:cloud");
+    await storeRawScopedChoice("story", OLLAMA_BASE, "deepseek-v4.1-flash:1017-cloud");
     // /api/ps names a different model, so every cloud id reports loaded: false.
     const servers: FakeServers = {
       ollama: { ids: CLOUD_IDS, running: ["gemma4:12b"] },
@@ -305,11 +305,11 @@ describe("Unit BB: local model picker load state", () => {
     };
     await withFetch(fakeFetch(servers), async () => {
       const choice = await resolveLocalModelChoice(NEWSROOM_ID, "story");
-      assert.deepEqual(choice.override, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:cloud" });
+      assert.deepEqual(choice.override, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:1017-cloud" });
 
       const result = await probeProvider("local-model", NEWSROOM_ID, undefined, "story");
       assert.equal(result.ok, true, "a hosted model is never 'not loaded' in the local sense");
-      assert.deepEqual(result.localModel, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:cloud" });
+      assert.deepEqual(result.localModel, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:1017-cloud" });
     });
   });
 
@@ -328,7 +328,7 @@ describe("Unit BB: local model picker load state", () => {
     await withFetch(fakeFetch(servers), async () => {
       const choice = await resolveLocalModelChoice(NEWSROOM_ID, "story");
       assert.equal(choice.source, "default", "the picker's help line needs to say why");
-      assert.deepEqual(choice.override, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:cloud" });
+      assert.deepEqual(choice.override, { baseUrl: OLLAMA_BASE, id: "deepseek-v4.1-flash:1017-cloud" });
     });
   });
 

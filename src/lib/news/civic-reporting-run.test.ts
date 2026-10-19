@@ -200,7 +200,7 @@ describe("performReportingWork: the run", () => {
       requestedEffort: "none",
       actualRuntime: "local-model",
       actualEffort: "none",
-      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:1017-cloud" },
     });
     await sql`update reporting_requests set model_receipt = ${JSON.stringify(pin)}::jsonb where id = ${requestId}`;
     const job = await claimedJobFor(requestId, { result_json: JSON.stringify(pin) });
@@ -252,7 +252,7 @@ describe("performReportingWork: the run", () => {
       requestedEffort: "none",
       actualRuntime: "local-model",
       actualEffort: "none",
-      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:1017-cloud" },
     });
     const requestId = await newRequest({
       lead_id: leadId,
@@ -325,7 +325,7 @@ describe("performReportingWork: the run", () => {
       assert.equal(pkg.receipt.requestedEffort, "none", "the package keeps the requested effort");
       assert.equal(pkg.receipt.actualRuntime, "local-model", "the package keeps the answering runtime");
       assert.equal(pkg.receipt.modelEffort, "none", "the package keeps the exact OFF effort");
-      assert.equal(pkg.receipt.modelId, "deepseek-v4.1-flash:cloud", "the pinned model wins over the probe's model");
+      assert.equal(pkg.receipt.modelId, "deepseek-v4.1-flash:1017-cloud", "the pinned model wins over the probe's model");
       assert.equal(pkg.receipt.modelEndpoint, "http://127.0.0.1:11434/v1", "the pinned endpoint wins over the probe's endpoint");
       assert.equal(pkg.receipt.runtimeProvider, "Ollama");
       assert.equal(pkg.receipt.modelLabel, "DeepSeek v4.1 Flash", "the panel does not receive a generic LLM label");
@@ -2176,19 +2176,19 @@ describe("finishing preserves the canonical model pin", () => {
         requestedEffort: "none",
         actualRuntime: "local-model",
         actualEffort: "none",
-        localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+        localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:1017-cloud" },
       }),
       requested: "auto",
       effective: "local-model",
       label: "LLM",
-      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:1017-cloud" },
       effort: "none",
       reason: "",
     });
     // Canonical pin survives.
     assert.equal(receipt.actualRuntime, "local-model", "the canonical runtime pin survives");
     assert.equal(receipt.modelEffort, "none", "the canonical effort pin survives");
-    assert.equal((receipt.localModel as { id: string }).id, "deepseek-v4.1-flash:cloud", "the exact model id survives");
+    assert.equal((receipt.localModel as { id: string }).id, "deepseek-v4.1-flash:1017-cloud", "the exact model id survives");
     assert.equal((receipt.localModel as { baseUrl: string }).baseUrl, "http://127.0.0.1:11434/v1", "the exact endpoint survives");
     // The editor sees a real model, not "LLM".
     assert.notEqual(receipt.label, "LLM", "the generic label is replaced");

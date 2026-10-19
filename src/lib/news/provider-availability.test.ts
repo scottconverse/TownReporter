@@ -44,7 +44,7 @@ describe("provider availability for the picker", () => {
   it("warns both names for an exhausted cloud model and clears only after a successful explicit connection test", async () => {
     setLocalDiscoveryReachable(true);
     const url = "http://127.0.0.1:11434/v1";
-    const model = "deepseek-v4.1-flash:cloud";
+    const model = "deepseek-v4.1-flash:1017-cloud";
     const words = "you (sconverse) have reached your monthly usage limit";
     recordOllamaCloudCall(url, model, 429, words);
     const deps = {

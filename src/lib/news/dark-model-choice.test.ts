@@ -134,7 +134,7 @@ before(() => {
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith(DEEPSEEK_URL)) {
       return new Response(
-        JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }),
+        JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:1017-cloud" }] }),
         { status: 200 },
       );
     }

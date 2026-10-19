@@ -774,7 +774,8 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     // line (see `pickerOptionText`).
     optionDetail: "Ollama",
     kind: "local",
-    model: "deepseek-v4.1-flash:cloud",
+    // D160 (Scott, Oct 19 2026): pinned to the exact Ollama tag, not the floating ":cloud".
+    model: "deepseek-v4.1-flash:1017-cloud",
     // Ollama's OpenAI-compatible face. The bake-off ran this model through
     // Ollama Cloud; the endpoint is the same one `localDiscoveryReachable`
     // probes for.
@@ -904,7 +905,7 @@ const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 function defaultsToThinkingOff(model: string | undefined | null): boolean {
   const id = model?.trim() ?? "";
   return (
-    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
+    /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(id)
     || /^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
     || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)
   );
@@ -926,7 +927,7 @@ export function openAiCompatibleModelEfforts(
   model: string | undefined | null,
 ): readonly ModelEffort[] {
   const id = model?.trim() ?? "";
-  if (/^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)) {
+  if (/^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(id)) {
     return DEEPSEEK_V4_1_FLASH_EFFORTS;
   }
   if (/^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
@@ -950,7 +951,7 @@ export function modelEffortLabel(
 }
 
 function isDeepSeekFlashModel(model: string | undefined | null): boolean {
-  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model?.trim() ?? "");
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(model?.trim() ?? "");
 }
 
 /** Effort values accepted by TownReporter's transport for this choice.

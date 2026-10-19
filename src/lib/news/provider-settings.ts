@@ -126,13 +126,13 @@ export type { LocalModelScope } from "./request-input.ts";
 
 /** First-run model candidates; a newsroom's saved pick always takes precedence. */
 const PREFERRED_CLOUD_MODEL_BY_SCOPE: Readonly<Record<LocalModelScope, string>> = {
-  story: "deepseek-v4.1-flash:cloud",
-  scan: "deepseek-v4.1-flash:cloud",
-  "follow-up": "deepseek-v4.1-flash:cloud",
-  opinion: "deepseek-v4.1-flash:cloud",
-  dark: "deepseek-v4.1-flash:cloud",
-  ocr: "deepseek-v4.1-flash:cloud",
-  forced: "deepseek-v4.1-flash:cloud",
+  story: "deepseek-v4.1-flash:1017-cloud",
+  scan: "deepseek-v4.1-flash:1017-cloud",
+  "follow-up": "deepseek-v4.1-flash:1017-cloud",
+  opinion: "deepseek-v4.1-flash:1017-cloud",
+  dark: "deepseek-v4.1-flash:1017-cloud",
+  ocr: "deepseek-v4.1-flash:1017-cloud",
+  forced: "deepseek-v4.1-flash:1017-cloud",
 };
 
 /** Is a stored `{baseUrl,id}` still on that server's current model list? */

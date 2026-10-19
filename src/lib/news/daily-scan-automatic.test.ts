@@ -131,7 +131,7 @@ describe("daily scan on Automatic", () => {
       async () => {
         const restore = stubFetch((url) =>
           url === "http://127.0.0.1:11434/v1/models"
-            ? json({ data: [{ id: "deepseek-v4.1-flash:cloud" }] })
+            ? json({ data: [{ id: "deepseek-v4.1-flash:1017-cloud" }] })
             : null,
         );
         try {
@@ -147,7 +147,7 @@ describe("daily scan on Automatic", () => {
           // actually reach DeepSeek on the Ollama port.
           assert.deepEqual(receipt.localModel, {
             baseUrl: "http://127.0.0.1:11434/v1",
-            id: "deepseek-v4.1-flash:cloud",
+            id: "deepseek-v4.1-flash:1017-cloud",
           });
           // DeepSeek's own effort default is thinking off ("none"), which is
           // the effort the run record shows as resolved.

@@ -1510,9 +1510,10 @@ function isLoopbackEndpoint(baseUrl: string): boolean {
   }
 }
 
-/** DeepSeek v4.1 Flash on Ollama, by its exact model id. */
+/** DeepSeek v4.1 Flash on Ollama, by its exact model id: the pinned
+ * ":1017-cloud" tag (D160), and the older floating ":cloud" for stored runs. */
 function isDeepSeekFlashModel(model: string): boolean {
-  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(model.trim());
 }
 
 function reasoningEffortFor(
@@ -1533,7 +1534,7 @@ function reasoningEffortFor(
     // DeepSeek v4.1 Flash is always Off (Scott's standing rule). A stray effort
     // Automatic carried in, such as "medium", becomes Off here; it must not fall
     // to provider default, where thinking spends the output budget.
-    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(model.trim());
     return deepSeekFlash && declared.includes("none") ? "none" : undefined;
   }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
