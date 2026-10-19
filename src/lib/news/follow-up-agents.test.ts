@@ -133,9 +133,9 @@ describe("the agent seam", () => {
     // KIND_BUDGETS.local): the run is still capped at ten, because a follow-up
     // is a background check, not a pipeline.
     assert.equal(followUpRunLimits("local-model").elapsedMs, 10 * 60_000);
-    // A provider whose own budget is shorter keeps it: the Claude CLI rungs
-    // carry a seven-minute wall (KIND_BUDGETS["claude-code"]).
-    assert.equal(followUpRunLimits("claude-sonnet").elapsedMs, 420_000);
+    // CLI providers have a fifteen-minute wall; follow-ups still stop at
+    // their independent ten-minute hard cap.
+    assert.equal(followUpRunLimits("claude-sonnet").elapsedMs, 600_000);
     assert.equal(followUpRunLimits("auto").elapsedMs <= 10 * 60_000, true);
   });
 

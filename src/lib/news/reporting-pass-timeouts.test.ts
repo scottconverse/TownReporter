@@ -82,6 +82,6 @@ it("keeps warm and writer calls at 45 seconds with a smaller stored override", a
 it("gives the Codex meeting writer ten minutes while the warm pass keeps its default budget", async () => {
   // guards: the Codex writer times out before it can file the editor's meeting story.
   const timeout = await reportingCalls("codex-frontier");
-  assert.equal(timeout("warm"), 150000);
+  assert.equal(timeout("warm"), 300000);
   assert.ok((timeout("writer") ?? 0) >= 600000);
 });

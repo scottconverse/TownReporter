@@ -297,7 +297,7 @@ describe("resolveProvider", () => {
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
   });
 
-  it("reserves a measured full-draft window for Gemini Pro while Flash stays shorter", () => {
+  it("preserves Gemini Pro's own window while Flash uses the CLI defaults", () => {
     const budget = providerBudget as unknown as (
       choice: string,
     ) => ReturnType<typeof providerBudget>;
@@ -305,7 +305,7 @@ describe("resolveProvider", () => {
     const flash = budget("gemini-flash");
 
     assert.deepEqual(pro, { wallMs: 660_000, callMs: 300_000, reserveMs: 300_000 });
-    assert.equal(flash.callMs, 150_000);
+    assert.equal(flash.callMs, 300_000);
   });
 
   it("gives a local model enough wall clock to draft from a long meeting", () => {
@@ -562,8 +562,8 @@ describe("grokChat", () => {
   it("gives a custom connection enough time for research, writing and name checks", () => {
     const budget = providerBudget("custom:9ce9a944-f444-4a69-8927-7c7705c07a35");
     assert.deepEqual(budget, {
-      wallMs: 420_000,
-      callMs: 150_000,
+      wallMs: 900_000,
+      callMs: 300_000,
       reserveMs: 170_000,
     });
   });

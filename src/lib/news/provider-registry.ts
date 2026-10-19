@@ -379,9 +379,9 @@ export const DISCOVERED_LOCAL_ADDRESSES: readonly string[] = [
  * own timings under pressure.
  */
 export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
-  "claude-code": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
-  codex: { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
-  "gemini-cli": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
+  "claude-code": { wallMs: 900_000, callMs: 300_000, reserveMs: 170_000 },
+  codex: { wallMs: 900_000, callMs: 300_000, reserveMs: 170_000 },
+  "gemini-cli": { wallMs: 900_000, callMs: 300_000, reserveMs: 170_000 },
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   // A measured four-hour council-meeting draft takes about 20 minutes across
