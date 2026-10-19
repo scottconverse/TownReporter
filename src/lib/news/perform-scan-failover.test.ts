@@ -23,6 +23,37 @@ const RUNG_TIMEOUT_NO_OUTPUT = "The call timed out after 150s, 0 bytes out";
  * it runs on, and the failure text is whatever that rung's transport said.
  */
 describe("runScanChatWithFailover", () => {
+  it("D159: a scheduled scan on Local model switches mid-run on a usage limit; an editor's Local pick does not", async () => {
+    const LIMIT = "LLM: Provider says: you have reached your monthly usage limit (429)";
+    const run = async (source: string) => {
+      const choices: string[] = [];
+      const result = await runScanChatWithFailover({
+        job: { id: 9, model_choice: "local-model", model_choice_source: source },
+        newsroomId: 1,
+        system: "system",
+        user: "source evidence",
+        maxTokens: 3500,
+        timeoutMs: () => 90_000,
+        grokChat: async (_system, _user, _maxTokens, options) => {
+          choices.push(String(options?.choice));
+          return options?.choice === "local-model"
+            ? { ok: false, error: LIMIT }
+            : { ok: true, text: '{"leads":[]}' };
+        },
+        probe: async (choice) => ({ ok: true, label: choice }) as any,
+        setModelChoice: async () => undefined,
+        setStage: async () => undefined,
+      });
+      return { result, choices };
+    };
+    const scheduled = await run("scheduled");
+    assert.equal(scheduled.result.ok, true);
+    assert.equal(scheduled.choices[0], "local-model");
+    assert.notEqual(scheduled.choices.at(-1), "local-model");
+    const editor = await run("editor");
+    assert.equal(editor.result.ok, false);
+    assert.deepEqual(editor.choices, ["local-model"]);
+  });
   it("passes the selected Ollama model to the scan call", async () => {
     const localModel = { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" };
     const seen: unknown[] = [];

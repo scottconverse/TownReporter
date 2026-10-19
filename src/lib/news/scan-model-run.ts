@@ -173,6 +173,14 @@ export async function runScanChatWithFailover(
     current: job.model_choice,
     error: ai.error,
     probe,
+    /*
+      D159 (Scott, Oct 19 2026, "a"): the SCHEDULED daily scan may leave a
+      hand-picked Local model mid-run. On Oct 11 the scan's "Local model" was
+      DeepSeek on Ollama's cloud; its monthly limit failed the whole morning's
+      scan because Local was never switched. An editor's own Local pick still
+      stays put.
+    */
+    allowExplicitLocalFailover: job.model_choice_source === "scheduled",
   });
   if (!plan) return ai;
 
