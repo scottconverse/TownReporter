@@ -1119,7 +1119,11 @@ export async function grokChat(
   // PLANNER_MODEL: planning and judging are different jobs with different
   // prices, and one provider setting for both overpays for one of them.
   const model = opts?.model?.trim() || provider.model;
-  system = researchSystem(system);
+  // Resolve by the actual model, including Local/Custom overrides and failover.
+  // Stage callers (notably report.ts) may already embed the shared guidance.
+  const toolsEnabled = !isDeepSeekFlashModel(model);
+  system = researchSystem(system, toolsEnabled);
+  if (!toolsEnabled) user = researchSystem(user, false);
   const selectedAdapter = adapters?.[provider.kind];
   if (selectedAdapter) {
     return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
@@ -1222,7 +1226,7 @@ export async function grokChat(
     return retryFailureDetail ? `${message}\n\n${retryFailureDetail}` : message;
   };
   const tools = await modelToolsServer();
-  payload.tools = tools.openAiModelTools;
+  if (toolsEnabled) payload.tools = tools.openAiModelTools;
   try {
     return await tools.withinDeadline(signal, async () => {
       while (true) {
@@ -1388,7 +1392,7 @@ export async function grokChat(
           }
         }
         const message = body.choices?.[0]?.message;
-        if (message?.tool_calls?.length && body.choices?.[0]?.finish_reason !== "length") {
+        if (toolsEnabled && message?.tool_calls?.length && body.choices?.[0]?.finish_reason !== "length") {
           const messages = payload.messages as Record<string, unknown>[];
           messages.push({ ...message, role: "assistant" });
           const round = toolUsage.round(Math.max(0, Date.now() - startedAt));
