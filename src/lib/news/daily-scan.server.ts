@@ -23,7 +23,7 @@ import {
   type PickerProviderId,
   type RetiredProviderId,
 } from "./provider-registry.ts";
-import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase ,
+import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase, looksLikeProviderQuota,
 } from "./automatic-failover.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 
@@ -203,12 +203,44 @@ export async function tickDailyScans(
       [p.newsroom_id, p.revision],
     );
     if (!authorized) continue;
+    /*
+      D157: A USAGE LIMIT NO LONGER STOPS THE SCHEDULE.
+
+      A scheduled run that failed on a usage limit used to pause the policy
+      until someone pressed Resume. Nobody did: on Oct 11 2026 one Ollama
+      monthly-limit 429 stopped the daily scan for eight days, long after the
+      limit had reset. Now the failure stays on its reservation and the next
+      day runs as usual. A runtime that hit a limit in the last 7 days, with no
+      completed scheduled run on it since, is treated as unavailable for the
+      day, so the run fails over along the ladder and says why in its note.
+    */
+    const limited = await sql.query<{ runtime: string | null; error: string | null }>(
+      `select coalesce(r.model_snapshot->>'resolvedRuntime', r.model_snapshot->>'modelChoice') as runtime, r.error
+         from daily_scan_reservations r
+        where r.newsroom_id=$1 and r.status='failed' and r.finished_at > $2::timestamptz - interval '7 days'
+          and not exists (
+            select 1 from daily_scan_reservations later
+             where later.newsroom_id=r.newsroom_id and later.id>r.id and later.status='completed'
+               and coalesce(later.model_snapshot->>'resolvedRuntime', later.model_snapshot->>'modelChoice')
+                 = coalesce(r.model_snapshot->>'resolvedRuntime', r.model_snapshot->>'modelChoice'))
+        order by r.id desc`,
+      [p.newsroom_id, now.toISOString()],
+    );
+    const limitedRuntimes = new Map<string, string>();
+    for (const row of limited)
+      if (row.runtime && looksLikeProviderQuota(row.error) && !limitedRuntimes.has(row.runtime))
+        limitedRuntimes.set(row.runtime, row.error!);
+    const validate: typeof validateForcedRuntime = (newsroomId, runtime, effort) => {
+      const error = limitedRuntimes.get(runtime);
+      return error ? Promise.reject(new Error(error)) : validateForcedRuntime(newsroomId, runtime, effort);
+    };
     let model: any;
     try {
       model = await (deps.runtimeSnapshot ?? validateDailyRuntime)(
         p.newsroom_id,
         dailyScanRuntime(p.runtime as StoredDailyScanRuntime),
         modelEffort(dailyScanRuntime(p.runtime as StoredDailyScanRuntime), p.model_effort),
+        validate,
       );
     } catch (e) {
       await sql.query(
@@ -417,11 +449,8 @@ export async function finalizeDailyScanFailure(
       "update scan_runs set finished_at=coalesce(finished_at,now()),error=coalesce(error,$2) where id=$1 and newsroom_id=$3 and daily_reservation_id=(select id from daily_scan_reservations where desk_job_id=$4)",
       [job.subject_id, msg, job.newsroom_id, job.id],
     );
-    if (/\b429\b|quota|rate limit/i.test(msg))
-      await sql.query(
-        "update daily_scan_policies set paused=true,pause_reason='Subscription quota was reached. Resume manually after access is restored.',revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$2",
-        [job.newsroom_id, reservation.policy_revision],
-      );
+    // D157: a usage limit no longer pauses the policy. The error stays on the
+    // reservation, and the next tick fails over from that runtime.
   });
 }
 

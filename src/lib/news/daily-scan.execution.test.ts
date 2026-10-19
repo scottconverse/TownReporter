@@ -515,16 +515,55 @@ describe("scheduled failure fence", () => {
       false,
     );
   });
-  it("pauses the matching policy on subscription quota with no reset time", async () => {
+  it("D157: a usage limit records the failure and leaves the schedule running", async () => {
     await finalizeDailyScanFailure(job, "429 subscription quota reached");
-    const [p] = await (
-      await getSql()
-    ).query<{ paused: boolean; pause_reason: string }>(
+    const sql = await getSql();
+    const [r] = await sql.query<{ status: string; error: string }>(
+      "select status,error from daily_scan_reservations where id=701",
+    );
+    assert.equal(r.status, "failed");
+    assert.match(r.error, /quota/);
+    const [p] = await sql.query<{ paused: boolean; pause_reason: string | null }>(
       "select paused,pause_reason from daily_scan_policies where newsroom_id=501",
     );
-    assert.equal(p.paused, true);
-    assert.match(p.pause_reason, /Resume manually/);
-    assert.doesNotMatch(p.pause_reason, /hour|tomorrow|\d{1,2}:/);
+    assert.equal(p.paused, false);
+    assert.equal(p.pause_reason, null);
+  });
+  it("D157: the next day fails over from the runtime that hit its limit", async () => {
+    const sql = await getSql();
+    await sql.query(
+      "insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',true)",
+    );
+    await sql.query(
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
+    );
+    await sql.query(
+      "update desk_jobs set status='failed' where id=501",
+    );
+    await sql.query(
+      `update daily_scan_reservations set local_day='2026-09-03',status='failed',finished_at='2026-09-03T12:34:00Z',
+         error='LLM: Provider says: you have reached your monthly usage limit (429)',
+         model_snapshot='{"resolvedRuntime":"local-model","modelChoice":"local-model"}' where id=701`,
+    );
+    let refused: unknown = null;
+    const reserved = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
+      kick: false,
+      runtimeSnapshot: async (_room, _runtime, _effort, validate) => {
+        await validate!(501, "local-model").catch((e: unknown) => {
+          refused = e;
+        });
+        return {
+          requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
+          runtime: "codex-terra" as const,
+          modelChoice: "codex-balanced" as const,
+          model: "fixture",
+          transport: "codex" as const,
+        };
+      },
+    });
+    assert.deepEqual(reserved, { reserved: 1 });
+    assert.ok(refused instanceof Error);
+    assert.match((refused as Error).message, /monthly usage limit/);
   });
 });
 
