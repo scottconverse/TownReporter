@@ -8,10 +8,12 @@
  *           the move back;
  *   rows    every accepted, trial and dormant source with its 90-day numbers
  *           and score, highest score first.
+ *   suggestedSites  the suggestions waiting, one entry per website (spec 5f).
  *
  * Read-only. Declared with the narrow tagged-template SQL type for tests.
  */
 import type { SqlTag } from "./lead-filing.ts";
+import { proposalsBySite } from "./source-intake.ts";
 import { yieldScore } from "./source-yield.ts";
 
 export type SourceMove = {
@@ -101,6 +103,8 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
     dormantReason: (r.dormant_reason as string | null) ?? null,
   }));
   scored.sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity) || b.leads90 - a.leads90 || a.id - b.id);
+  // Spec 5f: the suggestions waiting, one row per website.
+  const suggestedSites = await proposalsBySite(sql, newsroomId);
   return {
     counts: {
       accepted: counts?.accepted ?? 0,
@@ -122,5 +126,6 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
       }),
     ),
     rows: scored,
+    suggestedSites,
   };
 }
