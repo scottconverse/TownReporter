@@ -69,7 +69,7 @@ test("every draft stage on the Local model gets the 16,384 floor with thinking o
       maxTokens,
       replies: [{ finish: "stop", content: "{}" }],
     });
-    assert.ok(Number(requests[0].max_tokens) >= 32_768, `stage cap ${maxTokens}`);
+    assert.ok(Number(requests[0].max_tokens) >= 16_384, `stage cap ${maxTokens}`);
     assert.equal(requests[0].reasoning_effort, "none", `stage cap ${maxTokens}`);
   }
 });

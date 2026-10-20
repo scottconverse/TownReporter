@@ -52,7 +52,7 @@ test("walk 4: Gemini reserves thinking room and exposes Google's output-limit fi
         }),
       },
     );
-    assert.ok(Number(requests[0].max_tokens) >= 32768);
+    assert.ok(Number(requests[0].max_tokens) >= 16384);
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.match(result.error, /Google says:.*output token limit.*finish reason: length/);

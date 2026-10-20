@@ -1202,9 +1202,12 @@ export async function grokChat(
     // stage caps are smaller than the full-JSON reply they ask for (a measured
     // 2,629-token draft on lead 448), so Local was cut off on the same lead
     // DeepSeek was (Oct 12 2026, job 336). A cap is a ceiling, not a target.
-    max_tokens: (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl))
-      || isDeepSeekFlashModel(model) || isLoopbackEndpoint(llm.baseUrl)
-      ? Math.max(maxTokens, DRAFT_OUTPUT_TOKEN_FLOOR) : maxTokens,
+    // Oct 20 2026: DeepSeek gets its full 32,768 (Scott); Gemini and Local keep
+    // the 16,384 floor -- a local model with a 32K context cannot take a 32K answer.
+    max_tokens: isDeepSeekFlashModel(model)
+      ? Math.max(maxTokens, DEEPSEEK_OUTPUT_TOKENS)
+      : (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)) || isLoopbackEndpoint(llm.baseUrl)
+        ? Math.max(maxTokens, DRAFT_OUTPUT_TOKEN_FLOOR) : maxTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -1508,7 +1511,8 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * was half that and is why drafts at low effort were cut off.
  */
 export const DEEPSEEK_OUTPUT_TOKENS = 32_768;
-export const DRAFT_OUTPUT_TOKEN_FLOOR = DEEPSEEK_OUTPUT_TOKENS;
+/** Gemini and Local keep the Oct 12 floor (DeepSeek uses DEEPSEEK_OUTPUT_TOKENS). */
+export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
 
 /** Temperature of the one retry after a DeepSeek reply hit the output ceiling. */
 const LOOP_RETRY_TEMPERATURE = 0.7;
