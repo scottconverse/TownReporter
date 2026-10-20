@@ -10,6 +10,7 @@ it("checks the front page for an article suggestion, the page itself for a list 
   assert.equal(pageToTry("https://www.leader.example.test/local-news/library-opens-123"), "https://www.leader.example.test/");
   assert.equal(pageToTry("https://club.example.test/events/"), "https://club.example.test/events/");
   assert.equal(pageToTry("https://club.example.test/feed/"), "https://club.example.test/feed/");
+  assert.equal(pageToTry("https://state.example.test/news/press-releases/a-story"), "https://state.example.test/");
 });
 
 it("a new suggested site with dated items goes on trial; others stay suggestions with a reason", async () => {

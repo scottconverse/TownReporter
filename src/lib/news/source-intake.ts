@@ -28,6 +28,9 @@ const NEVER_TRY = [
   "facebook.com", "instagram.com", "x.com", "twitter.com", "tiktok.com", "linkedin.com",
   "google.com", "bing.com", "duckduckgo.com", "yahoo.com", "t.co", "bit.ly", "tinyurl.com",
   "nextdoor.com", "pinterest.com", "threads.net",
+  // File storage and CDNs hold documents, not news sites (Test walk, Oct 20 2026).
+  "googleapis.com", "googleusercontent.com", "amazonaws.com", "cloudfront.net", "website-files.com",
+  "dropbox.com", "box.com", "sharepoint.com", "squarespace-cdn.com", "wixstatic.com", "akamaized.net",
 ];
 
 const MONTHS =
@@ -56,7 +59,9 @@ export function neverTry(site: string): boolean {
 export function pageToTry(url: string): string {
   const u = new URL(url);
   const path = u.pathname.replace(/\/+$/, "");
-  if (!path || /(^|\/)(feed|rss|news|events?|calendar|agendas?|meetings?|blog|press|newsroom|announcements?)(\/|$|\.)/i.test(path))
+  // Only the LAST part of the path says "list": /news/ is a list, /news/some-story is not.
+  const last = path.split("/").pop() ?? "";
+  if (!path || /^(feed|rss|news|events?|calendar|agendas?|meetings?|blog|press|press-releases|newsroom|announcements?)(\.[a-z]+)?$/i.test(last))
     return url;
   return `${u.protocol}//${u.host}/`;
 }
