@@ -57,7 +57,7 @@ const value = (rows: OpsRow[], label: string): string => row(rows, label).value;
 */
 const timeRow = (over: Partial<ProviderTimeSetting>): ProviderTimeSetting => ({
   providerId: "deepseek-flash",
-  label: "DeepSeek v4.1 Flash",
+  label: "DeepSeek v4.1 Flash 1017",
   detail: "",
   kind: "local",
   callSeconds: 600,
@@ -518,7 +518,7 @@ describe("Server card rows (CX2)", () => {
     const lines = writingModelLines({ times: [], statuses: [], availability,
       catalog: { servers: [], checkedAt: 0, defaultModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" } },
     });
-    for (const name of ["DeepSeek v4.1 Flash", "Local model"]) {
+    for (const name of ["DeepSeek v4.1 Flash 1017", "Local model"]) {
       const line = lines.find(row => row.name === name)!;
       assert.equal(line.chip?.source, "words");
       if (line.chip?.source === "words") assert.equal(line.chip.label, "Warning");
@@ -694,7 +694,7 @@ describe("Server card rows (CX2)", () => {
         writingModelLines(
           read({ catalog: catalogOf([server], { baseUrl: "http://127.0.0.1:1234/v1", id: "halo/qwen" }) }),
         ),
-        "DeepSeek v4.1 Flash",
+        "DeepSeek v4.1 Flash 1017",
       ),
     );
     assert.equal(first.label, "Not answering");

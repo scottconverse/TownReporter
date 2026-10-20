@@ -17,7 +17,7 @@ const RUNG_TIMEOUT_NO_OUTPUT = "The call timed out after 150s, 0 bytes out";
  * rung of AUTOMATIC_LADDER, once, using the SAME `system`/`user` text --
  * never a second fetch pass over the watch list.
  *
- * The ladder those scenarios walk is the 0.6.63 one: DeepSeek v4.1 Flash,
+ * The ladder those scenarios walk is the 0.6.63 one: DeepSeek v4.1 Flash 1017,
  * then Qwen 3.6 35B on this computer, then Codex Terra. The two failure
  * messages above are provider-neutral on purpose -- each test names the rung
  * it runs on, and the failure text is whatever that rung's transport said.
@@ -198,7 +198,7 @@ describe("runScanChatWithFailover", () => {
     assert.deepEqual(probeCalls, ["qwen-local"]);
     assert.equal(modelChoiceSetTo, "qwen-local");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash timed out"),
+      stageMessages.some((s) => s === "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash 1017 timed out"),
       `expected the "timed out" stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.ok(
@@ -223,7 +223,7 @@ describe("runScanChatWithFailover", () => {
       },
       probe: async () => {
         probeCalled = true;
-        return { ok: true as const, label: "DeepSeek v4.1 Flash", choice: "deepseek-flash" as const };
+        return { ok: true as const, label: "DeepSeek v4.1 Flash 1017", choice: "deepseek-flash" as const };
       },
       setModelChoice: async () => undefined,
       setStage: async () => undefined,
@@ -271,15 +271,15 @@ describe("runScanChatWithFailover", () => {
     assert.deepEqual(receipts, [{
       previousChoice: "deepseek-flash",
       nextChoice: "qwen-local",
-      previousLabel: "DeepSeek v4.1 Flash",
+      previousLabel: "DeepSeek v4.1 Flash 1017",
       nextLabel: "Qwen 3.6 35B",
       // The Qwen rung declares no measured efforts, so the receipt records
       // that the destination ran on its own default rather than carrying the
       // DeepSeek rung's "none" across.
       nextEffort: null,
       reason: "timeout",
-      switchReason: "DeepSeek v4.1 Flash timed out",
-      switchNote: "This draft moved to Qwen 3.6 35B because DeepSeek v4.1 Flash timed out",
+      switchReason: "DeepSeek v4.1 Flash 1017 timed out",
+      switchNote: "This draft moved to Qwen 3.6 35B because DeepSeek v4.1 Flash 1017 timed out",
     }]);
   });
 

@@ -185,8 +185,8 @@ describe("draft batch transaction and read", () => {
       requestedRuntime: "deepseek-flash",
       requestedEffort: "high",
       resolvedRuntime: "claude-sonnet",
-      switchReason: "DeepSeek v4.1 Flash is unavailable",
-      switchNote: "Using Claude Sonnet after DeepSeek v4.1 Flash became unavailable",
+      switchReason: "DeepSeek v4.1 Flash 1017 is unavailable",
+      switchNote: "Using Claude Sonnet after DeepSeek v4.1 Flash 1017 became unavailable",
     };
     const input = { context, items: [{ leadId }], runtimeSnapshot: snapshot };
     const warning = await commitDraftBatchForAuthenticatedEditor(input, {

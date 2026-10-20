@@ -23,7 +23,7 @@ import { modelChoiceLabel } from "./model-choice.ts";
  * through injected fakes, the same pattern `perform-scan-failover.test.ts`
  * already uses for the Scan half of the same mechanism.
  *
- * 0.6.63 Unit Y moved the ladder to DeepSeek v4.1 Flash -> the LM Studio rung
+ * 0.6.63 Unit Y moved the ladder to DeepSeek v4.1 Flash 1017 -> the LM Studio rung
  * -> Codex Terra. That middle rung named one pinned model ("Qwen 3.6 35B")
  * until 0.6.69 (Unit AL item 4), when it became whatever LM Studio has LOADED
  * and took the bare label "Local model". The fake probe below answers with the
@@ -260,12 +260,12 @@ describe("failOverAndRetry", () => {
     assert.deepEqual(modelChoiceCalls, [[41, "qwen-local"]]);
     assert.deepEqual(runReportCalls, ["qwen-local"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash sign-in lapsed"),
+      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash 1017 sign-in lapsed"),
       `expected the auth-lapse stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed",
+      "This draft moved to Local model because DeepSeek v4.1 Flash 1017 sign-in lapsed",
       "the durable failover_note must carry the same 'sign-in lapsed' wording as the stage",
     );
   });
@@ -288,8 +288,8 @@ describe("failOverAndRetry", () => {
 
     assert.equal(
       noteWritten,
-      "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed (DeepSeek v4.1 Flash ran at effort none)",
-      "DeepSeek v4.1 Flash runs with thinking off, so the receipt must say none, not the requested medium",
+      "This draft moved to Local model because DeepSeek v4.1 Flash 1017 sign-in lapsed (DeepSeek v4.1 Flash 1017 ran at effort none)",
+      "DeepSeek v4.1 Flash 1017 runs with thinking off, so the receipt must say none, not the requested medium",
     );
   });
 
@@ -323,12 +323,12 @@ describe("failOverAndRetry", () => {
     assert.deepEqual(modelChoiceCalls, [[41, "qwen-local"]]);
     assert.deepEqual(runReportCalls, ["qwen-local"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash timed out"),
+      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash 1017 timed out"),
       `expected the timeout stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Local model because DeepSeek v4.1 Flash timed out",
+      "This draft moved to Local model because DeepSeek v4.1 Flash 1017 timed out",
       "the durable failover_note must carry the same 'timed out' wording as the stage",
     );
   });
@@ -453,7 +453,7 @@ describe("Story provider failure and stage failover", () => {
     assert.deepEqual(result, { ok: true, value: "document evidence", choice: "qwen-local" });
     assert.deepEqual(calls, ["qwen-local"]);
     assert.deepEqual(stages, [
-      "Switched to Local model: DeepSeek v4.1 Flash reached its usage limit",
+      "Switched to Local model: DeepSeek v4.1 Flash 1017 reached its usage limit",
     ]);
   });
 
@@ -501,7 +501,7 @@ describe("Story provider failure and stage failover", () => {
         /*
           `claude-frontier` is not a rung of Automatic's ladder, so the hop
           falls back to the whole ladder and takes its FIRST ready rung --
-          DeepSeek v4.1 Flash. The old fixture expected Codex Terra because its
+          DeepSeek v4.1 Flash 1017. The old fixture expected Codex Terra because its
           probe answered "codex-balanced" for every rung it was handed; the
           probe now names the rung it was actually asked for.
         */

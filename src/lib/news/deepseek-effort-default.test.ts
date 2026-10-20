@@ -11,7 +11,7 @@ import { cleanJobEffort, resolveJobModel, type ModelAssignmentRow } from "./mode
 import { grokChat } from "./ai.ts";
 
 /*
-  DeepSeek v4.1 Flash runs with thinking OFF everywhere (Scott's standing
+  DeepSeek v4.1 Flash 1017 runs with thinking OFF everywhere (Scott's standing
   rule, Oct 11). Thinking spends the output budget before the draft starts, so
   an unset effort must resolve to "none", never to provider default and never
   to "medium" carried over from Automatic.
@@ -50,7 +50,7 @@ async function withEnvAndFetch<T>(
   }
 }
 
-describe("DeepSeek v4.1 Flash effort defaults to None", () => {
+describe("DeepSeek v4.1 Flash 1017 effort defaults to None", () => {
   it("defaults the deepseek-flash door to none with no exact model passed", () => {
     assert.equal(defaultModelEffort("deepseek-flash"), "none");
     assert.equal(defaultModelEffort("deepseek-flash", null), "none");

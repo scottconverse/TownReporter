@@ -242,7 +242,7 @@ it("names the picked model, actual writer, and first failure after a fallback ch
     draftFallbackAttribution({
       pickedModel: "Gemini 3.1 Pro (Pro plan)",
       writerModel: "Codex Sol 6.1 (balanced)",
-      failoverNote: "Gemini request timed out. -> DeepSeek v4.1 Flash -> DeepSeek v4.1 Flash: Provider says: reply was cut off -> Codex Sol 6.1 (balanced)",
+      failoverNote: "Gemini request timed out. -> DeepSeek v4.1 Flash 1017 -> DeepSeek v4.1 Flash 1017: Provider says: reply was cut off -> Codex Sol 6.1 (balanced)",
     }),
     "You picked Gemini 3.1 Pro (Pro plan). Codex Sol 6.1 (balanced) wrote this draft because Gemini 3.1 Pro (Pro plan) timed out.",
   );
@@ -266,7 +266,7 @@ describe("running writer and switch reason", () => {
 
   it("reads the last hop of a trail note", () => {
     assert.equal(
-      switchReasonFromNote("Gemini timed out -> Codex Sol 6.1 (balanced) timed out -> DeepSeek v4.1 Flash"),
+      switchReasonFromNote("Gemini timed out -> Codex Sol 6.1 (balanced) timed out -> DeepSeek v4.1 Flash 1017"),
       "Codex Sol 6.1 (balanced) timed out",
     );
   });
@@ -274,11 +274,11 @@ describe("running writer and switch reason", () => {
   it("keeps a reason that itself contains an arrow, whole and without a second period", () => {
     const note = appendStoryFailoverNote(
       "This draft moved to Gemini (key) because Gemini (gemini-3.5-flash) cannot be read. Fix it in Server -> Connections.",
-      "This draft moved to DeepSeek v4.1 Flash because Gemini (key) cannot be read. Fix it in Server -> Connections.",
+      "This draft moved to DeepSeek v4.1 Flash 1017 because Gemini (key) cannot be read. Fix it in Server -> Connections.",
     );
     assert.equal(
-      runningWriterSentence({ pickedModel: "Gemini (gemini-3.5-flash)", writerModel: "DeepSeek v4.1 Flash", failoverNote: note }),
-      "You picked Gemini (gemini-3.5-flash). DeepSeek v4.1 Flash is writing because Gemini (key) cannot be read. Fix it in Server -> Connections.",
+      runningWriterSentence({ pickedModel: "Gemini (gemini-3.5-flash)", writerModel: "DeepSeek v4.1 Flash 1017", failoverNote: note }),
+      "You picked Gemini (gemini-3.5-flash). DeepSeek v4.1 Flash 1017 is writing because Gemini (key) cannot be read. Fix it in Server -> Connections.",
     );
   });
 
@@ -317,8 +317,8 @@ describe("lastDraftInHand: the draft in hand keeps its model after a save messag
   const finishedAt = "2026-10-12T16:53:00.000Z";
   it("still names the model after the page shows its own 'Draft saved.' message", () => {
     assert.match(
-      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "DeepSeek v4.1 Flash", finishedAt }),
-      /^Last draft: DeepSeek v4\.1 Flash, /,
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "DeepSeek v4.1 Flash 1017", finishedAt }),
+      /^Last draft: DeepSeek v4.1 Flash 1017, /,
     );
   });
   it("names a local run with its exact model", () => {
@@ -357,9 +357,9 @@ describe("modelAndResearchLabel: Automatic does not say it fell back", () => {
         pickerModel: "Automatic",
         requestedModelChoice: "auto",
         requestedModel: "Automatic",
-        writerModel: "DeepSeek v4.1 Flash",
+        writerModel: "DeepSeek v4.1 Flash 1017",
       }),
-      "DeepSeek v4.1 Flash (you picked Automatic)",
+      "DeepSeek v4.1 Flash 1017 (you picked Automatic)",
     );
   });
 
@@ -370,9 +370,9 @@ describe("modelAndResearchLabel: Automatic does not say it fell back", () => {
         pickerModel: "Claude Sonnet 5.5",
         requestedModelChoice: "claude-sonnet",
         requestedModel: "Claude Sonnet 5.5",
-        writerModel: "DeepSeek v4.1 Flash",
+        writerModel: "DeepSeek v4.1 Flash 1017",
       }),
-      "DeepSeek v4.1 Flash (you picked Claude Sonnet 5.5; it fell back)",
+      "DeepSeek v4.1 Flash 1017 (you picked Claude Sonnet 5.5; it fell back)",
     );
   });
 
@@ -380,12 +380,12 @@ describe("modelAndResearchLabel: Automatic does not say it fell back", () => {
     assert.equal(
       modelAndResearchLabel({
         runningLine: "",
-        pickerModel: "DeepSeek v4.1 Flash",
+        pickerModel: "DeepSeek v4.1 Flash 1017",
         requestedModelChoice: "deepseek-flash",
-        requestedModel: "DeepSeek v4.1 Flash",
-        writerModel: "DeepSeek v4.1 Flash",
+        requestedModel: "DeepSeek v4.1 Flash 1017",
+        writerModel: "DeepSeek v4.1 Flash 1017",
       }),
-      "DeepSeek v4.1 Flash",
+      "DeepSeek v4.1 Flash 1017",
     );
   });
 });
@@ -466,21 +466,21 @@ describe("the Last draft line names the model that ran (the story page's composi
 });
 
 describe("a saved draft's 'you picked' names the pick as its run recorded it", () => {
-  const failoverNote = "Claude Opus request timed out. -> DeepSeek v4.1 Flash";
+  const failoverNote = "Claude Opus request timed out. -> DeepSeek v4.1 Flash 1017";
   const writerOf = (choice: string, resultJson: string | null, choiceLabel: string) =>
     pastRunModelName({ choice, actualModelId: recordedActualModelId(resultJson), choiceLabel });
   it("an old claude-frontier job with no recorded id says 'You picked Claude Opus', with no version", () => {
     const resultJson = JSON.stringify({ requestedRuntime: "claude-frontier" });
     const pick = pastDraftPickName({ status: "completed", requestedChoice: "claude-frontier", ranChoice: "deepseek-flash", resultJson, choiceLabel: "Claude Opus 5.5" });
-    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash");
+    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash 1017");
     assert.equal(pick, "Claude Opus");
     assert.equal(
       draftFallbackAttribution({ pickedModel: pick, writerModel: writer, failoverNote }),
-      "You picked Claude Opus. DeepSeek v4.1 Flash wrote this draft because Claude Opus timed out.",
+      "You picked Claude Opus. DeepSeek v4.1 Flash 1017 wrote this draft because Claude Opus timed out.",
     );
     assert.equal(
       modelAndResearchLabel({ runningLine: "", pickerModel: "Claude Opus 5.5", pickerModelChoice: "claude-frontier", requestedModelChoice: "claude-frontier", requestedModel: pick, writerModel: writer }),
-      "DeepSeek v4.1 Flash (you picked Claude Opus; it fell back)",
+      "DeepSeek v4.1 Flash 1017 (you picked Claude Opus; it fell back)",
     );
   });
   it("an old claude-frontier job that ran unchanged names no version and adds no attribution sentence", () => {
@@ -495,9 +495,9 @@ describe("a saved draft's 'you picked' names the pick as its run recorded it", (
   });
   it("a new deepseek-flash job that recorded its model and ran its pick adds no attribution sentence", () => {
     const resultJson = JSON.stringify({ actualModelId: "deepseek-v4.1-flash" });
-    const pick = pastDraftPickName({ status: "completed", requestedChoice: "deepseek-flash", ranChoice: "deepseek-flash", resultJson, choiceLabel: "DeepSeek v4.1 Flash" });
-    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash");
-    assert.equal(pick, "DeepSeek v4.1 Flash");
+    const pick = pastDraftPickName({ status: "completed", requestedChoice: "deepseek-flash", ranChoice: "deepseek-flash", resultJson, choiceLabel: "DeepSeek v4.1 Flash 1017" });
+    const writer = writerOf("deepseek-flash", resultJson, "DeepSeek v4.1 Flash 1017");
+    assert.equal(pick, "DeepSeek v4.1 Flash 1017");
     assert.equal(draftFallbackAttribution({ pickedModel: pick, writerModel: writer, failoverNote: null }), undefined);
   });
   it("a live job keeps today's label for its pick", () => {
@@ -507,8 +507,8 @@ describe("a saved draft's 'you picked' names the pick as its run recorded it", (
   });
   it("a picker that moved to another model still shows the picker", () => {
     assert.equal(
-      modelAndResearchLabel({ runningLine: "", pickerModel: "DeepSeek v4.1 Flash", pickerModelChoice: "deepseek-flash", requestedModelChoice: "claude-frontier", requestedModel: "Claude Opus", writerModel: "Claude Opus" }),
-      "DeepSeek v4.1 Flash",
+      modelAndResearchLabel({ runningLine: "", pickerModel: "DeepSeek v4.1 Flash 1017", pickerModelChoice: "deepseek-flash", requestedModelChoice: "claude-frontier", requestedModel: "Claude Opus", writerModel: "Claude Opus" }),
+      "DeepSeek v4.1 Flash 1017",
     );
   });
 });

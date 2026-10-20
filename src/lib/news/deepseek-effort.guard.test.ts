@@ -1,4 +1,4 @@
-// Guard for Scott's standing rule (Oct 10, repeated): DeepSeek v4.1 Flash runs
+// Guard for Scott's standing rule (Oct 10, repeated): DeepSeek v4.1 Flash 1017 runs
 // with effort NONE (thinking off) everywhere, unless the editor picks another
 // effort on that run. For every job that offers DeepSeek, the resolved effort
 // must be "none" and the Ollama request must carry reasoning_effort "none".

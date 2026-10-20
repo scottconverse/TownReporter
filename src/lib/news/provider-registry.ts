@@ -766,10 +766,11 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   */
   {
     id: "deepseek-flash",
-    label: "DeepSeek v4.1 Flash",
+    // Scott, Oct 19 2026: the label names the pinned build (the tag's "1017").
+    label: "DeepSeek v4.1 Flash 1017",
     detail: "Ollama · research and drafting",
     // The select's own line. "Ollama · research and drafting" is a clause and
-    // the label alone is 19 characters, so the pair would be 52 in a box
+    // the label alone is 24 characters, so the pair would be 57 in a box
     // measured for 34 -- the sentence moves to the option's title and the help
     // line (see `pickerOptionText`).
     optionDetail: "Ollama",

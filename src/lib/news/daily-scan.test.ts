@@ -80,7 +80,7 @@ describe("scheduled scan trust boundaries", () => {
   });
   it("routes a scheduled run around a technical provider failure", async () => {
     /*
-      0.6.63 Unit Y: the ladder is now DeepSeek v4.1 Flash -> Qwen 3.6 35B ->
+      0.6.63 Unit Y: the ladder is now DeepSeek v4.1 Flash 1017 -> Qwen 3.6 35B ->
       Codex Terra. Two things in this fixture followed it, and neither one is
       an assertion being relaxed:
 
@@ -105,7 +105,7 @@ describe("scheduled scan trust boundaries", () => {
     assert.deepEqual(probed, ["deepseek-flash"], "the walk starts at the ladder's first rung");
     assert.deepEqual(plan, {
       next: "deepseek-flash",
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
       reason: "timeout",
     });
   });

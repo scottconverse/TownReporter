@@ -1576,7 +1576,7 @@ describe("readableReplyOrRetry", () => {
         return { ok: true as const, text: '{"headline":"Hi"}' };
       },
       read: readObject,
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
     });
     assert.equal(calls, 1);
     assert.equal(reply.ok, true);
@@ -1598,7 +1598,7 @@ describe("readableReplyOrRetry", () => {
           : { ok: true as const, text: '{"headline":"Hi","dek":"There"}' };
       },
       read: readObject,
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
       onRetry: () => { notified = true; },
     });
     assert.equal(calls, 2);
@@ -1617,16 +1617,16 @@ describe("readableReplyOrRetry", () => {
         return { ok: true as const, text: "I could not write that draft." };
       },
       read: readObject,
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
     });
     assert.equal(calls, 2);
     assert.equal(reply.ok, false);
     assert.equal(reply.retried, true);
     assert.equal(
       reply.ok === false && reply.error,
-      "DeepSeek v4.1 Flash sent a reply the desk could not read (unreadable JSON).",
+      "DeepSeek v4.1 Flash 1017 sent a reply the desk could not read (unreadable JSON).",
     );
-    assert.equal(unreadableReplyError("DeepSeek v4.1 Flash"), reply.ok === false && reply.error);
+    assert.equal(unreadableReplyError("DeepSeek v4.1 Flash 1017"), reply.ok === false && reply.error);
   });
 
   it("passes a transport failure straight through without retrying it", async () => {
@@ -1634,15 +1634,15 @@ describe("readableReplyOrRetry", () => {
     const reply = await readableReplyOrRetry({
       attempt: async () => {
         calls += 1;
-        return { ok: false as const, error: "DeepSeek v4.1 Flash request timed out" };
+        return { ok: false as const, error: "DeepSeek v4.1 Flash 1017 request timed out" };
       },
       read: readObject,
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
     });
     assert.equal(calls, 1);
     assert.equal(reply.ok, false);
     assert.equal(reply.retried, false);
-    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash request timed out");
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash 1017 request timed out");
   });
 
   it("keeps the second attempt's own transport error rather than inventing one", async () => {
@@ -1652,13 +1652,13 @@ describe("readableReplyOrRetry", () => {
         calls += 1;
         return calls === 1
           ? { ok: true as const, text: "not json" }
-          : { ok: false as const, error: "DeepSeek v4.1 Flash was unavailable" };
+          : { ok: false as const, error: "DeepSeek v4.1 Flash 1017 was unavailable" };
       },
       read: readObject,
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
     });
     assert.equal(calls, 2);
-    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash was unavailable");
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash 1017 was unavailable");
   });
 });
 
@@ -1746,7 +1746,7 @@ describe("the planner model respects the provider", () => {
 /*
   UNIT U29 -- THE OPINION WRITING CALL ON THE DEEPSEEK RUNG.
 
-  Opinion's Automatic starts on DeepSeek v4.1 Flash, and this is the wire the
+  Opinion's Automatic starts on DeepSeek v4.1 Flash 1017, and this is the wire the
   writing pass sends when it does. Three properties, all of them the reason
   this path is a ONE-PASS pair rather than a pair:
 

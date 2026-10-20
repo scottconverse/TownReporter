@@ -44,7 +44,7 @@ async function withEnv<T>(changes: Record<string, string | undefined>, run: () =
 
   U24's own choice was to change the COPY and leave the ladder alone. Unit U29
   (owner decision 2026-09-30) then changed the ladder too -- Opinion's
-  Automatic now starts on DeepSeek v4.1 Flash -- so the sentence that said
+  Automatic now starts on DeepSeek v4.1 Flash 1017 -- so the sentence that said
   "the desk's story writer is not used for Opinion" would now be false. The
   tests below pin the sentence that replaced it, rung by rung, in order.
 */
@@ -108,7 +108,7 @@ describe("U24: Opinion says which models it writes with", () => {
     assert.equal(result.ready, false);
     assert.match(
       result.why,
-      /Opinion's Automatic writes with DeepSeek v4\.1 Flash, then Codex Sol 6\.1, then Claude Sonnet/,
+      /Opinion's Automatic writes with DeepSeek v4.1 Flash 1017, then Codex Sol 6\.1, then Claude Sonnet/,
     );
     /* The generic sentence that started this is gone from what the editor reads. */
     assert.doesNotMatch(result.why, /No model is set up yet/);
@@ -259,7 +259,7 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
       probeCandidate: async (choice) => {
         probed.push(choice);
-        return { ok: true as const, label: "DeepSeek v4.1 Flash", choice };
+        return { ok: true as const, label: "DeepSeek v4.1 Flash 1017", choice };
       },
     });
     assert.equal(result.ready, true);
@@ -284,7 +284,7 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
       probeCandidate: async (choice) => {
         probed.push(choice);
         return choice === "deepseek-flash"
-          ? { ok: true as const, label: "DeepSeek v4.1 Flash", choice }
+          ? { ok: true as const, label: "DeepSeek v4.1 Flash 1017", choice }
           : { ok: false as const, error: "Codex is not set up on this machine: open Codex and log in." };
       },
     });

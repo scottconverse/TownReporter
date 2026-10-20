@@ -48,7 +48,7 @@ async function runCalls(opts: {
   }
 }
 
-test("every draft stage on DeepSeek v4.1 Flash gets the 16,384 floor with thinking off", async () => {
+test("every draft stage on DeepSeek v4.1 Flash 1017 gets the 16,384 floor with thinking off", async () => {
   for (const maxTokens of DRAFT_STAGE_CAPS) {
     const { requests } = await runCalls({
       modelId: "deepseek-v4.1-flash:cloud",

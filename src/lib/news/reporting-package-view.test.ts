@@ -242,12 +242,12 @@ describe("gaps, locators and held rows", () => {
         modelId: "deepseek-v4.1-flash:cloud",
         modelEndpoint: "http://127.0.0.1:11434/v1",
         runtimeProvider: "Ollama",
-        modelLabel: "DeepSeek v4.1 Flash",
+        modelLabel: "DeepSeek v4.1 Flash 1017",
       },
     });
     assert.ok(parsed);
     const line = methodLine(parsed!);
-    assert.match(line, /DeepSeek v4\.1 Flash/);
+    assert.match(line, /DeepSeek v4.1 Flash 1017/);
     assert.match(line, /deepseek-v4\.1-flash:cloud/);
     assert.match(line, /Ollama/);
     assert.match(line, /effort none \(off\)/);

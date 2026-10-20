@@ -328,7 +328,7 @@ describe("performReportingWork: the run", () => {
       assert.equal(pkg.receipt.modelId, "deepseek-v4.1-flash:1017-cloud", "the pinned model wins over the probe's model");
       assert.equal(pkg.receipt.modelEndpoint, "http://127.0.0.1:11434/v1", "the pinned endpoint wins over the probe's endpoint");
       assert.equal(pkg.receipt.runtimeProvider, "Ollama");
-      assert.equal(pkg.receipt.modelLabel, "DeepSeek v4.1 Flash", "the panel does not receive a generic LLM label");
+      assert.equal(pkg.receipt.modelLabel, "DeepSeek v4.1 Flash 1017", "the panel does not receive a generic LLM label");
 
       const [jobRow] = await sql<{ result_json: string | null }>`
         select result_json from desk_jobs where id = ${job.id}

@@ -7,7 +7,7 @@
  * never onto the ladder stories walk. This file pins the four behaviours the
  * unit asks for, in the order they matter:
  *
- *   1. an Automatic policy resolves to the first rung, DeepSeek v4.1 Flash;
+ *   1. an Automatic policy resolves to the first rung, DeepSeek v4.1 Flash 1017;
  *   2. a rung that has to be loaded and is not is SKIPPED, with the reason
  *      recorded, and the ladder moves on to the next ready rung;
  *   3. a run already pinned to a rung still fails over mid-run, one hop, with
@@ -121,7 +121,7 @@ function stubFetch(respond: (url: string) => Response | null) {
 }
 
 describe("daily scan on Automatic", () => {
-  it("resolves an Automatic policy to DeepSeek v4.1 Flash, the ladder's first rung", async () => {
+  it("resolves an Automatic policy to DeepSeek v4.1 Flash 1017, the ladder's first rung", async () => {
     await withEnvAsync(
       {
         ...BARE,
@@ -283,7 +283,7 @@ describe("daily scan on Automatic", () => {
             ) => {
               calls.push(String(options?.choice));
               return options?.choice === "deepseek-flash"
-                ? { ok: false, error: "DeepSeek v4.1 Flash is rate limited (429)." }
+                ? { ok: false, error: "DeepSeek v4.1 Flash 1017 is rate limited (429)." }
                 : { ok: true, text: '{"claims":[]}' };
             }) as never,
             probe: (choice) =>
@@ -314,7 +314,7 @@ describe("daily scan on Automatic", () => {
           const receipt = seen.receipt;
           assert.ok(receipt);
           assert.equal(receipt.previousChoice, "deepseek-flash");
-          assert.equal(receipt.previousLabel, "DeepSeek v4.1 Flash");
+          assert.equal(receipt.previousLabel, "DeepSeek v4.1 Flash 1017");
           assert.equal(receipt.nextChoice, "qwen-local");
           /*
             The probe is the real one here, so the label is the one it reports
@@ -326,7 +326,7 @@ describe("daily scan on Automatic", () => {
           assert.equal(receipt.reason, "quota");
           assert.match(
             receipt.switchNote,
-            /moved to Local model \(halo\/qwen3\.6-35b-a3b\) because DeepSeek v4\.1 Flash reached its usage limit/i,
+            /moved to Local model \(halo\/qwen3\.6-35b-a3b\) because DeepSeek v4.1 Flash 1017 reached its usage limit/i,
           );
           const resolved = seen.resolved;
           assert.ok(resolved);

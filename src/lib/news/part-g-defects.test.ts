@@ -272,7 +272,7 @@ test("B07/FB06: Server health does not call a missing Codex or an empty LM Studi
 });
 
 
-test("walk D1: DeepSeek v4.1 Flash gets the full writer room with thinking off", async () => {
+test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking off", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Record<string, unknown>[] = [];
   globalThis.fetch = async (_url, init) => {

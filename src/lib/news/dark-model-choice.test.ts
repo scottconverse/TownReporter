@@ -108,7 +108,7 @@ const NOTHING = { TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" };
 /**
  * DeepSeek answerable, Codex switched off.
  *
- * 0.6.63 (Unit Y item 1) put DeepSeek v4.1 Flash first on every Automatic
+ * 0.6.63 (Unit Y item 1) put DeepSeek v4.1 Flash 1017 first on every Automatic
  * surface, Dark Desk included, so this is the env in which Dark's Automatic
  * has a first rung to land on. Codex is off so a probe can never reach the CLI
  * genuinely installed on a developer machine -- the same reason CLAUDE_ONLY

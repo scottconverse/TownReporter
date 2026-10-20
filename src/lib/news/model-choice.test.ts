@@ -65,7 +65,7 @@ describe("model choice contract", () => {
         "Claude Sonnet 5.5",
         "Claude Haiku 5.5",
         "Local model",
-        "DeepSeek v4.1 Flash",
+        "DeepSeek v4.1 Flash 1017",
       ],
     );
   });
@@ -137,8 +137,8 @@ describe("model choice contract", () => {
     assert.ok(!providersFor("ocr").some((entry) => entry.id === "deepseek-flash"));
 
     const deepseek = OPINION_MODEL_CHOICES.find((choice) => choice.value === "deepseek-flash")!;
-    assert.equal(deepseek.label, "DeepSeek v4.1 Flash");
-    assert.equal(pickerOptionText(deepseek), "DeepSeek v4.1 Flash — Ollama");
+    assert.equal(deepseek.label, "DeepSeek v4.1 Flash 1017");
+    assert.equal(pickerOptionText(deepseek), "DeepSeek v4.1 Flash 1017 — Ollama");
     assert.ok(
       pickerOptionText(deepseek).length <= PICKER_OPTION_TEXT_MAX,
       "the option must fit the measured select box",
@@ -147,8 +147,8 @@ describe("model choice contract", () => {
     // A pick that says DeepSeek says DeepSeek back: not Automatic, and not the
     // page default Codex Sol 6.1.
     assert.equal(opinionModelChoice("deepseek-flash"), "deepseek-flash");
-    assert.equal(modelChoiceLabel("deepseek-flash", "opinion"), "DeepSeek v4.1 Flash");
-    assert.match(modelChoiceHelp("deepseek-flash", "opinion"), /Prefers DeepSeek v4\.1 Flash/);
+    assert.equal(modelChoiceLabel("deepseek-flash", "opinion"), "DeepSeek v4.1 Flash 1017");
+    assert.match(modelChoiceHelp("deepseek-flash", "opinion"), /Prefers DeepSeek v4.1 Flash 1017/);
   });
 
   /*
@@ -243,7 +243,7 @@ describe("model choice contract", () => {
 
   it("labels a pinned rung by the registry name the editor reads", () => {
     // "Automatic" would be a lie on the line the editor reads to find out.
-    assert.equal(modelChoiceLabel("deepseek-flash"), "DeepSeek v4.1 Flash");
+    assert.equal(modelChoiceLabel("deepseek-flash"), "DeepSeek v4.1 Flash 1017");
     /*
       0.6.69 (Unit AL item 4): the LM Studio rung names no model of its own --
       it runs whatever is loaded -- so its label is the bare "Local model".
@@ -334,11 +334,11 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries DeepSeek v4.1 Flash, Codex Sol 6.1, then Claude Sonnet 5.5. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
+      "Tries DeepSeek v4.1 Flash 1017, Codex Sol 6.1, then Claude Sonnet 5.5. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
     );
     /*
       0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed
@@ -350,7 +350,7 @@ describe("model choice contract", () => {
     */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -369,7 +369,7 @@ describe("model choice contract", () => {
       reordered or retired rung cannot leave this wording behind.
     */
     const help = modelChoiceHelp("auto", "scan");
-    assert.match(help, /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/);
+    assert.match(help, /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/);
     assert.match(help, /records which one ran/i);
     assert.doesNotMatch(help, /configured gateway/i);
     /*
@@ -383,7 +383,7 @@ describe("model choice contract", () => {
     assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
     assert.match(
       pickerOptionTitle(automatic!),
-      /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/,
+      /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/,
     );
   });
 
@@ -519,7 +519,7 @@ describe("the Writing models panel's ladder sentence", () => {
     const sentence = await orderSentenceFn();
     assert.equal(
       sentence(),
-      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5.",
+      "Automatic uses DeepSeek v4.1 Flash 1017 first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5.",
     );
   });
 
@@ -528,7 +528,7 @@ describe("the Writing models panel's ladder sentence", () => {
     assert.equal(sentence(["codex-balanced"]), "Automatic uses Codex Sol 6.1 (balanced).");
     assert.equal(
       sentence(["codex-balanced", "deepseek-flash"]),
-      "Automatic uses Codex Sol 6.1 (balanced) first, then DeepSeek v4.1 Flash.",
+      "Automatic uses Codex Sol 6.1 (balanced) first, then DeepSeek v4.1 Flash 1017.",
     );
     assert.equal(sentence([]), "Automatic has no writing model set up on this machine.");
   });
@@ -562,8 +562,8 @@ describe("pastRunModelName: the Last draft line names the model that ran", () =>
 
   it("keeps the label of a choice whose name no version change touched", () => {
     assert.equal(
-      pastRunModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
-      "DeepSeek v4.1 Flash",
+      pastRunModelName({ choice: "deepseek-flash", choiceLabel: "DeepSeek v4.1 Flash 1017" }),
+      "DeepSeek v4.1 Flash 1017",
     );
   });
 
@@ -598,15 +598,15 @@ describe("pastRunModelName: the Last draft line names the model that ran", () =>
 
   it("names a model two choices share by its raw id when the choice that ran does not serve it", () => {
     assert.equal(
-      pastRunModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash" }),
+      pastRunModelName({ choice: "deepseek-flash", actualModelId: "gpt-6.1-sol", choiceLabel: "DeepSeek v4.1 Flash 1017" }),
       "gpt-6.1-sol",
     );
   });
 
   it("names a recorded id that lacks the registry tag (:cloud) by the choice that ran", () => {
     assert.equal(
-      pastRunModelName({ choice: "deepseek-flash", actualModelId: "deepseek-v4.1-flash", choiceLabel: "DeepSeek v4.1 Flash" }),
-      "DeepSeek v4.1 Flash",
+      pastRunModelName({ choice: "deepseek-flash", actualModelId: "deepseek-v4.1-flash", choiceLabel: "DeepSeek v4.1 Flash 1017" }),
+      "DeepSeek v4.1 Flash 1017",
     );
   });
 

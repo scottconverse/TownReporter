@@ -6,18 +6,18 @@ it("THU-7: after a fallback the label names the model that wrote the draft and k
   assert.equal(
     modelAndResearchLabel({
       runningLine: "",
-      pickerModel: "DeepSeek v4.1 Flash",
-      requestedModel: "DeepSeek v4.1 Flash",
+      pickerModel: "DeepSeek v4.1 Flash 1017",
+      requestedModel: "DeepSeek v4.1 Flash 1017",
       writerModel: "Codex Sol 6.1 (balanced)",
     }),
-    "Codex Sol 6.1 (balanced) (you picked DeepSeek v4.1 Flash; it fell back)",
+    "Codex Sol 6.1 (balanced) (you picked DeepSeek v4.1 Flash 1017; it fell back)",
   );
 });
 
 it("THU-7: a draft written by the pick, or no draft yet, reads as the pick", () => {
-  const base = { runningLine: "", pickerModel: "DeepSeek v4.1 Flash", requestedModel: "DeepSeek v4.1 Flash" };
-  assert.equal(modelAndResearchLabel({ ...base, writerModel: "DeepSeek v4.1 Flash" }), "DeepSeek v4.1 Flash");
-  assert.equal(modelAndResearchLabel({ ...base, writerModel: "" }), "DeepSeek v4.1 Flash");
+  const base = { runningLine: "", pickerModel: "DeepSeek v4.1 Flash 1017", requestedModel: "DeepSeek v4.1 Flash 1017" };
+  assert.equal(modelAndResearchLabel({ ...base, writerModel: "DeepSeek v4.1 Flash 1017" }), "DeepSeek v4.1 Flash 1017");
+  assert.equal(modelAndResearchLabel({ ...base, writerModel: "" }), "DeepSeek v4.1 Flash 1017");
 });
 
 it("THU-7: a picker moved on to another model shows that model", () => {
@@ -25,7 +25,7 @@ it("THU-7: a picker moved on to another model shows that model", () => {
     modelAndResearchLabel({
       runningLine: "",
       pickerModel: "Codex Terra",
-      requestedModel: "DeepSeek v4.1 Flash",
+      requestedModel: "DeepSeek v4.1 Flash 1017",
       writerModel: "Codex Sol 6.1 (balanced)",
     }),
     "Codex Terra",

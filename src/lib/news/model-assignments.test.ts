@@ -17,7 +17,7 @@
  *
  * Every value asserted below was measured from the registry rather than typed
  * from memory: `claude-sonnet` takes low..max with medium as its default,
- * `codex-astra` takes low..max, DeepSeek v4.1 Flash takes none/low/high/max,
+ * `codex-astra` takes low..max, DeepSeek v4.1 Flash 1017 takes none/low/high/max,
  * an unknown model id takes nothing, and the job menus derive from their
  * dedicated surfaces. `grok-oauth` has no registry entry at all since GR-C
  * removed Grok (xAI), which is why it can be asserted absent from every menu
@@ -325,7 +325,7 @@ describe("effort is validated per exact model", () => {
     assert.equal(
       cleanJobEffort("local-model", "medium", "deepseek-v4.1-flash"),
       "none",
-      "DeepSeek v4.1 Flash declares none/low/high/max and defaults to Off",
+      "DeepSeek v4.1 Flash 1017 declares none/low/high/max and defaults to Off",
     );
   });
 

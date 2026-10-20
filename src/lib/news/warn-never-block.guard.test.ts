@@ -30,7 +30,7 @@ const cases = [
   {
     name: "Draft anyway on an unreachable model",
     actionWord: "Draft",
-    sentence: "DeepSeek v4.1 Flash is unavailable. If you draft anyway, the desk will use the next ready writing model.",
+    sentence: "DeepSeek v4.1 Flash 1017 is unavailable. If you draft anyway, the desk will use the next ready writing model.",
   },
   {
     name: "Story with no section",

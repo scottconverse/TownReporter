@@ -185,7 +185,7 @@ describe("Automatic Opinion provider persistence", () => {
           readEditorialDocuments,
           documentProbe: async (choice) => ({
             ok: true as const,
-            label: choice === "deepseek-flash" ? "DeepSeek v4.1 Flash" : choice === "codex-frontier" ? "Codex Sol 6.1" : "Claude Sonnet",
+            label: choice === "deepseek-flash" ? "DeepSeek v4.1 Flash 1017" : choice === "codex-frontier" ? "Codex Sol 6.1" : "Claude Sonnet",
             choice: choice as "deepseek-flash" | "codex-frontier" | "claude-sonnet",
           }),
           documentChat: async (_system, _user, _tokens, options) => {
@@ -199,7 +199,7 @@ describe("Automatic Opinion provider persistence", () => {
       );
       /*
         Unit U29: the reading pass starts on the first rung of Opinion's
-        Automatic ladder that answers -- DeepSeek v4.1 Flash, since this fake
+        Automatic ladder that answers -- DeepSeek v4.1 Flash 1017, since this fake
         probe says every rung is ready -- and moves one rung (the failover
         seam allows exactly one hop per attempt) to Codex Sol before the
         failure is terminal.

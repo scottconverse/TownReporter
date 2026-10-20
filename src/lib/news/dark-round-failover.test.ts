@@ -29,7 +29,7 @@ const CODEX_AUTH_FAILURE =
   what DeepSeek actually reports; the next ready rung receives the unfinished call.
 */
 const DEEPSEEK_AUTH_FAILURE =
-  "DeepSeek v4.1 Flash rejected its credentials. Sign in or update its key.";
+  "DeepSeek v4.1 Flash 1017 rejected its credentials. Sign in or update its key.";
 const DEEPSEEK_TIMEOUT_NO_OUTPUT = "DeepSeek request timed out after 150s, 0 bytes out";
 
 /**
@@ -109,12 +109,12 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "qwen-local",
       label: "Local model",
-      switchedBecause: "DeepSeek v4.1 Flash sign-in lapsed",
+      switchedBecause: "DeepSeek v4.1 Flash 1017 sign-in lapsed",
     });
     assert.deepEqual(probed, ["qwen-local"], "a hop stops at the first ready rung");
     assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
     assert.deepEqual(stageMessages, [
-      "Switched to Local model: DeepSeek v4.1 Flash sign-in lapsed",
+      "Switched to Local model: DeepSeek v4.1 Flash 1017 sign-in lapsed",
     ]);
   });
 
@@ -140,11 +140,11 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "qwen-local",
       label: "Local model",
-      switchedBecause: "DeepSeek v4.1 Flash timed out",
+      switchedBecause: "DeepSeek v4.1 Flash 1017 timed out",
     });
     assert.deepEqual(probed, ["qwen-local"]);
     assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
-    assert.deepEqual(stageMessages, ["Switched to Local model: DeepSeek v4.1 Flash timed out"]);
+    assert.deepEqual(stageMessages, ["Switched to Local model: DeepSeek v4.1 Flash 1017 timed out"]);
   });
 
   it("routes an editor's explicit model choice around a technical failure", async () => {
@@ -339,7 +339,7 @@ describe("terminalPlannerStartupFailure", () => {
   the backup's failure and hid the first model's real cause.
 */
 it("FC27: a failed synthesis retry names both causes", async () => {
-  const cutOff = "DeepSeek v4.1 Flash: Provider says: reply was cut off because the output token limit was reached (finish reason: length).";
+  const cutOff = "DeepSeek v4.1 Flash 1017: Provider says: reply was cut off because the output token limit was reached (finish reason: length).";
   const unreachable = "Local model is unreachable. Check that it is running and that this machine is online.";
   let calls = 0;
   const out = await runCheckpointedDarkStages({

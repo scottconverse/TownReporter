@@ -10,11 +10,11 @@ import {
 import { unreadableReplyError } from "./ai.ts";
 
 it("appends a third Story hop without dropping earlier reasons or duplicating a retried receipt", () => {
-  const first = failoverNoteSentence("DeepSeek v4.1 Flash", "Claude Haiku", "auth");
-  const second = failoverNoteSentence("Codex Sol 6.1", "DeepSeek v4.1 Flash", "quota");
+  const first = failoverNoteSentence("DeepSeek v4.1 Flash 1017", "Claude Haiku", "auth");
+  const second = failoverNoteSentence("Codex Sol 6.1", "DeepSeek v4.1 Flash 1017", "quota");
   const third = failoverNoteSentence("Claude Sonnet", "Codex Sol 6.1", "timeout");
   const history = appendStoryFailoverNote(appendStoryFailoverNote(first, second), third);
-  assert.equal(history, "Claude Haiku sign-in lapsed → DeepSeek v4.1 Flash reached its usage limit → Codex Sol 6.1 timed out → Claude Sonnet");
+  assert.equal(history, "Claude Haiku sign-in lapsed → DeepSeek v4.1 Flash 1017 reached its usage limit → Codex Sol 6.1 timed out → Claude Sonnet");
   assert.equal(appendStoryFailoverNote(history, third), history);
 });
 
@@ -146,10 +146,10 @@ describe("planAutomaticFailover", () => {
       error: LIVE_401,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "DeepSeek v4.1 Flash", choice: "deepseek-flash" };
+        return { ok: true, label: "DeepSeek v4.1 Flash 1017", choice: "deepseek-flash" };
       },
     });
-    assert.deepEqual(plan, { next: "deepseek-flash", label: "DeepSeek v4.1 Flash", reason: "auth" });
+    assert.deepEqual(plan, { next: "deepseek-flash", label: "DeepSeek v4.1 Flash 1017", reason: "auth" });
     assert.deepEqual(calls, ["deepseek-flash"]);
   });
 
@@ -161,12 +161,12 @@ describe("planAutomaticFailover", () => {
       error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "DeepSeek v4.1 Flash", choice: "deepseek-flash" };
+        return { ok: true, label: "DeepSeek v4.1 Flash 1017", choice: "deepseek-flash" };
       },
     });
     assert.deepEqual(plan, {
       next: "deepseek-flash",
-      label: "DeepSeek v4.1 Flash",
+      label: "DeepSeek v4.1 Flash 1017",
       reason: "timeout",
     });
     assert.deepEqual(calls, ["deepseek-flash"]);
@@ -291,8 +291,8 @@ describe("failoverReasonPhrase", () => {
 
   it("reads as a reply the desk could not read for reason 'unreadable'", () => {
     assert.equal(
-      failoverReasonPhrase("DeepSeek v4.1 Flash", "unreadable"),
-      "DeepSeek v4.1 Flash sent a reply the desk could not read",
+      failoverReasonPhrase("DeepSeek v4.1 Flash 1017", "unreadable"),
+      "DeepSeek v4.1 Flash 1017 sent a reply the desk could not read",
     );
   });
 });
@@ -308,7 +308,7 @@ describe("failoverReasonPhrase", () => {
  */
 describe("an unreadable reply is a provider failure like any other", () => {
   it("classifies the sentence the retry reports as 'unreadable'", () => {
-    assert.equal(automaticFailoverReason(unreadableReplyError("DeepSeek v4.1 Flash")), "unreadable");
+    assert.equal(automaticFailoverReason(unreadableReplyError("DeepSeek v4.1 Flash 1017")), "unreadable");
     assert.equal(
       automaticFailoverReason("The writing model sent a reply the desk could not read (unreadable JSON)."),
       "unreadable",
@@ -320,7 +320,7 @@ describe("an unreadable reply is a provider failure like any other", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "deepseek-flash",
-      error: unreadableReplyError("DeepSeek v4.1 Flash"),
+      error: unreadableReplyError("DeepSeek v4.1 Flash 1017"),
       probe: async (choice) => {
         calls.push(choice);
         return choice === "qwen-local"

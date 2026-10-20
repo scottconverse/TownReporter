@@ -582,7 +582,7 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
     },
     /*
       Unit U29: the one-pass pair is no longer a poison pill here. It is the
-      pair Automatic starts on -- DeepSeek v4.1 Flash is Opinion's first rung,
+      pair Automatic starts on -- DeepSeek v4.1 Flash 1017 is Opinion's first rung,
       and it is dispatched to this one because its registry kind is "local" --
       so a test that leaves it out would only prove the ladder never reached
       its own head.
@@ -682,13 +682,13 @@ describe("Opinion routes the exact selected cloud model", () => {
     UNIT U29 -- AUTOMATIC STARTS ON DEEPSEEK.
 
     The owner's decision of 2026-09-30 ("use deepseek ... deepseek is the best
-    model at the lowest price we have") made DeepSeek v4.1 Flash Opinion's
+    model at the lowest price we have") made DeepSeek v4.1 Flash 1017 Opinion's
     first rung. It is dispatched to the ONE-PASS pair rather than the Claude
     or Codex pair because its provider has no web-tool loop
     (`providerRunsToolPass`), which is what this pins: the id in the ladder,
     and the transport that id actually reaches.
   */
-  it("Automatic runs DeepSeek v4.1 Flash first and files without spending Claude", async () => {
+  it("Automatic runs DeepSeek v4.1 Flash 1017 first and files without spending Claude", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -735,7 +735,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     if (result.ok) assert.fail("a refusal must not file");
     assert.match(
       (result as { error: string }).error,
-      /^DeepSeek v4\.1 Flash declined: EDITORIAL_REFUSAL: the requested piece asks for an invented quote$/,
+      /^DeepSeek v4.1 Flash 1017 declined: EDITORIAL_REFUSAL: the requested piece asks for an invented quote$/,
     );
     assert.deepEqual(events, ["voice:locate", "local"]);
   });
@@ -872,7 +872,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     UNIT U29 -- THE ORDER, AND THE FALL-THROUGH.
 
     Automatic walks Opinion's ladder in registry order and moves on only after
-    a technical failure: DeepSeek v4.1 Flash, then Codex Sol, then Claude
+    a technical failure: DeepSeek v4.1 Flash 1017, then Codex Sol, then Claude
     Sonnet. Each hop is asserted with the model the pair was actually handed,
     so a reordered or shortened ladder fails here rather than in production.
   */
@@ -967,7 +967,7 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     assert.equal(result.modelChoice, "codex-frontier");
     /*
       The ladder an explicit pick moves along is Opinion's whole ladder with
-      that pick first, which since unit U29 holds DeepSeek v4.1 Flash ahead of
+      that pick first, which since unit U29 holds DeepSeek v4.1 Flash 1017 ahead of
       Codex Sol. It is the second "local" here: the same one-pass pair, a
       different registry entry (the DeepSeek rung), and it fails too.
     */
@@ -1037,7 +1037,7 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     assert.equal(
       result.modelChoice,
       "deepseek-flash",
-      "and the default walks the ladder, which starts on DeepSeek v4.1 Flash",
+      "and the default walks the ladder, which starts on DeepSeek v4.1 Flash 1017",
     );
     assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
@@ -1202,7 +1202,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     UNIT U29 + U30 -- THE DEEPSEEK PAIR: THE DESK RESEARCHES, THEN ONE WRITING
     CALL WITH THE VOICE AND NO TOOLS.
 
-    DeepSeek v4.1 Flash is reached over Ollama's OpenAI-compatible HTTP face,
+    DeepSeek v4.1 Flash 1017 is reached over Ollama's OpenAI-compatible HTTP face,
     which has no WebSearch/WebFetch tool loop at all, so there is no gathering
     pass to give the web tools to -- which is what makes SEC-3 hold by
     construction rather than by remembering. Unit U29 stopped there and wrote

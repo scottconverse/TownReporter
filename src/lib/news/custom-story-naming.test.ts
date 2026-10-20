@@ -40,7 +40,7 @@ for (const [path, error] of [
   }, {
     probeProvider: async picked => picked === choice && error
       ? {ok:false as const,error}
-      : {ok:true as const,choice:picked === choice ? choice : "deepseek-flash",label:picked === choice ? label : "DeepSeek v4.1 Flash"},
+      : {ok:true as const,choice:picked === choice ? choice : "deepseek-flash",label:picked === choice ? label : "DeepSeek v4.1 Flash 1017"},
     enqueueJob: opts => enqueueJob({...opts,kick:false}),
   });
   assert.equal(result.ok,true);
@@ -76,8 +76,8 @@ test("runtime provider-error hops keep the original connection identity", async 
       run: snapshot => snapshot.modelChoice === choice
         ? grokChat("System","User",10,{choice,newsroomId:1},{resolveCustom:async()=>({...connection,baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai",apiKey:"fixture-key"})})
         : Promise.resolve({ok:true as const,text:"Draft"}),
-      probe:async()=>({ok:true as const,choice:"deepseek-flash" as const,label:"DeepSeek v4.1 Flash"}),
-      resolve:async modelChoice=>({modelChoice,modelLabel:"DeepSeek v4.1 Flash"}),
+      probe:async()=>({ok:true as const,choice:"deepseek-flash" as const,label:"DeepSeek v4.1 Flash 1017"}),
+      resolve:async modelChoice=>({modelChoice,modelLabel:"DeepSeek v4.1 Flash 1017"}),
       onSwitch:async hop=>{
         // The runtime can still emit a legacy generic stage; presentation must name it.
         stage = `Switched to ${hop.nextLabel}: ${failoverReasonPhrase("Custom API connection",hop.reason)}`;

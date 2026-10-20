@@ -63,19 +63,19 @@ describe("a stage boundary on a job that has a stage list", () => {
   for (const label of ["Claude Fable", "Claude Opus", "Claude Sonnet", "Claude Haiku"]) it(`keeps every hop of ${label} to DeepSeek to Sol in order`, async () => {
     const id = freshSubject();
     const job = await enqueueDraft("picker-switch-history", id);
-    await setJobFailoverNote(job.id, `This draft moved to DeepSeek v4.1 Flash because ${label} sign-in lapsed`);
-    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash reached its usage limit");
+    await setJobFailoverNote(job.id, `This draft moved to DeepSeek v4.1 Flash 1017 because ${label} sign-in lapsed`);
+    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash 1017 reached its usage limit");
     const note = (await stored(id))!.failover_note;
     assert.ok(note.includes(`${label} sign-in lapsed`));
-    assert.ok(note.indexOf(label) < note.lastIndexOf("DeepSeek v4.1 Flash reached its usage limit"));
-    assert.match(note, /DeepSeek v4\.1 Flash reached its usage limit.*Codex Sol 6\.1/);
+    assert.ok(note.indexOf(label) < note.lastIndexOf("DeepSeek v4.1 Flash 1017 reached its usage limit"));
+    assert.match(note, /DeepSeek v4.1 Flash 1017 reached its usage limit.*Codex Sol 6\.1/);
   });
   it("updates the waiting line as soon as a draft switches, before the next tick", async () => {
     const id = freshSubject();
     const job = await enqueueDraft("picker-progress-switch", id);
-    await reportProgress(job.id, { step: "Waiting on DeepSeek v4.1 Flash · 12s" });
+    await reportProgress(job.id, { step: "Waiting on DeepSeek v4.1 Flash 1017 · 12s" });
     await setJobModelRuntime(job.id, "codex-balanced", "medium");
-    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash reached its usage limit");
+    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash 1017 reached its usage limit");
     assert.match((await stored(id))!.step_text!, /Waiting on Codex Sol 6\.1/);
   });
   it("moves the chip row for an arrival and leaves it for a step", async () => {

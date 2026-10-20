@@ -151,7 +151,7 @@ describe("model-specific thinking effort", () => {
     );
     assert.equal(defaultModelEffort("custom:11111111-1111-4111-8111-111111111111"), null);
     assert.equal(defaultModelEffort("grok-oauth"), null);
-    // Release H decision 1: DeepSeek v4.1 Flash runs at none even when Max is picked.
+    // Release H decision 1: DeepSeek v4.1 Flash 1017 runs at none even when Max is picked.
     assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "none");
     assert.equal(
       modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"),
@@ -298,7 +298,7 @@ describe("the provider registry is the one description of a writing model", () =
 describe("the Automatic ladder is derived, not typed out", () => {
   it("orders Automatic with DeepSeek first, Gemini after balanced Codex, and Claude Sonnet last", () => {
     // 0.6.63, Unit Y item 1, on the owner's measured blind research test:
-    // DeepSeek v4.1 Flash 30.9, Qwen3.6-35B 15.8, Terra 15.3. Oct 18, 2026:
+    // DeepSeek v4.1 Flash 1017 30.9, Qwen3.6-35B 15.8, Terra 15.3. Oct 18, 2026:
     // Automatic uses any subscribed model, so Claude Sonnet is the last rung.
     const ladder = automaticLadder();
     assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash", "claude-sonnet"]);
@@ -687,7 +687,7 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
   });
 });
 
-describe("DeepSeek v4.1 Flash runs with effort none, and the receipt says so", () => {
+describe("DeepSeek v4.1 Flash 1017 runs with effort none, and the receipt says so", () => {
   it("a local-model run of deepseek-v4.1-flash:cloud with no pick records none", () => {
     assert.equal(recordedModelEffort("local-model", null, "deepseek-v4.1-flash:cloud"), "none");
     assert.equal(recordedModelEffort("local-model", undefined, "deepseek-v4.1-flash:cloud"), "none");

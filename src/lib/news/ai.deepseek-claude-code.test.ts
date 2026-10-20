@@ -99,7 +99,7 @@ it("D153 every picker, local, custom, model override, automatic and forced route
     let calls = 0;
     const adapters: GrokChatAdapters = {
       findClaudeCli: async () => fake,
-      probe: async () => ({ ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" }),
+      probe: async () => ({ ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash 1017" }),
       resolveCustom: async () => ({ baseUrl: "http://127.0.0.1:9/custom/v1", modelId: model, apiKey: "custom-fixture" }),
       claudeCode: async input => {
         calls++;

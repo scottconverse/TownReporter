@@ -59,7 +59,7 @@ it("Automatic drafting honors the saved Story assignment before readiness and re
       {
         probeProvider: async (choice) => {
           assert.equal(choice, "deepseek-flash");
-          return { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" };
+          return { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash 1017" };
         },
         enqueueJob: (options) => enqueueJob({ ...options, kick: false }),
       },
@@ -120,7 +120,7 @@ it("an unavailable saved writer warns and Draft anyway preserves requested and a
     const deps = {
       probeProvider: async (choice?: string) =>
         choice === "deepseek-flash"
-          ? { ok: false as const, error: "DeepSeek v4.1 Flash is unavailable: service failed" }
+          ? { ok: false as const, error: "DeepSeek v4.1 Flash 1017 is unavailable: service failed" }
           : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
       enqueueJob: (options: Parameters<typeof enqueueJob>[0]) =>
         enqueueJob({ ...options, kick: false }),
@@ -629,7 +629,7 @@ describe("authenticated Codex commit boundary", () => {
     /*
       An explicit Claude Opus pick, which Opinion offers but its Automatic
       ladder never reaches on its own -- so the forward walk here is the whole
-      ladder: DeepSeek v4.1 Flash (unit U29), Codex Sol, Claude Sonnet.
+      ladder: DeepSeek v4.1 Flash 1017 (unit U29), Codex Sol, Claude Sonnet.
     */
     const opinionExpired = await commitOpinionForAuthenticatedEditor(
       {
