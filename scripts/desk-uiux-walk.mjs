@@ -431,6 +431,16 @@ function responsiveLayoutFailures({ surface, viewportWidth, size }, metrics) {
           target.selectedTextRequiredWidth + "px including the arrow allowance",
       );
     }
+    if (
+      selector.endsWith(" select") &&
+      typeof target.backgroundColor === "string" &&
+      /^rgba\(.*,\s*0\)$|^transparent$/.test(target.backgroundColor)
+    ) {
+      failures.push(
+        selector + " has a see-through background (" + target.backgroundColor +
+          "), so its open list is drawn white under the theme's text color",
+      );
+    }
     if (selector.endsWith(" select") && target.labelGapPx < -0.5) {
       failures.push(selector + " overlaps its visible label by " + Math.abs(target.labelGapPx).toFixed(1) + "px");
     }
@@ -528,6 +538,9 @@ async function collectResponsiveTargets(page, surfaceName) {
           optionCount: select.options.length,
           longestOptionText: optionTexts.reduce((longest, text) => text.length > longest.length ? text : longest, ""),
           labelGapPx: labelRect ? selectRect.left - labelRect.right : 0,
+          // The browser paints the open list in the select's own background;
+          // a see-through select opens a white list under the theme's words.
+          backgroundColor: getComputedStyle(select).backgroundColor,
         };
       };
       targets = [

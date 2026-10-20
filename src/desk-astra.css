@@ -4240,12 +4240,19 @@
    which is the `Queue search overlaps the tab strip by 3.1px` CI failure. The
    select keeps its border -- it is the control's edge, the thing the guard
    measures -- and the wrapper keeps the inset that places it, so this costs no
-   edge and no target: only the duplicated 4px inside the select is dropped. */
+   edge and no target: only the duplicated 4px inside the select is dropped.
+
+   Scott, Oct 19 2026: the open Sort and Section lists were near-white words
+   on white. The browser paints a select's open list in the select's own
+   background color; `background: none` (see-through) made it fall back to
+   white while the words stayed the dark theme's #e8e6e1. The select takes the
+   page color instead, which looks the same closed and gives the open list the
+   theme's own background in both light and dark. */
 .desk-ltr.astra .queue-sel select {
   min-height: 44px;
   padding: 2px 0;
   border: 1px solid var(--fg2);
-  background: none;
+  background: var(--bg);
   color: var(--fg);
   font: inherit;
   min-width: 0;
