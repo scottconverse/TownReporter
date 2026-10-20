@@ -28,6 +28,7 @@ import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { jobHeadline } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
+import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
@@ -302,7 +303,22 @@ export function DeskShell({
     the existing ones, so an invalidation anywhere still refreshes them.
   */
   const jobs = useDeskJobs();
-  const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
+  /*
+    A scan files leads batch by batch, so the Queue count in this nav moves
+    while one runs -- but `["leads"]` was never polled and the number sat still
+    until some other write invalidated it. The scan's own job row is already
+    polled at 2 s by `useDeskJobs`; while one is queued or running, the count
+    refetches every 5 s to follow it. With no scan running the interval is
+    `false`, exactly the old behaviour.
+  */
+  const scanRunning = (jobs.data ?? []).some(
+    (job) => job.kind === "scan" && (job.status === "queued" || job.status === "running"),
+  );
+  const leads = useQuery({
+    queryKey: ["leads"],
+    queryFn: () => listLeads(),
+    refetchInterval: queueCountRefetchMs(scanRunning),
+  });
   /*
     The Drafts nav count asks the server to count the draft rows, not to send
     them (review D2): the shell only needs the number, and the count is taken

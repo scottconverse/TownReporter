@@ -212,7 +212,7 @@ import {
   correctionWordingPrompt,
   parseCorrectionWording,
 } from "./correction-wording.ts";
-import { provenanceFromUrls } from "./findings";
+import { provenanceFromUrls, withSourceOrganization } from "./findings";
 import type {
   ClaimEvidenceRow,
   FindingEvidenceRow,
@@ -3700,13 +3700,15 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           .filter(Boolean),
       ),
     ].join("\n");
-    const provenance = checkpoint.captures.map((capture) => ({
-      url: capture.url,
-      title: capture.title,
-      version_id: capture.version_id,
-      capture_event_id: capture.capture_event_id,
-      role: "followed",
-    }));
+    const provenance = withSourceOrganization(
+      checkpoint.captures.map((capture) => ({
+        url: capture.url,
+        title: capture.title,
+        version_id: capture.version_id,
+        capture_event_id: capture.capture_event_id,
+        role: "followed",
+      })),
+    );
     await withClaimedLeadDraftCheckpointLock(job, leadId, async (transactionSql) => {
       const current =
         (

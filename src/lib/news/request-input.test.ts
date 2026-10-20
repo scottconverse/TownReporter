@@ -14,6 +14,7 @@ import {
   cleanModelScope,
   cleanPublishId,
   cleanWriteProvider,
+  parseVersionId,
 } from "./request-input.ts";
 
 /**
@@ -326,5 +327,21 @@ describe("an auth request is capped before its body is read", () => {
       password: "an-operator-password-1234",
     });
     assert.ok(signUp.length < MAX_AUTH_BODY_BYTES / 100, `cap is only ${MAX_AUTH_BODY_BYTES / signUp.length}x a sign-up`);
+  });
+});
+
+describe("an evidence address is a row id or nothing", () => {
+  it("accepts a whole positive number and refuses everything else", () => {
+    assert.equal(parseVersionId("42"), 42);
+    assert.equal(parseVersionId("1"), 1);
+    assert.equal(parseVersionId("not-a-number"), null);
+    assert.equal(parseVersionId("12abc"), null);
+    assert.equal(parseVersionId("0"), null);
+    assert.equal(parseVersionId("-1"), null);
+    // `Number("1e3")` is 1000 and `Number("")` is 0; neither is an address.
+    assert.equal(parseVersionId("1e3"), null);
+    assert.equal(parseVersionId(""), null);
+    assert.equal(parseVersionId(" 7 "), null);
+    assert.equal(parseVersionId("99999999999999999999"), null);
   });
 });
