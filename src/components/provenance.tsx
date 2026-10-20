@@ -1,32 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { SourceCard } from "@/components/paper/source-card";
-import type { ProvenanceItem } from "@/lib/news/findings";
+import { provenanceHost as hostOf, type ProvenanceItem } from "@/lib/news/findings";
 
-/**
- * The record line under a card's title.
- *
- * The organization is the hostname for a source discovered from a URL
- * (`describeSourceUrl` in findings.ts sets it), and a real newsroom name when a
- * fetch found one. Printing both when they are the same string would read
- * "longmont.primegov.com · longmont.primegov.com", so the duplicate is dropped;
- * when they differ the reader gets the newsroom and its address, which is the
- * pair that lets them judge it.
- */
-function hostOf(item: ProvenanceItem): string {
-  const organization = item.organization.trim();
-  let hostname = "";
-  try {
-    hostname = item.url ? new URL(item.url).hostname.replace(/^www\./i, "") : "";
-  } catch {
-    hostname = "";
-  }
-  if (!organization) return hostname;
-  if (!hostname) return organization;
-  const same =
-    organization.toLowerCase().replace(/^www\./i, "") === hostname.toLowerCase();
-  return same ? organization : `${organization} · ${hostname}`;
-}
 
 /**
  * "How we reported this" -- the evidence behind a story, as cards.

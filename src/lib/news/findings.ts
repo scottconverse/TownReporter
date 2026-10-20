@@ -337,3 +337,33 @@ export function resolvePublicFindings(
       return { ...publicFinding, locators: [] };
     });
 }
+
+/**
+ * The record line under a "How we reported this" card's title.
+ *
+ * The organization is the hostname for a source discovered from a URL
+ * (`describeSourceUrl` sets it), and a real newsroom name when a fetch found
+ * one. Printing both when they are the same string would read
+ * "longmont.primegov.com · longmont.primegov.com", so the duplicate is dropped;
+ * when they differ the reader gets the newsroom and its address, which is the
+ * pair that lets them judge it.
+ *
+ * A writer checkpoint saves provenance with no organization at all
+ * (desk.ts onWriterDraft, draft-reconcile). The public story page crashed on
+ * those ("Something went wrong", Test walk Oct 20 2026), so a missing
+ * organization reads as empty here.
+ */
+export function provenanceHost(item: Pick<ProvenanceItem, "url"> & { organization?: unknown }): string {
+  const organization = typeof item.organization === "string" ? item.organization.trim() : "";
+  let hostname = "";
+  try {
+    hostname = item.url ? new URL(item.url).hostname.replace(/^www\./i, "") : "";
+  } catch {
+    hostname = "";
+  }
+  if (!organization) return hostname;
+  if (!hostname) return organization;
+  const same =
+    organization.toLowerCase().replace(/^www\./i, "") === hostname.toLowerCase();
+  return same ? organization : `${organization} · ${hostname}`;
+}
