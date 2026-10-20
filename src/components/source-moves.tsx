@@ -29,6 +29,11 @@ const BUTTON_WORDS: Record<To, string> = {
   dormant: "Make it dormant",
 };
 
+/** "Try it again" reads wrong on a source the scan already reads. */
+export function buttonWord(from: string, to: To): string {
+  return to === "trial" && from === "accepted" ? "Put on trial" : BUTTON_WORDS[to];
+}
+
 /** The moves the editor can make from a status: every other status. */
 export function movesFrom(status: string): To[] {
   return (["accepted", "trial", "dormant"] as To[]).filter((to) => to !== status);
@@ -55,13 +60,13 @@ function MoveButtons({ sourceId, status, title }: { sourceId: number; status: st
           phase={pressed === to ? rowActionPhase({ isPending: move.isPending, problem: failed }) : "idle"}
           disabled={move.isPending && pressed !== to}
           workingLabel="Saving…"
-          ariaLabel={`${BUTTON_WORDS[to]}: ${title}`}
+          ariaLabel={`${buttonWord(status, to)}: ${title}`}
           onAct={() => {
             setPressed(to);
             move.mutate(to);
           }}
         >
-          {BUTTON_WORDS[to]}
+          {buttonWord(status, to)}
         </ActionButton>
       ))}
       {failed ? <span role="alert">{failed}</span> : null}
