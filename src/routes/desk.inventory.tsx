@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { DeskShell, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { getSourceInventory } from "@/lib/news/desk";
+import { SourceMovesPanel } from "@/components/source-moves";
 
 /*
   THE SOURCE INVENTORY SCREEN.
@@ -45,6 +46,8 @@ function InventoryPage() {
       kicker="What the desk knows about every source it watches"
       hideTitle
     >
+      {/* Dynamic sources unit 8 (D169): what the self-updating list did, with undo. */}
+      <SourceMovesPanel />
       <SecHead
         title="Source inventory"
         count={data?.total ?? 0}

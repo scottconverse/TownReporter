@@ -794,6 +794,9 @@ export function authBodyTooLarge(contentLength: string | null): boolean {
 
 /** A row id. Every `id` column here is a 4-byte integer. */
 export const rowId = z.number().int().positive().max(2_147_483_647);
+
+/** Dynamic sources unit 8 (D169): the editor's one-click source move. */
+export const sourceMoveInput = z.object({ id: rowId, to: z.enum(["accepted", "trial", "dormant"]) });
 /** A revision or run counter: same column, but 0 is a real value. */
 export const counter = z.number().int().nonnegative().max(2_147_483_647);
 export const optionalId = rowId.optional();

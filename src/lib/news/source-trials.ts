@@ -83,16 +83,17 @@ async function note(
   sourceId: number,
   kind: string,
   text: string,
+  by = "trial-pass",
 ): Promise<void> {
   await sql`
     insert into source_observations (newsroom_id, source_id, kind, note, observed_by)
-    values (${newsroomId}, ${sourceId}, ${kind}, ${text.slice(0, 600)}, 'trial-pass')`;
+    values (${newsroomId}, ${sourceId}, ${kind}, ${text.slice(0, 600)}, ${by})`;
 }
 
 /** Move a source to a new status and log why. */
 export async function moveSource(
   sql: SqlTag,
-  input: { newsroomId: number; sourceId: number; to: "accepted" | "trial" | "dormant"; why: string },
+  input: { newsroomId: number; sourceId: number; to: "accepted" | "trial" | "dormant"; why: string; by?: string },
 ): Promise<void> {
   const { newsroomId, sourceId, to, why } = input;
   if (to === "trial") {
@@ -107,7 +108,7 @@ export async function moveSource(
       next_due_at = null, dormant_at = null, dormant_reason = null
       where id = ${sourceId} and newsroom_id = ${newsroomId}`;
   }
-  await note(sql, newsroomId, sourceId, to === "dormant" ? "demoted" : "promoted", why);
+  await note(sql, newsroomId, sourceId, to === "dormant" ? "demoted" : "promoted", why, input.by);
 }
 
 /**

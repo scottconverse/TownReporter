@@ -147,6 +147,7 @@ import {
   pullTodoInput,
   reportingNotesInput,
   rowId,
+  sourceMoveInput,
   runScanInput,
   acceptUnreviewedClaimsInput,
   acknowledgeUncheckedInput,
@@ -446,6 +447,36 @@ export const saveSourceScanPreference = createServerFn({ method: "POST" })
     if (data.invalidError) return { ok: false as const, error: data.invalidError };
     const sql = await getSql();
     return saveSourceScanPreferenceForEditor(sql, context, data);
+  });
+
+/** Dynamic sources unit 8 (D169): counts, recent moves and the scored list. */
+export const getSourceScores = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { loadSourceScores } = await import("./source-scores.ts");
+    return loadSourceScores(await getSql(), owned(context));
+  });
+
+/** Dynamic sources unit 8 (D169): the editor moves a source by hand, any way,
+ *  one click, no confirmation. The move is logged like the system's own. */
+export const moveSourceByEditor = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => sourceMoveInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const [row] = await sql<{ status: string }>`
+      select status from sources where id = ${data.id} and newsroom_id = ${owned(context)}`;
+    if (!row) return { ok: false as const, error: "That source is not on this paper." };
+    const { moveSource } = await import("./source-trials.ts");
+    const words = { accepted: "kept (read by the scan)", trial: "put on trial", dormant: "made dormant (checked once a month)" };
+    await moveSource(sql, {
+      newsroomId: owned(context),
+      sourceId: data.id,
+      to: data.to,
+      why: `The editor ${words[data.to]}. It was ${row.status}.`,
+      by: "editor",
+    });
+    return { ok: true as const };
   });
 
 /** The read-only inventory screen, using the same facts and judgement as its CSV. */
