@@ -630,6 +630,29 @@ describe("daily scan rotation plan", () => {
     assert.equal(plan.fullPassDays, 2);
   });
 });
+// guards: a source too new to have a score must still be ordered by how its website does (spec 5a).
+it("a source with fewer than 3 reads borrows the best score of the other sources on its website", async () => {
+  const { yieldScoresByWebsite } = await import("./daily-scan-plan.server.ts");
+  const pool = [
+    { id: 1, url: "https://paper.example.test/a" },
+    { id: 2, url: "https://www.paper.example.test/b" },
+    { id: 3, url: "https://other.example.test/" },
+    { id: 4, url: "https://other.example.test/two" },
+    { id: 5, url: "https://empty.example.test/" },
+  ];
+  const yields = [
+    { source_id: 1, reads_90: 10, leads_per_read: 0.5, published_per_read: 0, bad_source_kills_90: 0 },
+    { source_id: 2, reads_90: 1, leads_per_read: 0, published_per_read: 0, bad_source_kills_90: 0 },
+    { source_id: 3, reads_90: 10, leads_per_read: 0.1, published_per_read: 0, bad_source_kills_90: 0 },
+    { source_id: 4, reads_90: 10, leads_per_read: 0.2, published_per_read: 0, bad_source_kills_90: 0 },
+  ];
+  const scores = yieldScoresByWebsite(pool, yields);
+  assert.equal(scores.get(1), 0.7 * 0.5);
+  assert.equal(scores.get(2), scores.get(1));
+  assert.equal(scores.get(4), 0.7 * 0.2);
+  assert.equal(scores.get(3), 0.7 * 0.1);
+  assert.equal(scores.get(5), null);
+});
 // guards: daily runs must rotate the accepted pool rather than repeatedly reading only the saved picks.
 it("the saved daily plan fills rotating slots from the accepted pool", async () => {
   const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");

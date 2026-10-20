@@ -3,7 +3,38 @@ import type { Sql } from "../db.ts";
 import { ensureDailyScanPolicySchema, planDailySourceRotation } from "./daily-scan.ts";
 import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
 import { scheduledScanCoverage } from "./scan-source-coverage.ts";
+import { siteOf } from "./source-intake.ts";
 import { yieldScore, type YieldRow } from "./source-yield.ts";
+
+/**
+ * Spec 5a: a source's score for ordering, with the website fallback. A source
+ * with fewer than 3 reads has no score of its own and uses the best score of
+ * the other sources on its website (`siteOf`, max of `yieldScore` per site).
+ * A source with its own score keeps it, even a score of 0.
+ */
+export function yieldScoresByWebsite(
+  pool: ReadonlyArray<{ id: number; url: string }>,
+  yields: ReadonlyArray<YieldRow>,
+): Map<number, number | null> {
+  const urlById = new Map(pool.map((source) => [source.id, source.url]));
+  const own = new Map<number, number | null>();
+  const bestBySite = new Map<string, number>();
+  for (const row of yields) {
+    const score = yieldScore(row);
+    own.set(row.source_id, score);
+    if (score == null) continue;
+    const site = siteOf(urlById.get(row.source_id) ?? "");
+    if (!site) continue;
+    const best = bestBySite.get(site);
+    if (best == null || score > best) bestBySite.set(site, score);
+  }
+  const scores = new Map<number, number | null>();
+  for (const source of pool) {
+    const site = siteOf(source.url);
+    scores.set(source.id, own.get(source.id) ?? (site ? bestBySite.get(site) ?? null : null));
+  }
+  return scores;
+}
 
 /** Both scheduled and editor-started daily scans use this saved policy plan. */
 export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, allAccepted = false) {
@@ -21,7 +52,7 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
     "select source_id,reads_90,leads_per_read,published_per_read,bad_source_kills_90 from source_yield where newsroom_id=$1",
     [newsroomId],
   );
-  const scoreById = new Map(yields.map((row) => [row.source_id, yieldScore(row)]));
+  const scoreById = yieldScoresByWebsite(pool, yields);
   const preferences = await loadSourceScanPreferences(sql, newsroomId);
   const preferenceById = new Map(preferences.map((preference) => [preference.sourceId, preference]));
   const rotation = planDailySourceRotation({
