@@ -2783,6 +2783,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             scanPlace,
             batchDupCheck,
             filedThisScan,
+            fetched,
           );
           await refreshManualScanClaim(writeSql, job);
           return counts;
@@ -3154,6 +3155,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         scanPlace,
         dupCheck,
         fileAsRead ? filedThisScan : undefined,
+        fetched,
       ),
     );
 

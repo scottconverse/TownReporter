@@ -27,6 +27,8 @@ export const OBSERVATION_KINDS = [
   "filled-gap",
   "corrected-draft",
   "replaced",
+  // Dynamic sources unit 1 (D169): a scan filed a new lead from this source.
+  "produced-lead",
 ] as const;
 
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
@@ -75,9 +77,15 @@ export async function recordObservation(
   const db = sql ?? (await getSql());
   const note = input.note?.trim().slice(0, NOTE_MAX) || null;
   if (input.scanRunId != null) {
+    // A row about one lead is not a repeat of a row about another lead from
+    // the same source in the same run (D169: two leads, two produced-lead rows).
     const existing = await db.query<{ id: number }>(
-      "select id from source_observations where newsroom_id=$1 and source_id=$2 and kind=$3 and scan_run_id=$4 limit 1",
-      [input.newsroomId, input.sourceId, input.kind, input.scanRunId],
+      input.leadId != null
+        ? "select id from source_observations where newsroom_id=$1 and source_id=$2 and kind=$3 and scan_run_id=$4 and lead_id=$5 limit 1"
+        : "select id from source_observations where newsroom_id=$1 and source_id=$2 and kind=$3 and scan_run_id=$4 limit 1",
+      input.leadId != null
+        ? [input.newsroomId, input.sourceId, input.kind, input.scanRunId, input.leadId]
+        : [input.newsroomId, input.sourceId, input.kind, input.scanRunId],
     );
     if (existing[0]) return null;
   }
