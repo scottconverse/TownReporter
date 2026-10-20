@@ -4260,6 +4260,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Every desk list, in the page and in dialogs: the open list's rows carry the
+   theme's own colors, so no list can open as light words on a white sheet
+   (Scott, Oct 19 2026 -- the Queue's Sort and Section did). Browsers that
+   draw the open list themselves and ignore option colors keep their own. */
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) select option {
+  background-color: var(--bg);
+  color: var(--fg);
+}
 .desk-ltr.astra .queue-sel select:focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 2px;
