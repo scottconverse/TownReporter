@@ -118,6 +118,11 @@ export const SCAN_SUMMARY_CHAR_LIMIT = 2000;
 import { cutAtSentenceEnd } from "./sentence-stop.ts";
 export { cutAtSentenceEnd };
 
+/** The key two batches' leads are called the same headline by (merge below, and D162's file-as-read). */
+export function scanHeadlineKey(headline: string): string {
+  return headline.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export function mergeScanBatchResults<
   TLead extends { headline: string; source_urls: string[] },
   TProposed extends { url: string },
@@ -133,7 +138,7 @@ export function mergeScanBatchResults<
   const summaries: string[] = [];
   for (const result of results) {
     for (const lead of result.leads) {
-      const key = lead.headline.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const key = scanHeadlineKey(lead.headline);
       if (!key || seenHeadlines.has(key)) continue;
       seenHeadlines.add(key);
       leads.push(lead);
