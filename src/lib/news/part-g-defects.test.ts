@@ -272,7 +272,7 @@ test("B07/FB06: Server health does not call a missing Codex or an empty LM Studi
 });
 
 
-test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking off", async () => {
+test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with low thinking", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Record<string, unknown>[] = [];
   globalThis.fetch = async (_url, init) => {
@@ -287,9 +287,10 @@ test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking 
         apiKey: "not-needed",
         baseUrl: "http://127.0.0.1:11434/v1",
       }),
+      findClaudeCli: async () => null,
     });
     assert.ok(Number(requests[0].max_tokens) >= 16384);
-    assert.equal(requests[0].reasoning_effort, "none");
+    assert.equal(requests[0].reasoning_effort, "low");
   } finally {
     globalThis.fetch = originalFetch;
   }

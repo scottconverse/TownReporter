@@ -70,7 +70,8 @@ export function setupFieldHelp(key: SetupFieldKey): string {
  * wording (for example "Off — no extra thinking").
  */
 export function effortChoiceLabel(effort: ModelEffort, model?: string | null): string {
-  return `${modelEffortLabel(effort, model)} (${effort})`;
+  const label = modelEffortLabel(effort, model);
+  return model !== undefined && label.toLowerCase().startsWith(`${effort} —`) ? label : `${label} (${effort})`;
 }
 
 /**

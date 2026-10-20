@@ -5,8 +5,8 @@ import type { IncomingHttpHeaders } from "node:http";
 
 export type DeepSeekRelayEvidence = {
   kind: "messages" | "tool-use";
-  thinkingDisabled: boolean;
-  effortAbsent: boolean;
+  thinkingLow: boolean;
+  effortLow: boolean;
   authMatchesExpected: boolean;
   forwardedAuthMatchesExpected: boolean;
   forwardedAuthorization?: "Bearer ollama";
@@ -48,16 +48,18 @@ async function startListener(): Promise<string> {
       let evidence: DeepSeekRelayEvidence | undefined;
       if (suffix === "/v1/messages" && req.method === "POST") {
         const payload = JSON.parse(body.toString("utf8"));
-        payload.thinking = { type: "disabled" };
-        if (payload.output_config && typeof payload.output_config === "object") delete payload.output_config.effort;
+        payload.thinking = { type: "enabled", budget_tokens: 2048 };
+        payload.output_config = { ...(payload.output_config ?? {}), effort: "low" };
+        if (!(Number(payload.max_tokens) > 2048)) payload.max_tokens = 2048 + 4096;
         const toolResults = Array.isArray(payload.messages)
           ? payload.messages.reduce((count: number, message: { content?: unknown }) => count + (Array.isArray(message.content)
             ? message.content.filter(block => block?.type === "tool_result").length : 0), 0)
           : 0;
         body = Buffer.from(JSON.stringify(payload));
         evidence = {
-          kind: "messages", thinkingDisabled: payload.thinking.type === "disabled",
-          effortAbsent: !Object.hasOwn(payload.output_config ?? {}, "effort"),
+          kind: "messages", thinkingLow: payload.thinking.type === "enabled"
+            && payload.thinking.budget_tokens === 2048 && payload.output_config.effort === "low",
+          effortLow: payload.output_config.effort === "low",
           authMatchesExpected: req.headers.authorization === `Bearer ${route.token}`,
           forwardedAuthMatchesExpected: false,
           toolUses: 0, toolResults,

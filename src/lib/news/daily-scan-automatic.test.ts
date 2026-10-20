@@ -149,9 +149,9 @@ describe("daily scan on Automatic", () => {
             baseUrl: "http://127.0.0.1:11434/v1",
             id: "deepseek-v4.1-flash:1017-cloud",
           });
-          // DeepSeek's own effort default is thinking off ("none"), which is
+          // DeepSeek's own effort default is low thinking ("low"), which is
           // the effort the run record shows as resolved.
-          assert.equal(receipt.modelEffort, "none");
+          assert.equal(receipt.modelEffort, "low");
           assert.equal(receipt.switchReason, null);
           assert.equal(receipt.switchNote, null);
         } finally {

@@ -79,7 +79,7 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
     assert.equal("reasoning_effort" in (sentBody ?? {}), false);
   });
 
-  it("maps DeepSeek Off to Ollama's explicit none disable while returning the final draft text", async () => {
+  it("maps DeepSeek to Ollama's explicit low thinking while returning the final draft text", async () => {
     let sentBody: Record<string, unknown> | undefined;
     const result = await withFetch(
       (async (_url, init) => {
@@ -97,10 +97,10 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
       () =>
         withEnvAsync(
           { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "deepseek-v4.1-flash:cloud" },
-          () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
+          () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }, { findClaudeCli: async () => null }),
         ),
     );
-    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal(sentBody?.reasoning_effort, "low");
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.text, "A publishable draft.");
   });

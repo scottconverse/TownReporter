@@ -1188,8 +1188,8 @@ export async function grokChat(
     temperature: 0.2,
     // Gemini shares its output budget with thinking; the 2,200-token writer
     // request measured 85 visible tokens. Reserve room for a complete draft.
-    // DeepSeek v4.1 Flash needs the same room even with thinking off (effort
-    // None): dev walk D1, Oct 12 2026, job 335 -- the 2,200-token writer request
+    // DeepSeek v4.1 Flash needs the same room even with low thinking (effort
+    // Low): dev walk D1, Oct 12 2026, job 335 -- the 2,200-token writer request
     // was cut off (finish reason: length) and the draft fell back to Codex Sol.
     // Codex and Claude never applied this cap, so DeepSeek was the only writer
     // held to it.
@@ -1387,7 +1387,7 @@ export async function grokChat(
             meta: openAiMeta(body),
           };
         }
-        // A DeepSeek reply that runs to the output ceiling with thinking off is a
+        // A DeepSeek reply that runs to the output ceiling with low thinking is a
         // repetition loop, not a long answer: the Oct 12 2026 edit-stage call wrote
         // the same "The release does not state ..." note ~370 times (81k characters
         // at 16,384 tokens), while the same request re-run finished in 1,420 tokens.
@@ -1490,10 +1490,11 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  *
  * A validated per-run editor choice wins. `LLM_REASONING_EFFORT` supplies the
  * default when the run did not choose one. Unknown models omit the field;
- * that is the only transport-safe default. DeepSeek v4.1 Flash's UI "Off"
- * is persisted as TownReporter's shared `none` value and sent as the Ollama
- * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
- * field would select provider default and can re-enable thinking.
+ * that is the only transport-safe default. DeepSeek v4.1 Flash is always
+ * forced to `low` and sent as `reasoning_effort: "low"` on Ollama's
+ * OpenAI-compatible path. Qwen models forced to `none` still send the explicit
+ * disable value. Omitting the field would select provider default and can
+ * re-enable thinking.
  */
 /** Output room every stage of a DeepSeek or Local draft call gets at minimum. */
 export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
@@ -1531,11 +1532,10 @@ function reasoningEffortFor(
   const declared = openAiCompatibleModelEfforts(model);
   if (requested) {
     if (declared.includes(requested)) return requested;
-    // DeepSeek v4.1 Flash is always Off (Scott's standing rule). A stray effort
-    // Automatic carried in, such as "medium", becomes Off here; it must not fall
+    // DeepSeek v4.1 Flash is always Low (Scott's standing rule). A stray effort
+    // Automatic carried in, such as "medium", becomes Low here; it must not fall
     // to provider default, where thinking spends the output budget.
-    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(model.trim());
-    return deepSeekFlash && declared.includes("none") ? "none" : undefined;
+    return isDeepSeekFlashModel(model) && declared.includes("low") ? "low" : undefined;
   }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
   if (override && REASONING_EFFORTS.has(override)) {

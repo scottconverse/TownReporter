@@ -130,8 +130,8 @@ describe("model-specific thinking effort", () => {
     assert.equal(defaultModelEffort("local-model"), null);
     assert.equal(
       defaultModelEffort("local-model", "deepseek-v4.1-flash:cloud"),
-      "none",
-      "the picker default must agree with its Off label",
+      "low",
+      "the picker default must agree with its Low label",
     );
     assert.equal(defaultModelEffort("local-model", "qwen3.8-27b"), "none");
     assert.equal(defaultModelEffort("local-model", "qwen3.5:397b-cloud"), "none");
@@ -147,16 +147,16 @@ describe("model-specific thinking effort", () => {
         "custom:11111111-1111-4111-8111-111111111111",
         "deepseek-v4.1-flash:cloud",
       ),
-      "none",
+      "low",
     );
     assert.equal(defaultModelEffort("custom:11111111-1111-4111-8111-111111111111"), null);
     assert.equal(defaultModelEffort("grok-oauth"), null);
-    // Release H decision 1: DeepSeek v4.1 Flash 1017 runs at none even when Max is picked.
-    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "none");
+    // DeepSeek v4.1 Flash 1017 runs at Low even when Max is picked.
+    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "low");
     assert.equal(
       modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"),
-      "none",
-      "an unsupported stale value must fall back to the model's safe Off default",
+      "low",
+      "an unsupported stale value must fall back to the model's safe Low default",
     );
     assert.equal(
       modelEffort("custom:11111111-1111-4111-8111-111111111111", "high", "gemini-2.5-flash"),
@@ -687,15 +687,15 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
   });
 });
 
-describe("DeepSeek v4.1 Flash 1017 runs with effort none, and the receipt says so", () => {
-  it("a local-model run of deepseek-v4.1-flash:cloud with no pick records none", () => {
-    assert.equal(recordedModelEffort("local-model", null, "deepseek-v4.1-flash:cloud"), "none");
-    assert.equal(recordedModelEffort("local-model", undefined, "deepseek-v4.1-flash:cloud"), "none");
+describe("DeepSeek v4.1 Flash 1017 runs with low thinking, and the receipt says so", () => {
+  it("a local-model run of deepseek-v4.1-flash:cloud with no pick records low", () => {
+    assert.equal(recordedModelEffort("local-model", null, "deepseek-v4.1-flash:cloud"), "low");
+    assert.equal(recordedModelEffort("local-model", undefined, "deepseek-v4.1-flash:cloud"), "low");
   });
 
-  it("the picker and Models read the same label for that model: None — fastest", () => {
-    assert.equal(modelEffortLabel("none", "deepseek-v4.1-flash:cloud"), "None — fastest");
-    assert.equal(modelEffortLabel("none", "deepseek-flash"), "None — fastest");
+  it("the picker and Models read the same label for that model: Low — faster", () => {
+    assert.equal(modelEffortLabel("low", "deepseek-v4.1-flash:cloud"), "Low — faster");
+    assert.equal(modelEffortLabel("low", "deepseek-flash"), "Low — faster");
   });
 
   it("Qwen models that default to thinking off keep their own wording", () => {
@@ -709,33 +709,33 @@ describe("Automatic never shows a false Medium (Release H)", () => {
     assert.equal(pickerShownEffort("auto", null, null), null);
   });
 
-  it("a DeepSeek rung reached through Automatic records none even when the editor picked medium", () => {
-    assert.equal(modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"), "none");
+  it("a DeepSeek rung reached through Automatic records low even when the editor picked medium", () => {
+    assert.equal(modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"), "low");
   });
 });
 
 describe("Automatic's effort line names each model, not one Medium (Release H)", () => {
-  it("with no pick it names each model's default and DeepSeek's always-off rule", () => {
+  it("with no pick it names each model's default and DeepSeek's always-low rule", () => {
     const note = automaticEffortNote(null);
     assert.match(note, /each model's own default/);
-    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with low thinking/);
     assert.doesNotMatch(note, /Medium/);
   });
 
   it("with a pick it names the pick and still says DeepSeek ignores it", () => {
     const note = automaticEffortNote("medium");
     assert.match(note, /^Thinking effort: Medium — balanced where a model offers it/);
-    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with low thinking/);
   });
 });
 
-describe("DeepSeek v4.1 Flash always runs with thinking off", () => {
-  // Decision 1 (Release H): a DeepSeek rung runs at "none" even when the
+describe("DeepSeek v4.1 Flash always runs with low thinking", () => {
+  // Scott's Oct 20 2026 rule: a DeepSeek rung runs at "low" even when the
   // editor picked another effort, so the receipt never says otherwise.
-  it("a picked High or Max still runs at none on the DeepSeek rung", () => {
-    assert.equal(modelEffort("deepseek-flash", "high"), "none");
-    assert.equal(modelEffort("deepseek-flash", "max"), "none");
-    assert.equal(modelEffort("deepseek-flash", "medium"), "none");
-    assert.equal(modelEffort("local-model", "high", "deepseek-v4.1-flash:cloud"), "none");
+  it("a picked High or Max still runs at low on the DeepSeek rung", () => {
+    assert.equal(modelEffort("deepseek-flash", "high"), "low");
+    assert.equal(modelEffort("deepseek-flash", "max"), "low");
+    assert.equal(modelEffort("deepseek-flash", "medium"), "low");
+    assert.equal(modelEffort("local-model", "high", "deepseek-v4.1-flash:cloud"), "low");
   });
 });

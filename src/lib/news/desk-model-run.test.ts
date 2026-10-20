@@ -288,8 +288,8 @@ describe("failOverAndRetry", () => {
 
     assert.equal(
       noteWritten,
-      "This draft moved to Local model because DeepSeek v4.1 Flash 1017 sign-in lapsed (DeepSeek v4.1 Flash 1017 ran at effort none)",
-      "DeepSeek v4.1 Flash 1017 runs with thinking off, so the receipt must say none, not the requested medium",
+      "This draft moved to Local model because DeepSeek v4.1 Flash 1017 sign-in lapsed (DeepSeek v4.1 Flash 1017 ran at effort low)",
+      "DeepSeek v4.1 Flash 1017 runs with low thinking, so the receipt must say low, not the requested medium",
     );
   });
 
