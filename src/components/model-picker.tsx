@@ -16,6 +16,7 @@ import {
 } from "@/lib/news/model-choice";
 import {
   automaticEffortNote,
+  defaultModelEffort,
   modelEffortLabel,
   modelEffortsFor,
   pickerShownEffort,
@@ -293,7 +294,7 @@ export function LocalModelSelect({
           }) ||
             `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.`}
           {selectedModel?.cloud
-            ? ` It may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}`
+            ? ` It may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${defaultModelEffort("local-model", selectedModel.id) === "low" ? "TownReporter runs this model with low thinking." : modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}`
             : ""}
           {selectedModel?.vision
             ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it."

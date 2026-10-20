@@ -78,8 +78,9 @@ it("D153 DeepSeek actually spawns full-tool Claude CLI with relay, exact model a
     assert.equal(seen[0].path, "/custom/v1/messages");
     assert.equal(seen[0].authMatches, true);
     assert.equal(seen[0].apiKeyAbsent, true);
-    assert.deepEqual(seen[0].body.thinking, { type: "disabled" });
-    assert.deepEqual(seen[0].body.output_config, { format: "kept" });
+    // D168: the relay asks DeepSeek for LOW thinking.
+    assert.deepEqual(seen[0].body.thinking, { type: "enabled", budget_tokens: 2048 });
+    assert.deepEqual(seen[0].body.output_config, { format: "kept", effort: "low" });
   } finally { await upstream.close(); }
 });
 
@@ -204,12 +205,12 @@ it("D153 relay reuses one listener, isolates concurrent endpoints, streams and e
     assert.equal(await untouched.text(), "unmodified response");
     assert.deepEqual(received.find(item => item.path?.includes("messages")), {
       path: "/custom/v1/messages?beta=true", authMatches: true,
-      body: JSON.stringify({ ...body, thinking: { type: "disabled" }, output_config: { other: true } }),
+      body: JSON.stringify({ ...body, thinking: { type: "enabled", budget_tokens: 2048 }, output_config: { effort: "low", other: true }, max_tokens: 6144 }),
     });
     assert.deepEqual(received.find(item => item.path?.includes("models")), { path: "/other/v1/models?limit=1", body: "unchanged bytes", authMatches: true });
     assert.deepEqual(evidence, [
-      { kind: "messages", thinkingDisabled: true, effortAbsent: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 0, toolResults: 1 },
-      { kind: "tool-use", thinkingDisabled: true, effortAbsent: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 1, toolResults: 1, toolId: "fixture-webfetch-1", toolName: "WebFetch" },
+      { kind: "messages", thinkingLow: true, effortLow: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 0, toolResults: 1 },
+      { kind: "tool-use", thinkingLow: true, effortLow: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 1, toolResults: 1, toolId: "fixture-webfetch-1", toolName: "WebFetch" },
     ]);
     assert.equal(JSON.stringify(evidence).includes("fixture-one"), false);
     // Inbound mismatch is distinct from the outgoing rung credential evidence.
@@ -218,7 +219,7 @@ it("D153 relay reuses one listener, isolates concurrent endpoints, streams and e
     });
     await unkeyed.text();
     assert.deepEqual(evidence.at(-1), {
-      kind: "messages", thinkingDisabled: true, effortAbsent: true,
+      kind: "messages", thinkingLow: true, effortLow: true,
       authMatchesExpected: false, forwardedAuthMatchesExpected: true,
       forwardedAuthorization: "Bearer ollama", toolUses: 0, toolResults: 0,
     });

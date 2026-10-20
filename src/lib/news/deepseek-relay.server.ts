@@ -5,8 +5,9 @@ import type { IncomingHttpHeaders } from "node:http";
 
 export type DeepSeekRelayEvidence = {
   kind: "messages" | "tool-use";
-  thinkingDisabled: boolean;
-  effortAbsent: boolean;
+  /** Thinking is enabled at low effort (Scott, Oct 20 2026, D168). */
+  thinkingLow: boolean;
+  effortLow: boolean;
   authMatchesExpected: boolean;
   forwardedAuthMatchesExpected: boolean;
   forwardedAuthorization?: "Bearer ollama";
@@ -18,6 +19,8 @@ export type DeepSeekRelayEvidence = {
 export type DeepSeekRelayObserver = (evidence: DeepSeekRelayEvidence) => void;
 type Route = { baseUrl: string; token: string; onEvidence?: DeepSeekRelayObserver };
 const routes = new Map<string, Route>();
+/** Thinking budget the relay gives DeepSeek at low effort. */
+const DEEPSEEK_THINKING_BUDGET = 2048;
 let listener: Promise<string> | undefined;
 
 function emit(route: Route, evidence: DeepSeekRelayEvidence) {
@@ -48,16 +51,26 @@ async function startListener(): Promise<string> {
       let evidence: DeepSeekRelayEvidence | undefined;
       if (suffix === "/v1/messages" && req.method === "POST") {
         const payload = JSON.parse(body.toString("utf8"));
-        payload.thinking = { type: "disabled" };
-        if (payload.output_config && typeof payload.output_config === "object") delete payload.output_config.effort;
+        // D168: DeepSeek runs with LOW thinking. Measured Oct 20 2026 on Ollama's
+        // /v1/messages for deepseek-v4.1-flash:1017-cloud: thinking enabled with a
+        // budget plus output_config.effort "low" returns a thinking block, then
+        // the text or proper tool_use blocks.
+        payload.thinking = { type: "enabled", budget_tokens: DEEPSEEK_THINKING_BUDGET };
+        payload.output_config = {
+          ...(payload.output_config && typeof payload.output_config === "object" ? payload.output_config : {}),
+          effort: "low",
+        };
+        if (!(typeof payload.max_tokens === "number" && payload.max_tokens > DEEPSEEK_THINKING_BUDGET)) {
+          payload.max_tokens = DEEPSEEK_THINKING_BUDGET + 4096;
+        }
         const toolResults = Array.isArray(payload.messages)
           ? payload.messages.reduce((count: number, message: { content?: unknown }) => count + (Array.isArray(message.content)
             ? message.content.filter(block => block?.type === "tool_result").length : 0), 0)
           : 0;
         body = Buffer.from(JSON.stringify(payload));
         evidence = {
-          kind: "messages", thinkingDisabled: payload.thinking.type === "disabled",
-          effortAbsent: !Object.hasOwn(payload.output_config ?? {}, "effort"),
+          kind: "messages", thinkingLow: payload.thinking.type === "enabled",
+          effortLow: payload.output_config?.effort === "low",
           authMatchesExpected: req.headers.authorization === `Bearer ${route.token}`,
           forwardedAuthMatchesExpected: false,
           toolUses: 0, toolResults,

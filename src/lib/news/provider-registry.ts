@@ -986,19 +986,25 @@ export function modelEffortsForModel(model: string | undefined | null): readonly
 }
 
 /*
-  DeepSeek V4.1 Flash always runs with thinking off. Every rung that reaches
-  it -- Automatic's first rung, a fallback, or an explicit pick -- gets "none",
-  whatever effort the editor picked. Its Ollama transport distinguishes an
-  explicit Off from an omitted effort, which means provider default. The
-  entry's own declared list is DeepSeek's, so its own model id counts even
-  when no exact model was passed or the server reports another id.
+  Scott, Oct 20 2026 (D168): "Low EVERYWHERE including inside townreporter."
+  DeepSeek V4.1 Flash always runs with LOW thinking. Every rung that reaches
+  it -- Automatic's first rung, a fallback, or an explicit pick -- gets "low",
+  whatever effort the editor picked. (Before D168 it was forced to "none".)
+  The entry's own declared list is DeepSeek's, so its own model id counts even
+  when no exact model was passed or the server reports another id. The Qwen
+  models that default to thinking off are still forced to "none".
 */
-function forcesThinkingOff(id: string | undefined | null, exactModel?: string | null): boolean {
+function forcedEffort(id: string | undefined | null, exactModel?: string | null): ModelEffort | null {
   const entry = providerEntry(id);
-  return (
-    modelEffortsFor(id, exactModel).includes("none") &&
-    (defaultsToThinkingOff(exactModel) || (entry?.efforts?.includes("none") ?? false))
-  );
+  const choices = modelEffortsFor(id, exactModel);
+  if (
+    (isDeepSeekFlashModel(exactModel) || entry?.efforts === DEEPSEEK_V4_1_FLASH_EFFORTS) &&
+    choices.includes("low")
+  ) {
+    return "low";
+  }
+  if (choices.includes("none") && defaultsToThinkingOff(exactModel)) return "none";
+  return null;
 }
 
 export function defaultModelEffort(
@@ -1008,9 +1014,10 @@ export function defaultModelEffort(
   const entry = providerEntry(id);
   const choices = modelEffortsFor(id, exactModel);
   if (!choices.length) return null;
-  if (forcesThinkingOff(id, exactModel)) return "none";
+  const forced = forcedEffort(id, exactModel);
+  if (forced) return forced;
   // Automatic has no single effort: each rung runs at its own default (DeepSeek:
-  // none, Codex/Claude: their provider default). Saying "Medium" here was false,
+  // low, Codex/Claude: their provider default). Saying "Medium" here was false,
   // so Automatic (no registry entry) returns null like any unknown choice.
   if (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli")) {
     return null;
@@ -1021,15 +1028,16 @@ export function defaultModelEffort(
 }
 
 /** The effort a picker shows: the editor's pick when this model offers it,
- * otherwise the model's own default (DeepSeek: None). */
+ * otherwise the model's own default (DeepSeek: Low). */
 export function pickerShownEffort(
   id: string | undefined | null,
   exactModel: string | null | undefined,
   effort: ModelEffort | null | undefined,
   options: readonly ModelEffort[] = modelEffortsFor(id, exactModel),
 ): ModelEffort | null {
-  // DeepSeek always runs at none, so the picker must show none, not the pick.
-  if (forcesThinkingOff(id, exactModel)) return "none";
+  // DeepSeek always runs at low, so the picker must show low, not the pick.
+  const forced = forcedEffort(id, exactModel);
+  if (forced) return forced;
   return effort && options.includes(effort) ? effort : defaultModelEffort(id, exactModel);
 }
 
@@ -1040,12 +1048,12 @@ export function automaticEffortNote(pick: ModelEffort | null | undefined): strin
   const rest = pick
     ? `${modelEffortLabel(pick, null)} where a model offers it`
     : "each model's own default";
-  return `Thinking effort: ${rest} (DeepSeek v4.1 Flash always runs with thinking off)`;
+  return `Thinking effort: ${rest} (DeepSeek v4.1 Flash always runs with low thinking)`;
 }
 
 /** An effort a saved snapshot may still carry. A DeepSeek snapshot saved before
- * its effort was forced to none holds its old pick, which the model still lists:
- * that value is legal, and modelEffort canonicalizes it to none. */
+ * its effort was forced holds its old pick, which the model still lists:
+ * that value is legal, and modelEffort canonicalizes it to low. */
 export function storedEffortIsLegal(
   id: string | undefined | null,
   stored: unknown,
@@ -1071,7 +1079,8 @@ export function modelEffort(
       ? (value as ModelEffort)
       : null;
   }
-  if (forcesThinkingOff(id, exactModel)) return "none";
+  const forced = forcedEffort(id, exactModel);
+  if (forced) return forced;
   const choices = modelEffortsFor(id, exactModel);
   return typeof value === "string" && choices.includes(value as ModelEffort)
     ? (value as ModelEffort)

@@ -1,7 +1,8 @@
-// Guard for Scott's standing rule (Oct 10, repeated): DeepSeek v4.1 Flash 1017 runs
-// with effort NONE (thinking off) everywhere, unless the editor picks another
-// effort on that run. For every job that offers DeepSeek, the resolved effort
-// must be "none" and the Ollama request must carry reasoning_effort "none".
+// Guard for Scott's rule (Oct 20 2026, D168: "Low EVERYWHERE including inside
+// townreporter"; it replaced the Oct 10 "none" rule): DeepSeek v4.1 Flash 1017
+// runs with effort LOW everywhere. For every job that offers DeepSeek, the
+// resolved effort must be "low" and the Ollama request must carry
+// reasoning_effort "low".
 //
 // Known failure until the release/h-deepseek-effort PR merges: the resolver or
 // the request path may still omit the field for some job. A failure here names
@@ -41,7 +42,7 @@ async function withCleanEnv<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-describe("DeepSeek effort is Off by default (Scott's standing rule)", () => {
+describe("DeepSeek effort is Low by default (Scott, Oct 20 2026, D168)", () => {
   it("covers exactly the eight jobs that offer DeepSeek", () => {
     const offered = MODEL_JOB_KEYS.filter((key) => isOfferedForJob(key, "deepseek-flash"));
     assert.deepEqual([...offered].sort(), [...DEEPSEEK_JOBS].sort(),
@@ -49,17 +50,17 @@ describe("DeepSeek effort is Off by default (Scott's standing rule)", () => {
   });
 
   for (const jobKey of DEEPSEEK_JOBS) {
-    it(`${jobKey}: a DeepSeek pick with no explicit effort resolves to none`, () => {
+    it(`${jobKey}: a DeepSeek pick with no explicit effort resolves to low`, () => {
       const resolved = resolveJobModel({
         jobKey,
         explicit: "deepseek-flash",
         exactModel: DEEPSEEK_EXACT_MODEL,
       });
       assert.equal(resolved.providerId, "deepseek-flash");
-      assert.equal(resolved.effort, "none", `${jobKey} resolved DeepSeek effort to ${resolved.effort}`);
+      assert.equal(resolved.effort, "low", `${jobKey} resolved DeepSeek effort to ${resolved.effort}`);
     });
 
-    it(`${jobKey}: the Ollama request turns thinking off`, async () => {
+    it(`${jobKey}: the Ollama request asks for low thinking`, async () => {
       const resolved = resolveJobModel({
         jobKey,
         explicit: "deepseek-flash",
@@ -89,8 +90,8 @@ describe("DeepSeek effort is Off by default (Scott's standing rule)", () => {
       assert.equal(bodies.length, 1);
       assert.equal(
         bodies[0]!.reasoning_effort,
-        "none",
-        `${jobKey}: Ollama body must carry reasoning_effort "none", got ${JSON.stringify(bodies[0]!.reasoning_effort)}`,
+        "low",
+        `${jobKey}: Ollama body must carry reasoning_effort "low", got ${JSON.stringify(bodies[0]!.reasoning_effort)}`,
       );
     });
   }

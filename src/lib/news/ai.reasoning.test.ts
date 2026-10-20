@@ -100,7 +100,7 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
           () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
         ),
     );
-    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal(sentBody?.reasoning_effort, "low");
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.text, "A publishable draft.");
   });

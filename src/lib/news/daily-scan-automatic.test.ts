@@ -151,7 +151,7 @@ describe("daily scan on Automatic", () => {
           });
           // DeepSeek's own effort default is thinking off ("none"), which is
           // the effort the run record shows as resolved.
-          assert.equal(receipt.modelEffort, "none");
+          assert.equal(receipt.modelEffort, "low");
           assert.equal(receipt.switchReason, null);
           assert.equal(receipt.switchNote, null);
         } finally {

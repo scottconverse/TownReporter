@@ -1490,10 +1490,10 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  *
  * A validated per-run editor choice wins. `LLM_REASONING_EFFORT` supplies the
  * default when the run did not choose one. Unknown models omit the field;
- * that is the only transport-safe default. DeepSeek v4.1 Flash's UI "Off"
- * is persisted as TownReporter's shared `none` value and sent as the Ollama
- * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
- * field would select provider default and can re-enable thinking.
+ * that is the only transport-safe default. DeepSeek v4.1 Flash always sends
+ * `reasoning_effort: "low"` (Scott, Oct 20 2026, D168: "Low EVERYWHERE
+ * including inside townreporter"), whatever was requested or set in
+ * LLM_REASONING_EFFORT. Omitting the field would select provider default.
  */
 /** Output room every stage of a DeepSeek or Local draft call gets at minimum. */
 export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
@@ -1529,13 +1529,11 @@ function reasoningEffortFor(
   }
   if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
   const declared = openAiCompatibleModelEfforts(model);
+  // DeepSeek v4.1 Flash always runs at low (D168). A stray effort Automatic
+  // carried in, such as "medium" or an old saved "none", becomes low here.
+  if (isDeepSeekFlashModel(model) && declared.includes("low")) return "low";
   if (requested) {
-    if (declared.includes(requested)) return requested;
-    // DeepSeek v4.1 Flash is always Off (Scott's standing rule). A stray effort
-    // Automatic carried in, such as "medium", becomes Off here; it must not fall
-    // to provider default, where thinking spends the output budget.
-    const deepSeekFlash = /^(?:models\/)?deepseek-v4\.1-flash(?::(?:\d{4}-)?cloud)?$/i.test(model.trim());
-    return deepSeekFlash && declared.includes("none") ? "none" : undefined;
+    return declared.includes(requested) ? requested : undefined;
   }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
   if (override && REASONING_EFFORTS.has(override)) {

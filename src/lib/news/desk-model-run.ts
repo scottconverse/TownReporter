@@ -287,8 +287,8 @@ export async function failOverAndRetry(opts: {
 
   const previousLabel = modelChoiceLabel(job.model_choice);
   // The effort the rung that failed ACTUALLY ran at. The job's requested effort
-  // is not that: DeepSeek v4.1 Flash runs with thinking off whatever the editor
-  // chose, so the note says "none" for it, not the medium the job carried.
+  // is not that: DeepSeek v4.1 Flash runs with low thinking whatever the editor
+  // chose (D168), so the note says "low" for it, not the medium the job carried.
   const failedRungEffort =
     draftInput.modelEffort == null
       ? null
