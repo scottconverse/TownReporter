@@ -1,13 +1,40 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome-utils";
 import { getPublicEvidence } from "@/lib/news/evidence";
+import { parseVersionId } from "@/lib/news/request-input";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 export const Route = createFileRoute("/evidence/$versionId")({
-  loader: ({ params }) => getPublicEvidence({ data: Number(params.versionId) }),
+  loader: ({ params }) => {
+    /*
+      A wrong address is a 404, not a 500. `Number("not-a-number")` is `NaN`,
+      which the server function's `rowId` validator rejected by throwing, so a
+      mistyped citation link answered as a server fault. `notFound()` gives the
+      same answer this app gives any missing page (see `articles.$slug.tsx`).
+      A real id with no visible capture still keeps the page's own "not in this
+      edition" panel below, which is a true statement about a valid id.
+    */
+    const versionId = parseVersionId(params.versionId);
+    if (versionId === null) throw notFound();
+    return getPublicEvidence({ data: versionId });
+  },
+  notFoundComponent: () => (
+    <PaperShell compact>
+      <EmptyState
+        kicker="Evidence"
+        title="That capture is not in this edition"
+        body="The address is not a capture TownReporter has a record of."
+        action={
+          <Link to="/" className={inkGhost}>
+            Back to the paper
+          </Link>
+        }
+      />
+    </PaperShell>
+  ),
   component: EvidencePage,
 });
 

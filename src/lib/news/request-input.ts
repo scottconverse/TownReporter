@@ -795,6 +795,21 @@ export function authBodyTooLarge(contentLength: string | null): boolean {
 /** A row id. Every `id` column here is a 4-byte integer. */
 export const rowId = z.number().int().positive().max(2_147_483_647);
 
+/**
+ * A row id taken from a URL segment, or `null` when the segment is not one.
+ *
+ * `/evidence/not-a-number` used to reach `getPublicEvidence` as `NaN`; the
+ * validator threw and the reader got a 500 for what is simply a wrong address.
+ * The route asks this first and answers `notFound()`, so a mistyped link is
+ * the 404 it looks like. Digits only: `Number("")` is 0, `Number("12abc")` is
+ * `NaN`, and `Number("1e3")` is 1000, none of which should resolve a row.
+ */
+export function parseVersionId(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 /** Dynamic sources unit 8 (D169): the editor's one-click source move. */
 export const sourceMoveInput = z.object({ id: rowId, to: z.enum(["accepted", "trial", "dormant"]) });
 /** A revision or run counter: same column, but 0 is a real value. */
