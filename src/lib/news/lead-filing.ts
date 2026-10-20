@@ -1,5 +1,6 @@
 import { sanitizePublicUrls } from "./schema.ts";
 import { storableText } from "./storable-text.ts";
+import { sourceIdentity } from "./url-guard.ts";
 import { noEventVerdict, standingPageStamp, type LeadEventFields } from "./lead-newsworthiness.ts";
 import type { DupCheckOutcome } from "./dup-check.ts";
 import {
@@ -22,6 +23,55 @@ import {
  */
 export interface SqlTag {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
+}
+
+/** A source the scan read this run: its row id, its own URL, and the pages it
+ * read under it (feed items, linked agenda pages, newsletter issues). */
+export type ScanReadSource = { id: number; url: string; extras?: { url: string }[] };
+
+function urlPath(identity: string): { host: string; path: string } {
+  const slash = identity.indexOf("/");
+  return slash < 0
+    ? { host: identity, path: "" }
+    : { host: identity.slice(0, slash), path: identity.slice(slash).toLowerCase() };
+}
+
+/**
+ * Dynamic sources unit 1 (D169, spec 4b): which source a new lead came from.
+ * The model returns only URLs, so the lead's URLs, in order, are matched to
+ * the sources this run read:
+ *   1. a lead URL that IS a page the scan read for a source (the source's own
+ *      page or a page read under it) -- "the row it was reading";
+ *   2. else the source on the same site whose path is the longest start of
+ *      the lead URL's path (a lead on /local-news/x goes to /local-news);
+ *   3. else any source read on that site, the first one;
+ *   4. else null.
+ * URLs are compared by `sourceIdentity` (host without www, path, no query).
+ */
+export function leadSourceId(leadUrls: readonly string[], read: readonly ScanReadSource[]): number | null {
+  if (!read.length) return null;
+  const ids = leadUrls.map(sourceIdentity).filter((id): id is string => Boolean(id));
+  for (const id of ids) {
+    for (const src of read) {
+      const pages = [src.url, ...(src.extras ?? []).map((extra) => extra.url)];
+      if (pages.some((page) => sourceIdentity(page) === id)) return src.id;
+    }
+  }
+  for (const id of ids) {
+    const lead = urlPath(id);
+    let best: { id: number; length: number } | null = null;
+    for (const src of read) {
+      const identity = sourceIdentity(src.url);
+      if (!identity) continue;
+      const source = urlPath(identity);
+      if (source.host !== lead.host) continue;
+      const prefix = !source.path || lead.path === source.path || lead.path.startsWith(source.path + "/");
+      const length = prefix ? source.path.length : -1;
+      if (!best || length > best.length) best = { id: src.id, length };
+    }
+    if (best) return best.id;
+  }
+  return null;
 }
 
 function parseLeadSourceUrls(raw: string): string[] {
@@ -170,6 +220,12 @@ export async function fileScanLeads(
     (`mergedSameScan`), and every row this call files is appended to it.
   */
   insertedEarlier?: MatchCandidateLead[],
+  /*
+    Dynamic sources unit 1 (D169): the sources this run read. Each NEW lead
+    gets `leads.source_id` from them (`leadSourceId`) and one `produced-lead`
+    observation for that source. Absent: nothing is recorded, as before.
+  */
+  readSources?: readonly ScanReadSource[],
 ): Promise<{
   leadsCreated: number;
   resurfacedKilled: number;
@@ -521,6 +577,14 @@ export async function fileScanLeads(
         returning id, status, headline
       `;
     leadsCreated += 1;
+    const sourceId = readSources ? leadSourceId(candidateUrls, readSources) : null;
+    if (sourceId != null) {
+      await sql`update leads set source_id = ${sourceId} where id = ${inserted[0]!.id}`;
+      await sql`
+        insert into source_observations (newsroom_id, source_id, kind, note, lead_id, scan_run_id, observed_by)
+        values (${newsroomId}, ${sourceId}, 'produced-lead', ${inserted[0]!.headline.slice(0, 200)}, ${inserted[0]!.id}, ${runId}, 'scan')
+      `;
+    }
     const insertedRow: MatchCandidateLead = {
       id: inserted[0]!.id,
       status: inserted[0]!.status,
