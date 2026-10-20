@@ -52,7 +52,7 @@ test("walk 4: Gemini reserves thinking room and exposes Google's output-limit fi
         }),
       },
     );
-    assert.ok(Number(requests[0].max_tokens) >= 16384);
+    assert.ok(Number(requests[0].max_tokens) >= 32768);
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.match(result.error, /Google says:.*output token limit.*finish reason: length/);
@@ -288,7 +288,7 @@ test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking 
         baseUrl: "http://127.0.0.1:11434/v1",
       }),
     });
-    assert.ok(Number(requests[0].max_tokens) >= 16384);
+    assert.ok(Number(requests[0].max_tokens) >= 32768);
     assert.equal(requests[0].reasoning_effort, "none");
   } finally {
     globalThis.fetch = originalFetch;

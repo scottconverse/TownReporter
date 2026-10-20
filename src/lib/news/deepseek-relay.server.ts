@@ -21,6 +21,12 @@ type Route = { baseUrl: string; token: string; onEvidence?: DeepSeekRelayObserve
 const routes = new Map<string, Route>();
 /** Thinking budget the relay gives DeepSeek at low effort. */
 const DEEPSEEK_THINKING_BUDGET = 2048;
+/**
+ * Output ceiling for deepseek-v4.1-flash:1017-cloud: 32,768 (Scott, Oct 20 2026,
+ * DSH standard). Thinking shares it with the answer, so anything smaller cuts
+ * drafts off at low effort. The relay never sends less than this.
+ */
+const DEEPSEEK_OUTPUT_TOKENS = 32_768;
 let listener: Promise<string> | undefined;
 
 function emit(route: Route, evidence: DeepSeekRelayEvidence) {
@@ -60,8 +66,8 @@ async function startListener(): Promise<string> {
           ...(payload.output_config && typeof payload.output_config === "object" ? payload.output_config : {}),
           effort: "low",
         };
-        if (!(typeof payload.max_tokens === "number" && payload.max_tokens > DEEPSEEK_THINKING_BUDGET)) {
-          payload.max_tokens = DEEPSEEK_THINKING_BUDGET + 4096;
+        if (!(typeof payload.max_tokens === "number" && payload.max_tokens >= DEEPSEEK_OUTPUT_TOKENS)) {
+          payload.max_tokens = DEEPSEEK_OUTPUT_TOKENS;
         }
         const toolResults = Array.isArray(payload.messages)
           ? payload.messages.reduce((count: number, message: { content?: unknown }) => count + (Array.isArray(message.content)

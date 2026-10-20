@@ -205,7 +205,7 @@ it("D153 relay reuses one listener, isolates concurrent endpoints, streams and e
     assert.equal(await untouched.text(), "unmodified response");
     assert.deepEqual(received.find(item => item.path?.includes("messages")), {
       path: "/custom/v1/messages?beta=true", authMatches: true,
-      body: JSON.stringify({ ...body, thinking: { type: "enabled", budget_tokens: 2048 }, output_config: { effort: "low", other: true }, max_tokens: 6144 }),
+      body: JSON.stringify({ ...body, thinking: { type: "enabled", budget_tokens: 2048 }, output_config: { effort: "low", other: true }, max_tokens: 32768 }),
     });
     assert.deepEqual(received.find(item => item.path?.includes("models")), { path: "/other/v1/models?limit=1", body: "unchanged bytes", authMatches: true });
     assert.deepEqual(evidence, [

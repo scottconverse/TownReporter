@@ -905,7 +905,12 @@ export async function probeProvider(
  * ceiling, so the answer budget alone would truncate mid-JSON. Give the
  * thinking room and keep a floor, so a 2,200-token draft is not cut off.
  */
-function anthropicCeiling(requested: number): number {
+function anthropicCeiling(requested: number, model?: string): number {
+  // DeepSeek v4.1 Flash: thinking shares `max_tokens` with the answer, and the
+  // configured output ceiling for this model is 32,768 everywhere (Scott,
+  // Oct 20 2026, DSH standard: contextWindow 1,048,576, maxTokens 32,768,
+  // effort low). 16K-class caps are why drafts at low effort were cut off.
+  if (model && isDeepSeekFlashModel(model)) return Math.max(requested, DEEPSEEK_OUTPUT_TOKENS);
   return Math.min(32_000, Math.max(requested * 4, 8_000));
 }
 
@@ -954,7 +959,7 @@ async function anthropicChat(
         signal.throwIfAborted();
         const request = {
           model: cfg.model,
-          max_tokens: anthropicCeiling(maxTokens),
+          max_tokens: anthropicCeiling(maxTokens, cfg.model),
           // Preserve the cached system prompt and model's thinking/effort settings.
           system: [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }],
           thinking: { type: "adaptive" as const },
@@ -1495,8 +1500,15 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * including inside townreporter"), whatever was requested or set in
  * LLM_REASONING_EFFORT. Omitting the field would select provider default.
  */
-/** Output room every stage of a DeepSeek or Local draft call gets at minimum. */
-export const DRAFT_OUTPUT_TOKEN_FLOOR = 16_384;
+/**
+ * Output room every stage of a DeepSeek or Local draft call gets at minimum.
+ * 32,768, not 16,384: DeepSeek v4.1 Flash thinks inside the same `max_tokens`
+ * as its answer, and the configured output ceiling for this model is 32,768
+ * (Scott, Oct 20 2026, DSH standard). The 16K floor from Oct 12 (job 336)
+ * was half that and is why drafts at low effort were cut off.
+ */
+export const DEEPSEEK_OUTPUT_TOKENS = 32_768;
+export const DRAFT_OUTPUT_TOKEN_FLOOR = DEEPSEEK_OUTPUT_TOKENS;
 
 /** Temperature of the one retry after a DeepSeek reply hit the output ceiling. */
 const LOOP_RETRY_TEMPERATURE = 0.7;

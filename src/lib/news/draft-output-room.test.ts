@@ -56,7 +56,7 @@ test("every draft stage on DeepSeek v4.1 Flash 1017 gets the 16,384 floor with t
       maxTokens,
       replies: [{ finish: "stop", content: "{}" }],
     });
-    assert.ok(Number(requests[0].max_tokens) >= 16_384, `stage cap ${maxTokens}`);
+    assert.ok(Number(requests[0].max_tokens) >= 32_768, `stage cap ${maxTokens}`);
     assert.equal(requests[0].reasoning_effort, "none", `stage cap ${maxTokens}`);
   }
 });
@@ -69,7 +69,7 @@ test("every draft stage on the Local model gets the 16,384 floor with thinking o
       maxTokens,
       replies: [{ finish: "stop", content: "{}" }],
     });
-    assert.ok(Number(requests[0].max_tokens) >= 16_384, `stage cap ${maxTokens}`);
+    assert.ok(Number(requests[0].max_tokens) >= 32_768, `stage cap ${maxTokens}`);
     assert.equal(requests[0].reasoning_effort, "none", `stage cap ${maxTokens}`);
   }
 });
@@ -97,7 +97,7 @@ test("a DeepSeek reply that runs to the ceiling is retried once, warmer, and the
   assert.equal(requests.length, 2);
   assert.ok(Number(requests[1].temperature) > Number(requests[0].temperature));
   assert.equal(requests[1].reasoning_effort, "none");
-  assert.ok(Number(requests[1].max_tokens) >= 16_384);
+  assert.ok(Number(requests[1].max_tokens) >= 32_768);
   assert.equal(result.ok, true);
   if (result.ok) assert.match(result.text, /A Line runs every 30 minutes/);
 });
