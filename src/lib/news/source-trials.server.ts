@@ -7,13 +7,22 @@ import { getSql } from "../db.ts";
 import { ingestUrl } from "./ingest.ts";
 import { getPaperPlace } from "./paper-settings.ts";
 import { placeNamesOf, runLightPass } from "./source-trials.ts";
+import { runIntake } from "./source-intake.ts";
 
 export async function tickSourceTrials(): Promise<void> {
   const sql = await getSql();
   const rooms = await sql<{ newsroom_id: number }>`
-    select distinct newsroom_id from sources where status in ('trial', 'dormant') order by newsroom_id`;
+    select distinct newsroom_id from sources where status in ('trial', 'dormant', 'proposed') order by newsroom_id`;
   for (const room of rooms) {
     try {
+      // Unit 7: new suggested sites get their one automatic check first.
+      await runIntake(sql, {
+        newsroomId: room.newsroom_id,
+        read: async (url) => {
+          const page = await ingestUrl(url);
+          return { text: page.text, method: page.method ?? null };
+        },
+      });
       const place = await getPaperPlace(room.newsroom_id);
       await runLightPass(sql, {
         newsroomId: room.newsroom_id,
