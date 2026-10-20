@@ -33,7 +33,7 @@ it("a new suggested site with dated items goes on trial; others stay suggestions
     if (url === "https://thin.example.test/") return { text: "Welcome to our site." };
     throw new Error(`unexpected read ${url}`);
   };
-  const checked = await runIntake(sql, { newsroomId: room, read });
+  const checked = await runIntake(sql, { newsroomId: room, placeNames: [], read });
   assert.deepEqual(checked.sort(), ["club.example.test", "thin.example.test"]);
 
   const rows = await sql<{ id: number; url: string; status: string; review_note: string | null }>`
@@ -54,7 +54,7 @@ it("a new suggested site with dated items goes on trial; others stay suggestions
   assert.equal(moved!.kind, "promoted");
 
   // A checked site is not checked again.
-  assert.deepEqual(await runIntake(sql, { newsroomId: room, read }), []);
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames: [], read }), []);
 });
 
 it("a suggestion on a website the paper already has is attached to that source and counted there (5f)", async () => {
@@ -72,7 +72,7 @@ it("a suggestion on a website the paper already has is attached to that source a
     throw new Error(`unexpected read ${url}`);
   };
 
-  assert.deepEqual(await runIntake(sql, { newsroomId: room, read }), []);
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames: [], read }), []);
   const rows = await sql<{ id: number; status: string; review_note: string | null; proposed_count: number }>`
     select id, status, review_note, proposed_count from sources where newsroom_id = ${room} order by id`;
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -82,7 +82,7 @@ it("a suggestion on a website the paper already has is attached to that source a
   assert.equal(byId.get(two)!.review_note, `Same website as source ${paper}.`);
 
   // Written once: a second round leaves the note alone and still counts both.
-  await runIntake(sql, { newsroomId: room, read });
+  await runIntake(sql, { newsroomId: room, placeNames: [], read });
   const again = await sql<{ id: number; review_note: string | null; proposed_count: number }>`
     select id, review_note, proposed_count from sources where newsroom_id = ${room} order by id`;
   assert.equal(again.find((r) => r.id === paper)!.proposed_count, 2);
@@ -105,13 +105,13 @@ it("a new suggestion on a dormant source's website puts it back on trial (5b)", 
   };
 
   // An old, already reviewed suggestion does not wake it.
-  await runIntake(sql, { newsroomId: room, read });
+  await runIntake(sql, { newsroomId: room, placeNames: [], read });
   const [before] = await sql<{ status: string }>`select status from sources where id = ${dormant}`;
   assert.equal(before!.status, "dormant");
 
   // A NEW suggestion on the same website does.
   await add("https://quiet.example.test/new-story", "proposed");
-  await runIntake(sql, { newsroomId: room, read });
+  await runIntake(sql, { newsroomId: room, placeNames: [], read });
   const [after] = await sql<{ status: string; proposed_count: number }>`
     select status, proposed_count from sources where id = ${dormant}`;
   assert.equal(after!.status, "trial");
@@ -120,4 +120,65 @@ it("a new suggestion on a dormant source's website puts it back on trial (5b)", 
     select kind, note from source_observations where source_id = ${dormant} order by id desc limit 1`;
   assert.equal(moved!.kind, "promoted");
   assert.equal(moved!.note, "A new link on its website was suggested. Trial started again.");
+});
+
+it("a suggested website that never names the paper's place stays a suggestion (D176)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9574;
+  await sql`insert into newsrooms(id,name) values(${room},'Intake home-area fixture')`;
+  const add = async (url: string, status: string) =>
+    (await sql<{ id: number }>`insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+      values('intake-user',${room},${url},${url},'page','C',${status}) returning id`)[0]!.id;
+  const away = await add("https://www.nyc.gov/news/budget-hearing", "proposed");
+  const home = await add("https://www.longmontcolorado.gov/news/library-open", "proposed");
+  const placeNames = ["Longmont", "Boulder County"];
+
+  const read = async (url: string) => {
+    if (url === "https://www.nyc.gov/")
+      return { text: "Budget hearing Oct. 2. Council meets Oct. 9. Parade Oct. 14. Vote Oct. 21. Fair Oct. 28." };
+    if (url === "https://www.longmontcolorado.gov/")
+      return { text: "Longmont: library open Oct. 2. Council meets Oct. 9. Parade Oct. 14. Vote Oct. 21. Fair Oct. 28." };
+    throw new Error(`unexpected read ${url}`);
+  };
+  assert.deepEqual((await runIntake(sql, { newsroomId: room, placeNames, read })).sort(), [
+    "longmontcolorado.gov",
+    "nyc.gov",
+  ]);
+
+  const rows = await sql<{ id: number; url: string; status: string; review_note: string | null }>`
+    select id, url, status, review_note from sources where newsroom_id = ${room} order by id`;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(rows.find((r) => r.url === "https://www.nyc.gov/"), undefined);
+  assert.equal(byId.get(away)!.status, "proposed");
+  assert.match(byId.get(away)!.review_note!, /not tried, because the page does not name Longmont or Boulder County/);
+  const [observation] = await sql<{ kind: string; note: string; observed_by: string }>`
+    select kind, note, observed_by from source_observations where source_id = ${away}`;
+  assert.equal(observation!.kind, "not-local");
+  assert.equal(observation!.note, byId.get(away)!.review_note);
+  assert.equal(observation!.observed_by, "trial-pass");
+
+  const trial = rows.find((r) => r.url === "https://www.longmontcolorado.gov/")!;
+  assert.equal(trial.status, "trial");
+  assert.equal(byId.get(home)!.review_note, `Its site is on trial as source ${trial.id}.`);
+});
+
+it("with no place set, a dated far-away website still goes on trial (D176)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9575;
+  await sql`insert into newsrooms(id,name) values(${room},'Intake no-place fixture')`;
+  const [suggestion] = await sql<{ id: number }>`
+    insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+    values('intake-user',${room},'https://www.nyc.gov/news/budget-hearing','nyc','page','C','proposed') returning id`;
+  const read = async () => ({
+    text: "Budget hearing Oct. 2. Council meets Oct. 9. Parade Oct. 14. Vote Oct. 21. Fair Oct. 28.",
+  });
+
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames: [], read }), ["nyc.gov"]);
+  const [trial] = await sql<{ id: number; status: string }>`
+    select id, status from sources where newsroom_id = ${room} and url = 'https://www.nyc.gov/'`;
+  assert.equal(trial!.status, "trial");
+  const [note] = await sql<{ review_note: string }>`select review_note from sources where id = ${suggestion!.id}`;
+  assert.equal(note!.review_note, `Its site is on trial as source ${trial!.id}.`);
 });

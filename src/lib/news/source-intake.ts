@@ -11,7 +11,8 @@
  *     a feed, otherwise the site's front page (a suggestion is usually one
  *     article, and an article never changes, so a trial of it would always fail);
  *   - it passes when the read works and the page is a feed or shows 3 or more
- *     dates;
+ *     dates, and (D176) names the paper's city or county when the paper has a
+ *     place set — a far-away website never gets a trial;
  *   - pass: a trial source for that page starts (unit 6 then keeps or drops it);
  *   - fail: the suggestions stay suggestions, with a note saying why.
  *
@@ -19,7 +20,7 @@
  * deleted, and the editor can still accept or reject any suggestion by hand.
  */
 import type { SqlTag } from "./lead-filing.ts";
-import { moveSource } from "./source-trials.ts";
+import { moveSource, namesPlace, note } from "./source-trials.ts";
 
 export const INTAKE_PER_TICK = 3;
 export const MIN_DATED_ITEMS = 3;
@@ -112,9 +113,9 @@ export async function proposalsBySite(sql: SqlTag, newsroomId: number): Promise<
 /** One intake round for one newsroom. Returns the sites it checked. */
 export async function runIntake(
   sql: SqlTag,
-  input: { newsroomId: number; read: IntakeReader },
+  input: { newsroomId: number; placeNames: readonly string[]; read: IntakeReader },
 ): Promise<string[]> {
-  const { newsroomId, read } = input;
+  const { newsroomId, placeNames, read } = input;
   const all = await sql<{ id: number; user_id: string; url: string; status: string; reviewed_at: unknown }>`
     select id, user_id, url, status, reviewed_at from sources where newsroom_id = ${newsroomId} order by id`;
   const known = new Set<string>();
@@ -175,10 +176,12 @@ export async function runIntake(
     const proposals = bySite.get(site)!;
     const first = proposals[0]!;
     const target = pageToTry(first.url);
+    let text = "";
     let verdict: { ok: boolean; why: string };
     try {
       const page = await read(target);
-      verdict = page.text?.trim() ? looksLikeListing(page.text, page.method) : { ok: false, why: "the page had no readable text" };
+      text = page.text ?? "";
+      verdict = text.trim() ? looksLikeListing(text, page.method) : { ok: false, why: "the page had no readable text" };
     } catch (error) {
       verdict = { ok: false, why: `it could not be read (${(error instanceof Error ? error.message : "fetch failed").slice(0, 120)})` };
     }
@@ -187,6 +190,16 @@ export async function runIntake(
       await sql`update sources set reviewed_at = now(),
         review_note = ${`Automatic check of ${target}: not tried, because ${verdict.why}. Still a suggestion.`}
         where newsroom_id = ${newsroomId} and id = any(${ids})`;
+      continue;
+    }
+    // D176: a website that never names the paper's city or county is not the
+    // paper's neighbourhood news, so it stays a suggestion.
+    if (placeNames.length > 0 && !namesPlace(text, placeNames)) {
+      const why = `the page does not name ${placeNames.join(" or ")}`;
+      const reason = `Automatic check of ${target}: not tried, because ${why}. Still a suggestion.`;
+      await sql`update sources set reviewed_at = now(), review_note = ${reason}
+        where newsroom_id = ${newsroomId} and id = any(${ids})`;
+      await note(sql, newsroomId, first.id, "not-local", reason);
       continue;
     }
     const why = `Suggested site checked on its own: ${verdict.why}. Trial started on ${target}.`;
