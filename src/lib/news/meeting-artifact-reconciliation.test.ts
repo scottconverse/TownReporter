@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
@@ -74,6 +74,54 @@ test("reconciliation verifies rows and quarantines unowned files without deletin
     assert.ok(temporary?.quarantinePath && existsSync(temporary.quarantinePath));
     assert.equal(readFileSync(orphan!.quarantinePath!, "utf8"), "orphan");
     assert.equal(readFileSync(temporary!.quarantinePath!, "utf8"), "partial");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a recorded hash mismatch is not re-hashed or rewritten until the file changes", async () => {
+  const { reconcileMeetingArtifactStorage } = await import("./meeting-artifact-reconciliation.ts");
+  const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-reconcile-mismatch-"));
+  try {
+    const videoDir = join(root, "newsroom-7", "video-1");
+    mkdirSync(videoDir, { recursive: true });
+    const mismatchPath = join(videoDir, `transcript-${hash("expected")}.vtt`);
+    writeFileSync(mismatchPath, "different");
+    const recordedCheck = "2026-10-20T15:58:34.000Z";
+    const beforeCheck = new Date("2026-10-19T12:00:00.000Z");
+    const afterCheck = new Date("2026-10-21T09:00:00.000Z");
+    utimesSync(mismatchPath, beforeCheck, beforeCheck);
+
+    const row = {
+      id: 51, artifact_type: "transcript", is_legacy: false, newsroom_id: 7,
+      storage_path: mismatchPath, sha256: hash("expected"), info_path: null, info_sha256: null,
+      info_missing_reason: null, integrity_status: "hash-mismatch",
+      integrity_detail: "Recorded transcript hash does not match the stored bytes.",
+      integrity_checked_at: recordedCheck,
+    };
+    const updates: Array<{ id: number; checked: boolean }> = [];
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+      if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
+      if (/from meeting_transcript_artifacts/i.test(text) && /^\s*select/i.test(text)) return [row] as T[];
+      if (/update meeting_transcript_artifacts/i.test(text)) {
+        updates.push({ id: Number(params[0]), checked: true });
+        return [] as T[];
+      }
+      if (/insert into meeting_artifact_storage_findings/i.test(text)) return [] as T[];
+      throw new Error(`unexpected query: ${text}`);
+    };
+
+    const first = await reconcileMeetingArtifactStorage(sql, 7, { orphanGraceMs: 0 });
+    const second = await reconcileMeetingArtifactStorage(sql, 7, { orphanGraceMs: 0 });
+    assert.equal(first.mismatched, 1, "the recorded mismatch is still reported");
+    assert.equal(second.mismatched, 1);
+    assert.deepEqual(updates, [], "an unchanged file must not be re-hashed or rewritten");
+
+    utimesSync(mismatchPath, afterCheck, afterCheck);
+    const third = await reconcileMeetingArtifactStorage(sql, 7, { orphanGraceMs: 0 });
+    assert.equal(third.mismatched, 1);
+    assert.deepEqual(updates, [{ id: 51, checked: true }], "a file touched after the check is checked again");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
