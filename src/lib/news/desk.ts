@@ -21,7 +21,7 @@ import {
 } from "./source-seeds.server.ts";
 import { selectCustomScanSources, selectedScanSources } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
-import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
+import { buildScanBatches, mergeScanBatchResults, scanHeadlineKey } from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
@@ -233,7 +233,7 @@ import {
   scanDecisionsSentence,
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
-import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
+import { addScanFilingCounts, emptyScanFilingCounts, fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
   collectDupPairs,
   runDupCheck,
@@ -1781,6 +1781,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     modelBatchesFailed: 0,
     failedSources: "[]",
   };
+  // D162: leads a manual scan has already filed batch by batch. A run that fails
+  // or is cancelled later still says how many of its leads are on the Queue.
+  let leadsFiledEarly = 0;
   let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
   try {
     const recordTools = jobToolRecorder(await getSql(), job);
@@ -2618,6 +2621,185 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const batchResults: import("./schema.ts").ParsedScanResult[] = [];
     let batchesFailed = 0;
     let lastBatchError: string | null = null;
+
+    /*
+    The leads this scan may match against.
+
+    `fileScanLeads` has always read this itself, inside the commit transaction.
+    U28 hoists it out for the same reason `getPaperPlace` above is read out
+    here: the duplicate check has to identify its borderline pairs BEFORE the
+    commit, and a model call inside `commitResults` would hold that transaction
+    open for as long as the model takes. On the dev desk's single PGlite
+    connection that is not a slow query, it is the whole desk.
+  */
+    const readExistingLeads = async (): Promise<MatchCandidateLead[]> => {
+      const existingLeadsRaw = await sql<{
+        id: number;
+        status: string;
+        headline: string;
+        topic: string | null;
+        source_urls: string;
+        created_at: string;
+        why: string | null;
+        evidence: string | null;
+      }>`
+        select id, status, headline, source_urls, created_at, why, evidence, topic
+        from leads
+        where newsroom_id = ${owned(context)}
+          and status <> 'published'
+          and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
+      `;
+      return existingLeadsRaw.map((l) => ({
+        id: l.id,
+        status: l.status,
+        headline: l.headline,
+        topic: l.topic,
+        source_urls: parseLeadSourceUrls(l.source_urls),
+        created_at: l.created_at,
+        // Unit AK item 2: the killed lead's own words, so a strong match that
+        // brings new facts can be filed against it instead of discarded.
+        why: l.why,
+        evidence: l.evidence,
+      }));
+    };
+
+    /*
+    U28 (2026-09-30): the owner's "double check. worth it."
+
+    For the pairs the word rules can only rate BORDERLINE -- the matcher's
+    "possible" tier, and a "Looks already printed" chip candidate -- the desk
+    asks its own model one short question, batched: are these the same news
+    story? See ./dup-check.ts for what that decides (a chip, and only a chip)
+    and what it deliberately does not. D162: a manual scan asks it once per
+    batch it files; a scheduled scan still asks once, before its one commit.
+
+    The duplicate check uses the scan's current pinned provider, reasoning
+    effort and local model snapshot. A separate lead-scoring assignment cannot
+    override the editor's pick. Technical scan failovers are already recorded
+    on the job, so the check follows that same effective runtime.
+
+    A failure here is never fatal and never moves a chip on its own: the
+    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
+    trace is a log line -- the operator asked for no noise about it.
+  */
+    const checkScanDuplicates = async (
+      candidates: import("./schema.ts").ParsedScanResult["leads"],
+      existing: MatchCandidateLead[],
+    ): Promise<DupCheckOutcome | null> => {
+      let outcome: DupCheckOutcome | null = null;
+      try {
+        await throwIfJobCancelled(job.id);
+        /* A scan that found nothing has no pairs and no reason to read the
+         * published list -- the check costs one query and one model call per scan
+         * THAT NEEDS ONE, and not one query per scheduled scan. */
+        const printed = candidates.length > 0 ? await queryDupCheckPrinted(context) : [];
+        const collected = collectDupPairs({
+          candidates,
+          existing,
+          printed,
+          place: scanPlace,
+        });
+        if (collected.pairs.length > 0) {
+          /*
+            `scheduledCommit` is this function's own test for "am I the scheduled
+            lane" (it is what the commit below branches on), and the scheduled
+            lane's job row carries the exact choice its forced runtime is pinned
+            to (daily-scan.server.ts queues it with `model.modelChoice`), so
+            passing it back to that same runtime is a no-op rather than a
+            re-resolution.
+          */
+          const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
+          outcome = await runDupCheck({
+            pairs: collected.pairs,
+            skipped: collected.skipped,
+            chat: scanDuplicateChat({
+              modelChoice: job.model_choice,
+              reasoningEffort: effortFromJob(job),
+              newsroomId: job.newsroom_id,
+              localModel: scanLocalModel,
+              timeoutMs: dupTimeoutMs,
+            }, runChat),
+          });
+        }
+      } catch (error) {
+        if (error instanceof JobCancelledError) throw error;
+        // A check that could not run must not be able to change an answer: the
+        // word rule stands, exactly as it did before this unit (see dup-check.ts).
+        console.error("[scan] duplicate check could not run", error);
+      }
+      if (outcome?.failure) console.error(`[scan] run ${runId}: ${outcome.failure}`);
+      return outcome;
+    };
+
+    /*
+    D162 (Scott, Oct 19 2026: "why don't you update the queue live while it's
+    searching"): a MANUAL scan files each batch's leads as soon as the model has
+    read that batch, in its own short transaction, so they show on the Queue
+    while the scan is still running. Same rules as the one commit at the end:
+    the same-headline drop `mergeScanBatchResults` applies, `fileScanLeads`'
+    same-scan merge (through `filedThisScan`), the existing-lead match and the
+    duplicate check. A scheduled scan is unchanged: everything it writes is held
+    for its one commit with the daily reservation.
+
+    If a batch's filing fails, its leads wait for the final commit instead, so a
+    failed early write never loses a lead. Leads already filed stay filed if the
+    scan is cancelled or fails later; the receipt counts them.
+  */
+    const fileAsRead = !deps.scheduledCommit;
+    const filedThisScan: MatchCandidateLead[] = [];
+    const headlinesFiledThisScan = new Set<string>();
+    let existingForEarlyFiling: MatchCandidateLead[] | null = null;
+    let earlyFiling = emptyScanFilingCounts();
+    const leadsLeftForCommit: import("./schema.ts").ParsedScanResult["leads"] = [];
+    const fileBatchLeads = async (leads: import("./schema.ts").ParsedScanResult["leads"]) => {
+      const fresh = leads.filter((lead) => {
+        const key = scanHeadlineKey(lead.headline);
+        if (!key || headlinesFiledThisScan.has(key)) return false;
+        headlinesFiledThisScan.add(key);
+        return true;
+      });
+      if (!fresh.length) return;
+      const filedBefore = filedThisScan.length;
+      try {
+        existingForEarlyFiling ??= await readExistingLeads();
+        const existing = existingForEarlyFiling;
+        const batchDupCheck = await checkScanDuplicates(fresh, existing);
+        const filed = await withTransaction(async (writeSql) => {
+          if (!(await lockManualScanClaim(writeSql, job)))
+            throw new Error("Scan job claim was superseded; refusing stale result writes.");
+          const openRun = await writeSql<{ id: number }>`
+            select id from scan_runs
+            where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+            for update
+          `;
+          if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
+          const counts = await fileScanLeads(
+            writeSql,
+            context,
+            owned(context),
+            runId,
+            fresh,
+            existing,
+            scanPlace,
+            batchDupCheck,
+            filedThisScan,
+          );
+          await refreshManualScanClaim(writeSql, job);
+          return counts;
+        });
+        earlyFiling = addScanFilingCounts(earlyFiling, filed);
+        leadsFiledEarly = earlyFiling.leadsCreated;
+      } catch (error) {
+        if (error instanceof JobCancelledError) throw error;
+        // The transaction rolled back: forget the rows it pushed into the
+        // in-memory lists and re-read the leads next time, then let the final
+        // commit file these.
+        filedThisScan.splice(filedBefore);
+        existingForEarlyFiling = null;
+        leadsLeftForCommit.push(...fresh);
+        console.error(`[scan] run ${runId}: a batch's leads could not be filed early; they wait for the final commit`, error);
+      }
+    };
     /*
     The second countable pass. `buildScanBatches` has already split the fetched
     text into bounded batches, so the model phase knows exactly how many calls
@@ -2723,6 +2905,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (messageId) analyzedNewsletterIds.add(messageId);
     }
     failureReceipt.sourcesAnalyzed += batch.sources.length;
+    if (fileAsRead) await fileBatchLeads(parsed.leads);
     // The row moves phase: from "reading sources — k of n" to "reading the
     // pages with a model", which is what the editor watching the history sees.
     await writeLiveRunRow(true);
@@ -2733,7 +2916,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       update scan_runs
       set finished_at = now(),
           sources_fetched = ${fetchedCount},
-          leads_created = 0,
+          -- D162: leads a manual scan filed before it failed are on the Queue.
+          leads_created = ${leadsFiledEarly},
           sources_proposed = 0,
           sources_selected = ${sources.length},
           sources_attempted = ${failureReceipt.sourcesAttempted},
@@ -2878,111 +3062,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       : batchesFailed > 0
         ? `${batchesFailed} of ${batches.length} analysis batches failed; the rest were kept.`
         : "",
-    leads: merged.leads,
+    // D162: a manual scan already filed its leads batch by batch; only the ones
+    // whose early filing failed are left for this commit.
+    leads: fileAsRead ? leadsLeftForCommit : merged.leads,
     proposed_sources: merged.proposed_sources,
     parseError: null,
   };
     const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
 
-    /*
-    The leads this scan may match against.
-
-    `fileScanLeads` has always read this itself, inside the commit transaction.
-    U28 hoists it out for the same reason `getPaperPlace` above is read out
-    here: the duplicate check has to identify its borderline pairs BEFORE the
-    commit, and a model call inside `commitResults` would hold that transaction
-    open for as long as the model takes. On the dev desk's single PGlite
-    connection that is not a slow query, it is the whole desk.
-  */
-    const existingLeadsRaw = await sql<{
-    id: number;
-    status: string;
-    headline: string;
-    topic: string | null;
-    source_urls: string;
-    created_at: string;
-    why: string | null;
-    evidence: string | null;
-  }>`
-    select id, status, headline, source_urls, created_at, why, evidence, topic
-    from leads
-    where newsroom_id = ${owned(context)}
-      and status <> 'published'
-      and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
-  `;
-    const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
-    id: l.id,
-    status: l.status,
-    headline: l.headline,
-    topic: l.topic,
-    source_urls: parseLeadSourceUrls(l.source_urls),
-    created_at: l.created_at,
-    // Unit AK item 2: the killed lead's own words, so a strong match that
-    // brings new facts can be filed against it instead of discarded.
-    why: l.why,
-    evidence: l.evidence,
-  }));
-
-    /*
-    U28 (2026-09-30): the owner's "double check. worth it."
-
-    For the pairs the word rules can only rate BORDERLINE -- the matcher's
-    "possible" tier, and a "Looks already printed" chip candidate -- the desk
-    asks its own model one short question, once for the whole scan, batched:
-    are these the same news story? See ./dup-check.ts for what that decides
-    (a chip, and only a chip) and what it deliberately does not.
-
-    The duplicate check uses the scan's current pinned provider, reasoning
-    effort and local model snapshot. A separate lead-scoring assignment cannot
-    override the editor's pick. Technical scan failovers are already recorded
-    on the job, so the check follows that same effective runtime.
-
-    A failure here is never fatal and never moves a chip on its own: the
-    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
-    trace is a log line -- the operator asked for no noise about it.
-  */
-    let dupCheck: DupCheckOutcome | null = null;
-    try {
-    await throwIfJobCancelled(job.id);
-    /* A scan that found nothing has no pairs and no reason to read the
-     * published list -- the check costs one query and one model call per scan
-     * THAT NEEDS ONE, and not one query per scheduled scan. */
-    const printed = data.leads.length > 0 ? await queryDupCheckPrinted(context) : [];
-    const collected = collectDupPairs({
-      candidates: data.leads,
-      existing: existingLeads,
-      printed,
-      place: scanPlace,
-    });
-    if (collected.pairs.length > 0) {
-      /*
-        `scheduledCommit` is this function's own test for "am I the scheduled
-        lane" (it is what the commit below branches on), and the scheduled
-        lane's job row carries the exact choice its forced runtime is pinned
-        to (daily-scan.server.ts queues it with `model.modelChoice`), so
-        passing it back to that same runtime is a no-op rather than a
-        re-resolution.
-      */
-      const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
-      dupCheck = await runDupCheck({
-        pairs: collected.pairs,
-        skipped: collected.skipped,
-        chat: scanDuplicateChat({
-          modelChoice: job.model_choice,
-          reasoningEffort: effortFromJob(job),
-          newsroomId: job.newsroom_id,
-          localModel: scanLocalModel,
-          timeoutMs: dupTimeoutMs,
-        }, runChat),
-      });
-    }
-  } catch (error) {
-    if (error instanceof JobCancelledError) throw error;
-    // A check that could not run must not be able to change an answer: the
-    // word rule stands, exactly as it did before this unit (see dup-check.ts).
-    console.error("[scan] duplicate check could not run", error);
-  }
-    if (dupCheck?.failure) console.error(`[scan] run ${runId}: ${dupCheck.failure}`);
+    // The leads this scan may match against, and the duplicate check on what
+    // this commit files (see readExistingLeads and checkScanDuplicates above).
+    const existingLeads = await readExistingLeads();
+    const dupCheck = await checkScanDuplicates(data.leads, existingLeads);
 
     const commitResults = async (writeSql: Sql) => {
     if (!deps.scheduledCommit && !(await lockManualScanClaim(writeSql, job)))
@@ -3049,15 +3140,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       standingPageDropped,
       noEventDropped,
       firstDroppedReason,
-    } = await fileScanLeads(
-      writeSql,
-      context,
-      owned(context),
-      runId,
-      data.leads,
-      existingLeads,
-      scanPlace,
-      dupCheck,
+    } = addScanFilingCounts(
+      // D162: what a manual scan already filed batch by batch, plus this commit.
+      // A scheduled scan files nothing early, so its tally starts empty.
+      earlyFiling,
+      await fileScanLeads(
+        writeSql,
+        context,
+        owned(context),
+        runId,
+        data.leads,
+        existingLeads,
+        scanPlace,
+        dupCheck,
+        fileAsRead ? filedThisScan : undefined,
+      ),
     );
 
     await markNewsletterDocsScanned(writeSql, owned(context), [...analyzedNewsletterIds]);
@@ -3240,7 +3337,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   } catch (error) {
     const failure = postgresText(error instanceof Error ? error.message : String(error));
     const cancelledSummary = error instanceof JobCancelledError
-      ? `Cancelled after ${failureReceipt.sourcesCompleted} of ${failureReceipt.sourcesSelected} sources`
+      ? `Cancelled after ${failureReceipt.sourcesCompleted} of ${failureReceipt.sourcesSelected} sources${
+          leadsFiledEarly > 0 ? `; ${leadsFiledEarly} lead${leadsFiledEarly === 1 ? "" : "s"} filed before it stopped stay on the Queue` : ""
+        }`
       : null;
     {
       try {
@@ -3257,6 +3356,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
                 model_batches_used = ${failureReceipt.modelBatchesUsed},
                 model_batches_failed = ${failureReceipt.modelBatchesFailed},
                 failed_sources = ${failureReceipt.failedSources},
+                -- D162: a manual scan's early-filed leads stay, so the receipt counts them.
+                leads_created = case when ${leadsFiledEarly}::int > 0 then ${leadsFiledEarly}::int else leads_created end,
                 meetings_found = ${meetingAwareness?.found.length ?? 0},
                 meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
                 meetings_failed = ${meetingAwareness?.failed.length ?? 0},

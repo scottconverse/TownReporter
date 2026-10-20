@@ -697,7 +697,26 @@ function QueuePage() {
         ? previousData
         : undefined;
     },
+    /*
+      D162 (Scott, Oct 19 2026: "why don't you update the queue live while it's
+      searching"): a manual scan now files each batch's leads as soon as it is
+      read, so while a scan is open the list asks again every 5 seconds and the
+      new leads appear. With no scan open there is no extra polling.
+    */
+    refetchInterval: scanJob ? 5_000 : false,
   });
+  /*
+    D162: the scan's last leads are filed at its very end, after the last 5-second
+    tick may already have run. When the open scan goes away, ask once more.
+  */
+  const openScanId = scanJob?.id ?? null;
+  const lastOpenScanId = useRef<number | null>(null);
+  useEffect(() => {
+    if (lastOpenScanId.current !== null && openScanId === null) {
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+    }
+    lastOpenScanId.current = openScanId;
+  }, [openScanId, qc]);
   const { isPending, isError, error, refetch, isRefetching } = leadsQuery;
   /*
     The rows on the screen (`leads`) and how many the tab actually holds

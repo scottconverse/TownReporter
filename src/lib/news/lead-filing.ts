@@ -162,6 +162,14 @@ export async function fileScanLeads(
   existing: MatchCandidateLead[],
   place?: NewsroomPlace | null,
   dupCheck?: DupCheckOutcome | null,
+  /*
+    Scott, Oct 19 2026 (D162): a manual scan files each batch's leads as soon as
+    that batch is read, so this function runs once per batch. `insertedEarlier`
+    is the list of rows the SAME scan filed in earlier calls; a candidate is
+    merged into one of them exactly as it is merged into a row this call filed
+    (`mergedSameScan`), and every row this call files is appended to it.
+  */
+  insertedEarlier?: MatchCandidateLead[],
 ): Promise<{
   leadsCreated: number;
   resurfacedKilled: number;
@@ -317,7 +325,7 @@ export async function fileScanLeads(
       continue;
     }
 
-    const sibling = insertedThisRun.find((prior) =>
+    const sibling = [...(insertedEarlier ?? []), ...insertedThisRun].find((prior) =>
       sameStoryForMerge({ headline, source_urls: candidateUrls, topic }, prior, place),
     );
     if (sibling) {
@@ -527,6 +535,7 @@ export async function fileScanLeads(
     };
     existing.push(insertedRow);
     insertedThisRun.push(insertedRow);
+    insertedEarlier?.push(insertedRow);
   }
 
   return {
@@ -544,6 +553,48 @@ export async function fileScanLeads(
     // FC18: the rows this call inserted, in order -- the only set a "filed as
     // new" example may be drawn from.
     filedHeadlines: insertedThisRun.map((row) => row.headline),
+  };
+}
+
+export type ScanFilingCounts = Awaited<ReturnType<typeof fileScanLeads>>;
+
+/** The empty tally a scan starts from before its first batch is filed. */
+export function emptyScanFilingCounts(): ScanFilingCounts {
+  return {
+    leadsCreated: 0,
+    resurfacedKilled: 0,
+    resurfacedOpen: 0,
+    possibleMatched: 0,
+    developingFiled: 0,
+    mergedSameScan: 0,
+    dupCheckCleared: 0,
+    firstDiscardedHeadline: undefined,
+    standingPageDropped: 0,
+    noEventDropped: 0,
+    firstDroppedReason: undefined,
+    filedHeadlines: [],
+  };
+}
+
+/**
+ * D162: one scan's filing done in several calls (one per batch, then the final
+ * commit) adds up to the receipt one call would have written. Counts are summed,
+ * the "first" headlines keep the earliest, and filed headlines keep filing order.
+ */
+export function addScanFilingCounts(a: ScanFilingCounts, b: ScanFilingCounts): ScanFilingCounts {
+  return {
+    leadsCreated: a.leadsCreated + b.leadsCreated,
+    resurfacedKilled: a.resurfacedKilled + b.resurfacedKilled,
+    resurfacedOpen: a.resurfacedOpen + b.resurfacedOpen,
+    possibleMatched: a.possibleMatched + b.possibleMatched,
+    developingFiled: a.developingFiled + b.developingFiled,
+    mergedSameScan: a.mergedSameScan + b.mergedSameScan,
+    dupCheckCleared: a.dupCheckCleared + b.dupCheckCleared,
+    firstDiscardedHeadline: a.firstDiscardedHeadline ?? b.firstDiscardedHeadline,
+    standingPageDropped: a.standingPageDropped + b.standingPageDropped,
+    noEventDropped: a.noEventDropped + b.noEventDropped,
+    firstDroppedReason: a.firstDroppedReason ?? b.firstDroppedReason,
+    filedHeadlines: [...a.filedHeadlines, ...b.filedHeadlines],
   };
 }
 
