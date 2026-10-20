@@ -214,6 +214,9 @@ function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean
 }
 
 /** Shared full-tool argv for chat and OCR; no allow-list or MCP suppression. */
+/** DeepSeek v4.1 Flash context window, the CLI's `CLAUDE_CODE_MAX_CONTEXT_TOKENS`. */
+export const DEEPSEEK_CONTEXT_WINDOW = 1_048_576;
+
 export function buildClaudeCodeArgs(input: {
   model: string;
   reasoningEffort?: ModelEffort | null;
@@ -367,6 +370,14 @@ export async function claudeCodeChat(opts: {
       ANTHROPIC_SMALL_FAST_MODEL: opts.model,
       CLAUDE_CODE_SUBAGENT_MODEL: opts.model,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      // The CLI does not recognize the DeepSeek model name, so it assumes a
+      // 200,000-token window and auto-compacts against it. Measured Oct 20 2026
+      // (Claude Code 2.1.296): a one-line prompt already sends ~183,000 input
+      // tokens (the system prompt plus every configured MCP server's tools), so
+      // the first tool result overflowed the assumed window and the draft died
+      // with "Autocompact is thrashing". DeepSeek v4.1 Flash's real window is
+      // 1,048,576 (Scott's DSH standard); telling the CLI so ends the thrash.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(DEEPSEEK_CONTEXT_WINDOW),
     });
   }
 

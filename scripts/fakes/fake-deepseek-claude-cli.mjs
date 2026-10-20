@@ -23,6 +23,7 @@ const result = {
   apiKeyEmpty: env.ANTHROPIC_API_KEY === "",
   modelsPinned: modelKeys.every(key => env[key] === model),
   nonessentialDisabled: env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === "1",
+  contextWindow: env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
   hasDeepSeekDefaults: modelKeys.slice(1).some(key => key in env),
   relayStatus,
 };

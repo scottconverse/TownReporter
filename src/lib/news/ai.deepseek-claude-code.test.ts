@@ -61,6 +61,8 @@ it("D153 DeepSeek actually spawns full-tool Claude CLI with relay, exact model a
       assert.equal(child.authMatchesExpected, true);
       assert.equal(child.apiKeyEmpty, true);
       assert.equal(child.nonessentialDisabled, true);
+      // The CLI assumes 200,000 for a name it does not know; DeepSeek has 1,048,576.
+      assert.equal(child.contextWindow, "1048576");
       assert.equal(child.system, researchSystem("Research facts", true));
       assert.equal(child.user, "Unchanged " + RESEARCH_GUIDANCE);
       assert.equal(child.relayStatus, 200);
