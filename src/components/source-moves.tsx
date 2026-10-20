@@ -7,9 +7,12 @@ import { getSourceScores, moveSourceByEditor } from "@/lib/news/desk";
 import {
   STATUS_WORDS,
   buttonWord,
+  moreLinksWords,
   movesFrom,
   sortOn,
   sortSourceRowList,
+  sortSuggestedSites,
+  viewForFilter,
   DEFAULT_SORT,
   type SourceFilter,
   type SourceSort,
@@ -145,16 +148,20 @@ export function SourceMovesPanel({
   });
   if (isPending) return <p className="py-3">Loading the source list…</p>;
   if (error || !data) return <p className="py-3" role="alert">The source list could not be loaded.</p>;
-  const { counts, moves, rows } = data;
+  const { counts, moves, rows, suggestedSites } = data;
+  const view = viewForFilter(filter);
   const shown = sortSourceRowList(rows, sort, filter);
+  const sites = sortSuggestedSites(suggestedSites);
 
   /*
     The strip is the filter (spec 6b). Each count is a press that narrows the
-    table to that status; "Show all" clears it. The suggested count is a link
-    rather than a filter because suggested sites are NOT in this table -- they
-    are the review queue on /desk/sources, one tab away.
+    view to that status; "Show all" clears it. The suggested count is a press
+    too: it swaps the ranked table for the by-website list of suggestions
+    (one row per website), with a link inside that list to the flat queue on
+    /desk/sources. Suggested sites are not rows of the ranked table, so the
+    press changes the view rather than filtering rows.
   */
-  const stripButton = (status: To, label: string, count: number) => {
+  const stripButton = (status: SourceFilter, label: string, count: number) => {
     const on = filter === status;
     return (
       <button
@@ -179,9 +186,7 @@ export function SourceMovesPanel({
         {stripButton("accepted", "read by the scan", counts.accepted)}
         {stripButton("trial", "on trial", counts.trial)}
         {stripButton("dormant", "dormant", counts.dormant)}
-        <Link to="/desk/sources" search={{ tab: "proposed" }} className="underline decoration-dotted">
-          <strong>{counts.suggestedSites}</strong> suggested sites
-        </Link>
+        {stripButton("suggested", "suggested sites", counts.suggestedSites)}
         {filter ? (
           <button type="button" className="underline" onClick={() => onFilter?.(null)}>
             Show all
@@ -189,9 +194,11 @@ export function SourceMovesPanel({
         ) : null}
       </div>
       <p className="pb-3" aria-live="polite">
-        {filter
-          ? `Showing ${shown.length} ${STATUS_WORDS[filter].toLowerCase()}.`
-          : `Showing all ${shown.length} sources the scan reads, tries or checks monthly.`}
+        {filter === "suggested"
+          ? `Showing ${sites.length} ${sites.length === 1 ? "website" : "websites"} with suggested links.`
+          : filter
+            ? `Showing ${shown.length} ${STATUS_WORDS[filter].toLowerCase()}.`
+            : `Showing all ${shown.length} sources the scan reads, tries or checks monthly.`}
       </p>
 
       <h3 className="pt-4 pb-2 font-bold">What the system did</h3>
@@ -221,6 +228,48 @@ export function SourceMovesPanel({
         </ul>
       )}
 
+      {view === "suggested-sites" ? (
+        <>
+          <h3 className="pt-4 pb-2 font-bold">Suggested sites, one row per website</h3>
+          <div className="overflow-x-auto pb-4">
+            <table className="suggested-sites w-full border-collapse">
+              <thead>
+                <tr className="border-b border-ink text-left">
+                  <th scope="col" className="p-2">Site</th>
+                  <th scope="col" className="p-2">Suggested links</th>
+                  <th scope="col" className="p-2">First suggested link</th>
+                  <th scope="col" className="p-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sites.length === 0 ? (
+                  <tr>
+                    <td className="p-2" colSpan={4}>No suggested sites are waiting.</td>
+                  </tr>
+                ) : null}
+                {sites.map((site) => (
+                  <tr key={site.site} className="border-b border-rule align-top">
+                    <td className="p-2">{site.site}</td>
+                    <td className="p-2">{site.count}</td>
+                    <td className="p-2">
+                      <a href={site.firstUrl} target="_blank" rel="noreferrer" className="underline">
+                        {site.firstUrl}
+                      </a>
+                    </td>
+                    <td className="p-2">{site.note ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="pb-6">
+            <Link to="/desk/sources" search={{ tab: "proposed" }} className="underline">
+              See every suggested link
+            </Link>
+          </p>
+        </>
+      ) : (
+        <>
       <h3 className="pt-4 pb-2 font-bold">Every source, by news score (last 90 days)</h3>
       <div className="overflow-x-auto pb-6">
         <table className="source-scores w-full border-collapse">
@@ -285,6 +334,9 @@ export function SourceMovesPanel({
                   >
                     {row.title || row.url}
                   </Link>
+                  {moreLinksWords(row.proposedCount) ? (
+                    <div className="pt-1">{moreLinksWords(row.proposedCount)}</div>
+                  ) : null}
                 </td>
                 <td className="p-2" data-label="Status">
                   <span className={"astra-chip " + (row.status === "trial" ? "wait" : "same")}>
@@ -319,6 +371,8 @@ export function SourceMovesPanel({
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </section>
   );
 }

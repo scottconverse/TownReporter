@@ -55,8 +55,43 @@ export function movesFrom(status: string): To[] {
   return (["accepted", "trial", "dormant"] as To[]).filter((to) => to !== status);
 }
 
-/** The filter the counts strip puts on the table. Null is every row. */
-export type SourceFilter = To | null;
+/**
+ * The filter the counts strip puts on the table. Null is every row.
+ *
+ * "suggested" is not a `sources.status` on this table -- suggested sites are
+ * proposed sources waiting for a look, and the panel shows them one row per
+ * website rather than in the ranked table. It lives in the same filter because
+ * it is the same strip: one press in force at a time, "Show all" clears it.
+ */
+export type SourceFilter = To | "suggested" | null;
+
+/** Which list the panel draws for a strip press. */
+export type SourceView = "table" | "suggested-sites";
+
+export function viewForFilter(filter: SourceFilter): SourceView {
+  return filter === "suggested" ? "suggested-sites" : "table";
+}
+
+/**
+ * Spec 5f: the suggested sites, biggest count first -- the website with the
+ * most waiting links is the one worth opening first. Equal counts read by name
+ * so the list does not shuffle between loads.
+ */
+export function sortSuggestedSites<T extends { site: string; count: number }>(
+  sites: readonly T[],
+): T[] {
+  return [...sites].sort((a, b) => b.count - a.count || a.site.localeCompare(b.site));
+}
+
+/**
+ * The line under a source's name when other links on the same website are
+ * waiting to be looked at (spec 6a). Null when there are none, so the caller
+ * draws nothing rather than "0 more links".
+ */
+export function moreLinksWords(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1 ? "1 more link on this site" : `${count} more links on this site`;
+}
 
 export type SourceSortKey =
   | "source"
@@ -155,7 +190,8 @@ export function sortSourceRowList<T extends SortableSourceRow>(
   sort: SourceSort,
   filter: SourceFilter = null,
 ): T[] {
-  const kept = filter ? rows.filter((row) => row.status === filter) : [...rows];
+  const kept =
+    filter && filter !== "suggested" ? rows.filter((row) => row.status === filter) : [...rows];
   const sign = sort.direction === "asc" ? 1 : -1;
   return kept.sort((a, b) => {
     const left = sortValue(a, sort.key);

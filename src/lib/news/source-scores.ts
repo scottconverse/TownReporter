@@ -45,6 +45,10 @@ export type SourceScoreRow = {
   intervalMinutes: number | null;
   trialReads: number;
   dormantReason: string | null;
+  /** Other links on the same website waiting as suggestions (spec 6a: "N more
+   *  links on this site"). Written by the intake on the website's owning
+   *  source. Zero when none are waiting. */
+  proposedCount: number;
   /** Spec 6a "Last observation": the newest `source_observations` row for this
    *  source -- what the desk last saw (changed, quiet, blocked, promoted ...)
    *  and when. Null for a source nothing has been recorded about yet. */
@@ -76,7 +80,7 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
     limit 40`;
   const rows = await sql<Record<string, unknown>>`
     select s.id, s.title, s.url, s.status, s.kind, s.tier, s.next_due_at, s.rhythm, s.interval_minutes,
-      s.trial_reads, s.dormant_reason,
+      s.trial_reads, s.dormant_reason, s.proposed_count,
       coalesce(y.reads_90, 0) as reads_90, coalesce(y.leads_90, 0) as leads_90,
       coalesce(y.published_90, 0) as published_90, y.leads_per_read, y.published_per_read,
       coalesce(y.bad_source_kills_90, 0) as bad_source_kills_90, y.last_lead_at,
@@ -119,6 +123,7 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
     intervalMinutes: r.interval_minutes == null ? null : Number(r.interval_minutes),
     trialReads: Number(r.trial_reads ?? 0),
     dormantReason: (r.dormant_reason as string | null) ?? null,
+    proposedCount: Number(r.proposed_count ?? 0),
     lastObservationKind: (r.last_observation_kind as string | null) ?? null,
     lastObservationAt: iso(r.last_observation_at),
   }));

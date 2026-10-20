@@ -49,6 +49,23 @@ it("counts each status, lists the latest moves with who made them, and sorts by 
   assert.equal(byId.get(high)!.lastObservationAt, null);
 });
 
+it("every row carries how many other links on its site are waiting (6a, proposed_count)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9583;
+  await sql`insert into newsrooms(id,name) values(${room},'Waiting links fixture')`;
+  const add = async (url: string, proposed: number) =>
+    (await sql<{ id: number }>`insert into sources(user_id,newsroom_id,url,title,kind,tier,status,proposed_count)
+      values('scores-user',${room},${url},${url},'page','C','accepted',${proposed}) returning id`)[0]!.id;
+  const busy = await add("https://busy.example.test/", 7);
+  const plain = await add("https://plain.example.test/", 0);
+
+  const data = await loadSourceScores(sql, room);
+  const byId = new Map(data.rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(busy)!.proposedCount, 7);
+  assert.equal(byId.get(plain)!.proposedCount, 0);
+});
+
 it("suggestions come back one row per website, biggest first, on suggestedSites (5f)", async () => {
   await applyMigrationsToTestPglite();
   const sql = await getSql();

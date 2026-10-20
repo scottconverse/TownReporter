@@ -15,10 +15,13 @@ import {
   buttonWord,
   DEFAULT_SORT,
   minutesBetweenReads,
+  moreLinksWords,
   movesFrom,
   sortOn,
   sortSourceRowList,
+  sortSuggestedSites,
   STATUS_WORDS,
+  viewForFilter,
   type SortableSourceRow,
 } from "./source-table.ts";
 
@@ -130,6 +133,40 @@ test("every press on a source has its own words, and every one is reversible", (
   assert.equal(STATUS_WORDS.dormant, "Dormant (checked once a month)");
   assert.equal(STATUS_WORDS.rejected, "Rejected");
   assert.equal(STATUS_WORDS.proposed, "Suggested");
+});
+
+test("suggested sites are one row per website, biggest count first (5f)", () => {
+  const sites = [
+    { site: "three.example.test", count: 1 },
+    { site: "two.example.test", count: 4 },
+    { site: "one.example.test", count: 4 },
+    { site: "aaa.example.test", count: 4 },
+  ];
+  assert.deepEqual(
+    sortSuggestedSites(sites).map((s) => [s.site, s.count]),
+    [
+      ["aaa.example.test", 4],
+      ["one.example.test", 4],
+      ["two.example.test", 4],
+      ["three.example.test", 1],
+    ],
+  );
+  // The input is left alone: the panel sorts a copy of the query result.
+  assert.equal(sites[0]!.site, "three.example.test");
+});
+
+test("the suggested count is a press that shows the by-website list, and Show all clears it", () => {
+  assert.equal(viewForFilter("suggested"), "suggested-sites");
+  assert.equal(viewForFilter("trial"), "table");
+  assert.equal(viewForFilter("accepted"), "table");
+  assert.equal(viewForFilter("dormant"), "table");
+  assert.equal(viewForFilter(null), "table");
+});
+
+test("a source says how many other links on its site are waiting, and says nothing at zero", () => {
+  assert.equal(moreLinksWords(0), null);
+  assert.equal(moreLinksWords(1), "1 more link on this site");
+  assert.equal(moreLinksWords(12), "12 more links on this site");
 });
 
 test("how often reads the detected rhythm before the interval", () => {
