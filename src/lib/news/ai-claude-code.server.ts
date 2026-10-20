@@ -213,15 +213,27 @@ function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean
   }
 }
 
-/** Shared full-tool argv for chat and OCR; no allow-list or MCP suppression. */
 /** DeepSeek v4.1 Flash context window, the CLI's `CLAUDE_CODE_MAX_CONTEXT_TOKENS`. */
 export const DEEPSEEK_CONTEXT_WINDOW = 1_048_576;
 
+/**
+ * The DeepSeek child loads no MCP servers (Scott, Oct 20 2026, D174). The user-scope
+ * MCP servers' tool lists are ~165,000 tokens on every turn (measured: turn one
+ * 182,414 input tokens with them, 16,825 without). No desk prompt uses an MCP
+ * tool. Built-in tools (Read, Bash, WebFetch, WebSearch and the rest) stay.
+ */
+export const DEEPSEEK_NO_MCP_ARGS = ["--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: {} })];
+
+/**
+ * Shared full-tool argv for chat and OCR; no allow-list. MCP servers stay loaded
+ * for Claude children; the DeepSeek child is the one exception (D174).
+ */
 export function buildClaudeCodeArgs(input: {
   model: string;
   reasoningEffort?: ModelEffort | null;
   system?: string;
   systemPromptFile?: string;
+  deepSeek?: boolean;
 }): string[] {
   return [
     "-p",
@@ -244,6 +256,7 @@ export function buildClaudeCodeArgs(input: {
     "--model", input.model,
     ...(input.reasoningEffort ? ["--effort", input.reasoningEffort] : []),
     "--output-format", "json",
+    ...(input.deepSeek ? DEEPSEEK_NO_MCP_ARGS : []),
   ];
 }
 
@@ -349,6 +362,7 @@ export async function claudeCodeChat(opts: {
     reasoningEffort: opts.deepSeek ? undefined : opts.reasoningEffort,
     system: usingFile ? undefined : opts.system,
     systemPromptFile,
+    deepSeek: Boolean(opts.deepSeek),
   });
 
   const relay = opts.deepSeek

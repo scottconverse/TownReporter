@@ -63,6 +63,9 @@ it("D153 DeepSeek actually spawns full-tool Claude CLI with relay, exact model a
       assert.equal(child.nonessentialDisabled, true);
       // The CLI assumes 200,000 for a name it does not know; DeepSeek has 1,048,576.
       assert.equal(child.contextWindow, "1048576");
+      // D174: no MCP servers for the DeepSeek child (~165,000 tokens of tool text per turn).
+      assert.ok(child.args.includes("--strict-mcp-config"));
+      assert.equal(child.args[child.args.indexOf("--mcp-config") + 1], '{"mcpServers":{}}');
       assert.equal(child.system, researchSystem("Research facts", true));
       assert.equal(child.user, "Unchanged " + RESEARCH_GUIDANCE);
       assert.equal(child.relayStatus, 200);

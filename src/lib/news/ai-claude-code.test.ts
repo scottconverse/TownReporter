@@ -19,6 +19,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
 
 // Bug 21a: Opinion WebFetch could exfiltrate private pasted material in a URL or prompt.
+// Claude children keep every tool and MCP server. The DeepSeek child is the one
+// exception: it loads no MCP servers (D174), checked in ai.deepseek-claude-code.test.ts.
 it("Opinion retains full tools despite a legacy allow-list", async () => {
   const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_TOOLS: "1" });
   resetClaudeCliCache();
