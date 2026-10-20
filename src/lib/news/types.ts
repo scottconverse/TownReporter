@@ -62,6 +62,15 @@ export type SourceRow = {
   purpose_preference?: "watch" | "reference" | "unknown" | null;
   scan_cadence?: "daily" | "weekly" | "monthly" | "as-needed" | null;
   scan_deadline?: string | null;
+  /*
+    Dynamic sources (spec 4a, 6c): the row a status = 'trial' or 'dormant'
+    carries. `trial_reads` out of the trial's six; `dormant_reason` is the note
+    the move wrote. Optional -- a reader that selects only the watch-list
+    columns has no answer rather than a wrong one.
+  */
+  trial_reads?: number | null;
+  trial_started_at?: string | null;
+  dormant_reason?: string | null;
 };
 
 export type LeadRow = {

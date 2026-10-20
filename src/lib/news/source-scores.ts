@@ -43,6 +43,11 @@ export type SourceScoreRow = {
   intervalMinutes: number | null;
   trialReads: number;
   dormantReason: string | null;
+  /** Spec 6a "Last observation": the newest `source_observations` row for this
+   *  source -- what the desk last saw (changed, quiet, blocked, promoted ...)
+   *  and when. Null for a source nothing has been recorded about yet. */
+  lastObservationKind: string | null;
+  lastObservationAt: string | null;
 };
 
 function iso(value: unknown): string | null {
@@ -72,8 +77,21 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
       s.trial_reads, s.dormant_reason,
       coalesce(y.reads_90, 0) as reads_90, coalesce(y.leads_90, 0) as leads_90,
       coalesce(y.published_90, 0) as published_90, y.leads_per_read, y.published_per_read,
-      coalesce(y.bad_source_kills_90, 0) as bad_source_kills_90, y.last_lead_at
-    from sources s left join source_yield y on y.source_id = s.id
+      coalesce(y.bad_source_kills_90, 0) as bad_source_kills_90, y.last_lead_at,
+      last_observation.kind as last_observation_kind,
+      last_observation.created_at as last_observation_at
+    from sources s
+    left join source_yield y on y.source_id = s.id
+    -- Spec 6a "Last observation": the newest thing the desk recorded about
+    -- this source. The same table every read already writes (changed, quiet,
+    -- retrieval-error, extraction-failure, promoted, demoted ...), read for
+    -- the latest row only rather than recomputed here.
+    left join lateral (
+      select o.kind, o.created_at from source_observations o
+      where o.newsroom_id = ${newsroomId} and o.source_id = s.id
+      order by o.created_at desc, o.id desc
+      limit 1
+    ) last_observation on true
     where s.newsroom_id = ${newsroomId} and s.status in ('accepted', 'trial', 'dormant')
     order by s.id`;
   const scored: SourceScoreRow[] = rows.map((r) => ({
@@ -99,6 +117,8 @@ export async function loadSourceScores(sql: SqlTag, newsroomId: number) {
     intervalMinutes: r.interval_minutes == null ? null : Number(r.interval_minutes),
     trialReads: Number(r.trial_reads ?? 0),
     dormantReason: (r.dormant_reason as string | null) ?? null,
+    lastObservationKind: (r.last_observation_kind as string | null) ?? null,
+    lastObservationAt: iso(r.last_observation_at),
   }));
   scored.sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity) || b.leads90 - a.leads90 || a.id - b.id);
   return {

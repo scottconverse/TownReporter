@@ -34,4 +34,16 @@ it("counts each status, lists the latest moves with who made them, and sorts by 
   );
   assert.deepEqual(data.rows.map((r) => r.id), [high, low, trial]);
   assert.equal(data.rows[2]!.score, null);
+  /*
+    Spec 6a's "Last observation" column: the newest `source_observations` row
+    for that source, kind and date. The trial source was moved twice, so its
+    newest observation is the editor's move "up" into trial; a source nothing
+    has been recorded about reads as null -- "nothing recorded yet", not a
+    made-up word.
+  */
+  const byId = new Map(data.rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(trial)!.lastObservationKind, "promoted");
+  assert.ok(byId.get(trial)!.lastObservationAt);
+  assert.equal(byId.get(high)!.lastObservationKind, null);
+  assert.equal(byId.get(high)!.lastObservationAt, null);
 });
