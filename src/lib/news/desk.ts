@@ -62,6 +62,7 @@ import {
   recordObservation,
   type ObservationKind,
 } from "./source-observations.server.ts";
+import { applyReadCadence } from "./source-cadence.ts";
 import { checkRate, recordDeskRun, audit } from "./ops";
 import { auditOverrides, checkOverride, type OverrideWarning } from "./override.ts";
 import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
@@ -2054,6 +2055,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         },
         sql,
       );
+      // Dynamic sources unit 4 (D169): a changed or quiet read moves the
+      // source's interval, rhythm and next due time.
+      await applyReadCadence(sql, { newsroomId: owned(context), sourceId, kind });
     } catch {
       /* the touch stands whatever happens to the observation */
     }
@@ -2118,6 +2122,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           },
           writeSql,
         );
+        await applyReadCadence(writeSql, { newsroomId: owned(context), sourceId: obs.sourceId, kind: obs.input.kind });
       } catch {
         /* the touch stands whatever happens to the observation */
       }
