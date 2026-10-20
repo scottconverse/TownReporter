@@ -14,6 +14,9 @@ type ArtifactRow = {
   info_path: string | null;
   info_sha256: string | null;
   info_missing_reason: string | null;
+  integrity_status: string | null;
+  integrity_detail: string | null;
+  integrity_checked_at: string | Date | null;
 };
 
 type IntegrityStatus =
@@ -99,10 +102,10 @@ export async function reconcileMeetingArtifactStorage(
   const storageRoot = resolveMeetingStorageRoot(roots[0]?.storage_root ?? null);
   const newsroomRoot = join(storageRoot, `newsroom-${newsroomId}`);
   const artifacts = await sql.query<ArtifactRow>(
-    `select id,'transcript' as artifact_type,false as is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason
+    `select id,'transcript' as artifact_type,false as is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason,integrity_status,integrity_detail,integrity_checked_at
        from meeting_transcript_artifacts where newsroom_id=$1 and artifact_type='transcript'
      union all
-     select id,'audio' as artifact_type,is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason
+     select id,'audio' as artifact_type,is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason,integrity_status,integrity_detail,integrity_checked_at
        from meeting_audio_artifact_inventory where newsroom_id=$1
      order by id`,
     [newsroomId],
@@ -122,7 +125,23 @@ export async function reconcileMeetingArtifactStorage(
     let status: IntegrityStatus = "valid";
     let detail = artifact.info_missing_reason ?? "Caption and optional sidecar match their immutable recorded hashes.";
     const owners = pathOwners.get(resolve(artifact.storage_path)) ?? [];
-    if (owners.length > 1) {
+    /*
+      A row already marked `hash-mismatch` is not hashed or rewritten again
+      while its file is unchanged. The first check's time is the evidence that
+      the mismatch was found once, at a known moment; rewriting it on every
+      boot would erase that and re-read bytes known to be wrong. A file touched
+      after the recorded check is a different question and is checked again.
+    */
+    const alreadyMismatched =
+      artifact.integrity_status === "hash-mismatch" &&
+      artifact.integrity_checked_at != null &&
+      existsSync(artifact.storage_path) &&
+      statSync(artifact.storage_path).mtimeMs <= new Date(artifact.integrity_checked_at).getTime();
+    if (alreadyMismatched) {
+      status = "hash-mismatch";
+      detail = artifact.integrity_detail ?? detail;
+      totals.mismatched += 1;
+    } else if (owners.length > 1) {
       status = "ambiguous-path";
       detail = `Storage path is referenced by artifact rows ${owners.join(", ")}.`;
       totals.ambiguous += 1;
@@ -153,18 +172,20 @@ export async function reconcileMeetingArtifactStorage(
     } else {
       totals.valid += 1;
     }
-    if (artifact.artifact_type === "audio" && !artifact.is_legacy) {
-      await sql.query(
-        "update meeting_audio_captures set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
-        [artifact.id, status, detail],
-      );
-    } else {
-      await sql.query(
-        "update meeting_transcript_artifacts set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
-        [artifact.id, status, detail],
-      );
+    if (!alreadyMismatched) {
+      if (artifact.artifact_type === "audio" && !artifact.is_legacy) {
+        await sql.query(
+          "update meeting_audio_captures set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
+          [artifact.id, status, detail],
+        );
+      } else {
+        await sql.query(
+          "update meeting_transcript_artifacts set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
+          [artifact.id, status, detail],
+        );
+      }
     }
-    if (status !== "valid") {
+    if (status !== "valid" && !alreadyMismatched) {
       await recordFinding(sql, {
         newsroomId,
         artifactId: artifact.artifact_type === "audio" && !artifact.is_legacy ? null : artifact.id,
