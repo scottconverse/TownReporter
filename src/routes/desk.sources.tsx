@@ -1,12 +1,13 @@
 import { dailyScanCounts } from "@/lib/desk/daily-scan-counts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useDeferredValue, useMemo, useRef, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { SourceNewsletter } from "@/components/source-newsletter";
+import { MoveButtons } from "@/components/source-moves";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
@@ -18,7 +19,7 @@ import {
 } from "@/lib/news/desk";
 import { checkOneSource, runScan, saveSourceScanPreference } from "@/components/scoped-actions";
 import { findReplacement } from "@/lib/news/editor-dialog-actions";
-import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
+import { PAGE_SIZE, WINDOW_MAX, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import { myDesk } from "@/lib/news/claim";
 import { getDailyScanPolicy } from "@/lib/news/daily-scan";
@@ -38,6 +39,7 @@ import {
   SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS,
 } from "@/lib/news/desk-copy";
 import { keepsFailing } from "@/lib/news/source-rows";
+import { STATUS_WORDS } from "@/lib/news/source-table";
 import { candidateIsWatchedSource } from "@/lib/news/source-replacements";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -58,11 +60,23 @@ export const Route = createFileRoute("/desk/sources")({
   */
   validateSearch: (
     search: Record<string, unknown>,
-  ): { tab?: "accepted" | "proposed" | "rejected" } => ({
+  ): { tab?: "accepted" | "proposed" | "rejected"; source?: number } => ({
     tab:
       search.tab === "accepted" || search.tab === "proposed" || search.tab === "rejected"
         ? search.tab
         : undefined,
+    /*
+      `?source=<id>` is the ranked table's row click (spec 6a: "row click opens
+      the existing source panel on /desk/sources"). One source's row on this
+      screen IS its panel -- the chip, the preference editor, the newsletter
+      and the row's own actions -- so this opens the tab that holds the row,
+      brings it into the window and marks it. A hand-typed non-number is
+      dropped rather than trusted.
+    */
+    source: (() => {
+      const id = Number(search.source);
+      return Number.isInteger(id) && id > 0 ? id : undefined;
+    })(),
   }),
   component: SourcesPage,
 });
@@ -91,7 +105,13 @@ function SourcesPage() {
     pills and "Files up to" both promise the size of the list.
   */
   const [sourceQuery, setSourceQuery] = useState("");
-  const [sourcesShown, setSourcesShown] = useState(PAGE_SIZE);
+  /*
+    `?source=<id>` opens one row, and a row below the window would not be on
+    the page at all -- so a targeted visit asks for the whole filtered list
+    once rather than 25 rows that cannot contain it. Every other visit keeps
+    the window.
+  */
+  const [sourcesShown, setSourcesShown] = useState(search.source ? WINDOW_MAX : PAGE_SIZE);
   const deferredSourceQuery = useDeferredValue(sourceQuery);
   const {
     data: sourcesPage,
@@ -120,6 +140,24 @@ function SourcesPage() {
     the kill-pattern count on every render.
   */
   const sources = useMemo(() => sourcesPage?.rows ?? [], [sourcesPage]);
+  /*
+    Spec 6a's row click lands here. The row's tab is decided by its status, the
+    window is already open (`sourcesShown` above), and the row is scrolled to
+    and tinted with the same `just-added` tint the add dialog uses so the
+    editor's eye lands on the source they pressed.
+  */
+  useEffect(() => {
+    if (!search.source) return;
+    const row = sources.find((source) => source.id === search.source);
+    if (!row) return;
+    const tab =
+      row.status === "proposed" ? "proposed" : row.status === "rejected" ? "rejected" : "accepted";
+    if (sourceTab !== tab) {
+      setSourceTab(tab);
+      return;
+    }
+    document.getElementById(`source-${row.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [search.source, sources, sourceTab]);
   const sourcesTotal = sourcesPage?.total ?? 0;
   const counts = sourcesPage?.counts;
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -700,6 +738,8 @@ function SourcesPage() {
                 <WatchRows
                   rows={rows}
                       justAddedSince={addedFloor}
+                      targetId={search.source ?? null}
+                      onMoved={() => void refetchSources()}
                       killCounts={killCounts}
                   checkingId={checkOne.isPending ? (checkOne.variables ?? null) : null}
                   statusId={statusId}
@@ -1410,6 +1450,7 @@ function hostLabel(url: string): string {
 function WatchRows({
   rows,
   justAddedSince,
+  targetId,
   killCounts,
   checkingId,
   statusId,
@@ -1418,10 +1459,16 @@ function WatchRows({
   checkResult,
   onCheck,
   onStatus,
+  onMoved,
 }: {
   rows: SourceRow[];
   /** The watch list's high-water mark when the add dialog last reported a save. */
   justAddedSince?: number | null;
+  /** Refetch the list after a trial / dormant move (spec 6c). */
+  onMoved: () => void;
+  /** The row `?source=` opened from the inventory table (spec 6a), tinted so
+   *  the editor's eye lands on the source they pressed. */
+  targetId?: number | null;
   /**
    * The rows with a kill pattern, from `badSourceKillsBySource`. A row absent
    * from the map has no kill from it and mounts no panel.
@@ -1486,7 +1533,21 @@ function WatchRows({
         */
         const waiting = s.retry_after_note ?? null;
         const blocked = waiting != null && s.blocked_at != null;
-        const chip = paused
+        /*
+          Dynamic sources (spec 6c): a source on trial or gone dormant is on
+          this list now, and its chip says the same words the inventory table
+          uses -- "On trial" / "Dormant (checked once a month)". Those two are
+          STATES, so they win over the read-outcome words below: "No change"
+          on a row the scan is not reading would describe a check that is not
+          happening.
+        */
+        const statusChip =
+          s.status === "trial"
+            ? { cls: "wait", label: STATUS_WORDS.trial }
+            : s.status === "dormant"
+              ? { cls: "same", label: STATUS_WORDS.dormant }
+              : null;
+        const chip = statusChip ?? (paused
           ? { cls: "paused", label: "Paused" }
           : /*
               Precedence, SH-B over SH0-3: a row the desk has parked says WHY it
@@ -1506,8 +1567,12 @@ function WatchRows({
                 ? { cls: "changed", label: "Changed" }
                 : s.last_fetched_at
                   ? { cls: "same", label: "✓ No change" }
-                  : { cls: "wait", label: "Not checked yet" };
-        const note = paused
+                  : { cls: "wait", label: "Not checked yet" });
+        const note = statusChip
+          ? s.status === "trial"
+            ? `On trial · ${s.trial_reads ?? 0} of 6 reads. It is read on a light pass, and becomes read by the scan or dormant by itself; you can decide now.`
+            : `Dormant · ${s.dormant_reason || "It is re-checked once a month and comes back on its own if it changes."}`
+          : paused
           ? "Paused · the scanner will not fetch it"
           : waiting != null
             ? keeps
@@ -1547,9 +1612,11 @@ function WatchRows({
         return (
           <Fragment key={s.id}>
             <div
+              id={`source-${s.id}`}
               className={
                 "astra-row src" +
-                (justAddedSince != null && s.id > justAddedSince ? " just-added" : "")
+                (justAddedSince != null && s.id > justAddedSince ? " just-added" : "") +
+                (targetId != null && s.id === targetId ? " just-added" : "")
               }
             >
               <div className="astra-cell src-name">
@@ -1621,7 +1688,22 @@ function WatchRows({
                 {s.status === "accepted" ? <SourceNewsletter sourceId={s.id} /> : null}
               </div>
               <div className="astra-row-acts">
-                {paused ? (
+                {statusChip ? (
+                  /*
+                    A trial or dormant row is not "on watch" in the sense Pause
+                    and Check now mean: the desk already reads it on its own
+                    clock. Its presses are the same moves the inventory table
+                    offers, with the same words and the same progress, so the
+                    editor never has to leave this screen to keep or drop a
+                    source.
+                  */
+                  <MoveButtons
+                    sourceId={s.id}
+                    status={s.status}
+                    title={s.title || s.url}
+                    onMoved={onMoved}
+                  />
+                ) : paused ? (
                   <>
                     {/*
                       Unit UI1a2. Every press on this row is the shared
@@ -1914,10 +1996,14 @@ function SourcePreferenceEditor({ source }: { source: SourceRow }) {
  *   - The button at the bottom says **Uses one model call** before it is
  *     pressed, and it is the only thing in this feature that spends anything.
  *
- * Every candidate carries **Use this instead** (files a suggestion for the
- * editor to approve -- it never accepts anything) and **Not now** (drops it
- * from this panel only; nothing is written). The rows come back through
+ * Every candidate carries **Use this instead** and **Not now** (drops it from
+ * this panel only; nothing is written). The rows come back through
  * `useDeskMutation`, so a press that fails says why.
+ *
+ * Since dynamic sources (spec 6c), **Use this instead** puts the chosen page
+ * straight into TRIAL rather than into the suggestion queue: the editor has
+ * already made the choice the queue would ask them to make. Trial is still
+ * reversible with one click, and nothing is accepted automatically.
  *
  * WHAT IT SAYS WHEN IT FINDS NOTHING, AND WHY THAT MATTERS. For most newsrooms
  * the true answer to "what else covers Planning?" is "Planning has only this
@@ -1947,12 +2033,14 @@ function ReplacementPanel({ source }: { source: SourceRow }) {
         },
       }),
     pending: "Filing…",
+    /*
+      Spec 6c: "Use this instead" puts the page on trial straight away, so the
+      server's own sentence is what the editor is told -- it names the trial,
+      not the suggestion queue. A page that was already a source, or one the
+      desk will not watch, says so in its own words.
+    */
     done: (result) =>
-      result.ok
-        ? result.proposed > 0
-          ? "Added to Suggested sources. Nothing is fetched until you accept it."
-          : (result.notice ?? "Nothing was added.")
-        : (result.error ?? "That did not work."),
+      result.ok ? (result.notice ?? "Nothing was added.") : (result.error ?? "That did not work."),
     failedLead: "Could not file that suggestion. ",
     after: async () => {
       await qc.invalidateQueries({ queryKey: ["sources"] });
