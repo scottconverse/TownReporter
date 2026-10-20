@@ -77,7 +77,37 @@ export function looksLikeListing(text: string, method?: string | null): { ok: bo
 
 export type IntakeReader = (url: string) => Promise<{ text: string; method?: string | null }>;
 
-type Proposal = { id: number; user_id: string; url: string };
+type Proposal = { id: number; user_id: string; url: string; reviewed_at: unknown };
+
+/** Spec 5f: the statuses that own a website (a suggestion there is attached, not tried). */
+const OWNED_STATUSES = ["accepted", "trial", "dormant"];
+
+export type SiteProposals = { site: string; count: number; firstUrl: string; note: string | null };
+
+/**
+ * Spec 5f: the suggestions waiting, one entry per website (biggest count
+ * first), so the inventory can show 330 sites instead of 1,316 rows.
+ * `firstUrl` is the oldest suggestion on the site; `note` is the note the
+ * intake wrote on it, when it has one.
+ */
+export async function proposalsBySite(sql: SqlTag, newsroomId: number): Promise<SiteProposals[]> {
+  const rows = await sql<{ url: string; note: string | null }>`
+    select url, coalesce(review_note, '') as note from sources
+    where newsroom_id = ${newsroomId} and status = 'proposed' order by id`;
+  const groups = new Map<string, SiteProposals>();
+  for (const row of rows) {
+    const site = siteOf(row.url);
+    if (!site) continue;
+    const group = groups.get(site);
+    if (!group) {
+      groups.set(site, { site, count: 1, firstUrl: row.url, note: row.note || null });
+      continue;
+    }
+    group.count += 1;
+    if (!group.note && row.note) group.note = row.note;
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || a.site.localeCompare(b.site));
+}
 
 /** One intake round for one newsroom. Returns the sites it checked. */
 export async function runIntake(
@@ -88,20 +118,56 @@ export async function runIntake(
   const all = await sql<{ id: number; user_id: string; url: string; status: string; reviewed_at: unknown }>`
     select id, user_id, url, status, reviewed_at from sources where newsroom_id = ${newsroomId} order by id`;
   const known = new Set<string>();
+  // Spec 5f: the lowest-id accepted/trial/dormant source of each website owns it.
+  const ownerBySite = new Map<string, { id: number; status: string }>();
+  const dormantBySite = new Map<string, number>();
   for (const row of all) {
     const site = siteOf(row.url);
-    if (site && row.status !== "proposed") known.add(site);
+    if (!site || row.status === "proposed") continue;
+    known.add(site);
+    if (!OWNED_STATUSES.includes(row.status)) continue;
+    if (!ownerBySite.has(site)) ownerBySite.set(site, { id: row.id, status: row.status });
+    if (row.status === "dormant" && !dormantBySite.has(site)) dormantBySite.set(site, row.id);
   }
   const bySite = new Map<string, Proposal[]>();
+  const attachedBySite = new Map<string, Proposal[]>();
   const checked = new Set<string>();
   for (const row of all) {
     if (row.status !== "proposed") continue;
     const site = siteOf(row.url);
-    if (!site || known.has(site) || neverTry(site)) continue;
+    if (!site) continue;
+    if (ownerBySite.has(site)) {
+      const list = attachedBySite.get(site) ?? [];
+      list.push(row);
+      attachedBySite.set(site, list);
+      continue;
+    }
+    if (known.has(site) || neverTry(site)) continue;
     if (row.reviewed_at) checked.add(site);
     const list = bySite.get(site) ?? [];
     list.push(row);
     bySite.set(site, list);
+  }
+
+  // Spec 5f: a suggestion on a website the paper already has is attached to
+  // that source, counted on it, and noted once. Its status does not change.
+  for (const [site, proposals] of attachedBySite) {
+    const owner = ownerBySite.get(site)!;
+    await sql`update sources set proposed_count = ${proposals.length}
+      where newsroom_id = ${newsroomId} and id = ${owner.id}`;
+    const ids = proposals.map((p) => p.id);
+    await sql`update sources set reviewed_at = now(), review_note = ${`Same website as source ${owner.id}.`}
+      where newsroom_id = ${newsroomId} and id = any(${ids}) and reviewed_at is null`;
+    // Spec 5b: a NEW suggestion on a dormant source's website puts it on trial again.
+    const dormantId = dormantBySite.get(site);
+    if (dormantId != null && proposals.some((p) => !p.reviewed_at)) {
+      await moveSource(sql, {
+        newsroomId,
+        sourceId: dormantId,
+        to: "trial",
+        why: "A new link on its website was suggested. Trial started again.",
+      });
+    }
   }
   const sites = [...bySite.keys()].filter((site) => !checked.has(site)).slice(0, INTAKE_PER_TICK);
 
