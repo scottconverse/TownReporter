@@ -3,6 +3,7 @@ import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
+import { tickSourceYield } from "./source-yield.ts";
 import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 import { restoreYoutubeCaptureRetries, tickYoutubeCaptureRetries } from "./meeting-capture.ts";
@@ -130,6 +131,16 @@ export function startUnattendedScheduler(): void {
         await pruneLocationDaily();
       } catch (err) {
         console.error("[townreporter] stats location prune failed:", err);
+      }
+      /*
+        Dynamic sources unit 2 (D169): the per-source news score in
+        source_yield, recomputed about once a day (each newsroom whose rows
+        are older than 20 hours). Its own try/catch, like the jobs above.
+      */
+      try {
+        await tickSourceYield(await getSql());
+      } catch (err) {
+        console.error("[townreporter] source yield tick failed:", err);
       }
     } finally {
       statsTicking = false;
