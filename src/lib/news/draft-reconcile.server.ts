@@ -7,6 +7,7 @@ import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved, retainUnchangedReconcileResearch, evidenceConfirmationMatches ,
 } from "./draft-evidence.ts";
+import { withSourceOrganization } from "./findings.ts";
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
 import { enqueueJob, findOpenJob, requestJobCancel, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob ,
 } from "./jobs.ts";
@@ -260,14 +261,14 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       : [...publicUrls];
     const sourceUrls = Array.isArray(parsed.source_urls) ? JSON.stringify(acceptedSourceUrls) : draft.source_urls;
     const priorProvenance = Array.isArray(provenance) ? provenance : [];
-    const addedProvenance = acceptedSourceUrls.flatMap((url ) => {
+    const addedProvenance = withSourceOrganization(acceptedSourceUrls.flatMap((url ) => {
       if (priorProvenance.some((item ) => item && typeof item === "object" && sameCaptureUrl(String((item as Record<string,unknown>).url ?? ""),url),
         )) return [];
       const capture = fallback.find((row ) => sameCaptureUrl(row.url,url));
       return capture ? [{url:capture.url,title:capture.title,version_id:capture.id,captured_at:capture.captured_at,role:"followed",
             },
           ] : [];
-    });
+    }));
     const provenanceJson = addedProvenance.length ? JSON.stringify([...priorProvenance,...addedProvenance]) : draft.provenance_json;
     const obsoleteCheckpointNote = "Evidence reconciliation not completed within the available edit pass. Draft retained; verify its claims and citations before publication.";
     const staleMissingTopicNote = "No configured Topic key was supplied with the lead; assign the editorial section before publication.";

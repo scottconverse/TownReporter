@@ -162,6 +162,27 @@ function finalizeProvenance(item: ProvenanceItem): ProvenanceItem {
   };
 }
 
+/**
+ * Fills in the organization a writer checkpoint left blank.
+ *
+ * `finalizeProvenance` does this for rows built by `provenanceFromUrls`, but
+ * the two writer checkpoints (`desk.ts`'s `onWriterDraft` and
+ * `draft-reconcile.server.ts`) build their own item objects and saved no
+ * organization at all. The public story page read those rows as an empty
+ * string and crashed ("Something went wrong", Test walk Oct 20 2026). A row
+ * that already names an organization is returned untouched.
+ */
+export function withSourceOrganization<T extends { url?: unknown; organization?: unknown }>(
+  items: readonly T[],
+): T[] {
+  return items.map((item) => {
+    const organization = typeof item.organization === "string" ? item.organization.trim() : "";
+    const url = typeof item.url === "string" ? item.url.trim() : "";
+    if (organization || !url) return item;
+    return { ...item, organization: describeSourceUrl(url).organization } as T;
+  });
+}
+
 export function provenanceFromUrls(
   urls: string[],
   extras: Partial<ProvenanceItem>[] = [],
