@@ -29,6 +29,9 @@ export const OBSERVATION_KINDS = [
   "replaced",
   // Dynamic sources unit 1 (D169): a scan filed a new lead from this source.
   "produced-lead",
+  // Dynamic sources unit 6 (D169): a source moved by the trial/dormant rules.
+  "promoted",
+  "demoted",
 ] as const;
 
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];

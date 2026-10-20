@@ -21,6 +21,7 @@
  */
 import { leadSourceId, type SqlTag } from "./lead-filing.ts";
 import { isBadSourceReason } from "./kill-reasons.ts";
+import { demoteQuietSources } from "./source-trials.ts";
 
 export const YIELD_WINDOW_DAYS = 90;
 /** Recompute when the newest row is older than this (the clock is hourly). */
@@ -163,6 +164,8 @@ export async function tickSourceYield(sql: SqlTag): Promise<void> {
   for (const newsroom of due) {
     try {
       await computeSourceYield(sql, newsroom.id);
+      // Unit 6: with fresh scores, quiet accepted sources may go dormant.
+      await demoteQuietSources(sql, newsroom.id);
     } catch (error) {
       console.error(`[townreporter] source yield failed for newsroom ${newsroom.id}:`, error);
     }

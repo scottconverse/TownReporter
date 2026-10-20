@@ -4,6 +4,7 @@ import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
 import { tickSourceYield } from "./source-yield.ts";
+import { tickSourceTrials } from "./source-trials.server.ts";
 import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 import { restoreYoutubeCaptureRetries, tickYoutubeCaptureRetries } from "./meeting-capture.ts";
@@ -141,6 +142,12 @@ export function startUnattendedScheduler(): void {
         await tickSourceYield(await getSql());
       } catch (err) {
         console.error("[townreporter] source yield tick failed:", err);
+      }
+      // Unit 6 (D169): the light pass reads trial and dormant sources, no model.
+      try {
+        await tickSourceTrials();
+      } catch (err) {
+        console.error("[townreporter] source trial tick failed:", err);
       }
     } finally {
       statsTicking = false;
