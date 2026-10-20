@@ -26,6 +26,27 @@ export const YIELD_WINDOW_DAYS = 90;
 /** Recompute when the newest row is older than this (the clock is hourly). */
 export const YIELD_REFRESH_HOURS = 20;
 
+export type YieldRow = {
+  source_id: number;
+  reads_90: number;
+  leads_per_read: number | null;
+  published_per_read: number | null;
+  bad_source_kills_90: number;
+};
+
+/**
+ * Spec 5a: the score the scan orders due sources by.
+ * 0.7 x leads per read + 0.3 x 3 x published per read - bad-source kills per read.
+ * Null under 3 reads (not enough to judge). The weights are the spec's
+ * placeholders, to tune once real numbers exist.
+ */
+export function yieldScore(row: YieldRow): number | null {
+  if (row.reads_90 < 3) return null;
+  const leads = Number(row.leads_per_read ?? 0);
+  const published = Number(row.published_per_read ?? 0);
+  return 0.7 * leads + 0.9 * published - row.bad_source_kills_90 / row.reads_90;
+}
+
 type LeadRow = {
   id: number;
   source_id: number | null;

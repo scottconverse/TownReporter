@@ -1,6 +1,6 @@
 export type ScanCoverageStatus = "pending" | "read" | "skipped" | "blocked";
 export type ScanCoverageReason =
-  "time-budget" | "over-cap" | "waiting" | "host-cap" | "not-reached" | "fetch-failed" | "blocked-after-render";
+  "time-budget" | "over-cap" | "waiting" | "host-cap" | "not-reached" | "fetch-failed" | "blocked-after-render" | "not-due";
 
 export type ScanSourceCoverageEntry = {
   sourceId: number;
@@ -45,7 +45,7 @@ export function manualScanCoverage(
 export function scheduledScanCoverage(
   sources: readonly ScanCoverageSource[],
   selectedSourceIds: readonly number[],
-  deferrals: readonly { sourceId: number; reason: "over-budget" | "parked" | "blocked" }[],
+  deferrals: readonly { sourceId: number; reason: "over-budget" | "parked" | "blocked" | "not-due" }[],
 ): ScanSourceCoverageEntry[] {
   const selected = new Set(selectedSourceIds);
   const deferred = new Map(deferrals.map((item) => [item.sourceId, item.reason]));
@@ -60,7 +60,7 @@ export function scheduledScanCoverage(
       kind: source.kind || "unclassified",
       tier: source.tier || "unclassified",
       status: readToday ? "pending" : "skipped",
-      reasonCode: readToday ? null : overCap ? "over-cap" : "waiting",
+      reasonCode: readToday ? null : overCap ? "over-cap" : deferral === "not-due" ? "not-due" : "waiting",
       reason: readToday ? null : source.retry_after_note || null,
       lastReadAt: iso(source.last_ok_at),
     };

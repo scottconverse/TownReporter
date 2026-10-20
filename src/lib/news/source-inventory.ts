@@ -135,6 +135,10 @@ export type SourceHealthFacts = {
   created_at?: string | null;
   /** The section keys this source is filed under, when the caller has them. */
   beats?: readonly string[] | null;
+  /** Dynamic sources unit 4 (D169): when this source is next due for a read. */
+  next_due_at?: string | null;
+  /** Dynamic sources unit 2/5 (D169): `yieldScore` from source_yield; null under 3 reads. */
+  yield_score?: number | null;
 };
 
 /**

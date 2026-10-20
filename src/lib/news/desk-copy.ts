@@ -126,6 +126,8 @@ export function scanSourceCoverageReason(entry: ScanSourceCoverageEntry): string
       return "The scan stopped before it reached this source.";
     case "fetch-failed":
       return "The source could not be read.";
+    case "not-due":
+      return "Not due yet. This source is read on its own schedule.";
     default:
       return "The source was not read this pass.";
   }

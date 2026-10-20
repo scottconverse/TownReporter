@@ -87,13 +87,15 @@ export type RotationDecision = {
     | "deadline-soon"
     | "longest-waiting"
     | "never-checked"
-    | "trial";
+    | "trial"
+    /** Due by its own interval or rhythm, ordered by its news score. */
+    | "due-by-yield";
 };
 
 export type RotationDeferral = {
   sourceId: number;
   /** Why this source was not read this pass. */
-  reason: "over-budget" | "parked" | "blocked";
+  reason: "over-budget" | "parked" | "blocked" | "not-due";
 };
 
 export type Rotation = {
@@ -135,7 +137,20 @@ export function selectRotation(input: RotationInput): Rotation {
 
   const selected: SourceHealthFacts[] = [];
   const rest: SourceHealthFacts[] = [];
-  for (const source of readable) (prefs.get(source.id)?.selected ? selected : rest).push(source);
+  /*
+    Dynamic sources unit 5 (D169, spec 5e step 5): a source whose own
+    `next_due_at` is still ahead is not read this pass -- unless the editor's
+    rules claim it (high priority, a deadline, a cadence) or it has waited 7
+    days (the starvation floor, spec 10a.3). Deferred, never removed.
+  */
+  const notDue: RotationDeferral[] = [];
+  for (const source of readable) {
+    const pref = prefs.get(source.id);
+    if (pref?.selected) selected.push(source);
+    else if (!pref?.highPriority && !isDue(source, pref, nowMs) && !starved(source, nowMs) && !dueByOwnTime(source, nowMs))
+      notDue.push({ sourceId: source.id, reason: "not-due" });
+    else rest.push(source);
+  }
 
   const waitingMs = (source: SourceHealthFacts): number => {
     const at = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
@@ -158,6 +173,16 @@ export function selectRotation(input: RotationInput): Rotation {
     const an = a.last_ok_at ? 1 : 0;
     const bn = b.last_ok_at ? 1 : 0;
     if (an !== bn) return an - bn;
+    // Unit 5: starved sources first, longest-waiting among them.
+    const aStarved = starved(a, nowMs) ? 0 : 1;
+    const bStarved = starved(b, nowMs) ? 0 : 1;
+    if (aStarved !== bStarved) return aStarved - bStarved;
+    if (aStarved === 1) {
+      // Then due sources by expected news: score x days overdue, capped at 7 days.
+      const ae = expectedNews(a, nowMs);
+      const be = expectedNews(b, nowMs);
+      if (ae !== be) return be - ae;
+    }
     const aw = waitingMs(a);
     const bw = waitingMs(b);
     if (aw !== bw) return bw - aw;
@@ -181,8 +206,34 @@ export function selectRotation(input: RotationInput): Rotation {
       reason: "over-budget" as const,
     })),
     ...parked,
+    ...notDue,
   ];
   return { read, deferred, poolSize: input.sources.length };
+}
+
+const STARVED_AFTER_MS = 7 * 86_400_000;
+
+/** Spec 10a.3: a source unread for 7 days (or never read) is due regardless. */
+function starved(source: SourceHealthFacts, nowMs: number): boolean {
+  const at = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+  return !Number.isFinite(at) || nowMs - at >= STARVED_AFTER_MS;
+}
+
+/** No due time yet (never computed) counts as due. */
+function dueByOwnTime(source: SourceHealthFacts, nowMs: number): boolean {
+  const at = source.next_due_at ? Date.parse(source.next_due_at) : Number.NaN;
+  return !Number.isFinite(at) || at <= nowMs;
+}
+
+/** Spec 5e step 4: yield x days overdue, capped at yield x 7. No score: 0. */
+function expectedNews(source: SourceHealthFacts, nowMs: number): number {
+  const score = source.yield_score;
+  if (score == null || !Number.isFinite(score)) return 0;
+  const dueAt = source.next_due_at ? Date.parse(source.next_due_at) : Number.NaN;
+  const lastOk = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+  const from = Number.isFinite(dueAt) ? dueAt : Number.isFinite(lastOk) ? lastOk : nowMs;
+  const days = Math.max(0, (nowMs - from) / 86_400_000);
+  return Math.min(score * days, score * 7);
 }
 
 /**
@@ -246,6 +297,9 @@ function reasonFor(
   if (deadline) return deadline;
   if (isDue(source, pref, nowMs)) return "cadence-due";
   if (!source.last_ok_at && !source.last_fetched_at) return "never-checked";
+  // Unread 7 days or more (spec 10a.3) keeps the old name: it is the longest wait.
+  if (starved(source, nowMs)) return "longest-waiting";
+  if (source.yield_score != null) return "due-by-yield";
   return "longest-waiting";
 }
 

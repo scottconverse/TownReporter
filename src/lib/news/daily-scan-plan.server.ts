@@ -3,6 +3,7 @@ import type { Sql } from "../db.ts";
 import { ensureDailyScanPolicySchema, planDailySourceRotation } from "./daily-scan.ts";
 import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
 import { scheduledScanCoverage } from "./scan-source-coverage.ts";
+import { yieldScore, type YieldRow } from "./source-yield.ts";
 
 /** Both scheduled and editor-started daily scans use this saved policy plan. */
 export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, allAccepted = false) {
@@ -12,14 +13,22 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
   ))[0];
   if (!p) throw new Error("Save the daily scan settings before running a daily scan.");
   const pool = await sql.query<any>(
-    "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,retry_after_note,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
+    "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,retry_after_note,blocked_at,blocked_attempts,consecutive_failures,next_due_at from sources where newsroom_id=$1 and status='accepted' order by id",
     [newsroomId],
   );
+  // Dynamic sources unit 5 (D169): each source's news score from the nightly source_yield.
+  const yields = await sql.query<YieldRow>(
+    "select source_id,reads_90,leads_per_read,published_per_read,bad_source_kills_90 from source_yield where newsroom_id=$1",
+    [newsroomId],
+  );
+  const scoreById = new Map(yields.map((row) => [row.source_id, yieldScore(row)]));
   const preferences = await loadSourceScanPreferences(sql, newsroomId);
   const preferenceById = new Map(preferences.map((preference) => [preference.sourceId, preference]));
   const rotation = planDailySourceRotation({
     facts: pool.map((source: any) => ({
       ...source,
+      next_due_at: source.next_due_at ? new Date(source.next_due_at).toISOString() : null,
+      yield_score: scoreById.get(source.id) ?? null,
       purpose_preference: preferenceById.get(source.id)?.purpose ?? null,
     })),
     selectedSourceIds: p.selected_source_ids ?? [],

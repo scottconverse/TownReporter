@@ -712,7 +712,7 @@ export type DailyRotationPlan = {
    * WHY each deferred source sat out, keyed by id, so the run record can say
    * "over budget" versus "the host asked us to wait" rather than lumping them.
    */
-  deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" }[];
+  deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" | "not-due" }[];
   /**
    * Editor-selected sources the automatic run did NOT read this pass because
    * they are ineligible right now (parked/blocked) or beyond the cap. Their
@@ -820,13 +820,19 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
   // did not read, with its reason. Parked/blocked come first (they are facts), and
   // the rest are over-budget against this run's real read set.
   const chosen = new Set(sourceIds);
-  const deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" }[] = [];
+  const deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" | "not-due" }[] = [];
   const deferredIds = new Set<number>();
   // Parked/blocked first: a wait or a block is a fact and outranks "over budget".
   for (const [id, reason] of ineligible)
     if (!chosen.has(id)) {
       deferrals.push({ sourceId: id, reason });
       deferredIds.add(id);
+    }
+  // Unit 5 (D169): a source not yet due by its own interval says so.
+  for (const d of rotation.deferred)
+    if (d.reason === "not-due" && !chosen.has(d.sourceId) && !deferredIds.has(d.sourceId)) {
+      deferrals.push({ sourceId: d.sourceId, reason: "not-due" });
+      deferredIds.add(d.sourceId);
     }
   // Everything else the run did not read is deferred for the budget alone.
   for (const f of input.facts)
