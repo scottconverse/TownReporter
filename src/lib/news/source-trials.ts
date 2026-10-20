@@ -44,13 +44,21 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Spec 10a.5 default: the text names the paper's place and carries a date. */
-export function hasDatedLocalItem(text: string, placeNames: readonly string[]): boolean {
-  if (!DATE_PATTERN.test(text)) return false;
+/**
+ * Spec 10a.5: whether the text names one of the paper's place names, as whole
+ * words and ignoring case. Names under 3 letters are ignored.
+ */
+export function namesPlace(text: string, placeNames: readonly string[]): boolean {
   return placeNames
     .map((name) => name.trim())
     .filter((name) => name.length >= 3)
     .some((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, "i").test(text));
+}
+
+/** Spec 10a.5 default: the text names the paper's place and carries a date. */
+export function hasDatedLocalItem(text: string, placeNames: readonly string[]): boolean {
+  if (!DATE_PATTERN.test(text)) return false;
+  return namesPlace(text, placeNames);
 }
 
 /** The words that name the paper's place: its city and its county. */
@@ -77,13 +85,16 @@ type LightRow = {
   trial_started_at: string | Date | null;
 };
 
-async function note(
+/** The `observed_by` written on a move or note the system made by itself. */
+export const SYSTEM_OBSERVED_BY = "trial-pass";
+
+export async function note(
   sql: SqlTag,
   newsroomId: number,
   sourceId: number,
   kind: string,
   text: string,
-  by = "trial-pass",
+  by = SYSTEM_OBSERVED_BY,
 ): Promise<void> {
   await sql`
     insert into source_observations (newsroom_id, source_id, kind, note, observed_by)

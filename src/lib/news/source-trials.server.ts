@@ -15,18 +15,19 @@ export async function tickSourceTrials(): Promise<void> {
     select distinct newsroom_id from sources where status in ('trial', 'dormant', 'proposed') order by newsroom_id`;
   for (const room of rooms) {
     try {
+      const placeNames = placeNamesOf(await getPaperPlace(room.newsroom_id));
       // Unit 7: new suggested sites get their one automatic check first.
       await runIntake(sql, {
         newsroomId: room.newsroom_id,
+        placeNames,
         read: async (url) => {
           const page = await ingestUrl(url);
           return { text: page.text, method: page.method ?? null };
         },
       });
-      const place = await getPaperPlace(room.newsroom_id);
       await runLightPass(sql, {
         newsroomId: room.newsroom_id,
-        placeNames: placeNamesOf(place),
+        placeNames,
         read: async (url) => ({ text: (await ingestUrl(url)).text }),
       });
     } catch (error) {
