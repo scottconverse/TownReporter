@@ -8745,12 +8745,16 @@
 .desk-ltr.astra .astra-pair .of-block > .side-item { margin: 0; }
 .desk-ltr.astra .astra-pair .of-block > .of-trail { margin-top: 0; }
 
+/* The ranked source table (dynamic sources unit 8, spec 6a) is the inventory
+   page's table now, and it carries the same ten columns on a phone as on the
+   desk: stacked as cards, every cell labelled, nothing to pan sideways. */
 @media (max-width: 600px) {
-  .source-inventory, .source-inventory tbody, .source-inventory tr, .source-inventory td { display: block; width: 100%; box-sizing: border-box; }
-  .source-inventory thead { display: none; }
-  .source-inventory tr { padding-block: 12px; }
-  .source-inventory td { overflow-wrap: anywhere; }
-  .source-inventory td::before { content: attr(data-label); display: block; font-weight: 700; color: var(--fg2); }
+  .source-inventory, .source-inventory tbody, .source-inventory tr, .source-inventory td,
+  .source-scores, .source-scores tbody, .source-scores tr, .source-scores td { display: block; width: 100%; box-sizing: border-box; }
+  .source-inventory thead, .source-scores thead { display: none; }
+  .source-inventory tr, .source-scores tr { padding-block: 12px; }
+  .source-inventory td, .source-scores td { overflow-wrap: anywhere; }
+  .source-inventory td::before, .source-scores td::before { content: attr(data-label); display: block; font-weight: 700; color: var(--fg2); }
 }
 
 @media (max-width: 600px) {

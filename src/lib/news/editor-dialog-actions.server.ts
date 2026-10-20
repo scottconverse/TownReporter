@@ -48,6 +48,7 @@ import { commitStoryDraftForAuthenticatedEditor } from "./model-request-commit.s
 import { parseNotes, packNotes } from "./notes.ts";
 import { parseSourceLines } from "./source-lines.ts";
 import { sourceIdentity } from "./url-guard.ts";
+import { moveSource } from "./source-trials.ts";
 import { headlineFromUrl, looksLikeUrl } from "./desk-copy.ts";
 import { holdChoice, isBadSourceReason } from "./kill-reasons.ts";
 import { setLeadStatusForEditor } from "./lead-lifecycle.ts";
@@ -693,6 +694,54 @@ export async function performFindReplacement(
   */
   const chosen = String(data.url ?? "").trim();
   if (chosen) {
+    /*
+      DYNAMIC SOURCES (spec 6c): a page the editor chose by hand goes STRAIGHT
+      INTO TRIAL. The editor has already made the decision the suggestion queue
+      exists to ask for -- they read the candidate list and pressed "Use this
+      instead" -- so filing it as another suggestion would ask them the same
+      question twice. Trial is still reversible in one click (Accept now / Drop
+      now), nothing is accepted automatically, and the move is written as an
+      observation with the editor's name on it, like every other move.
+
+      IF THE PAGE IS ALREADY A SOURCE, THAT ROW IS MOVED instead of filing a
+      second one -- the proposal door would refuse the duplicate anyway, and
+      "Use this instead" on a page the desk already has means "start reading
+      this one".
+    */
+    const identity = sourceIdentity(chosen);
+    const existing = identity
+      ? (await sql<{ id: number; url: string; status: string }>`
+          select id, url, status from sources where newsroom_id = ${context.newsroomId}
+        `).find((row) => sourceIdentity(row.url) === identity)
+      : undefined;
+    const toTrial = async (sourceId: number) => {
+      await moveSource(sql, {
+        newsroomId: context.newsroomId,
+        sourceId,
+        to: "trial",
+        why: "The editor chose it as a replacement.",
+        by: "editor",
+      });
+    };
+    if (existing) {
+      if (existing.status === "trial") {
+        return {
+          ok: true as const,
+          proposed: 0,
+          skipped: 1,
+          topic,
+          notice: "That page is already a source, and it is already on trial.",
+        };
+      }
+      await toTrial(existing.id);
+      return {
+        ok: true as const,
+        proposed: 0,
+        skipped: 1,
+        topic,
+        notice: "That page was already a source. It is on trial now, so the desk will start reading it.",
+      };
+    }
     const added = await deps.proposeSource(sql, {
       userId: context.userId,
       newsroomId: context.newsroomId,
@@ -702,13 +751,27 @@ export async function performFindReplacement(
       proposedBy: "desk",
       replacesSourceId: source.id,
     });
+    if (added) {
+      /*
+        The proposal door inserts by the exact URL it was given, so this reads
+        the row back by that URL rather than guessing an id. A row that is not
+        found is not a failure of the move -- the suggestion landed, and the
+        old notice is still true.
+      */
+      const [filed] = await sql<{ id: number }>`
+        select id from sources
+        where newsroom_id = ${context.newsroomId} and url = ${chosen}
+        order by id desc limit 1
+      `;
+      if (filed) await toTrial(Number(filed.id));
+    }
     return {
       ok: true as const,
       proposed: added ? 1 : 0,
       skipped: added ? 0 : 1,
       topic,
       notice: added
-        ? "Added to Suggested sources. Nothing is fetched until you accept it."
+        ? "Added to trial. The desk will start reading it within the hour, and you can drop it with one click."
         : "That page is already a source, already suggested, or one the desk will not watch.",
     };
   }

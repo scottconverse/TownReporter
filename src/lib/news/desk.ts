@@ -393,6 +393,11 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
               proposed_section, reviewed_at, review_note,
+             -- Dynamic sources (spec 6c): a trial source says how far through
+             -- its trial it is, and a dormant one says why it was parked. The
+             -- row's own chip names the status either way; these are the one
+             -- sentence under it.
+             trial_reads, trial_started_at, dormant_reason,
               scan_preference.purpose as purpose_preference,
               scan_preference.cadence as scan_cadence,
               scan_preference.deadline::text as scan_deadline,

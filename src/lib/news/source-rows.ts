@@ -102,7 +102,21 @@ export function keepsFailing(source: {
  * means.
  */
 export function onWatch(source: { status: string }): boolean {
-  return source.status === "accepted" || source.status === "paused";
+  /*
+    Dynamic sources (spec 6c): a source on trial or gone dormant is still one
+    the desk is watching -- it is read on a light pass every few hours, or
+    re-checked once a month -- and the editor has to be able to see it and move
+    it. Leaving those two statuses out of this list hid every trial source and
+    every dormant one from the only screen that can move a source by hand.
+    `watching` below stays accepted-only: that is the number the daily scan may
+    actually read.
+  */
+  return (
+    source.status === "accepted" ||
+    source.status === "paused" ||
+    source.status === "trial" ||
+    source.status === "dormant"
+  );
 }
 
 /** The Sources window: the shared one, and nothing extra -- this screen has no
@@ -127,7 +141,7 @@ export function sourceMatchesSearch(source: SourceRowLike, needle: string): bool
 }
 
 export type SourceCounts = {
-  /** The On watch pill: accepted and paused together. */
+  /** The On watch pill: accepted and paused, plus trial and dormant (spec 6c). */
   accepted: number;
   proposed: number;
   rejected: number;

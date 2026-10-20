@@ -178,6 +178,49 @@ describe("performFindReplacement", () => {
     assert.deepEqual(f.writes(), [], "the desk proposes; the editor accepts");
   });
 
+  /*
+    SPEC 6c: "Use this instead" is the editor making the choice, so the page
+    goes straight into TRIAL rather than into another approval queue. Nothing
+    is accepted: trial is a reversible state with two one-click moves.
+  */
+  it("files the editor's 'Use this instead' straight into trial", async () => {
+    const f = makeDeps({ source: [SOURCE], filed: [{ section_key: "planning" }], sections: SECTIONS });
+    const result = await performFindReplacement(
+      context,
+      { sourceId: 7, url: "https://new.test/agendas", title: "New agendas" },
+      f.deps,
+    );
+    assert.equal(result.ok, true);
+    assert.match(result.ok ? result.notice : "", /trial/i);
+    assert.equal(f.calls.length, 0, "a page already chosen costs no model call");
+    assert.equal(f.proposed.length, 1);
+    assert.equal(f.proposed[0]!.url, "https://new.test/agendas");
+    const writes = f.writes().map((q) => q.text);
+    assert.ok(
+      writes.some((text) => /update sources set status = 'trial'/i.test(text)),
+      `expected the new row to be put on trial; writes: ${JSON.stringify(writes)}`,
+    );
+    assert.ok(
+      writes.some((text) => /insert into source_observations/i.test(text)),
+      "the move is logged like every other move",
+    );
+  });
+
+  it("moves the existing row instead when the chosen page is already a source", async () => {
+    const f = makeDeps({ source: [SOURCE], filed: [{ section_key: "planning" }], sections: SECTIONS });
+    // The chosen URL is the source already on this desk, spelled differently.
+    const result = await performFindReplacement(
+      context,
+      { sourceId: 7, url: "https://www.broken.test/news/", title: "Broken News" },
+      f.deps,
+    );
+    assert.equal(result.ok, true);
+    assert.equal(f.proposed.length, 0, "no second row is filed for a page the desk already has");
+    const writes = f.writes().map((q) => q.text);
+    assert.ok(writes.some((text) => /update sources set status = 'trial'/i.test(text)));
+    assert.match(result.ok ? result.notice : "", /already a source/i);
+  });
+
   it("says so, and calls no model, when the desk cannot tell what the source was for", async () => {
     const f = makeDeps({ source: [{ ...SOURCE, title: "" }], filed: [], sections: SECTIONS });
     const result = await performFindReplacement(context, { sourceId: 7 }, f.deps);

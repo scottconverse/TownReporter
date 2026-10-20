@@ -82,17 +82,31 @@ test("the search is folded and trimmed, so capitals and stray spaces do not miss
   );
 });
 
-test("the watch list holds accepted and paused, and nothing else", () => {
+test("the watch list holds every source the desk is still working, and nothing else", () => {
+  /*
+    Dynamic sources (spec 6c): trial and dormant sources are still the desk's
+    to read and the editor's to move, so they belong on this list with the
+    accepted and paused rows. Before this, a source on trial or gone dormant
+    appeared on no screen that could move it by hand.
+  */
   const rows = [
     source({ id: 1, status: "accepted" }),
     source({ id: 2, status: "paused" }),
     source({ id: 3, status: "proposed" }),
     source({ id: 4, status: "rejected" }),
+    source({ id: 5, status: "trial" }),
+    source({ id: 6, status: "dormant" }),
   ];
   assert.deepEqual(
     sourceTabRows(rows, "accepted").map((s) => s.id),
-    [1, 2],
+    [1, 2, 5, 6],
   );
+  assert.equal(onWatch({ status: "trial" }), true);
+  assert.equal(onWatch({ status: "dormant" }), true);
+  // The number the daily scan may actually read is still accepted-only.
+  assert.equal(sourceCounts(rows).watching, 1);
+  // The On watch pill counts the rows the screen shows, so the two agree.
+  assert.equal(sourceCounts(rows).accepted, 4);
 });
 
 test("Could not check is the watch list narrowed to the rows the pass failed to read", () => {
