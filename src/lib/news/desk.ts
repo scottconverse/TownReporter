@@ -83,7 +83,13 @@ import {
   hostOf,
   rankCandidates,
   siblingCandidates,
+  sitemapCandidates,
 } from "./source-replacements.ts";
+import {
+  dropKnownSourceUrls,
+  readSitemapLocs,
+  SITEMAP_CANDIDATE_CAP,
+} from "./source-sitemap.ts";
 import {
   DESK_DRAFT_FILTERS,
   deskDraftFilterCounts,
@@ -614,12 +620,14 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
  * The free tier of "Find a replacement" (SH0-10): what the panel draws before
  * the editor spends anything.
  *
- * ONE READ, NO FETCHES, NO MODEL. The candidates are the other sources the
- * desk already watches on the same beat -- so this costs the newsroom a query
- * it is already paying for, and it cannot hammer a host that just refused us.
- * The beat is resolved by `beatsForSource`, the same function the AI tier seeds
- * its topic from, so the two halves of the panel cannot describe the source
- * differently.
+ * NO MODEL, AND THE ONLY NETWORK IS THE PAPER'S OWN CITY. The candidates are
+ * the other sources the desk already watches on the same beat, plus what the
+ * city's own sitemap publishes (`readSitemapLocs`, A5) when the newsroom holds
+ * an official host. Every sibling is already on the watch list, so on its own
+ * it could only ever say "Already on your watch list"; the sitemap is what
+ * gives the panel something the editor can actually accept. The beat is
+ * resolved by `beatsForSource`, the same function the AI tier seeds its topic
+ * from, so the two halves of the panel cannot describe the source differently.
  *
  * THE REFUSALS ARE THE RANKER'S, NOT A COPY. `rankCandidates` drops the
  * newsroom's legally dropped hosts and orders the paper's own record first; the
@@ -686,6 +694,12 @@ export async function performReplacementCandidates(
     "select url from sources where newsroom_id=$1 and status='dropped'",
     [newsroomId],
   );
+  /* Every row this newsroom holds, whatever its status: the proposal door
+     refuses all of them, so a sitemap page already here is not a candidate. */
+  const held = await sql.query<{ url: string }>(
+    "select url from sources where newsroom_id=$1",
+    [newsroomId],
+  );
   const [place] = await sql.query<{ city: string | null; state: string | null }>(
     "select city,state from paper_settings where newsroom_id=$1",
     [newsroomId],
@@ -710,7 +724,18 @@ export async function performReplacementCandidates(
     })),
     { sourceId, beats },
   );
-  const candidates = rankCandidates(siblings, {
+  /*
+    The city's own record, for the press that a sibling can never satisfy. No
+    official host means no sitemap: this file names no city, and a guessed host
+    would offer the wrong city's pages as this paper's official record.
+  */
+  const sitemap = officialHost
+    ? sitemapCandidates(
+        dropKnownSourceUrls(await readSitemapLocs(officialHost), held.map((row) => row.url)),
+        { beats },
+      ).slice(0, SITEMAP_CANDIDATE_CAP)
+    : [];
+  const candidates = rankCandidates([...siblings, ...sitemap], {
     officialHost,
     droppedHosts: dropped.map((row) => hostOf(row.url) ?? ""),
   });
