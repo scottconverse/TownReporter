@@ -115,6 +115,30 @@ export function hostOf(url: string): string | null {
   }
 }
 
+/**
+ * The hosts of the paper's own official sources, read from the URLs the
+ * newsroom holds.
+ *
+ * `cityOfficialHost` matches on a BARE host: it strips `www.` and tests
+ * `/\.(gov|us)$/`, so a full address such as
+ * `https://www.longmontcolorado.gov/` never matches and the paper's own record
+ * is never found. The rows are stored as URLs, so the addresses are reduced to
+ * their hosts here and a row that is not an http(s) address is dropped rather
+ * than passed on. Order is the rows' own; duplicates are collapsed, because
+ * `cityOfficialHost` only needs the set.
+ */
+export function officialPeerHosts(
+  peers: readonly { kind?: string | null; url: string }[],
+): string[] {
+  const out: string[] = [];
+  for (const peer of peers) {
+    if ((peer.kind ?? "").trim().toLowerCase() !== "official") continue;
+    const host = hostOf(peer.url);
+    if (host && !out.includes(host)) out.push(host);
+  }
+  return out;
+}
+
 function normalizeHost(value: string | null | undefined): string {
   return String(value ?? "")
     .trim()

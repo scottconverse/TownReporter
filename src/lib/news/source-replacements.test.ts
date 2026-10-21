@@ -9,6 +9,7 @@ import {
   JOURNALISM,
   NOT_OFFICIAL,
   OFFICIAL_RECORD,
+  officialPeerHosts,
   rankCandidates,
   siblingCandidates,
   sitemapCandidates,
@@ -16,6 +17,7 @@ import {
   type ReplacementCandidate,
   type ReplacementVia,
 } from "./source-replacements.ts";
+import { cityOfficialHost } from "./research-scope.ts";
 
 /*
   FINDING A REPLACEMENT, THE FREE TIER (SH0-8).
@@ -363,6 +365,45 @@ describe("what the replacement panel may offer (MEDIUM-1)", () => {
         ["https://sibling.test/planning", true],
         ["https://city.test/agendas", false],
       ],
+    );
+  });
+});
+
+/*
+  A5: THE PAPER'S OWN RECORD IS FOUND FROM THE ROWS THE DESK HOLDS.
+
+  The panel asks `cityOfficialHost` which of the newsroom's official sources is
+  this paper's city. That function matches a BARE host, and the rows hold full
+  URLs, so handing it the URLs straight through found none of them and the
+  sitemap was never read. This is the exact measured pair from the dev walk
+  (runs\a-devproof2, A5.4): with the URL it answers null, with the host it
+  answers the city.
+
+  THE MUTATION. Return `peer.url` instead of `hostOf(peer.url)` and the second
+  case below comes back null again.
+*/
+describe("the hosts of the paper's official sources (A5)", () => {
+  const PEERS = [
+    { kind: "official", url: "https://www.longmontcolorado.gov/" },
+    { kind: "press", url: "https://www.longmontleader.com/" },
+    { kind: "official", url: "longmontcolorado.gov" },
+    { kind: "official", url: "not a url" },
+  ];
+
+  it("reduces each official row to a bare host, once", () => {
+    assert.deepEqual(officialPeerHosts(PEERS), ["longmontcolorado.gov"]);
+  });
+
+  it("a full URL is no longer an official host the city test can find", () => {
+    // The bug, stated as the two answers it gave.
+    assert.equal(cityOfficialHost("Longmont", ["https://www.longmontcolorado.gov/"], "CO"), null);
+    assert.equal(cityOfficialHost("Longmont", ["longmontcolorado.gov"], "CO"), "longmontcolorado.gov");
+  });
+
+  it("so the paper's own record is found through the peers the desk holds", () => {
+    assert.equal(
+      cityOfficialHost("Longmont", officialPeerHosts(PEERS), "CO"),
+      "longmontcolorado.gov",
     );
   });
 });
