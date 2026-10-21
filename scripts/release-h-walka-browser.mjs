@@ -171,18 +171,28 @@ async function main() {
             .getByRole("button", { name: "Kill", exact: true })
             .click();
           /*
-            TMA-2 (ae6ff2a7): a bulk Kill now asks for one reason first, even for
-            a single lead, so "Kill all anyway" is behind this press.
+            TMA-2 (ae6ff2a7): a bulk Kill asks for one reason first, even for a
+            single lead, so the kill is this press.
+            D2-a (settleBulkKill, queue-bulk.ts:144-172) answers the saved-draft
+            warning INSIDE that press -- the drafted leads are sent again with
+            their own draft override -- so no "Kill all anyway" is drawn after
+            it. What is left to prove is the outcome: the lead is killed and its
+            Undo brings the draft back.
           */
           await page.getByRole("button", { name: "Yes, kill 1", exact: true }).click();
+          for (let i = 0; i < 60; i++) {
+            if ((await sql.query("select status from leads where id=$1", [id]))[0].status === "killed")
+              break;
+            await page.waitForTimeout(100);
+          }
+          assert.equal(
+            (await sql.query("select status from leads where id=$1", [id]))[0].status,
+            "killed",
+          );
         }
       }
-      await page
-        .getByRole("button", {
-          name: door === "bulk" ? "Kill all anyway" : "Kill anyway",
-          exact: true,
-        })
-        .click();
+      if (door !== "bulk")
+        await page.getByRole("button", { name: "Kill anyway", exact: true }).click();
       await restored(id);
       console.log(`PASS DHA2 ${door}: Undo restores draft`);
       await sql.query("update leads set status='killed' where id=$1", [id]);
@@ -199,13 +209,30 @@ async function main() {
     await page
       .getByRole("button", { name: "Already killed — add duplicate note: DHA3 duplicate", exact: true })
       .click();
-    const warning = page.getByRole("button", { name: "Kill anyway", exact: true });
-    if (await warning.isVisible()) await warning.click();
-    await page
+    const warning = page
       .locator("[data-sonner-toast]")
-      .getByRole("button", { name: "Undo", exact: true })
-      .last()
-      .click();
+      .getByRole("button", { name: "Kill anyway", exact: true });
+    /*
+      This lead has a written draft, so the press is answered by the desk's
+      drafted warning toast, whose only press is "<verb> anyway" and which
+      carries no Undo (desk-action.ts:414-425). WAIT for it: isVisible() asked
+      the instant the click returns answered false, no press was sent, and the
+      row then waited 15s for an Undo that the warning never draws.
+    */
+    await warning.waitFor({ timeout: 30_000 });
+    await warning.click();
+    /*
+      DHD2-8 (9f1695e8): this lead is ALREADY killed, so the press adds the
+      duplicate note naming the earlier story instead of killing again. The
+      note is the real outcome to assert here -- not an Undo, which on a lead
+      whose kill this desk did not make puts the lead back to New and drops the
+      reason it is checking.
+    */
+    for (let i = 0; i < 60; i++) {
+      const [row] = await sql.query("select kill_reason from leads where id=$1", [id]);
+      if (/DHA3 earlier story/.test(row.kill_reason ?? "")) break;
+      await page.waitForTimeout(100);
+    }
     assert.match(
       (await sql.query("select kill_reason from leads where id=$1", [id]))[0].kill_reason,
       /DHA3 earlier story/,
