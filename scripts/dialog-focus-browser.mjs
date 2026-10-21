@@ -11,7 +11,14 @@ test('search preview and menu dialogs trap focus and return it to the visible op
       const dialog=page.locator('dialog[open],[role="dialog"]');await dialog.waitFor();
       assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true,action+' must receive focus');
       for(let i=0;i<10;i++){await page.keyboard.press('Tab');assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true,action+' must trap Tab');}
-      await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});await page.waitForTimeout(30);
+      await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+      /* Radix's FocusScope restores focus inside a setTimeout(0) unmount task
+         (@radix-ui/react-focus-scope/dist/index.mjs:94-103), i.e. AFTER the
+         dialog element is already gone, so a fixed 30 ms read here could land
+         first (ci8-fix: this job failed round 6 at 'Edit', the first action).
+         Wait on the real state instead -- the opener holds focus again. A focus
+         that never comes back still fails, at the assertion right below. */
+      await page.waitForFunction(()=>{const el=document.querySelector('.more > summary');return !!el&&el===document.activeElement},undefined,{timeout:2000}).catch(()=>{});
       assert.equal(await more.evaluate(el=>el===document.activeElement),true,action+' must return to More');
     }
     await page.locator('.story-more > summary').click();await page.keyboard.press('Escape');
