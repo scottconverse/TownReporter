@@ -1079,8 +1079,14 @@ function DeskHome() {
         if (lead) startDraft.mutate(lead.id);
         break;
       case "hold":
-        // H is the row's Hold press, including its explicit warning retry.
-        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
+        /*
+          H is the row's Hold press: the drawn Hold dialog, whose "Hold, no
+          reason" records the hold and whose answer announces it (FB6, item 2
+          -- see the dialog mount below). This used to write the status here
+          directly, which left the dialog mounted and unreachable and made H a
+          silent hold with no reason recorded.
+        */
+        if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
         break;
       case "kill":
         // X is the row's fast Kill, with Undo and optional reason chips.
@@ -2270,7 +2276,17 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet"
-                                  onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
+                                  /*
+                                    FB6, item 2: the row's Hold is the drawn Hold
+                                    dialog, mounted below -- it takes the reason
+                                    and its answer is what moves the row. The
+                                    mount comment has said so since the unit
+                                    landed; this press still wrote the status
+                                    itself, so the dialog never opened and the
+                                    hold arrived with no reason and no "Held"
+                                    toast.
+                                  */
+                                  onClick={() => setHoldLead({ id: l.id, headline: l.headline })}
                                 >
                                   Hold <kbd>H</kbd>
                                 </InkButton>

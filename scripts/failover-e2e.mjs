@@ -106,6 +106,9 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 // src/lib/news/automatic-failover.ts. Asserted verbatim so a rename there
 // fails this walk instead of silently changing what it proves.
 const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
+// D160: the exact tag the desk pins DeepSeek to (the fake must list this id,
+// or the readiness probe refuses the rung -- see the startFake call below).
+const PINNED_DEEPSEEK_MODEL = "deepseek-v4.1-flash:1017-cloud";
 // Rung 2's label is "Local model" since 0.6.69 (Unit AL item 4): it names no
 // model of its own, because it runs whatever LM Studio has loaded.
 const LOCAL_LABEL = "Local model";
@@ -380,6 +383,16 @@ async function main() {
     FAKE_DEEPSEEK_PORT: String(PORT_FAKE_DEEPSEEK),
     FAKE_DEEPSEEK_MODE: "probe-5xx",
     FAKE_DEEPSEEK_DELAY_MS: String(DEEPSEEK_DELAY_MS),
+    /*
+      D160: DeepSeek is pinned to the exact tag "deepseek-v4.1-flash:1017-cloud",
+      and the desk refuses the rung unless that id is the one the endpoint
+      lists (src/lib/news/ai.ts:559-570). The fake's own default is the older
+      floating ":cloud" (scripts/fakes/fake-deepseek-endpoint.mjs:116), so
+      without this line rung 1 was genuinely down for EVERY draft, and the
+      ladder really did pass over the local rung on draft 2. The pin is the
+      product's, so the fake serves it.
+    */
+    FAKE_DEEPSEEK_MODEL: PINNED_DEEPSEEK_MODEL,
   })}`);
   console.log(`  fake  ${await ensureRungTwoServer()}`);
 

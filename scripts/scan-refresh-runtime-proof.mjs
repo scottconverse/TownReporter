@@ -220,12 +220,20 @@ try {
     broken.
   */
   const runScanPress = page.getByRole("button", { name: "Run scan", exact: true });
-  const busy = page.getByRole("button", { name: "Scanning sources…", exact: true });
+  /*
+    D32 (warn, never block): the running press is no longer the disabled
+    "Scanning sources…" label. The override worker's commit 7538d153 made it an
+    enabled control that says what pressing it does now -- "Use selected model"
+    while a run is open, "Run scan" otherwise
+    (src/routes/desk.scan.tsx:309). The busy state is still the same two facts,
+    so both are still asserted: this label and the job card.
+  */
+  const busy = page.getByRole("button", { name: "Use selected model", exact: true });
   const scanCard = page.locator(".scan-job-card .job-card");
   await busy.waitFor({ timeout: 20_000 });
   await scanCard.waitFor({ timeout: 20_000 });
   await page.screenshot({ path: join(evidenceDir, "1-open-run-busy.png"), fullPage: true });
-  step("page shows the busy state while the run is open (the press reads Scanning sources…, the card is drawn)");
+  step("page shows the busy state while the run is open (the press reads Use selected model, the card is drawn)");
 
   // Now finish that same row. Same id. This is the merge the bug broke.
   await database.query("update scan_runs set finished_at = now(), leads_created = 3, summary = 'runtime proof: finished run' where id = $1", [openId]);

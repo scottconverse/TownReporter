@@ -2381,9 +2381,27 @@ function StoryPage() {
         yes, without a second press.
   */
   const sectionChosenByModel = Boolean(data.draft?.model_headline?.trim()) && Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
+  /*
+    A section a PERSON filed. An imported or pasted story is filed under the
+    section the editor chose on the review screen or the Desk's paste card
+    (import-stories.server.ts:388 writes it to the lead and the draft, and the
+    paste card carries it the same way), so its lead reads `origin = "import"`
+    -- IMPORT_ORIGIN, which paste-one-story.ts shares by design.
+
+    Such a draft has no `model_headline`, so `sectionChosenByModel` can never
+    be true for it and the page called the editor's own choice "Section not
+    chosen": the select showed "", and the bar offered no "Publish in
+    <section>". Counting a person-filed section as chosen is what the editor
+    already did. Model-drafted stories are untouched: their origin is not
+    "import", and `topic_unchosen` still means what it says.
+  */
+  const sectionFiledByPerson =
+    data.lead.origin === "import" &&
+    !data.lead.topic_unchosen &&
+    Boolean(String(data.draft?.topic ?? "").trim());
   const sectionAlreadyConfirmed =
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
-  const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
+  const sectionReady = sectionChosenByModel || sectionFiledByPerson || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
   /* Walk E2, DHE2-1: a printed lead names the section it printed in. */
   const storyHeaderSection = storyHeaderSectionLabel({

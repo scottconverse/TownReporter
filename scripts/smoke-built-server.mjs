@@ -105,7 +105,24 @@ async function checkInBrowser() {
     await page.goto(BASE + "/login", { waitUntil: "networkidle", timeout: 30_000 });
     // A cold Vite graph can still be compiling after networkidle. Wait for
     // the usable form we assert below, rather than sampling after a fixed sleep.
-    await page.locator("input").nth(1).waitFor({ state: "visible", timeout: 30_000 });
+    /*
+      D187: reproduce before deciding. This wait timed out in CI and the log
+      carried nothing but the timeout -- no page, no console -- so a cold
+      compile, a dead client bundle, and a form that never drew all looked the
+      same. Print what the page actually said, and the console beside it, then
+      let the failure stand.
+    */
+    try {
+      await page.locator("input").nth(1).waitFor({ state: "visible", timeout: 30_000 });
+    } catch (err) {
+      const body = await page.locator("body").innerText().catch((e) => `<body unreadable: ${e}>`);
+      console.log("  ---- /login did not show a form; page says ----");
+      console.log(body.slice(0, 4000));
+      console.log("  ---- console/page errors ----");
+      console.log(errors.length ? errors.slice(0, 20).join("\n") : "  (none)");
+      console.log("  ---- end /login ----");
+      throw err;
+    }
     const text = await page.locator("body").innerText();
     if (/Opening/i.test(text)) {
       bad('/login is stuck on "Opening…" — the client bundle did not hydrate');

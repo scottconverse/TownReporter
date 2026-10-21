@@ -81,9 +81,20 @@ try {
     BEFORE the review as well as after: the block this walk is about is the
     evidence block, named by the desk, not a disabled attribute on its own.
   */
-  await page
-    .getByText(/The story changed after its evidence was gathered/)
-    .waitFor({ timeout: 30_000 });
+  /*
+    D124 (TNB-6, "warnings agree") makes the sentence legitimate in two
+    places: the reason at the top of the Checks tab says it, and the page's own
+    notice says it in its own words
+    (src/routes/desk.story.$leadId.tsx:3436 with the desk's block text). A bare
+    getByText is therefore a strict-mode violation, not a missing warning. The
+    assertion this walk makes is the desk's notice -- the same `.publish-blocked`
+    the button and link below are scoped to -- so it is scoped the same way.
+  */
+  const evidenceNotice = page
+    .locator(".publish-blocked")
+    .filter({ hasText: /The story changed after its evidence was gathered/ })
+    .first();
+  await evidenceNotice.waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
   /*
     The story screen's own confirm, and not the one the reasons block now draws
@@ -144,9 +155,7 @@ try {
     helper below proves: the button comes alive under the section's name, and
     that press is the confirmation.
   */
-  await page
-    .getByText(/The story changed after its evidence was gathered/)
-    .waitFor({ state: "detached", timeout: 30_000 });
+  await evidenceNotice.waitFor({ state: "detached", timeout: 30_000 });
   step("confirmed retained evidence after body edit; publication was blocked until review");
   // The evidence decision is part of what a section confirmation is recorded
   // against, so the editor reads the section after it. See confirm-section-step.mjs.
