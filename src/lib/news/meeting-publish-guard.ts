@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import type { Sql } from "../db.ts";
-import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.server.ts";
 import { recordPublishedMeetingEvidence } from "./meeting-article-revision.ts";
 
 /**

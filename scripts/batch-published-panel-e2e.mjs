@@ -283,7 +283,8 @@ async function draftBothAsOneBatch() {
     await rowChoice(headline).check();
   }
   const batch = await openBatchPanel(2);
-  const picker = batch.getByLabel("Writing model");
+  // The batch dialog labels it "Model for these stories" (desk.queue.tsx:2402-2404).
+  const picker = batch.getByLabel("Model for these stories");
   const option = picker.locator("option", { hasText: connectionName });
   const choice = await option.getAttribute("value");
   assert.match(choice ?? "", /^custom:/, "the saved connection must appear in the batch picker");

@@ -76,7 +76,11 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 // Verbatim from src/lib/news/provider-registry.ts and automatic-failover.ts.
 const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash 1017";
 const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
-const SWITCH_NOTE = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
+/* The durable note is the trail "<reason> → <destination>" that
+   appendStoryFailoverNote builds (automatic-failover.ts:225-239), not the
+   friendly sentence; the story page prints it as "Model note: ..."
+   (desk.story.$leadId.tsx:3832). */
+const SWITCH_NOTE = `${DEEPSEEK_LABEL} reached its usage limit → ${TERRA_LABEL}`;
 /** The pin, when the operator set one: rung 2 then asks for this exact model. */
 const PINNED_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "").trim();
 
@@ -386,7 +390,7 @@ async function main() {
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
 
   const visibleSwitch = page
-    .getByText(`Model switch: ${SWITCH_NOTE}`, { exact: true })
+    .getByText(`Model note: ${SWITCH_NOTE}`, { exact: true })
     .waitFor({ timeout: 45_000 });
   const deadline = Date.now() + Number(process.env.STORY_QUOTA_FAILOVER_DEADLINE_MS || 150_000);
   while (Date.now() < deadline) {

@@ -108,7 +108,7 @@ import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea, defaultStoryArea } from "../story-area.ts";
 import { findDuplicate } from "./import-review.ts";
-import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
+import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.server.ts";
 import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import {

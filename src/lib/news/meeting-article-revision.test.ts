@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import type { Sql } from "../db.ts";
-import { draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { draftEvidenceSha256 } from "./meeting-draft-revision-review.server.ts";
 import {
   completePublishedMeetingReviewWithCorrection,
   flagPublishedArticlesForTranscriptRevision,
