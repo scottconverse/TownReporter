@@ -14,7 +14,6 @@ import {
   ROUNDUP_WRITE_SYSTEM,
   RULE_ASSIGNED_REASON,
   SECOND_LEAD_REASON,
-  SECTION_MAX,
   SECTION_WORD_CAP,
   agendaRanges,
   applyPacketSpellings,
@@ -1850,7 +1849,7 @@ describe("whole-meeting writer", () => {
     assert.deepEqual(voteWordsIn("The council acted unanimously."), ["unanimously"], "a unanimous vote is found too");
   });
 
-  it("writes a high-impact non-lead item as its own section after the lead, capped at two", async () => {
+  it("writes a high-impact non-lead item as its own section after the lead, with no two-section cap", async () => {
     /*
       Fix 1. Run 5 led on 6A and moved its own second lead pick, 6B, to the
       roundup: a $511,000 shortfall, a $15,330 human services cut, a $495,670
@@ -1858,11 +1857,10 @@ describe("whole-meeting writer", () => {
       section is the item's resident impact, not its size: an item the status
       pass ADVANCES (10/20 or better) or one the single-lead rule moved here
       gets a plain subhead and up to 450 words after the lead and before ALSO AT
-      THE MEETING, at most two. Five dollar figures or twenty minutes of tape, on
-      their own, do not.
+      THE MEETING. Five dollar figures or twenty minutes of tape, on their own,
+      do not. There is no cap on how many items earn one (D198): every item the
+      editor scored as affecting residents is a story, not a roundup line.
     */
-    assert.equal(SECTION_MAX, 2, "at most two items get their own section");
-
     const small: LedgerItem = {
       itemNo: 9,
       kind: "staff-report",
@@ -1915,7 +1913,7 @@ describe("whole-meeting writer", () => {
       impact: n >= 3 ? impact(4, 4, 3, n >= 4 ? 5 : 3) : impact(2, 2, 2, 2),
     }));
     const chosen = chooseSectionItems(many);
-    assert.equal(chosen.length, SECTION_MAX, "sections are capped at two");
+    assert.equal(chosen.length, 2, "both items the score ADVANCES are chosen -- there is no cap to reach");
     assert.deepEqual(chosen.map((item) => item.itemNo), [4, 3], "the highest-impact items are chosen first");
     assert.equal(chooseSectionItems([]).length, 0, "nothing to choose when nothing deserves a section");
 
@@ -1943,7 +1941,7 @@ describe("whole-meeting writer", () => {
       },
       { segments: SECTIONS_SEGMENTS, agendaList: SECTIONS_AGENDA, packetPages: SECTIONS_PACKET },
     );
-    assert.equal(sectionPrompts.length, SECTION_MAX, "exactly two items were written as sections");
+    assert.equal(sectionPrompts.length, 2, "both qualifying items were written as sections");
     assert.equal(leadPrompts.length, 1, "the lead story is written once");
     const budgetPrompt = sectionPrompts.find((prompt) => prompt.includes("$511,000"));
     assert.ok(budgetPrompt, "the budget item, not just the smaller one, is written as a section");
@@ -1963,9 +1961,44 @@ describe("whole-meeting writer", () => {
     assert.match(result.body.slice(roundupAt), /Electrify Longmont Day: A short roundup line\./, "the small item stays a short roundup line");
     assert.match(
       result.meetingNotes,
-      new RegExp(`SECTIONS: ${SECTION_MAX} item\\(s\\) got their own section after the lead`),
+      /SECTIONS: 2 item\(s\) got their own section after the lead/,
       "the notes count the sections",
     );
+  });
+
+  it("gives each of four ADVANCE items its own section instead of stopping at two", () => {
+    /*
+      D198 (Scott's choice 1, Oct. 21 2026): every item the editor scored as
+      affecting residents (impact total 10+/20, ADVANCE) gets its own full
+      section under a plain subhead. A cap of two is how the third and fourth
+      resident decisions of a long council meeting became one-line roundup
+      entries. Order is unchanged: highest resident-impact total first.
+    */
+    const small: LedgerItem = {
+      itemNo: 0,
+      kind: "staff-report",
+      text: "item",
+      startSeconds: 0,
+      endSeconds: 60,
+      packetPage: null,
+      status: "roundup",
+      reason: "",
+      sourceExcerpt: "",
+      evidence: [],
+      motions: [],
+    };
+    const four = [
+      { ...small, itemNo: 1, impact: impact(3, 3, 2, 2) }, // 10
+      { ...small, itemNo: 2, impact: impact(4, 4, 3, 2) }, // 13
+      { ...small, itemNo: 3, impact: impact(4, 3, 3, 3) }, // 13 (lower item number keeps its place)
+      { ...small, itemNo: 4, impact: impact(3, 4, 3, 3) }, // 13
+      { ...small, itemNo: 5, impact: impact(2, 2, 2, 2) }, // 8, HOLD
+    ];
+    const chosen = chooseSectionItems(four);
+    assert.equal(chosen.length, 4, "all four ADVANCE items get a section -- no item is held back by a cap");
+    assert.deepEqual(chosen.map((item) => item.itemNo), [2, 3, 4, 1], "highest impact first, item order for ties");
+    assert.equal(deservesOwnSection(four[3]!), true, "the fourth item's own score earns it a section too");
+    assert.equal(chosen.some((item) => item.itemNo === 5), false, "an item below the ADVANCE band stays a roundup line");
   });
 
   it("takes a name the packet prints once with its title, and maps a title to its one holder", async () => {

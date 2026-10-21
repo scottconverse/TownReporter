@@ -277,19 +277,20 @@ export const COLD_CHECK_MAX = 15;
 export const NO_VOTE_SENTENCE =
   /\b(?:no\s+vote\b|vote\s+was\s+not\s+recorded|no\s+outcome\s+was\s+recorded|records?\s+no\s+vote)\b/i;
 
-/**
- * A second big item gets its own section after the lead story, under a plain
- * subhead, before ALSO AT THE MEETING. Run 5 moved 6B -- the 2027 budget and its
- * first public hearing, the model's own second lead pick -- to the roundup and
- * gave the whole item one short paragraph, losing the $511,000 shortfall, the
- * $15,330 human services cut, the $495,670 savings, NextLight's 29,910
- * subscribers and the second hearing date. At most this many items get a section.
- */
-export const SECTION_MAX = 2;
-/** Dollar figures in an item's own source that earn it a section of its own. */
-export const SECTION_DOLLAR_MIN = 5;
-/** Seconds of tape an item must run to earn a section of its own (20 minutes). */
-export const SECTION_SECONDS_MIN = 1_200;
+/*
+  A big item gets its own section after the lead story, under a plain subhead,
+  before ALSO AT THE MEETING. Run 5 moved 6B -- the 2027 budget and its first
+  public hearing, the model's own second lead pick -- to the roundup and gave the
+  whole item one short paragraph, losing the $511,000 shortfall, the $15,330 human
+  services cut, the $495,670 savings, NextLight's 29,910 subscribers and the
+  second hearing date.
+
+  There is no cap on the number of sections (D198, Scott's choice, Oct. 21 2026).
+  Every item the editor's score ADVANCES (10/20 or better) is a story for
+  residents, and a story for residents is not squeezed into one roundup line
+  because two other items also deserved one. Only the section's own word cap
+  holds.
+*/
 /** The word cap on a section; the writer is told, and the code trims. */
 export const SECTION_WORD_CAP = 450;
 export const SECTION_REPLY_TOKENS = 1_200;
@@ -1552,8 +1553,10 @@ export function deservesOwnSection(item: LedgerItem): boolean {
 
 /**
  * The items that get their own section, best first: the highest resident-impact
- * total first, then a moved second lead, capped at SECTION_MAX. Chosen from the
- * roundup candidates, so the lead is never re-written as a section and an
+ * total first, then a moved second lead. Every item that earns one gets one --
+ * there is no cap -- so a meeting with four resident-affecting decisions reads
+ * as four stories, not one story and three one-line roundup entries. Chosen from
+ * the roundup candidates, so the lead is never re-written as a section and an
  * excluded item is never resurrected.
  */
 export function chooseSectionItems(items: LedgerItem[]): LedgerItem[] {
@@ -1565,7 +1568,6 @@ export function chooseSectionItems(items: LedgerItem[]): LedgerItem[] {
       const b = [impactTotal(right.item.impact) ?? -1, right.item.reason === SECOND_LEAD_REASON ? 1 : 0];
       return b[0] - a[0] || b[1] - a[1] || left.index - right.index;
     })
-    .slice(0, SECTION_MAX)
     .map((row) => row.item);
 }
 
@@ -1749,7 +1751,7 @@ export function parseRoundupReply(text: string): { valid: boolean; paragraph: st
  * writer's, so the run's single reader writes both with the same rules.
  */
 export const SECTION_WRITE_SYSTEM = `${LEAD_WRITE_SYSTEM}
-This call writes ONE SECOND SECTION of the same story, for one other big item, under its own plain subhead. Write only this item's own story: up to ${SECTION_WORD_CAP} words, plain verbs, no repeating the lead, no headline for the whole story.
+This call writes ONE MORE SECTION of the same story, for one other big item, under its own plain subhead. Write only this item's own story: up to ${SECTION_WORD_CAP} words, plain verbs, no repeating the lead, no headline for the whole story.
 Return compact valid JSON only: {"headline":"the item's plain subhead","dek":"","lead":"this section's body"}`;
 
 export function parseSectionWriteReply(text: string): { valid: boolean; subhead: string; body: string } {
@@ -3361,9 +3363,9 @@ export async function runWholeMeetingWriter(input: {
   const roundupCandidates = ledger.filter(
     (item) => item.status !== "unread" && item.status !== "excluded" && !leadNos.has(item.itemNo),
   );
-  // A second big item -- or one the run's own status pass called a lead -- gets
-  // its own section after the lead story, not one short roundup paragraph. It
-  // leaves the roundup list so it is written once, in full, under its subhead.
+  // Every big item -- or one the run's own status pass called a lead -- gets its
+  // own section after the lead story, not one short roundup paragraph. It leaves
+  // the roundup list so it is written once, in full, under its subhead.
   const sectionItems = chooseSectionItems(roundupCandidates);
   const sectionNos = new Set(sectionItems.map((item) => item.itemNo));
   const roundupOnly = roundupCandidates.filter((item) => !sectionNos.has(item.itemNo));
@@ -3508,7 +3510,7 @@ export async function runWholeMeetingWriter(input: {
   const headline = lead.headline || input.meeting.title;
   const dek = lead.dek;
 
-  // A second big item gets its own section: its own plain subhead and up to
+  // Every big item gets its own section: its own plain subhead and up to
   // SECTION_WORD_CAP words, written from the item's full record and its packet
   // pages, so the facts that made it big are not squeezed into one roundup line.
   const sections: { name: string; text: string; item: LedgerItem }[] = [];
