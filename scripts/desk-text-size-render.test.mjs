@@ -328,6 +328,16 @@ const { DeskShell } = await import(
         await readFile(new URL("../src/lib/news/running-head-label.ts", import.meta.url), "utf8"),
         "running-head-label.ts",
       ),
+      /*
+        A11 (Oct 20 2026) made desk-chrome.tsx read the nav Queue poll
+        interval from @/lib/desk/queue-count-refresh. Like running-head-label
+        above it has no imports, so the REAL file loads and the specifier has
+        to resolve for the shell to load at all.
+      */
+      "@/lib/desk/queue-count-refresh": moduleUrl(
+        await readFile(new URL("../src/lib/desk/queue-count-refresh.ts", import.meta.url), "utf8"),
+        "queue-count-refresh.ts",
+      ),
       "@/lib/appearance-context": appearanceContextStub,
       "./shortcut-sheet": moduleUrl(
         await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),

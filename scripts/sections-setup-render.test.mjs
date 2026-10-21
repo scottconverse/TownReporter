@@ -273,6 +273,15 @@ const DESK_CHROME_IMPORTS = {
   ),
   "@/lib/desk-nav": deskNavUrl,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+  /*
+    A11 (Oct 20 2026) made desk-chrome.tsx read the nav Queue poll interval
+    from @/lib/desk/queue-count-refresh. It has no imports, so the REAL file
+    is loaded and the specifier has to resolve for the shell to load at all.
+  */
+  "@/lib/desk/queue-count-refresh": moduleUrl(
+    await readFile(new URL("../src/lib/desk/queue-count-refresh.ts", import.meta.url), "utf8"),
+    "queue-count-refresh.ts",
+  ),
 
   "@/components/desk-toaster": deskToasterStub,
   "@/components/desk-jobs": deskJobsUrl,

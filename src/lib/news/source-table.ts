@@ -88,8 +88,8 @@ export function sortSuggestedSites<T extends { site: string; count: number }>(
  * waiting to be looked at (spec 6a). Null when there are none, so the caller
  * draws nothing rather than "0 more links".
  */
-export function moreLinksWords(count: number): string | null {
-  if (count <= 0) return null;
+export function moreLinksWords(count: number | undefined): string | null {
+  if (count === undefined || !Number.isFinite(count) || count <= 0) return null;
   return count === 1 ? "1 more link on this site" : `${count} more links on this site`;
 }
 

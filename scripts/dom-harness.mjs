@@ -397,6 +397,18 @@ export const explainPairMatch = () => null;
 export const sharesTightName = () => false;
 `);
 
+/*
+  `@/lib/desk/queue-count-refresh` -- A11 (f9473ce5) made `desk-chrome.tsx`
+  import `queueCountRefetchMs` from this module for the nav's poll interval.
+  It has no imports of its own and is pure (a constant and one ternary), so
+  the REAL file is loaded, exactly like `running-head-label.ts` above; a
+  fixture that stubbed every transport handle still failed to load the chrome
+  with "imports a specifier this test neither stubs nor can resolve".
+
+  A fixture's own `imports[specifier]` still wins over this entry.
+*/
+sharedHelperUrls["@/lib/desk/queue-count-refresh"] = await moduleUrl("src/lib/desk/queue-count-refresh.ts");
+
 /**
  * Point every specifier at a URL Node can import.
  *

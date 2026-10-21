@@ -151,7 +151,7 @@ export function SourceMovesPanel({
   const { counts, moves, rows, suggestedSites } = data;
   const view = viewForFilter(filter);
   const shown = sortSourceRowList(rows, sort, filter);
-  const sites = sortSuggestedSites(suggestedSites);
+  const sites = sortSuggestedSites(suggestedSites ?? []);
 
   /*
     The strip is the filter (spec 6b). Each count is a press that narrows the

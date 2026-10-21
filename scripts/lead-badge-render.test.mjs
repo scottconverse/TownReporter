@@ -889,6 +889,13 @@ const { Chip } = await import(
         module to load.
       */
       "@/lib/news/running-head-label": await sharedModuleUrl("src/lib/news/running-head-label.ts"),
+      /*
+        A11 (Oct 20 2026) made desk-chrome.tsx read the nav Queue poll interval
+        from @/lib/desk/queue-count-refresh. It has no imports, so the real
+        module loads through the same shared URL the other fixtures use --
+        Chip() never reads it; the specifier only has to resolve.
+      */
+      "@/lib/desk/queue-count-refresh": await sharedModuleUrl("src/lib/desk/queue-count-refresh.ts"),
       "@/lib/news/jobs": inlineModule(
         "export const jobStages = () => []; export function queuedJobWaitReason() { throw new Error('lead-badge fixture: jobs.ts not loaded'); } export function requestJobCancel() { throw new Error('lead-badge fixture: jobs.ts not loaded'); }",
       ),

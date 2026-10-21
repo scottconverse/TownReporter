@@ -48,7 +48,7 @@ test("persists a writer checkpoint without completing the job when later reporti
   // 0119: the writer's checkpoint row records the model's own body beside it, so
   // the editor's later save on this row can be told apart from what the model wrote.
   assert.equal(drafts[1].model_body,"Expensive writer output");
-  assert.deepEqual(JSON.parse(drafts[1].provenance_json),[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55,role:"followed"}]);
+  assert.deepEqual(JSON.parse(drafts[1].provenance_json),[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55,role:"followed",organization:"records.example"}]);
   assert.match(drafts[1].integrity_notes,/Prior warning/);
   assert.match(drafts[1].integrity_notes,/Evidence reconciliation not completed/);
   assert.deepEqual(JSON.parse(drafts[1].research_json).writerCheckpoint,{version:1,jobId:job.id,evidenceCheckIncomplete:true});

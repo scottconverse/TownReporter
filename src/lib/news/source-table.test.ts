@@ -169,6 +169,11 @@ test("a source says how many other links on its site are waiting, and says nothi
   assert.equal(moreLinksWords(12), "12 more links on this site");
 });
 
+test("older-shaped data without a suggested-site list or a link count draws nothing instead of crashing", () => {
+  assert.equal(moreLinksWords(undefined), null);
+  assert.deepEqual(sortSuggestedSites([]), []);
+});
+
 test("how often reads the detected rhythm before the interval", () => {
   assert.equal(minutesBetweenReads({ rhythm: "weekly:thu", intervalMinutes: 1440 }), 7 * 24 * 60);
   assert.equal(minutesBetweenReads({ rhythm: "monthly:2", intervalMinutes: 1440 }), 30 * 24 * 60);

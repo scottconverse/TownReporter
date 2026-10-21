@@ -434,7 +434,7 @@ test("an explicitly cited public research capture gains its exact provenance", a
   assert.deepEqual(JSON.parse(rows[1].source_urls),[f.url,addedUrl]);
   const savedProvenance=JSON.parse(rows[1].provenance_json) as Array<Record<string,unknown>>;
   assert.deepEqual(savedProvenance[0],{url:f.url,version_id:originalVersion,role:"record"});
-  assert.deepEqual(savedProvenance[1],{url:addedUrl,title:"Public parking record",version_id:added.id,captured_at:savedProvenance[1].captured_at,role:"followed"});
+  assert.deepEqual(savedProvenance[1],{url:addedUrl,title:"Public parking record",version_id:added.id,captured_at:savedProvenance[1].captured_at,role:"followed",organization:"downtown.example"});
   assert.equal(typeof savedProvenance[1].captured_at,"string");
   assert.deepEqual(JSON.parse(rows[0].source_urls),[f.url]);
   assert.deepEqual(JSON.parse(rows[0].provenance_json),[{url:f.url,version_id:originalVersion,role:"record"}]);
