@@ -771,7 +771,9 @@ async function releaseGOverrides() {
     /* DHI-8 (Release J): the confirmation carries the section AND the acceptance
        clause as one sentence. "Yes, print it" is unchanged; "Publish anyway" now
        has the claims clause after the section. */
-    await page.getByRole("button", {
+    /* DHI-8: the blocker row's own button reads the same sentence as the
+       confirm, so the press is scoped to the publish bar's dialog. */
+    await page.locator("#astra-publish-bar").getByRole("button", {
       name: mode === "self-checked"
         ? new RegExp(`^Yes, print it in ${SECTION_NAME}$`)
         : new RegExp(`^Publish anyway in ${SECTION_NAME} — I accept`),

@@ -153,9 +153,11 @@ async function main() {
   // above a confirm press labelled "Publish anyway in <section>"
   // (src/components/publish-confirmation.ts:27, :88).
   await page.getByRole("button", { name: "Publish to the paper", exact: true }).click();
-  const dekWarning = page.locator(".astra-publish-warning", {
-    hasText: "No dek yet. You can add one, or publish without it.",
-  });
+  // TJA-4/DHC11: the Opinion screen has no `.astra-publish-warning`; its
+  // warnings are a `role="alert"` box (opinion-publish-warnings.ts:27-41).
+  const dekWarning = page
+    .getByRole("alert")
+    .getByText("No dek yet. You can add one, or publish without it.");
   await dekWarning.waitFor({ timeout: 20_000 });
   const publishAnyway = page.getByRole("button", { name: /Publish anyway/ });
   await publishAnyway.waitFor({ timeout: 20_000 });

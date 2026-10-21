@@ -472,9 +472,17 @@ async function theServerRefusesAPublishWithNoSection(publishUrl, leadId) {
     result?.ok === false,
     `the server printed a story with no confirmed section: ${JSON.stringify(result)}`,
   );
+  /*
+    The server names the FIRST unacknowledged warning in `error`, and a freshly
+    pasted story also has the unchecked gate ahead of the section one
+    (desk.ts:6479-6484, 6556-6562), so the section sentence is asserted where
+    it is actually carried: the full warning list on the blocked result.
+  */
   must(
-    /no editor has confirmed that for the version being printed/.test(String(result.error)),
-    `the server refused, but not for the unconfirmed section: "${result.error}"`,
+    (result.warnings ?? []).some((warning) =>
+      /no editor has confirmed that for the version being printed/.test(String(warning.sentence)),
+    ),
+    `the server refused, but not for the unconfirmed section: "${result.error}" warnings: ${JSON.stringify(result.warnings)}`,
   );
   step("the server refuses to print the pasted story with no section confirmed");
   return result.error;

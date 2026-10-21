@@ -490,7 +490,10 @@ async function main() {
   const balancedCodex = bulkOptions.find((option) => option.label.includes("Codex Sol 6.1 (balanced)"));
   if (!balancedCodex) throw new Error("the bulk picker is missing Codex Sol 6.1 (balanced)");
   await bulkWritingModel.selectOption(balancedCodex.value);
-  const bulkEffort = page.getByLabel("Thinking effort").filter({ visible: true }).first();
+  // The header scan picker emits its own "Thinking effort" select and sits
+  // earlier in the DOM, so the read is scoped to the bulk strip whose choice
+  // the Start press actually carries (desk.queue.tsx `.queue-bulk`).
+  const bulkEffort = page.locator(".queue-bulk").getByLabel("Thinking effort").first();
   await bulkEffort.waitFor({ timeout: 10_000 });
   const chosenEffort = await bulkEffort.inputValue();
   await page.getByRole("button", { name: /Start 1 story from the selected leads/ }).click();

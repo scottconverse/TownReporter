@@ -323,7 +323,16 @@ async function printTheFirstStory() {
   await topic.selectOption(values.includes("council") ? "council" : values[0]);
   await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: /^Publish in / }).click();
-  await page.getByRole("button", { name: /^Yes, print it in / }).click();
+  /*
+    DHI-8: a batch draft has no recorded claims, so the confirm carries the
+    warning block's own words -- "Publish anyway in <section> -- I accept these
+    claims are unreviewed". "Yes, print it in <section>" is still what a clean
+    draft draws. Scoped to the bar so the blocker row's button cannot match.
+  */
+  await page
+    .locator("#astra-publish-bar")
+    .getByRole("button", { name: /^(?:Yes, print it in|Publish anyway in) / })
+    .click();
   await page.getByText("On the paper").waitFor({ timeout: 45_000 });
   step(`"${printedHeadline}" is printed, and its lead is now published`);
   return href;

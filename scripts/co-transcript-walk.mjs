@@ -359,7 +359,7 @@ try {
     transcriptTab.waitForResponse((response) =>
       response.url().includes("/api/transcript-file") && response.status() === 200,
     ),
-    transcriptTab.getByRole("link", { name: /Download original file/ }).click(),
+    transcriptTab.getByRole("button", { name: /Download original file/ }).click(),
   ]);
   must(
     originalResponse.headers()["content-type"] === "application/xml",
