@@ -112,6 +112,20 @@ export function rungTimeoutMs(input: { requestedMs: number; deadlineAt: number; 
   return timeoutMs >= MIN_RUNG_MS ? { timeoutMs } : { refused: true };
 }
 
+/** The draft run's deadline after a rung change: the later of the deadline it
+ * already had and this rung's own wall clock measured from the run's start.
+ * desk_jobs 428: the deadline was stamped once from the first choice (Codex,
+ * 900 s) and kept when the run fell back to a local rung (2,400 s), so every
+ * later call was refused with no time left. A rung change can only lengthen
+ * the run; it never shortens the time already granted. */
+export function extendDeadlineForRung(input: {
+  runStartedAt: number;
+  currentDeadlineAt: number;
+  rungWallMs: number;
+}): number {
+  return Math.max(input.currentDeadlineAt, input.runStartedAt + input.rungWallMs);
+}
+
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared
  * desk renderer also serves Opinion, whose quota copy must not be shown for a
  * Story job. Deliberately avoid the renderer's quota trigger words here while

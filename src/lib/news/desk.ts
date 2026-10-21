@@ -291,6 +291,7 @@ import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts
 import {
   MIN_RUNG_MS,
   NO_MODEL_IN_TIME,
+  extendDeadlineForRung,
   rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
@@ -3831,6 +3832,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     };
     const rawStoryChat = deps.chat ?? grokChat;
     const storyChat: typeof grokChat = async (...args) => recordTools(await rawStoryChat(...args));
+    // One wall-clock deadline and one failed-rung set per draft run (decisions 2-3).
+    // The deadline follows the rung in use: a fallback rung gets its own wall
+    // clock measured from the run's start, never the dead rung's leftover
+    // (desk_jobs 428: Codex's 900 s was held over a 2,400 s local fallback).
+    const draftRunStartedAt = Date.now();
+    let draftRunDeadlineAt =
+      draftRunStartedAt + providerBudget(activeReportSnapshot.modelChoice, draftInput.providerOverrides).wallMs;
     const persistReportSwitch = async (
       nextChoice: EffectiveProviderChoice,
       reason: import("./automatic-failover.ts").AutomaticFailoverReason,
@@ -3849,6 +3857,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         ...(selectedMeetingArtifactId != null ? { meetingArtifactId: selectedMeetingArtifactId } : {}),
       });
       activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort, modelLabel:nextLabel };
+      // The switch is the moment the run's own budget changes: the new rung
+      // brings its own wall clock, and the deadline only ever moves later.
+      draftRunDeadlineAt = extendDeadlineForRung({
+        runStartedAt: draftRunStartedAt,
+        currentDeadlineAt: draftRunDeadlineAt,
+        rungWallMs: providerBudget(nextChoice, draftInput.providerOverrides).wallMs,
+      });
     };
     draftInput.onProviderSwitch = async ({ transport, model, reason }) => {
       const nextChoice: EffectiveProviderChoice | null =
@@ -3859,8 +3874,6 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             : null;
       if (nextChoice) await persistReportSwitch(nextChoice, reason);
     };
-    // One wall-clock deadline and one failed-rung set per draft run (decisions 2-3).
-    const draftRunDeadlineAt = Date.now() + providerBudget(activeReportSnapshot.modelChoice, draftInput.providerOverrides).wallMs;
     const draftRunTriedRungs = new Set<string>();
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => {
