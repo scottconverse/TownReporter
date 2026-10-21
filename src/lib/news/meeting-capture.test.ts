@@ -327,3 +327,64 @@ describe("A10: a captured video whose transcript artifact is missing is captured
     });
   });
 });
+
+describe("A10 guard: recapture runs only against a readable root, and only three at a time", () => {
+  it("recaptures nothing when the meeting artifact root is not readable", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "meeting-capture-test-"));
+    const unplugged = join(scratch, "unplugged-drive");
+    const prior = process.env.TOWNREPORTER_DATA_ROOT;
+    process.env.TOWNREPORTER_DATA_ROOT = unplugged; // the drive is not there
+    try {
+      const { sql } = capturePassSql({
+        artifactStatuses: { gone0000001: "missing" },
+        records: [{ ...CAPTURED_RECORD, video_id: "gone0000001" }],
+      });
+      const captures: string[] = [];
+      await runMeetingAwareness(sql, 900105, {
+        listChannelVideos: async () => [listedFor("gone0000001")],
+        prepareCapturePaths: () => ({ archivePath: join(scratch, "archive.txt"), outputDir: join(scratch, "captions") }),
+        captureMeeting: async (input) => { captures.push(input.videoId); return captionSuccess(join(scratch, "captions")); },
+        captureAudio: async () => { throw new Error("unexpected audio attempt"); },
+        applyCapturedMeetingTranscript: (async () => ({ warnings: [] })) as unknown as NonNullable<MeetingAwarenessDeps["applyCapturedMeetingTranscript"]>,
+        withTransaction: (async (fn: (tx: Sql) => Promise<unknown>) => fn(sql)) as unknown as NonNullable<MeetingAwarenessDeps["withTransaction"]>,
+      });
+      assert.deepEqual(captures, [], "an unreadable root cannot start a mass recapture");
+    } finally {
+      if (prior === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+      else process.env.TOWNREPORTER_DATA_ROOT = prior;
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("recaptures the three oldest missing meetings and leaves the rest in the archive", async () => {
+    await withCaptureDataRoot(async (root) => {
+      const published: Record<string, string> = {
+        missing0001: "2026-09-01", missing0002: "2026-09-02", missing0003: "2026-09-03",
+        missing0004: "2026-07-01", missing0005: "2026-08-01",
+      };
+      const { sql } = capturePassSql({
+        artifactStatuses: Object.fromEntries(Object.keys(published).map((id) => [id, "missing"])),
+        records: Object.entries(published).map(([video_id, date]) => ({ ...CAPTURED_RECORD, video_id, published: date })),
+      });
+      const archive = meetingArchivePath(900106, root);
+      const fs = await import("node:fs");
+      fs.mkdirSync(join(root, "meeting-capture", "newsroom-900106"), { recursive: true });
+      fs.writeFileSync(archive, Object.keys(published).map((id) => `youtube ${id}`).join("\n") + "\n", "utf8");
+      const captures: string[] = [];
+      await runMeetingAwareness(sql, 900106, {
+        listChannelVideos: async () => Object.keys(published).map((id) => listedFor(id)),
+        prepareCapturePaths: () => ({ archivePath: archive, outputDir: join(root, "captions") }),
+        captureMeeting: async (input) => { captures.push(input.videoId); return captionSuccess(join(root, "captions")); },
+        captureAudio: async () => { throw new Error("unexpected audio attempt"); },
+        applyCapturedMeetingTranscript: (async () => ({ warnings: [] })) as unknown as NonNullable<MeetingAwarenessDeps["applyCapturedMeetingTranscript"]>,
+        withTransaction: (async (fn: (tx: Sql) => Promise<unknown>) => fn(sql)) as unknown as NonNullable<MeetingAwarenessDeps["withTransaction"]>,
+      });
+      assert.deepEqual(captures.sort(), ["missing0001", "missing0004", "missing0005"],
+        "only the three oldest missing meetings are recaptured in one pass");
+      const archiveText = fs.readFileSync(archive, "utf8");
+      assert.match(archiveText, /youtube missing0002/, "an over-cap missing meeting keeps its archive line");
+      assert.match(archiveText, /youtube missing0003/, "an over-cap missing meeting keeps its archive line");
+      assert.doesNotMatch(archiveText, /youtube missing0004/, "a recapture target is held out of the archive");
+    });
+  });
+});

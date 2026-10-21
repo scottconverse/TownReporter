@@ -139,6 +139,35 @@ export function meetingRuntimeRoot(env: NodeJS.ProcessEnv = process.env, cwd = p
   // only for older source deployments that already set it.
   return env.TOWNREPORTER_DATA_ROOT || env.TOWNREPORTER_DATA_DIR || cwd;
 }
+/**
+ * A10 guard: a recapture pass runs only while the artifact root the captures
+ * write into is actually readable. When the data drive is unplugged every
+ * transcript artifact looks `missing`, and recapturing on that reading would
+ * re-download the whole archive the moment the app starts.
+ */
+export function meetingArtifactRootReadable(root = meetingRuntimeRoot()): boolean {
+  try { readdirSync(root); return true; } catch { return false; }
+}
+/** A10 guard: at most this many damaged captures are tried again per pass. */
+export const MAX_RECAPTURES_PER_PASS = 3;
+/**
+ * A10 guard: the recapture set for one pass, oldest meeting first, capped so a
+ * mass-missing reading cannot start dozens of downloads at once. Videos beyond
+ * the cap keep their archive line and are left alone until a later pass.
+ */
+export function selectRecaptureIds(
+  missing: ReadonlySet<string>,
+  records: MeetingCaptureRecord[],
+  limit = MAX_RECAPTURES_PER_PASS,
+): Set<string> {
+  const dated = records
+    .filter((r) => missing.has(r.videoId))
+    .sort((a, b) => a.published.localeCompare(b.published) || a.videoId.localeCompare(b.videoId))
+    .map((r) => r.videoId);
+  const known = new Set(records.map((r) => r.videoId));
+  const undated = [...missing].filter((id) => !known.has(id)).sort();
+  return new Set([...dated, ...undated].slice(0, limit));
+}
 export function meetingArchivePath(newsroomId: number, root = meetingRuntimeRoot()): string {
   return join(root, "meeting-capture", `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
 }
@@ -561,8 +590,13 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
     `--download-archive` file would otherwise skip it forever. The video is
     therefore treated as uncaptured and held out of the archive until a
     capture produces a new artifact. The old artifact row is kept as-is.
+    A10 guard: an unreadable artifact root means every artifact reads as
+    `missing`, so no recapture runs then, and at most MAX_RECAPTURES_PER_PASS
+    (oldest first) ever run in one pass.
   */
-  const recaptureIds = await missingTranscriptArtifactVideoIds(sql, newsroomId);
+  const recaptureIds = meetingArtifactRootReadable()
+    ? selectRecaptureIds(await missingTranscriptArtifactVideoIds(sql, newsroomId), captured)
+    : new Set<string>();
   // The database is the capture source of truth. Reconcile the yt-dlp cache
   // BEFORE asking yt-dlp to capture anything; doing this only after the pass
   // lets a stale file suppress a meeting the database says is uncaptured.
@@ -728,7 +762,12 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
   const archiveText = await readArchive(archivePath);
   // A10: recaptured videos are recomputed here -- one that produced a fresh
   // artifact is no longer held out, so its archive line comes back at once.
-  const stillRecapture = await missingTranscriptArtifactVideoIds(sql, newsroomId);
+  // Only this pass's chosen recaptures are ever held out; every other missing
+  // video keeps its archive line so yt-dlp does not touch it.
+  const stillMissing = meetingArtifactRootReadable()
+    ? await missingTranscriptArtifactVideoIds(sql, newsroomId)
+    : new Set<string>();
+  const stillRecapture = new Set([...recaptureIds].filter((id) => stillMissing.has(id)));
   const reconciled = reconcileArchive(archiveText, finalRecords, stillRecapture);
   if (reconciled.changed) regenerateArchive(archivePath, finalRecords, stillRecapture);
   // Which reader found these videos is part of the receipt: "read with the
