@@ -163,6 +163,79 @@ it("a suggested website that never names the paper's place stays a suggestion (D
   assert.equal(byId.get(home)!.review_note, `Its site is on trial as source ${trial.id}.`);
 });
 
+it("a dated site whose host names the paper's city goes on trial (D182 rule 2)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9576;
+  await sql`insert into newsrooms(id,name) values(${room},'Intake host fixture')`;
+  const [suggestion] = await sql<{ id: number }>`
+    insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+    values('intake-user',${room},'https://www.artslongmont.org/events/art-walk','arts','page','C','proposed')
+    returning id`;
+  const placeNames = ["Longmont", "Boulder County"];
+  const read = async () => ({
+    // Five dates, and no place name anywhere in the extracted text.
+    text: "Art walk Oct. 2. Gallery night Oct. 9. Open studio Oct. 14. Concert Oct. 21. Fair Oct. 28.",
+  });
+
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames, read }), ["artslongmont.org"]);
+  const [trial] = await sql<{ id: number; status: string }>`
+    select id, status from sources where newsroom_id = ${room} and url = 'https://www.artslongmont.org/'`;
+  assert.equal(trial!.status, "trial");
+  const [note] = await sql<{ review_note: string }>`select review_note from sources where id = ${suggestion!.id}`;
+  assert.equal(note!.review_note, `Its site is on trial as source ${trial!.id}.`);
+});
+
+it("a site that names the paper's place only in its full page text goes on trial (D182 rule 3)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9577;
+  await sql`insert into newsrooms(id,name) values(${room},'Intake raw-text fixture')`;
+  await sql`
+    insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+    values('intake-user',${room},'https://www.stvrain.k12.co.us/calendars/board-meeting','svvSD','page','C','proposed')`;
+  const placeNames = ["Longmont", "Boulder County"];
+  const read = async (url: string) => {
+    assert.equal(url, "https://www.stvrain.k12.co.us/");
+    return {
+      // The article body has the dates but not the city.
+      text: "Board meeting Oct. 2. Late start Oct. 9. Conferences Oct. 14. Holiday Oct. 21. Break Oct. 28.",
+      // The header and footer do, and article extraction drops them.
+      rawText: "St. Vrain Valley Schools — 395 S. Pratt Parkway, Longmont, CO 80501. Board meeting Oct. 2.",
+    };
+  };
+
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames, read }), ["stvrain.k12.co.us"]);
+  const [trial] = await sql<{ status: string }>`
+    select status from sources where newsroom_id = ${room} and url = 'https://www.stvrain.k12.co.us/'`;
+  assert.equal(trial!.status, "trial");
+});
+
+it("a far-away site naming the place nowhere stays a suggestion (D182)", async () => {
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
+  const room = 9578;
+  await sql`insert into newsrooms(id,name) values(${room},'Intake nowhere fixture')`;
+  const [away] = await sql<{ id: number }>`
+    insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+    values('intake-user',${room},'https://www.nyc.gov/news/budget-hearing','nyc','page','C','proposed')
+    returning id`;
+  const placeNames = ["Longmont", "Boulder County"];
+  const read = async () => ({
+    text: "Budget hearing Oct. 2. Council meets Oct. 9. Parade Oct. 14. Vote Oct. 21. Fair Oct. 28.",
+    rawText: "City of New York. Budget hearing Oct. 2. Council meets Oct. 9. Parade Oct. 14.",
+  });
+
+  assert.deepEqual(await runIntake(sql, { newsroomId: room, placeNames, read }), ["nyc.gov"]);
+  const [row] = await sql<{ status: string; review_note: string | null }>`
+    select status, review_note from sources where id = ${away!.id}`;
+  assert.equal(row!.status, "proposed");
+  assert.match(row!.review_note!, /not tried, because the page does not name Longmont or Boulder County/);
+  const [observation] = await sql<{ kind: string }>`
+    select kind from source_observations where source_id = ${away!.id}`;
+  assert.equal(observation!.kind, "not-local");
+});
+
 it("with no place set, a dated far-away website still goes on trial (D176)", async () => {
   await applyMigrationsToTestPglite();
   const sql = await getSql();

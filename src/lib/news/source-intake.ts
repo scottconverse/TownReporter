@@ -76,7 +76,24 @@ export function looksLikeListing(text: string, method?: string | null): { ok: bo
     : { ok: false, why: `the page shows ${dates} date${dates === 1 ? "" : "s"} (needs ${MIN_DATED_ITEMS})` };
 }
 
-export type IntakeReader = (url: string) => Promise<{ text: string; method?: string | null }>;
+/**
+ * D182: the reader also hands back the page's full text when it has one, so a
+ * site that names its city only in the header, footer or address — the parts
+ * article extraction drops — can still count as local.
+ */
+export type IntakeReader = (
+  url: string,
+) => Promise<{ text: string; method?: string | null; rawText?: string | null }>;
+
+/** D182 rule 2: a host names the place when it contains it, spaces and punctuation dropped. */
+export function hostNamesPlace(site: string | null, placeNames: readonly string[]): boolean {
+  if (!site) return false;
+  const squashed = site.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return placeNames
+    .map((name) => name.replace(/[^a-z0-9]/gi, "").toLowerCase())
+    .filter((name) => name.length >= 3)
+    .some((name) => squashed.includes(name));
+}
 
 type Proposal = { id: number; user_id: string; url: string; reviewed_at: unknown };
 
@@ -177,10 +194,12 @@ export async function runIntake(
     const first = proposals[0]!;
     const target = pageToTry(first.url);
     let text = "";
+    let rawText = "";
     let verdict: { ok: boolean; why: string };
     try {
       const page = await read(target);
       text = page.text ?? "";
+      rawText = page.rawText ?? "";
       verdict = text.trim() ? looksLikeListing(text, page.method) : { ok: false, why: "the page had no readable text" };
     } catch (error) {
       verdict = { ok: false, why: `it could not be read (${(error instanceof Error ? error.message : "fetch failed").slice(0, 120)})` };
@@ -192,9 +211,16 @@ export async function runIntake(
         where newsroom_id = ${newsroomId} and id = any(${ids})`;
       continue;
     }
-    // D176: a website that never names the paper's city or county is not the
-    // paper's neighbourhood news, so it stays a suggestion.
-    if (placeNames.length > 0 && !namesPlace(text, placeNames)) {
+    // D176 with D182: a website that never names the paper's city or county is
+    // not the paper's neighbourhood news, so it stays a suggestion. The place
+    // counts when the extracted text names it, when the host name carries it,
+    // or when the full page text names it somewhere extraction dropped.
+    const targetSite = siteOf(target);
+    const local =
+      namesPlace(text, placeNames) ||
+      hostNamesPlace(targetSite, placeNames) ||
+      (rawText.trim().length > 0 && namesPlace(rawText, placeNames));
+    if (placeNames.length > 0 && !local) {
       const why = `the page does not name ${placeNames.join(" or ")}`;
       const reason = `Automatic check of ${target}: not tried, because ${why}. Still a suggestion.`;
       await sql`update sources set reviewed_at = now(), review_note = ${reason}

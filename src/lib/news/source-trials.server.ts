@@ -22,7 +22,7 @@ export async function tickSourceTrials(): Promise<void> {
         placeNames,
         read: async (url) => {
           const page = await ingestUrl(url);
-          return { text: page.text, method: page.method ?? null };
+          return { text: page.text, method: page.method ?? null, rawText: page.rawText ?? null };
         },
       });
       await runLightPass(sql, {

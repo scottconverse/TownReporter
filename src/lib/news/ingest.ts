@@ -23,6 +23,8 @@ import { characterLength, pdfTextPreview } from "./pdf-read.ts";
 export const ARCHIVE_TEXT_CAP = 2_000_000;
 export const CHUNK_SIZE = 2000;
 export const PLANNER_TEXT_CAP = 1800;
+/** D182: enough of a page's full text to find a city named in its furniture. */
+export const RAW_TEXT_CAP = 200_000;
 
 export async function mapLimit<T, R>(
   items: T[],
@@ -619,6 +621,15 @@ export type IngestResult = {
   text: string;
   titleHint: string;
   extras: string[];
+  /**
+   * The WHOLE page as text, before article extraction — header, footer and
+   * address included. `text` is the article body, which is the right thing to
+   * store and the wrong thing to ask "does this site name its city?" (D182:
+   * the D176 home-area check read only `text` and rejected a school district
+   * whose front page names Longmont three times). Only set when the read
+   * already had the raw body, so it never costs a second fetch.
+   */
+  rawText?: string;
   newsletterSignupUrl?: string;
   /** Site furniture retained separately, never treated as article body. */
   notices?: string[];
@@ -1244,6 +1255,8 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
     text,
     titleHint: extracted.title || titleHint,
     extras,
+    // D182: the full page, tag-stripped, from the body already in hand.
+    rawText: htmlToPlainText(body).slice(0, RAW_TEXT_CAP),
     notices: extractSiteNotices(body),
     newsletterUrl: publicPageRoutes(body, url).newsletterUrl,
     newsletterSignupUrl: (await newsletterSignup()).detectedNewsletterSignup(body, url.toString()),
