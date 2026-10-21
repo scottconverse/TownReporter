@@ -223,6 +223,12 @@ describe("meeting capture Slice 2 second-run suppression", () => {
         ok: false as const, stopped: false, reason: "yt-dlp rate limited (HTTP 429)",
         argv: [], stdout: "", stderr: "",
       }),
+      // D177: the 429 is named as a block only when the audio download is
+      // refused too -- this fake refuses it the same way.
+      captureAudio: async () => ({
+        ok: false as const, stopped: false, reason: "yt-dlp rate limited (HTTP 429)",
+        argv: [], stdout: "", stderr: "",
+      }),
       withTransaction: state.withTransaction,
     } as never);
 

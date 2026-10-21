@@ -166,16 +166,35 @@ export function parseArchive(text: string): Set<string> {
   }
   return ids;
 }
-export function serializeArchive(records: MeetingCaptureRecord[]): string {
-  return records.filter((r) => r.status === "captured").map((r) => `youtube ${r.videoId}`).sort().join("\n").concat(records.length ? "\n" : "");
+export function serializeArchive(records: MeetingCaptureRecord[], heldOut?: ReadonlySet<string>): string {
+  const lines = records
+    .filter((r) => r.status === "captured" && !heldOut?.has(r.videoId))
+    .map((r) => `youtube ${r.videoId}`).sort();
+  return lines.join("\n").concat(lines.length ? "\n" : "");
 }
-export function reconcileArchive(archiveText: string | null, records: MeetingCaptureRecord[]): { capturedIds: Set<string>; rewritten: string; changed: boolean } {
+export function reconcileArchive(archiveText: string | null, records: MeetingCaptureRecord[], heldOut?: ReadonlySet<string>): { capturedIds: Set<string>; rewritten: string; changed: boolean } {
   const fromDb = new Set(records.filter((r) => r.status === "captured").map((r) => r.videoId));
   const fromFile = archiveText ? parseArchive(archiveText) : new Set<string>();
   const capturedIds = new Set([...fromDb].filter((id) => fromFile.has(id) || !fromFile.size || fromFile.has(id)));
   for (const id of fromDb) capturedIds.add(id);
-  const rewritten = serializeArchive(records);
+  const rewritten = serializeArchive(records, heldOut);
   return { capturedIds, rewritten, changed: rewritten !== (archiveText ?? "") };
+}
+/**
+ * A10: the videos whose most recent transcript artifact is marked `missing`
+ * by the storage integrity pass -- the capture's file is gone while the row
+ * (and its hash evidence) stays. The latest row decides: a video with a
+ * missing older artifact and a valid current one needs no recapture.
+ */
+export async function missingTranscriptArtifactVideoIds(sql: Sql, newsroomId: number): Promise<Set<string>> {
+  const rows = await sql.query<{ video_id: string; integrity_status: string | null }>(
+    `select distinct on (video_id) video_id,integrity_status
+       from meeting_transcript_artifacts
+      where newsroom_id=$1 and artifact_type='transcript'
+      order by video_id,captured_at desc,id desc`,
+    [newsroomId],
+  );
+  return new Set(rows.filter((row) => row.integrity_status === "missing").map((row) => row.video_id));
 }
 export async function loadMeetingPriority(sql: Sql, newsroomId: number): Promise<MeetingChannel[]> {
   const rows = await sql.query<{ channel_url: string; position: number }>("select channel_url,position from meeting_channel_priority where newsroom_id=$1 order by position,id", [newsroomId]);
@@ -189,8 +208,8 @@ export async function saveMeetingPriority(sql: Sql, newsroomId: number, channels
 export async function readArchive(path: string): Promise<string | null> {
   try { return existsSync(path) ? readFileSync(path, "utf8") : null; } catch { return null; }
 }
-export function regenerateArchive(path: string, records: MeetingCaptureRecord[]): string {
-  const text = serializeArchive(records);
+export function regenerateArchive(path: string, records: MeetingCaptureRecord[], heldOut?: ReadonlySet<string>): string {
+  const text = serializeArchive(records, heldOut);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text, "utf8");
   return text;
@@ -298,6 +317,91 @@ async function recordYoutubeRateLimit(
   );
   return retry.at;
 }
+
+type AudioFallbackContext = {
+  sql: Sql;
+  newsroomId: number;
+  video: ListedVideo & { channelUrl: string };
+  outputDir: string;
+  archivePath: string;
+  triggerReason: string;
+  caps: CaptureCaps;
+  now: Date;
+  previousRetry: { retryDay: string | null; retryCount: number | null; retryAt: string | null } | undefined;
+  failures: string[];
+  captureAudio: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number; resume?: boolean }) => Promise<AudioCaptureResult>;
+  storeAudio: typeof storeMeetingAudioArtifact;
+  runTransaction: typeof withTransaction;
+};
+
+/**
+ * The one audio-fallback path. M-1 calls it when captions are unusable; D177
+ * calls it when the caption download is refused with a 429, because YouTube
+ * rate-limiting the subtitle endpoint is not evidence that the media itself is
+ * unavailable. The rate limit is recorded only if this download is refused too.
+ *
+ * Every outcome records itself (stored, refused by a cap, failed, stopped or
+ * rate-limited) and appends its failure line; the caller just moves on.
+ */
+async function runAudioFallbackCapture(ctx: AudioFallbackContext): Promise<void> {
+  const { sql, newsroomId, video: v, outputDir, archivePath, triggerReason, caps, now, previousRetry, failures } = ctx;
+  let audio: AudioCaptureResult;
+  try {
+    audio = await ctx.captureAudio({ videoId: v.id, outputDir, archivePath, sleepRequests: 1 });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (isYoutubeRateLimit(reason)) {
+      const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, previousRetry, now);
+      failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+    } else {
+      await recordCaptureFailure(sql, newsroomId, v, `audio fallback failed: ${reason}`);
+      failures.push(`${v.title}: audio fallback failed: ${reason}`);
+    }
+    return;
+  }
+  if (!audio.ok) {
+    if (isYoutubeRateLimit(audio.reason)) {
+      const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, previousRetry, now);
+      failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+      return;
+    }
+    const reason = audio.stopped ? audio.reason : `audio fallback failed: ${audio.reason}`;
+    await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason, findResumablePartial(outputDir, v.id)) : recordCaptureFailure(sql, newsroomId, v, reason));
+    failures.push(`${v.title}: ${reason}`);
+    return;
+  }
+  // N-5 caps apply to the audio fallback too.
+  const audioDurRefusal = checkDurationCap(audio.info.durationSeconds, caps);
+  if (audioDurRefusal.refused) {
+    await recordCaptureRefusal(sql, newsroomId, v, audioDurRefusal.reason);
+    failures.push(`${v.title}: ${audioDurRefusal.reason}`);
+    return;
+  }
+  const audioSizeRefusal = checkSizeCap(audio.audio.byteSize, caps);
+  if (audioSizeRefusal.refused) {
+    await recordCaptureRefusal(sql, newsroomId, v, audioSizeRefusal.reason);
+    failures.push(`${v.title}: ${audioSizeRefusal.reason}`);
+    return;
+  }
+  const audioEndedAt = computeEndedAt({ durationSeconds: audio.info.durationSeconds, videoTimestamp: audio.info.videoTimestamp });
+  const audioDisposition = captureDisposition({ endedAt: audioEndedAt, now });
+  try {
+    await ctx.runTransaction(async (tx) => {
+      const stored = await ctx.storeAudio(tx, {
+        newsroomId, videoId: v.id, audioSourcePath: audio.audio.path,
+        format: audio.audio.format, triggerReason, infoSourcePath: audio.infoPath,
+      });
+      await recordAudioCaptureSuccess(tx, newsroomId, v, v.channelUrl, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await recordCaptureFailure(sql, newsroomId, v, reason);
+    failures.push(`${v.title}: ${reason}`);
+  }
+}
+
+const YOUTUBE_CAPTION_429_AUDIO_TRIGGER = "Captions refused by YouTube (HTTP 429); audio fallback used.";
+
 /**
  * N-5 Continue: resume captures the operator stopped, in place.
  *
@@ -450,13 +554,22 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
     if (!foundById.has(record.videoId)) found.push({ id: record.videoId, url: `https://www.youtube.com/watch?v=${record.videoId}`,
       channelUrl: record.channelUrl, title: record.title, published: record.published, duration: 0, tab: "rss" });
   }
+  /*
+    A10: a capture whose transcript artifact the integrity pass marked
+    `missing` is not done -- its file is gone, and the video is still on
+    YouTube. The record still says `captured`, so both the record and the
+    `--download-archive` file would otherwise skip it forever. The video is
+    therefore treated as uncaptured and held out of the archive until a
+    capture produces a new artifact. The old artifact row is kept as-is.
+  */
+  const recaptureIds = await missingTranscriptArtifactVideoIds(sql, newsroomId);
   // The database is the capture source of truth. Reconcile the yt-dlp cache
   // BEFORE asking yt-dlp to capture anything; doing this only after the pass
   // lets a stale file suppress a meeting the database says is uncaptured.
   const archivePath = meetingArchivePath(newsroomId);
-  const beforeCapture = reconcileArchive(await readArchive(archivePath), captured);
-  if (beforeCapture.changed) regenerateArchive(archivePath, captured);
-  const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
+  const beforeCapture = reconcileArchive(await readArchive(archivePath), captured, recaptureIds);
+  if (beforeCapture.changed) regenerateArchive(archivePath, captured, recaptureIds);
+  const known = new Set(captured.filter((r) => r.status === "captured" && !recaptureIds.has(r.videoId)).map((r) => r.videoId));
   const retryByVideo = new Map(captured.map((record) => [record.videoId, record]));
   const uncaptured = found.filter((v) => !known.has(v.id));
   const readyToCapture: ListedMeetingVideo[] = [];
@@ -500,12 +613,18 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (isYoutubeRateLimit(reason)) {
-        const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
-          retryDay: retryRecord.youtubeRetryDay ?? null,
-          retryCount: retryRecord.youtubeRetryCount ?? null,
-          retryAt: retryRecord.youtubeRetryAt ?? null,
-        }, now);
-        failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+        // D177: a refused caption download is tried once as audio before the
+        // rate limit is recorded -- only a refused audio download records it.
+        await runAudioFallbackCapture({
+          sql, newsroomId, video: v, outputDir, archivePath,
+          triggerReason: YOUTUBE_CAPTION_429_AUDIO_TRIGGER,
+          caps, now, previousRetry: retryRecord && {
+            retryDay: retryRecord.youtubeRetryDay ?? null,
+            retryCount: retryRecord.youtubeRetryCount ?? null,
+            retryAt: retryRecord.youtubeRetryAt ?? null,
+          },
+          failures, captureAudio, storeAudio, runTransaction,
+        });
       } else {
         await recordCaptureFailure(sql, newsroomId, v, reason);
         failures.push(`${v.title}: ${reason}`);
@@ -514,78 +633,31 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
     }
     if (!result.ok) {
       if (isYoutubeRateLimit(result.reason)) {
-        const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
-          retryDay: retryRecord.youtubeRetryDay ?? null,
-          retryCount: retryRecord.youtubeRetryCount ?? null,
-          retryAt: retryRecord.youtubeRetryAt ?? null,
-        }, now);
-        failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+        // D177: see the catch above -- one audio attempt before the rate limit stands.
+        await runAudioFallbackCapture({
+          sql, newsroomId, video: v, outputDir, archivePath,
+          triggerReason: YOUTUBE_CAPTION_429_AUDIO_TRIGGER,
+          caps, now, previousRetry: retryRecord && {
+            retryDay: retryRecord.youtubeRetryDay ?? null,
+            retryCount: retryRecord.youtubeRetryCount ?? null,
+            retryAt: retryRecord.youtubeRetryAt ?? null,
+          },
+          failures, captureAudio, storeAudio, runTransaction,
+        });
         continue;
       }
       // M-1: audio is required ONLY when captions are missing or unusable.
       if (requiresAudioFallback(result)) {
-        const triggerReason = `Captions unavailable or rejected; audio fallback required. yt-dlp caption result: ${result.reason}`;
-        let audio: AudioCaptureResult;
-        try {
-          audio = await captureAudio({ videoId: v.id, outputDir, archivePath, sleepRequests: 1 });
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          if (isYoutubeRateLimit(reason)) {
-            const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
-              retryDay: retryRecord.youtubeRetryDay ?? null,
-              retryCount: retryRecord.youtubeRetryCount ?? null,
-              retryAt: retryRecord.youtubeRetryAt ?? null,
-            }, now);
-            failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
-          } else {
-            await recordCaptureFailure(sql, newsroomId, v, `audio fallback failed: ${reason}`);
-            failures.push(`${v.title}: audio fallback failed: ${reason}`);
-          }
-          continue;
-        }
-        if (!audio.ok) {
-          if (isYoutubeRateLimit(audio.reason)) {
-            const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
-              retryDay: retryRecord.youtubeRetryDay ?? null,
-              retryCount: retryRecord.youtubeRetryCount ?? null,
-              retryAt: retryRecord.youtubeRetryAt ?? null,
-            }, now);
-            failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
-            continue;
-          }
-          const reason = audio.stopped ? audio.reason : `audio fallback failed: ${audio.reason}`;
-          await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason, findResumablePartial(outputDir, v.id)) : recordCaptureFailure(sql, newsroomId, v, reason));
-          failures.push(`${v.title}: ${reason}`);
-          continue;
-        }
-        // N-5 caps apply to the audio fallback too.
-        const audioDurRefusal = checkDurationCap(audio.info.durationSeconds, caps);
-        if (audioDurRefusal.refused) {
-          await recordCaptureRefusal(sql, newsroomId, v, audioDurRefusal.reason);
-          failures.push(`${v.title}: ${audioDurRefusal.reason}`);
-          continue;
-        }
-        const audioSizeRefusal = checkSizeCap(audio.audio.byteSize, caps);
-        if (audioSizeRefusal.refused) {
-          await recordCaptureRefusal(sql, newsroomId, v, audioSizeRefusal.reason);
-          failures.push(`${v.title}: ${audioSizeRefusal.reason}`);
-          continue;
-        }
-        const audioEndedAt = computeEndedAt({ durationSeconds: audio.info.durationSeconds, videoTimestamp: audio.info.videoTimestamp });
-        const audioDisposition = captureDisposition({ endedAt: audioEndedAt, now });
-        try {
-          await runTransaction(async (tx) => {
-            const stored = await storeAudio(tx, {
-              newsroomId, videoId: v.id, audioSourcePath: audio.audio.path,
-              format: audio.audio.format, triggerReason, infoSourcePath: audio.infoPath,
-            });
-            await recordAudioCaptureSuccess(tx, newsroomId, v, v.channelUrl, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
-          });
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          await recordCaptureFailure(sql, newsroomId, v, reason);
-          failures.push(`${v.title}: ${reason}`);
-        }
+        await runAudioFallbackCapture({
+          sql, newsroomId, video: v, outputDir, archivePath,
+          triggerReason: `Captions unavailable or rejected; audio fallback required. yt-dlp caption result: ${result.reason}`,
+          caps, now, previousRetry: retryRecord && {
+            retryDay: retryRecord.youtubeRetryDay ?? null,
+            retryCount: retryRecord.youtubeRetryCount ?? null,
+            retryAt: retryRecord.youtubeRetryAt ?? null,
+          },
+          failures, captureAudio, storeAudio, runTransaction,
+        });
         continue;
       }
       if (result.stopped) {
@@ -654,8 +726,11 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
   if (nextRetryAt) scheduleYoutubeRetry(newsroomId, new Date(nextRetryAt));
   const failed = finalRecords.filter((r) => r.status === "failed");
   const archiveText = await readArchive(archivePath);
-  const reconciled = reconcileArchive(archiveText, finalRecords);
-  if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
+  // A10: recaptured videos are recomputed here -- one that produced a fresh
+  // artifact is no longer held out, so its archive line comes back at once.
+  const stillRecapture = await missingTranscriptArtifactVideoIds(sql, newsroomId);
+  const reconciled = reconcileArchive(archiveText, finalRecords, stillRecapture);
+  if (reconciled.changed) regenerateArchive(archivePath, finalRecords, stillRecapture);
   // Which reader found these videos is part of the receipt: "read with the
   // official API" and "read the public feed" fail in different ways, and an
   // editor looking at a short list needs to know which one they are looking at.
