@@ -3516,6 +3516,20 @@ export async function runWholeMeetingWriter(input: {
       "The writing model returned no story text for this meeting, so no draft was saved. Try again, or pick another transcript.",
     );
   }
+  // No lead and nothing but placeholders is the same failed attempt as above:
+  // every write call was refused or unreadable, and only the item names and
+  // ROUNDUP_STUB made the body non-empty, so the guard above let it through
+  // (desk_jobs 428 saved that as a clean draft). A draft with real section or
+  // roundup prose but no lead stays as it is: the roundups still tell a reader
+  // something, and the notes already say the lead reply was not readable.
+  const stubOnly =
+    sections.every((section) => section.text === ROUNDUP_STUB) &&
+    roundups.every((roundup) => roundup.text === ROUNDUP_STUB);
+  if (!lead.valid && stubOnly) {
+    throw new Error(
+      "The writing model returned no story text for this meeting, so no draft was saved. Try again, or pick another transcript.",
+    );
+  }
   // Each written paragraph is checked against the item it was written from --
   // the lead item's paragraph, each section's, each roundup item's -- so a
   // figure or tally that belongs to another action, or a procedural tally, can

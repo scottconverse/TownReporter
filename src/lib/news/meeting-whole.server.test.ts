@@ -17,6 +17,7 @@ import {
   INVENTORY_SYSTEM,
   LEAD_WRITE_SYSTEM,
   LEDGER_STATUS_SYSTEM,
+  ROUNDUP_WRITE_SYSTEM,
 } from "./meeting-whole.ts";
 import { loadMeetingAccounting, loadStoredLedgerForRewrite } from "./meeting-ledger.server.ts";
 import type { IngestDocument } from "./ingest.ts";
@@ -702,6 +703,91 @@ describe("whole-meeting writer, against the migrated schema", () => {
       ),
       /no story text/,
     );
+  });
+
+  /*
+    desk_jobs 428: after the Codex timeout the run's deadline was spent, so the
+    lead, its retry, every section and every roundup write came back refused.
+    The body was still non-empty -- item names plus ROUNDUP_STUB -- so the
+    empty-body guard passed it and an all-placeholder draft was saved as clean.
+    Two items, one lead and one roundup: enough to reach the guard with a body.
+  */
+  const TWO_ITEM_INVENTORY = {
+    items: [
+      { kind: "vote", text: "Airport noise policy carries unanimously", who: "", timestamp: "0:00:00", packet_page: 57, numbers: "", source_words: "And that carries unanimously." },
+      // An announcement with no timestamp is a standalone event (see
+      // STANDALONE_EVENT_KINDS), so the ledger holds two items: the aligned
+      // agenda item and this one. A discussion at 0:00:12 would be folded into
+      // the same agenda group and there would be no roundup to write.
+      { kind: "announcement", text: "Council announced a library budget hearing", who: "staff", timestamp: "", packet_page: null, numbers: "", source_words: "I would encourage us to not give direction" },
+    ],
+  };
+  const TWO_ITEM_STATUSES = {
+    items: [
+      { item_no: 1, status: "lead", reason: "the vote" },
+      { item_no: 2, status: "roundup", reason: "a brief report" },
+    ],
+  };
+
+  it("fails a meeting draft when the lead and every write came back empty, instead of saving placeholders (desk_jobs 428)", async () => {
+    const sql = await getSql();
+    const chat: ReportChat = async (system) => {
+      if (system.includes(INVENTORY_SYSTEM)) return { ok: true, text: JSON.stringify(TWO_ITEM_INVENTORY) };
+      if (system.includes(LEDGER_STATUS_SYSTEM)) return { ok: true, text: JSON.stringify(TWO_ITEM_STATUSES) };
+      // The lead, its strict retry, every section and every roundup: all refused.
+      return { ok: false, error: "No model finished in time; nothing was saved." };
+    };
+    await assert.rejects(
+      runWholeMeetingDraft(
+        {
+          sql,
+          newsroomId: NEWSROOM,
+          userId: USER,
+          leadId,
+          artifactId,
+          videoId: VIDEO,
+          fallbackTitle: "fallback",
+          topic: "council",
+          modelChoice: "auto",
+          chat,
+        },
+        { primeGovOrigin: async () => null },
+      ),
+      /The writing model returned no story text for this meeting, so no draft was saved/,
+      "an all-placeholder body is a failed attempt, not a draft",
+    );
+  });
+
+  it("keeps a lead-less draft that still has real roundup prose (desk_jobs 428 stays narrow)", async () => {
+    const sql = await getSql();
+    const chat: ReportChat = async (system) => {
+      if (system.includes(INVENTORY_SYSTEM)) return { ok: true, text: JSON.stringify(TWO_ITEM_INVENTORY) };
+      if (system.includes(LEDGER_STATUS_SYSTEM)) return { ok: true, text: JSON.stringify(TWO_ITEM_STATUSES) };
+      // Checked before the lead branch: SECTION_WRITE_SYSTEM embeds the lead prompt.
+      if (system.includes(ROUNDUP_WRITE_SYSTEM)) {
+        return { ok: true, text: JSON.stringify({ paragraph: "The council heard staff on next year's library budget." }) };
+      }
+      if (system.includes(LEAD_WRITE_SYSTEM)) return { ok: false, error: "No model finished in time; nothing was saved." };
+      if (system.includes(COLD_CHECK_SYSTEM)) return { ok: true, text: JSON.stringify({ mismatches: [] }) };
+      return { ok: false, error: "unexpected stage" };
+    };
+    const result = await runWholeMeetingDraft(
+      {
+        sql,
+        newsroomId: NEWSROOM,
+        userId: USER,
+        leadId,
+        artifactId,
+        videoId: VIDEO,
+        fallbackTitle: "fallback",
+        topic: "council",
+        modelChoice: "auto",
+        chat,
+      },
+      { primeGovOrigin: async () => null },
+    );
+    assert.match(result.draft.body, /The council heard staff on next year's library budget\./);
+    assert.match(result.draft.integrity_notes ?? "", /lead-story reply was not readable/);
   });
 
   it("asks its chat for no fixed timeout when the desk sets none", async () => {
