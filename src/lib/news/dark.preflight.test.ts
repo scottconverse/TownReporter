@@ -167,9 +167,12 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       // Rung 1 answers with a model list holding exactly the model it names,
       // which is what `probeOpenAi` verifies; everything else answers `{}`, so
-      // no other rung can accidentally look configured.
+      // no other rung can accidentally look configured. The id is the pinned
+      // Ollama tag (D160, Scott Oct 19 2026), not the old floating ":cloud" --
+      // with the floating id `probeOpenAi` refuses rung 1 and the ladder falls
+      // through to Claude Code.
       if (url.startsWith(DEEPSEEK_URL)) {
-        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), {
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:1017-cloud" }] }), {
           status: 200,
         });
       }
@@ -185,10 +188,13 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
             the DeepSeek-ready case and must not depend on Claude's state.
           */
           TOWNREPORTER_DEEPSEEK_BASE_URL: DEEPSEEK_URL,
-          // The other two rungs are off, so this test never runs the Codex CLI
-          // installed on a developer machine.
+          // The other rungs are off, so this test never runs the Codex CLI or
+          // the Claude CLI installed on a developer machine. Without the Claude
+          // switch, a rung-1 regression would still pass here by falling
+          // through to that CLI, and the test would not mean what it says.
           TOWNREPORTER_QWEN: "0",
           TOWNREPORTER_CODEX: "0",
+          TOWNREPORTER_CLAUDE_CODE: "0",
         },
         async () => {
           const userId = `dark-preflight-ok-${Date.now()}`;
