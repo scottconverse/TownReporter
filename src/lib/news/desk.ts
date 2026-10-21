@@ -108,7 +108,14 @@ import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea, defaultStoryArea } from "../story-area.ts";
 import { findDuplicate } from "./import-review.ts";
-import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.server.ts";
+import type { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.server.ts";
+// Same boundary as performDraftWork above and ai.ts's `claudeServer`: the
+// client transform keeps performDraftMeetingReview's body (only createServerFn
+// handlers are stripped), so a static value import here would ship
+// node:crypto to the browser -- and import-protection refuses to build it.
+// createServerOnlyFn is the framework boundary import-protection honours, so
+// the lazy import is the one form that survives both the build and dev.
+const meetingDraftRevisionReviewServer = createServerOnlyFn(() => import("./meeting-draft-revision-review.server.ts"));
 import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import {
@@ -7952,9 +7959,11 @@ export async function performDraftMeetingReview(
     const warning = checkOverride(data, LIVE_STORY_REVERIFY_KEY, LIVE_STORY_CHANGE_SENTENCE);
     if (warning) return warning;
   }
+  const record = deps.record
+    ?? (await meetingDraftRevisionReviewServer()).recordDraftTranscriptRevisionReview;
   try {
     const result = await withTransaction((sql) =>
-      (deps.record ?? recordDraftTranscriptRevisionReview)(sql, {
+      record(sql, {
         newsroomId: owned(context),
         leadId: data.leadId,
         draftId: data.draftId,
