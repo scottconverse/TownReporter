@@ -30,7 +30,10 @@
  *   - a pasted story arrives with its section UNCONFIRMED, the desk names the
  *     section on the Publish button and says the press is what confirms it,
  *     and the server refuses the same publish when no section is carried at
- *     all -- so a paste cannot print under a section nobody confirmed;
+ *     all -- so a paste cannot print under a section nobody confirmed. The
+ *     same bare request prints for the second story once the walk's own
+ *     Save edits has confirmed its section, which is the human's confirmation
+ *     recorded, not a gate removed;
  *   - a pasted story with a cited page prints it under Sources beneath FOLLOW
  *     THE EVIDENCE; a pasted story with none prints no such heading and says in
  *     words that there are no source records (coordinator review of the Unit X
@@ -435,15 +438,34 @@ function isPublishRequest(payload, leadId) {
 }
 
 /**
- * Ask the server to publish without a section, and read back its refusal.
+ * Ask the server to publish without a section, and read back its answer.
  *
  * This is the caller shape an older desk sent -- the bare leadId, before
  * 0.6.67 taught the request to carry the section (`cleanPublishRequest`:
  * "an absent topic means 'unconfirmed', never 'confirmed blank'"). It is the
  * only way to put the paste's central question to the server itself rather
  * than to a disabled button.
+ *
+ * The answer depends on ONE thing, and that is the rule this pair of presses
+ * proves: a bare request prints only when a person has already confirmed this
+ * exact section for this exact saved version.
+ *
+ *   - "refused": no confirmation is recorded for the version being printed,
+ *     so the section warning stands and `performPublish` refuses
+ *     (desk.ts:6541-6558, 6744-6755).
+ *   - "printed": a confirmation IS recorded, so there is no warning to refuse
+ *     (desk.ts:6545-6557) and the press prints -- the design's "warn, never
+ *     block" with the human's confirmation on file.
+ *
+ * Story one below is the "refused" half. Story two is the "printed" half:
+ * before its publish, the walk moves the section in the story editor and
+ * presses Save edits, and Save edits records the section confirmation when
+ * the select was touched (desk.story.$leadId.tsx:1213-1216, added in
+ * 9b8bf114, writing notes.topicConfirmation at desk.ts:5693-5709). The bare
+ * request that follows therefore prints, and it is the same request shape
+ * that story one was refused with.
  */
-async function theServerRefusesAPublishWithNoSection(publishUrl, leadId) {
+async function theServerAnswersAPublishWithNoSection(publishUrl, leadId, expect) {
   const body = JSON.stringify(await toJSONAsync({ data: { leadId } }));
   const answer = await page.evaluate(
     async ({ url, payload }) => {
@@ -468,6 +490,20 @@ async function theServerRefusesAPublishWithNoSection(publishUrl, leadId) {
   must(answer.status === 200, `the publish server function answered HTTP ${answer.status}`);
   const decoded = answer.serialized ? fromCrossJSON(answer.body, {}) : answer.body;
   const result = decoded?.result ?? decoded;
+  if (expect === "printed") {
+    must(
+      result?.ok === true,
+      `the server refused a publish whose section a person had confirmed for this version: ${JSON.stringify(result)}`,
+    );
+    must(
+      typeof result.slug === "string" && result.slug.length > 0,
+      `the server printed the story but named no slug to follow: ${JSON.stringify(result)}`,
+    );
+    step(
+      "the same request prints once the editor has saved the section, because that save is the confirmation",
+    );
+    return `/articles/${result.slug}`;
+  }
   must(
     result?.ok === false,
     `the server printed a story with no confirmed section: ${JSON.stringify(result)}`,
@@ -489,27 +525,31 @@ async function theServerRefusesAPublishWithNoSection(publishUrl, leadId) {
 }
 
 /**
- * The section is confirmed by the press that names it, and by nothing else.
+ * The section is confirmed by the press that names it.
  *
  * 0.6.67 removed the separate "Confirm this section" button. The Publish
  * button now reads "Publish in <section>" and the request carries that
  * section, which the server records for the version it prints (desk.ts,
  * performPublish). A pasted story is no exception: it arrives with no
- * confirmation of its own, and this proves that in the two places it can be
- * proved -- the desk names the section on the button and says the press is
- * what confirms it, and the server refuses the same publish when no section is
- * carried at all.
+ * confirmation of its own, and this proves that -- the desk names the section
+ * on the button and says the press is what confirms it, and the server answers
+ * the same bare request from both sides: refused for story one, whose section
+ * nobody has confirmed, and printed for story two, whose section the walk's
+ * own Save edits confirmed (`expect`, see theServerAnswersAPublishWithNoSection).
+ *
+ * The old third check here looked for the text "Section confirmed for this
+ * saved draft" and required its ABSENCE. No file in src/ prints that sentence
+ * (searched: `git grep -n "Section confirmed for this saved draft" -- src`
+ * finds nothing), so it could never fail and it is gone rather than left
+ * looking like proof. What actually proves the state is the server's own
+ * answer below.
  */
-async function publishIt() {
+async function publishIt(expect = "refused") {
   const publishButton = page.getByRole("button", { name: /^Publish in / });
   await publishButton.waitFor({ timeout: 45_000 });
   must(
     (await page.getByRole("button", { name: "Confirm this section", exact: true }).count()) === 0,
     "a second Confirm step is back on the story page, so this walk proves nothing about the new one",
-  );
-  must(
-    (await page.getByText(/Section confirmed for this saved draft/).count()) === 0,
-    "the pasted story arrived with its section already confirmed, so nothing was confirmed here",
   );
   /* Opened before it is read: the section block is inside the shut "Story
      details" disclosure since unit CW2 (see openStoryDetails). */
@@ -525,7 +565,11 @@ async function publishIt() {
     "the desk is holding Publish down for a story nothing is blocking",
   );
   const named = (await publishButton.innerText()).replace(/\s+/g, " ").trim();
-  step(`the pasted story arrives unconfirmed, with "${named}" as the way to confirm it`);
+  step(
+    expect === "printed"
+      ? `the story's section was confirmed by the editor's own save, and "${named}" names it`
+      : `the pasted story arrives unconfirmed, with "${named}" as the way to confirm it`,
+  );
 
   /*
     The desk's own publish request is taken and thrown away before it leaves:
@@ -564,7 +608,16 @@ async function publishIt() {
     `the desk never sent a publish request this walk could refuse: ${JSON.stringify(taken.slice(0, 4))}`,
   );
 
-  await theServerRefusesAPublishWithNoSection(publishUrl, leadId);
+  const answered = await theServerAnswersAPublishWithNoSection(publishUrl, leadId, expect);
+  if (expect === "printed") {
+    /*
+      The bare request was enough, because the section was confirmed for this
+      version by the walk's own Save edits (see the helper's doc comment). There
+      is nothing left to press: the story is printed, and the caller reads it on
+      the paper the same way it reads story one.
+    */
+    return answered;
+  }
 
   // Nothing printed: a refused publish leaves the story a draft.
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
@@ -1052,7 +1105,13 @@ async function main() {
       (await secondBody.inputValue()) === SECOND_BODY,
       "the second story's text did not survive being retitled and re-sectioned",
     );
-    const printedTwo = await publishIt();
+    /*
+      "printed": moving the section and pressing Save edits above recorded the
+      section confirmation for this saved version (desk.story.$leadId.tsx
+      1213-1216). The bare publish request is answered by printing, and the
+      reader checks below run against the article it printed.
+    */
+    const printedTwo = await publishIt("printed");
     await aStoryWithNoRecordsPrintsNoHeading(printedTwo, movedTo);
 
     await thePictures(sectionOne);

@@ -392,24 +392,53 @@ try {
     .click();
   const batch = page.getByRole("dialog", { name: "Draft the selected leads" });
   await batch.locator("#draft-batch").waitFor({ timeout: 45_000 });
-  const batchPicker = batch.getByLabel("Writing model");
-  const batchNames = (await batchPicker.locator("option").allInnerTexts()).map((line) =>
-    line.split("—")[0].trim(),
-  );
+  /*
+    The batch picker's label is the strip's own ("Model for these stories",
+    desk.queue.tsx:2402-2404), not the shared default "Writing model"
+    (model-picker.tsx:576-578). Both this dialog and the strip behind it draw
+    the same ModelPicker, so getByLabel has to ask for the label they carry.
+  */
+  const batchPicker = batch.getByLabel("Model for these stories");
+  /*
+    The saved connection arrives from its own query, and while that query is
+    pending the list carries a "Saved API connections — loading…" line
+    (model-picker.tsx:613-617). Wait for the connection itself so the list
+    compared below is the loaded one.
+  */
+  const customOption = batchPicker.locator("option", { hasText: "Isolated API fixture" });
+  await customOption.waitFor({ timeout: 45_000 });
+  /*
+    The expected list is what SHARED_MODEL_CHOICES offers (model-choice.ts:131-139,
+    built from providersFor("story"), provider-registry.ts:1105-1110, sorted by
+    PICKER_PROVIDER_IDS), plus this walk's saved connection. Option text is
+    `<label> — <detail>` (model-choice.ts:68-71) with a ` · <status>` suffix on
+    the Gemini rows (model-picker.tsx:473-480), so both are stripped. The Local
+    row names the loaded backend in brackets when there is one
+    (model-picker.tsx:539-546); it is still the one Local option either way.
+  */
+  const batchNames = (await batchPicker.locator("option").allInnerTexts()).map((line) => {
+    const name = line.split("—")[0].split(" · ")[0].trim();
+    return name.startsWith("Local model") ? "Local model" : name;
+  });
   assert.deepEqual(batchNames, [
     "Automatic",
     "Codex Astra 6",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
     "Codex Luna 6",
+    "Gemini 3.8 Flash (Pro plan)",
+    "Gemini 3.1 Pro (Pro plan)",
     "Claude Fable 5.1",
     "Claude Opus 5.5",
     "Claude Sonnet 5.5",
     "Claude Haiku 5.5",
     "Local model",
-    "Isolated API fixture",
+    "DeepSeek v4.1 Flash 1017",
+    // customConnectionLabel adds "(key)" to every saved connection
+    // (model-picker.tsx:336-338), which is how this row is told apart from a
+    // model the desk reaches through its own program.
+    "Isolated API fixture (key)",
   ]);
-  const customOption = batchPicker.locator("option", { hasText: "Isolated API fixture" });
   const customChoice = await customOption.getAttribute("value");
   assert.match(customChoice ?? "", /^custom:/);
   await batchPicker.selectOption(customChoice);
