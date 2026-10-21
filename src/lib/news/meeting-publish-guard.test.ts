@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Sql } from "../db.ts";
 import { staleCitationNotice, staleMeetingCitations } from "./meeting-publish-guard.ts";
-import { draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { draftEvidenceSha256 } from "./meeting-draft-revision-review.server.ts";
 
 /**
  * The guard that stops a meeting draft being published against a tape that moved.

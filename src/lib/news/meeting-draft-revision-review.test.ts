@@ -6,7 +6,7 @@ import {
   acceptedSnapshotMatchesCurrent,
   draftEvidenceSha256,
   recordDraftTranscriptRevisionReview,
-} from "./meeting-draft-revision-review.ts";
+} from "./meeting-draft-revision-review.server.ts";
 
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);

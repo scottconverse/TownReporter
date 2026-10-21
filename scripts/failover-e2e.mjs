@@ -105,7 +105,7 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 // Labels and wording come from src/lib/news/provider-registry.ts and
 // src/lib/news/automatic-failover.ts. Asserted verbatim so a rename there
 // fails this walk instead of silently changing what it proves.
-const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
+const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash 1017";
 // D160: the exact tag the desk pins DeepSeek to (the fake must list this id,
 // or the readiness probe refuses the rung -- see the startFake call below).
 const PINNED_DEEPSEEK_MODEL = "deepseek-v4.1-flash:1017-cloud";
@@ -113,7 +113,6 @@ const PINNED_DEEPSEEK_MODEL = "deepseek-v4.1-flash:1017-cloud";
 // model of its own, because it runs whatever LM Studio has loaded.
 const LOCAL_LABEL = "Local model";
 const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
-const RUNG_ONE_QUOTA = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
 
 /**
  * Why rung 2 is skipped, which depends on how this walk was configured, since
@@ -594,13 +593,22 @@ async function main() {
     );
   }
   step(`draft 2's receipt named "deepseek-flash" while it ran, then the hop rewrote it to "codex-balanced"`);
-  if (String(second.job.failover_note ?? "") !== RUNG_ONE_QUOTA) {
+  /*
+    Rung 1 answered 429, so desk.ts:3838 keeps the provider's own words verbatim:
+    "<label>: Provider says: ... (429) -> <next label>" (provider-error-detail.ts:
+    providerHttpError). Assert the shape the walk actually cares about -- the
+    durable note survived to Done and still names rung 1 and the model it moved
+    to -- instead of pinning the provider's sentence.
+  */
+  const durable = String(second.job.failover_note ?? "");
+  if (!durable.startsWith(`${DEEPSEEK_LABEL}: `) || !durable.endsWith(`-> ${TERRA_LABEL}`)) {
     throw new Error(
-      `draft 2's failover_note read ${JSON.stringify(second.job.failover_note)}, expected ` +
-        `${JSON.stringify(RUNG_ONE_QUOTA)} -- the durable note did not survive to Done.`,
+      `draft 2's failover_note read ${JSON.stringify(durable)}, expected it to start ` +
+        `${JSON.stringify(`${DEEPSEEK_LABEL}: `)} and end ${JSON.stringify(`-> ${TERRA_LABEL}`)} -- ` +
+        `the durable note did not survive to Done.`,
     );
   }
-  step(`draft 2 hopped to Codex Sol 6.1 (balanced) with the durable note: "${RUNG_ONE_QUOTA}"`);
+  step(`draft 2 hopped to Codex Sol 6.1 (balanced) with the durable note: "${durable}"`);
 
   // The unreadable case is asserted from the fake's own log, not from the
   // draft: report.ts's research pass explicitly does NOT end the run on an

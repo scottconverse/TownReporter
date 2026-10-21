@@ -137,6 +137,16 @@ async function openTheStoryJustFiled() {
   await door.click();
 }
 
+/*
+  R2-8: this walk printed nothing until it either finished or threw, so a run
+  still going when the CI log was captured looked exactly like a silent stop.
+  One line per journey section (with elapsed time) says where it is.
+*/
+const walkStartedAt = Date.now();
+function section(name) {
+  console.log(`[custom-api] ${((Date.now() - walkStartedAt) / 1000).toFixed(1)}s ${name}`);
+}
+
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 const rawLog = {
@@ -154,6 +164,7 @@ try {
     if (body) serverFunctionBodies.push(body);
   });
   await page.goto(`${base}/login`);
+  section("login + first-run setup");
   await page.getByLabel("Email", { exact: true }).fill("api-ui@townreporter.test");
   await page.getByLabel("Password", { exact: true }).fill("isolated-api-ui-only-2026");
   const create = page.getByRole("button", { name: "Create editor account", exact: true });
@@ -177,6 +188,7 @@ try {
     screen's "+ Add a connection" dialog, and the panel keeps the
     `#custom-ai-connections` anchor, so every locator below is unchanged.
   */
+  section("Models screen: save, discover, test, edit and enable/disable the connection");
   await page.goto(`${base}/desk/models?tab=conn`);
   await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
@@ -231,6 +243,7 @@ try {
   await row.getByText(/fixture-model-edited/).waitFor();
   assert.equal(providerRequests.length, 3, "editing must send zero provider requests");
 
+  section("Story: AI drafts from an attached document");
   const documentMarker = `CUSTOM_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
   /*
@@ -283,6 +296,7 @@ try {
     "a Story server-function response exposed the saved API key",
   );
 
+  section("Opinion: AI writes an editorial from an attached document");
   const opinionMarker = `CUSTOM_OPINION_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
   // CY item 8: the AI intake is a shut card now, as the drawing draws it, so
@@ -322,6 +336,7 @@ try {
     "an Opinion server-function response exposed the saved API key",
   );
 
+  section("Daily scan: pick the connection and save");
   await page.goto(`${base}/desk/ops/daily-scan`);
   // 0.6.81 (unit CX2): the Daily scan card's panel lives on the card's own
   // screen now, so it is reached by going there, not by scrolling the page.
@@ -350,6 +365,7 @@ try {
     "a Daily scan settings response exposed the saved API key",
   );
 
+  section("Batch: file a lead and enqueue it on the connection");
   const beforeBatchRequests = providerRequests.length;
 
   const batchHeadline = `Custom API batch selection ${Date.now()}`;
@@ -417,6 +433,7 @@ try {
     second look is the same locator on the same component -- only the way in
     changed.
   */
+  section("Read-back: Models screen, screenshots, delete");
   await page.goto(`${base}/desk/models?tab=conn`);
   await page.getByRole("button", { name: "+ Add a connection" }).click();
   const finalSection = page.locator("#custom-ai-connections");
@@ -454,8 +471,10 @@ try {
     pageErrors: errors,
     providerRequestCount: providerRequests.length,
   });
+  section("all journeys passed");
   console.log(JSON.stringify(rawLog));
 } catch (error) {
+  console.error(`[custom-api] FAILED in the section above after ${((Date.now() - walkStartedAt) / 1000).toFixed(1)}s: ${error instanceof Error ? error.message : String(error)}`);
   Object.assign(rawLog, {
     error: error instanceof Error ? error.stack : String(error),
     pageErrors: errors,

@@ -5,8 +5,8 @@ import { PGlite } from "@electric-sql/pglite";
 import type { Sql } from "../db.ts";
 import { recordPublishedMeetingEvidence } from "./meeting-article-revision.ts";
 import { linkDraftToTranscript } from "./meeting-draft-transcript-link.ts";
-import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
-import { draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.server.ts";
+import { draftEvidenceSha256 } from "./meeting-draft-revision-review.server.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import { staleMeetingCitations } from "./meeting-publish-guard.ts";
 

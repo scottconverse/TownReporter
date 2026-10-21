@@ -102,7 +102,9 @@ async function thePickerIsThere() {
   await picker.waitFor({ timeout: 30_000 });
 
   const labels = await picker.locator("option").allInnerTexts();
-  const names = labels.map((line) => line.split("—")[0].trim());
+  // The option text is "<model>[ · <readiness word>]" (model-picker.tsx:476-479),
+  // so the check below is about which models are listed, not their readiness.
+  const names = labels.map((line) => line.split("—")[0].split(" · ")[0].trim());
   const expected = [
     "Automatic",
     "Codex Astra 6",

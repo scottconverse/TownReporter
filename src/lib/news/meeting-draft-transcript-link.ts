@@ -1,5 +1,5 @@
 import type { Sql } from "../db.ts";
-import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.server.ts";
 import { sanitizeJsonLeaves } from "./storable-text.ts";
 
 /**

@@ -31,7 +31,16 @@
  * so a test can drive time by hand and assert the exact gap between two sends
  * without waiting for it.
  */
-import { performance } from "node:perf_hooks";
+/*
+  The clock is the platform global, not `node:perf_hooks`. This module is
+  reachable from a route's client graph (desk.ts:47 imports it), and Vite
+  externalizes `node:` modules for the browser into a stub that throws on
+  first property access -- so importing `performance` from `node:perf_hooks`
+  threw while the page's modules were being evaluated, before any of this
+  gate ran. `/login` then never hydrated and sat on "Opening…" forever.
+  `performance` is a global in Node 16+ and in every browser, and
+  reddit.server.ts already reads it that way.
+*/
 
 /** A scheduler owns the send and the body lifetime of one HTTP hop. The URL is
  *  passed so a scheduler can pace per host; schedulers that do not care (the
