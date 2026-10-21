@@ -193,7 +193,7 @@ export type ReportChat = (
   user: string,
   maxTokens?: number,
   modelChoice?: EffectiveProviderChoice,
-  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number; onRetry?: () => void | Promise<void> },
+  options?: { timeoutMs?: number; draftReply?: boolean; minimumWords?: number; onRetry?: () => void | Promise<void> },
 ) => Promise<ChatResult>;
 
 export type WriterDraftCheckpoint = {
