@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { resetClaudeCliCache } from "./ai-claude-code.server.ts";
-import { grokChat, scanSystem, DRAFT_OUTPUT_TOKEN_FLOOR } from "./ai.ts";
+import { grokChat, scanSystem, DEEPSEEK_OUTPUT_TOKENS } from "./ai.ts";
 import { RESEARCH_GUIDANCE } from "./research-guidance.ts";
 import { reportResearchSystem, reportWriteSystem, REPORT_EDIT_SYSTEM, CITATION_REPAIR_SYSTEM } from "./report.ts";
 import { DARK_SYSTEM, DARK_PLANNER } from "./dark-prompt.ts";
@@ -52,7 +52,7 @@ async function fixture(work: (requests: Request[]) => Promise<void>, unsolicited
   }
 }
 const deepseek = (model: string, system = systems[0], user = "Supplied evidence") =>
-  grokChat(system, user, 200, { choice: "deepseek-flash", model, rungModel: null, timeoutMs: 3000, reasoningEffort: "none" });
+  grokChat(system, user, 200, { choice: "deepseek-flash", model, rungModel: null, timeoutMs: 3000, reasoningEffort: "low" });
 
 for (const model of ids) {
   it(`D151 missing-CLI fallback ${model} actual request omits tools and retains effort, output floor and returned model`, async () => {
@@ -62,8 +62,11 @@ for (const model of ids) {
       assert.equal(requests.length, 1);
       assert.equal(Object.hasOwn(requests[0], "tools"), false);
       assert.equal(requests[0].model, model);
-      assert.equal(requests[0].reasoning_effort, "none");
-      assert.equal(requests[0].max_tokens, DRAFT_OUTPUT_TOKEN_FLOOR);
+      // D168: DeepSeek v4.1 Flash always sends low thinking, whatever was requested.
+      assert.equal(requests[0].reasoning_effort, "low");
+      // DeepSeek runs on the 32,768 ceiling (Scott's DSH standard, commits
+      // e0cf2429/908229a3); Gemini and Local keep the 16,384 floor.
+      assert.equal(requests[0].max_tokens, DEEPSEEK_OUTPUT_TOKENS);
       assert.equal(result.meta?.model, "served-model-id");
       assert.equal(result.meta?.toolsFallback, false);
       assert.equal(JSON.stringify(requests).includes("Time left for this answer:"), false);

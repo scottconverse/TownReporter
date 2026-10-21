@@ -257,11 +257,14 @@ async function dailySettingsJourney(context, observePage) {
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
     "Codex Luna 6",
+    "Gemini 3.8 Flash (Pro plan)",
+    "Gemini 3.1 Pro (Pro plan)",
     "Claude Fable 5.1",
     "Claude Opus 5.5",
     "Claude Sonnet 5.5",
     "Claude Haiku 5.5",
     "Local model",
+    "DeepSeek v4.1 Flash 1017",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
     throw new Error(`daily runtime labels differ: ${JSON.stringify(labels)}`);
@@ -574,11 +577,14 @@ async function draftBatchJourney() {
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
     "Codex Luna 6",
+    "Gemini 3.8 Flash (Pro plan)",
+    "Gemini 3.1 Pro (Pro plan)",
     "Claude Fable 5.1",
     "Claude Opus 5.5",
     "Claude Sonnet 5.5",
     "Claude Haiku 5.5",
     "Local model",
+    "DeepSeek v4.1 Flash 1017",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
     throw new Error(`batch writing-model labels differ: ${JSON.stringify(labels)}`);

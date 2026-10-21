@@ -108,7 +108,9 @@ for (const ending of ["cancel", "cancel-after-model", "host", "stage", "leads", 
     assert.ok(receipt.finished_at);
     assert.ok(receipt.error);
     assert.equal(reservation.status, "failed");
-    if (ending === "quota") assert.equal((await sql`select paused from daily_scan_policies where newsroom_id=${room}`)[0].paused, true);
+    // D157/D158: a usage limit no longer pauses the daily scan; the failure stays on
+    // its reservation and the next day runs as usual (daily-scan.server.ts:205-215).
+    if (ending === "quota") assert.equal((await sql`select paused from daily_scan_policies where newsroom_id=${room}`)[0].paused, false);
   });
 }
 async function modelPack(

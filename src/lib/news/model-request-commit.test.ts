@@ -74,8 +74,8 @@ it("Automatic drafting honors the saved Story assignment before readiness and re
     const receipt = JSON.parse(job.result_json);
     assert.equal(receipt.requestedRuntime, "deepseek-flash");
     assert.equal(receipt.actualRuntime, "deepseek-flash");
-    // The saved High pick is not what DeepSeek runs at: its rung always records none (Release H).
-    assert.equal(receipt.modelEffort, "none");
+    // The saved High pick is not what DeepSeek runs at: its rung always records low (D168).
+    assert.equal(receipt.modelEffort, "low");
     const [explicitLead] = await sql<{
       id: number;
     }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'fm1-explicit-auto','Explicit Automatic','Why') returning id`;
@@ -180,8 +180,8 @@ for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claud
 
 for (const [error, reason] of [
   ["Claude CLI not found", "Claude Code is not installed on this server."],
-  ["Claude Haiku usage limit exceeded", "Claude Haiku hit its usage limit."],
-  ["Claude Haiku is unavailable: local service failed", "Claude Haiku is not ready: Claude Haiku is unavailable: local service failed",
+  ["Claude Haiku usage limit exceeded", "Claude Haiku 5.5 hit its usage limit."],
+  ["Claude Haiku is unavailable: local service failed", "Claude Haiku 5.5 is not ready: Claude Haiku is unavailable: local service failed",
   ],
 ]) it(`records the picker readiness reason for ${error}`, async () => {
   const sql = await getSql();
@@ -204,7 +204,8 @@ for (const [error, reason] of [
   if (!result.ok) assert.fail("Acknowledged unavailable Haiku must use the ready fallback");
   const [job] = await sql<{ failover_note: string ;
     }>`select failover_note from desk_jobs where id=${result.jobId}`;
-  assert.equal(job.failover_note, `Claude Haiku: ${reason} -> Codex Sol 6.1`);
+  // D135: the note names the model AND its version, so the label comes from modelChoiceLabel.
+  assert.equal(job.failover_note, `${modelChoiceLabel("claude-haiku")}: ${reason} -> Codex Sol 6.1`);
 });
 
 it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {

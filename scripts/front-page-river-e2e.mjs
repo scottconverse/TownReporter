@@ -751,19 +751,18 @@ async function theScreenshots(browser, main) {
  * a story the page already prints, and the river is left out entirely because
  * there is nothing left for it.
  *
- * Unit BX inverted the second half of this. The walk used to require the
- * "This week" panel to be PRESENT with its empty state, and the lead to keep
- * its column beside it, on the grounds that the approved design draws the lead
- * and the panel side by side (`docs/design/handoff-2026-09-26/design/Front
- * Daily.dc.html:34`, `--leadCols` at line 109). The brief's rule is now the
- * opposite for a panel with nothing to say: no dated items means no panel and
- * no explanatory sentence, and the lead runs the full width
- * (`src/routes/index.tsx:396`, the `solo` class; `src/reader-astra.css`, the
- * `min-width: 901px` block). The two halves of the band follow the same rule.
+ * D65 (Oct 11 2026, Scott) replaced the calendar box: "This week" now lists the
+ * paper's newest printed stories from the last seven days, leaving out the lead
+ * (`src/routes/index.tsx:163`, `listNewestStories`). A panel with nothing to say
+ * is still absent and the lead still runs the full width (unit BX, the `solo`
+ * class). Here the two stories the lead leaves ARE from this week, so the panel
+ * is present and titled "This week" (`frontWeekTitle`, src/lib/story-dates.ts:1051)
+ * and prints them newest first: story 2, then story 4.
  *
- * So the claims measured here are: the panel is ABSENT, the whole region band
- * is ABSENT (this paper's three stories are all home-ground and none of them is
- * an opinion piece), and the lead fills the row it sits in.
+ * So the claims measured here are: the panel is PRESENT with those two stories
+ * in that order, the whole region band is ABSENT (this paper's three stories are
+ * all home-ground and none of them is an opinion piece), and the lead shares its
+ * row with the panel instead of taking the full width.
  *
  * The three kept stories are 1, 2 and 4 -- NOT 1, 2 and 3: story 3 is the
  * opinion piece (unit BZ item 9), and keeping it would put a card in the
@@ -791,8 +790,19 @@ async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
     throw new Error("the grid did not stop at the two stories the lead leaves");
   if (await page.locator(".river").count())
     throw new Error("a river with nothing left in it was rendered");
-  if (await page.locator(".ledgerow > .datespanel").count())
-    throw new Error("This week printed a panel although no published story names a date this week");
+  const panel = page.locator(".ledgerow > .datespanel");
+  await panel.waitFor({ timeout: 30_000 });
+  const panelHeading = (await panel.getByRole("heading", { level: 2 }).innerText()).trim();
+  if (panelHeading !== "This week")
+    throw new Error(`the panel is headed ${JSON.stringify(panelHeading)}, expected "This week"`);
+  const panelSlugs = await panel
+    .locator(".dateslist li a")
+    .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+  const expectedSlugs = ["/articles/river-e2e-2", "/articles/river-e2e-4"];
+  if (JSON.stringify(panelSlugs) !== JSON.stringify(expectedSlugs))
+    throw new Error(
+      `This week lists ${JSON.stringify(panelSlugs)}, expected the two remaining stories newest first ${JSON.stringify(expectedSlugs)}`,
+    );
   if ((await page.locator(".datesempty").count()))
     throw new Error("an empty panel's explanatory sentence was printed");
   if (await page.locator(".regionband").count())
@@ -809,12 +819,14 @@ async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
     */
     document.querySelector(".ledgerow > .leadcolumn")?.getBoundingClientRect().width ?? 0,
   ]);
-  if (!(lead > 0 && lead >= row - 2))
+  if (await page.locator(".ledgerow.solo").count())
+    throw new Error("the lead row went solo although This week has rows to print");
+  if (!(lead > 0 && lead < row - 2))
     throw new Error(
-      `the lead is ${Math.round(lead)}px inside a ${Math.round(row)}px lead row: it did not take the full width when This week was absent`,
+      `the lead column is ${Math.round(lead)}px inside a ${Math.round(row)}px lead row: it did not share the row with This week`,
     );
   step(
-    "with three stories each is printed once, no empty This week or region band is rendered, and the lead runs the full width",
+    "with three stories each is printed once, This week lists the two remaining stories newest first, no region band is rendered, and the lead shares its row",
   );
 }
 

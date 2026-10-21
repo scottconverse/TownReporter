@@ -74,7 +74,7 @@ const PORT_FAKE_DEEPSEEK = 3321;
 const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 
 // Verbatim from src/lib/news/provider-registry.ts and automatic-failover.ts.
-const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
+const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash 1017";
 const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
 const SWITCH_NOTE = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
 /** The pin, when the operator set one: rung 2 then asks for this exact model. */
@@ -299,6 +299,9 @@ async function main() {
       FAKE_DEEPSEEK_PORT: String(PORT_FAKE_DEEPSEEK),
       FAKE_DEEPSEEK_MODE: "quota",
       FAKE_DEEPSEEK_DELAY_MS: String(DEEPSEEK_DELAY_MS),
+      // D160/D162: the rung names the pinned build, so the fake must serve and report
+      // that exact id or rung 1's readiness probe fails before the draft starts.
+      FAKE_DEEPSEEK_MODEL: "deepseek-v4.1-flash:1017-cloud",
     })}`,
   );
   console.log(`  fake  ${await ensureRungTwoServer()}`);
