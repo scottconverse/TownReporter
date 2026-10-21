@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  MIN_RUNG_MS,
   NO_MODEL_IN_TIME,
+  extendDeadlineForRung,
   failOverAndRetry,
   failOverOperationAndRetry,
   rungTimeoutMs,
@@ -13,6 +15,7 @@ import {
 import type { DeskJob } from "./jobs.ts";
 import type { EffectiveProviderChoice, ProviderProbe } from "./ai.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
+import { KIND_BUDGETS } from "./provider-registry.ts";
 
 /**
  * `failOverAndRetry` is the exact function job 41 hit on 2026-09-02 (see
@@ -226,6 +229,50 @@ describe("rungTimeoutMs", () => {
   it("refuses a call when the run has under the shortest real limit left, instead of sending 1 ms", () => {
     assert.deepEqual(rungTimeoutMs({ requestedMs: 150_000, deadlineAt: 100_000, now: 99_999 }), { refused: true });
     assert.deepEqual(rungTimeoutMs({ requestedMs: 1, deadlineAt: 100_000, now: 0 }), { refused: true });
+  });
+});
+
+describe("extendDeadlineForRung", () => {
+  /*
+    desk_jobs 428: the whole-meeting writer started on Codex (900 s wall), Codex
+    timed out, the run fell back to the local rung (2,400 s wall) -- and kept
+    Codex's deadline, because it was stamped once from the first choice. Every
+    later call was then refused for want of MIN_RUNG_MS, and the draft was saved
+    with no lead and a placeholder in every item.
+  */
+  it("gives the fallback rung its own clock from the run's start, not the dead rung's leftover", () => {
+    const runStartedAt = 1_000_000;
+    const now = runStartedAt + 750_000; // Codex spent 750 of its 900 seconds
+    const codexDeadline = runStartedAt + KIND_BUDGETS.codex.wallMs;
+    // What the run kept before the fix: 150 s left, so a 600 s local call is cut to 150 s.
+    assert.deepEqual(
+      rungTimeoutMs({ requestedMs: KIND_BUDGETS.local.callMs, deadlineAt: codexDeadline, now }),
+      { timeoutMs: 150_000 },
+      "the old constant deadline is what the fallback used to get",
+    );
+    const switchedDeadline = extendDeadlineForRung({
+      runStartedAt,
+      currentDeadlineAt: codexDeadline,
+      rungWallMs: KIND_BUDGETS.local.wallMs,
+    });
+    assert.ok(switchedDeadline - now > MIN_RUNG_MS, "the fallback leaves more than the shortest real call");
+    assert.deepEqual(
+      rungTimeoutMs({ requestedMs: KIND_BUDGETS.local.callMs, deadlineAt: switchedDeadline, now }),
+      { timeoutMs: KIND_BUDGETS.local.callMs },
+      "a ten-minute local call gets its whole ten minutes, not the dead rung's leftovers",
+    );
+  });
+
+  it("never moves a deadline earlier than the one it is handed", () => {
+    assert.equal(
+      extendDeadlineForRung({ runStartedAt: 0, currentDeadlineAt: 5_000_000, rungWallMs: KIND_BUDGETS.codex.wallMs }),
+      5_000_000,
+      "a shorter rung cannot take time away",
+    );
+    assert.equal(
+      extendDeadlineForRung({ runStartedAt: 0, currentDeadlineAt: 100, rungWallMs: KIND_BUDGETS.local.wallMs }),
+      KIND_BUDGETS.local.wallMs,
+    );
   });
 });
 
