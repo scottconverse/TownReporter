@@ -23,6 +23,27 @@ export const inkSolid =
 export const inkGhost =
   "pressable inline-flex min-h-11 items-center justify-center border border-ink px-4 text-sm font-medium hover:bg-paper-2 disabled:cursor-not-allowed disabled:opacity-50";
 
+/*
+  A COUNT IN A STRIP THAT NARROWS THE VIEW, AND A COLUMN HEADER THAT SORTS IT
+  (unit UI1b: nothing clickable is plain text).
+
+  Both were drawn as `underline decoration-dotted` text on /desk/inventory
+  (source-moves.tsx, desk.inventory.tsx) and the clickable guard measured every
+  one of them as "no edge/fill under 3:1" -- 14 controls, light and night at
+  1280. A dotted underline says "a link inside a sentence", not "a press", and
+  that is exactly the landmine the guard exists for.
+
+  This is `inkGhost`'s edge and target (`border border-ink`, `min-h-11`) WITHOUT
+  its `text-sm`: the words keep the size they already had, because the owner
+  reads them ("old eyes"), and `-ink` follows the theme through
+  `.desk-ltr.astra`'s own token remap (desk-astra.css:41-42), so the edge is
+  ink on cream in light and bone on warm black in night.
+*/
+export const countPress =
+  "pressable inline-flex min-h-11 items-center border border-ink px-3 hover:bg-paper-2";
+export const sortPress =
+  "pressable inline-flex min-h-11 items-center border border-ink px-2 text-left hover:bg-paper-2";
+
 export const inputClass =
   "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
 export const areaClass = inputClass;

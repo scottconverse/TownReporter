@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { DeskShell, SecHead } from "@/components/desk-chrome";
+import { countPress } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { getSourceInventory } from "@/lib/news/desk";
 import { SourceMovesPanel } from "@/components/source-moves";
@@ -79,7 +80,7 @@ function InventoryPage() {
         <span>{counts?.unreadable ?? 0} could not be read</span>
         <button
           type="button"
-          className={"underline decoration-dotted" + (filter === "trial" ? " font-bold" : "")}
+          className={countPress + (filter === "trial" ? " font-bold" : "")}
           aria-pressed={filter === "trial"}
           onClick={narrowToTrial}
         >

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { SecHead } from "@/components/desk-chrome";
+import { countPress, sortPress } from "@/components/desk-chrome-utils";
 import { getSourceScores, moveSourceByEditor } from "@/lib/news/desk";
 import {
   STATUS_WORDS,
@@ -166,7 +167,7 @@ export function SourceMovesPanel({
     return (
       <button
         type="button"
-        className={"underline decoration-dotted" + (on ? " font-bold" : "")}
+        className={countPress + (on ? " font-bold" : "")}
         aria-pressed={on}
         onClick={() => onFilter?.(on ? null : status)}
       >
@@ -293,7 +294,7 @@ export function SourceMovesPanel({
                     ) : (
                       <button
                         type="button"
-                        className="underline decoration-dotted text-left"
+                        className={sortPress}
                         onClick={() => setSort((current) => sortOn(key, current))}
                         title={`Sort by ${column.label.toLowerCase()}`}
                       >
