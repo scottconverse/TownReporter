@@ -754,6 +754,10 @@ async function releaseGOverrides() {
          the two clauses. Match the clause pair, not the whole old string. */
       await page.getByRole("button", { name: /Publish anyway( in .+)? — I accept these claims/ }).click();
       await waitForBlockerCount(0, "the recorded acceptance");
+      /* DHJ-3 (782a197a): that press records the acceptance and goes straight on
+         to the publish confirm, so say "Not yet" before the edit -- otherwise the
+         bar holds the dialog's buttons and no Publish press is on screen. */
+      await page.locator("#astra-publish-bar").getByRole("button", { name: "Not yet", exact: true }).click();
       await page.locator("#story-body").fill(body.replace("short", "brief"));
       await page.getByRole("button", { name: "Save edits", exact: true }).click();
       await waitForTruth("the edited word to be saved", async () => {
@@ -773,10 +777,15 @@ async function releaseGOverrides() {
        has the claims clause after the section. */
     /* DHI-8: the blocker row's own button reads the same sentence as the
        confirm, so the press is scoped to the publish bar's dialog. */
+    /* The clause is the claims warning's own words (DHI-8). "pasted" carries the
+       unchecked-story warning instead, whose accept press is "I checked this
+       story myself" -- so its confirm reads "Publish anyway in <section>" alone. */
     await page.locator("#astra-publish-bar").getByRole("button", {
       name: mode === "self-checked"
         ? new RegExp(`^Yes, print it in ${SECTION_NAME}$`)
-        : new RegExp(`^Publish anyway in ${SECTION_NAME} — I accept`),
+        : mode === "pasted"
+          ? new RegExp(`^Publish anyway in ${SECTION_NAME}$`)
+          : new RegExp(`^Publish anyway in ${SECTION_NAME} — I accept`),
     }).click();
     step(`${mode}: pressed the confirmation`);
     const article = await waitForTruth(`${mode} to publish`, async () => (await pg.query("select slug,body from articles where lead_id=$1", [leadId])).rows[0]);

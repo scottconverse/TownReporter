@@ -170,6 +170,11 @@ async function main() {
             .locator('[aria-label="Bulk actions for the leads shown"]')
             .getByRole("button", { name: "Kill", exact: true })
             .click();
+          /*
+            TMA-2 (ae6ff2a7): a bulk Kill now asks for one reason first, even for
+            a single lead, so "Kill all anyway" is behind this press.
+          */
+          await page.getByRole("button", { name: "Yes, kill 1", exact: true }).click();
         }
       }
       await page
@@ -189,7 +194,11 @@ async function main() {
     const id = await lead("DHA3 duplicate", { status: "killed", prior, draft: true });
     await page.goto(base + `/desk/story/${id}`, { waitUntil: "networkidle" });
     page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: /Same story.*kill this one/ }).click();
+    /* DHD2-8 (9f1695e8): this lead is already killed, so the Compare press adds
+       the duplicate note instead of killing again; its name says so. */
+    await page
+      .getByRole("button", { name: "Already killed — add duplicate note: DHA3 duplicate", exact: true })
+      .click();
     const warning = page.getByRole("button", { name: "Kill anyway", exact: true });
     if (await warning.isVisible()) await warning.click();
     await page
@@ -270,7 +279,11 @@ async function main() {
     const before = await page.locator('[aria-label="Filter drafts"]').innerText();
     assert.match(before, /All.*1/s);
     assert.equal(await page.locator(".drafts-row", { hasText: "DHA6 printed story" }).count(), 0);
-    await page.getByRole("button", { name: /Switch to (dark|light) appearance/ }).click();
+    /* TSA-2 (9b4af8d4): the control's name starts with its visible word --
+       "Dark: switch to dark appearance" / "Light: switch to light appearance". */
+    await page
+      .getByRole("button", { name: /^(Dark|Light): switch to (dark|light) appearance$/ })
+      .click();
     assert.equal(await page.locator('[aria-label="Filter drafts"]').innerText(), before);
     await page.goto(base + "/desk", { waitUntil: "networkidle" });
     const cards = page.locator(".in-progress .today-card", { hasText: "DHA6 current story" });
