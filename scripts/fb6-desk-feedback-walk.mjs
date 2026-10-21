@@ -343,10 +343,10 @@ try {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Good morning/ }).waitFor({ timeout: 45_000 });
   /*
-    The row's own Hold opens the drawn dialog (that ask is not this unit's), so
-    the press photographed here is the dialog's: the ROW moves the instant the
-    dialog answers -- before any refetch could have come back -- and the toast
-    that reports it carries the way back.
+    Hold holds AT ONCE (f91abe06, decision D32: warn, never block -- a warning
+    on the way is answered by the toast's own retry, not by a dialog). So the
+    ROW moves the instant the press lands -- before any refetch could have come
+    back -- and the toast that reports it carries the way back.
 
     The screenshot is taken on the HELD segment, because that is where the row
     went: a held lead is not open work any more (7a), so it leaves the Open list
@@ -355,20 +355,22 @@ try {
   // The Start-story scene can finish its draft before this scene begins.
   // Hold a separate open lead: written drafts correctly cannot be held.
   const firstRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
-  await firstRow.getByRole("button", { name: /^Hold/ }).click();
   /*
     Start watching before the press: the confirmation is a transient toast.
 
     D187: reproduce before deciding. This timed out in CI with no page and no
     toast text in the log, so "the toast never drew", "it drew with other
-    words", and "the dialog never opened" were indistinguishable. On failure
+    words", and "the press did nothing" were indistinguishable. On failure
     this prints the page, the toast host's own text and the dialog, then lets
     the failure stand.
   */
   try {
     await Promise.all([
-      page.getByText(/Held "/).first().waitFor({ timeout: 15_000 }),
-      page.getByRole("button", { name: "Hold, no reason" }).click(),
+      page
+        .getByText(/The lead is on hold, off the Queue until you release it\./)
+        .first()
+        .waitFor({ timeout: 15_000 }),
+      firstRow.getByRole("button", { name: /^Hold/ }).click(),
     ]);
   } catch (err) {
     const body = await page.locator("body").innerText().catch((e) => `<body unreadable: ${e}>`);
