@@ -855,6 +855,41 @@ export function mergeNearDuplicates(ledger: LedgerItem[]): { items: LedgerItem[]
   return { items: kept.map((item, index) => ({ ...item, itemNo: index + 1 })), merged };
 }
 
+/**
+ * The ordinance and resolution numbers a line names, normalized so that
+ * "Ordinance 2026-69", "Ordinance No. 2026-69" and "Ord. 2026-69" are one key.
+ *
+ * Run 707 read twenty-eight motions and filed almost the whole meeting --
+ * Ordinance 2026-69's 8513 St. Vrain Road annexation, Resolution 2026-75,
+ * Ordinance 2026-76's Longmont Gateway Northwest annexation, Ordinances 2026-65
+ * and 2026-66 -- under one ledger item, because with no packet the run found few
+ * agenda rows and every later motion folded into the first one. A motion that
+ * names its own instrument is a different item from the one it sat under.
+ */
+const INSTRUMENT_NUMBER = /\b(ord(?:inance)?|res(?:olution)?)\.?\s*(?:no\.?\s*)?(\d{4})\s*[-–—]\s*(\d{1,4})\b/gi;
+
+export function instrumentKeys(text: string): string[] {
+  const keys = new Set<string>();
+  for (const match of text.matchAll(INSTRUMENT_NUMBER)) {
+    const kind = match[1]!.toLowerCase().startsWith("res") ? "resolution" : "ordinance";
+    keys.add(`${kind}:${match[2]}-${match[3]}`);
+  }
+  return [...keys];
+}
+
+/**
+ * The street addresses a line names, normalized. Two lines that name different
+ * addresses are different subjects even when the same agenda heading covers
+ * both ("8513 St. Vrain Road" against a later annexation on another road).
+ */
+const STREET_ADDRESS = /\b\d{1,6}\s+(?:[A-Z][\w'’.-]*\s+){0,4}(?:Road|Rd|Street|St|Avenue|Ave|Drive|Dr|Boulevard|Blvd|Lane|Ln|Court|Ct|Way|Place|Pl)\b\.?/g;
+
+export function addressKeys(text: string): string[] {
+  return (text.match(STREET_ADDRESS) ?? []).map((address) =>
+    address.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim(),
+  );
+}
+
 /** The kinds that are the RECORD of an agenda item, not an item of their own. */
 const RECORD_CHILD_KINDS = new Set([
   "block",
@@ -890,7 +925,32 @@ const RECORD_CHILD_KINDS = new Set([
  */
 export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; merged: number } {
   const agendaItems = ledger.filter((item) => item.kind === "agenda-item" && item.status !== "unread");
+  const isRecordRow = (item: LedgerItem): boolean =>
+    RECORD_CHILD_KINDS.has(item.kind) && item.kind !== "block";
   if (agendaItems.length === 0) return { items: ledger, merged: 0 };
+
+  /*
+    Rows that name the same ordinance or resolution number are one item: the
+    motion to approve Ordinance 2026-69 and the vote on it belong together, and
+    neither belongs to an earlier agenda heading that never names the number. The
+    row that is not itself a record line (a staff report, a block, an agenda
+    item) hosts the group; when every row is a record line, the first one does.
+  */
+  const hostByInstrument = new Map<LedgerItem, LedgerItem>();
+  const byInstrument = new Map<string, LedgerItem[]>();
+  for (const item of ledger) {
+    if (item.kind === "agenda-item" || item.status === "unread") continue;
+    for (const key of instrumentKeys(item.text)) {
+      const group = byInstrument.get(key) ?? [];
+      group.push(item);
+      byInstrument.set(key, group);
+    }
+  }
+  for (const group of byInstrument.values()) {
+    if (group.length < 2) continue;
+    const host = group.find((item) => !isRecordRow(item)) ?? group[0]!;
+    for (const item of group) if (item !== host && !hostByInstrument.has(item)) hostByInstrument.set(item, host);
+  }
 
   const subjectParent = (child: LedgerItem): LedgerItem | null => {
     if (!SET_PIECE_KINDS.has(child.kind)) return null;
@@ -921,7 +981,32 @@ export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; 
   const absorbed = new Map<LedgerItem, LedgerItem>();
   for (const child of ledger) {
     if (child.kind === "agenda-item" || child.status === "unread") continue;
-    const parent = subjectParent(child) ?? recordParent(child);
+    const byNumber = hostByInstrument.get(child);
+    if (byNumber) {
+      absorbed.set(child, byNumber);
+      continue;
+    }
+    let parent = subjectParent(child) ?? recordParent(child);
+    /*
+      A record row that names its own instrument -- or an address the parent's
+      own text contradicts -- is not the record of that parent, however close in
+      time it sat. It stays its own item (or joins the item naming the same
+      number, above). This is the whole of run 707's bug: one agenda heading
+      early in the meeting swallowed every later ordinance because every later
+      motion was "after" it.
+    */
+    if (parent) {
+      const candidate = parent;
+      const mine = instrumentKeys(child.text);
+      const parentKeys = instrumentKeys(candidate.text);
+      const mineAddresses = addressKeys(child.text);
+      const parentAddresses = addressKeys(candidate.text);
+      const addressConflict =
+        mineAddresses.length > 0 &&
+        parentAddresses.length > 0 &&
+        !mineAddresses.some((address) => parentAddresses.includes(address));
+      if ((mine.length > 0 && !mine.some((key) => parentKeys.includes(key))) || addressConflict) parent = null;
+    }
     if (parent && parent !== child) absorbed.set(child, parent);
   }
   if (absorbed.size === 0) return { items: ledger, merged: 0 };

@@ -1693,6 +1693,61 @@ describe("whole-meeting writer", () => {
     assert.match(merged.items[2]!.text, /Tribute to Jim Berthold/, "a tribute with no matching item stays its own entry");
   });
 
+  it("keeps a motion that names its own ordinance or resolution as its own item, not part of an earlier heading", () => {
+    /*
+      Run 707 (Longmont City Council, Oct. 20 2026, live job 429) had no packet,
+      so few agenda rows were read. Every later motion and vote -- Ordinance
+      2026-69's 8513 St. Vrain Road annexation, Resolution 2026-75, Ordinance
+      2026-76's Longmont Gateway Northwest annexation -- folded into the first
+      agenda heading, "Consent agenda ordinances", and the story lost almost the
+      whole meeting. A record row that names an ordinance or resolution the
+      candidate parent does not name is not that parent's record: it is its own
+      item, grouped with the other rows naming the same number.
+    */
+    const AGENDA: AgendaListItem[] = [{ id: "7A", title: "Consent agenda ordinances" }];
+    const windows: WindowInventory[] = [
+      {
+        windowIndex: 0,
+        segments: [],
+        items: parseInventoryReply(
+          JSON.stringify({
+            items: [
+              { kind: "motion", text: "Consent agenda ordinances and first readings", agenda: "7A", timestamp: "0:05:00" },
+              { kind: "motion", text: "Move to approve the consent agenda minus items B and C", agenda: "", timestamp: "0:06:00" },
+              { kind: "motion", text: "Move to approve Resolution 2026-75 finding the annexation eligible", agenda: "", timestamp: "0:50:00" },
+              { kind: "motion", text: "Move to approve Ordinance 2026-69, the 8513 St. Vrain Road annexation", agenda: "", timestamp: "1:00:00" },
+              { kind: "vote", text: "Ordinance 2026-69 as amended carries 5 to 2", agenda: "", timestamp: "1:01:00" },
+              { kind: "motion", text: "Move to approve Ordinance 2026-76, the Longmont Gateway Northwest annexation", agenda: "", timestamp: "2:00:00" },
+              { kind: "vote", text: "Ordinance 2026-76 carries unanimously", agenda: "", timestamp: "2:01:00" },
+            ],
+          }),
+        ).items,
+      },
+    ];
+    const built = buildLedger(windows, [], [], AGENDA);
+    const merged = mergeRelatedItems(built);
+    const texts = merged.items.map((item) => `${item.text}\n${(item.evidence ?? []).map((line) => line.text).join("\n")}`);
+    const holds = (needle: RegExp): string[] => texts.filter((text) => needle.test(text));
+
+    assert.equal(merged.items.length, 4, "the heading, 2026-75, 2026-69 and 2026-76 are four items, not one");
+    assert.equal(holds(/2026-69/).length, 1, "the motion and the vote on Ordinance 2026-69 are one item");
+    assert.match(holds(/2026-69/)[0]!, /carries 5 to 2/, "and the vote on it is that item's record");
+    assert.equal(holds(/2026-76/).length, 1, "Ordinance 2026-76 is its own item");
+    assert.match(holds(/2026-76/)[0]!, /carries unanimously/, "with its own vote");
+    assert.equal(holds(/2026-75/).length, 1, "Resolution 2026-75 is its own item (the eligibility finding stays with the number it names)");
+    const heading = merged.items.find((item) => item.kind === "agenda-item")!;
+    assert.doesNotMatch(
+      `${heading.text}\n${(heading.evidence ?? []).map((line) => line.text).join("\n")}`,
+      /2026-(?:69|75|76)/,
+      "no numbered ordinance is swallowed by the heading",
+    );
+    assert.match(
+      (heading.evidence ?? []).map((line) => line.text).join("\n"),
+      /consent agenda minus items B and C/,
+      "a motion with no number of its own still folds into the heading it belongs to",
+    );
+  });
+
   it("corrects the tape's garbled names, maps a title to its holder, and flags a name it cannot verify", async () => {
     /*
       Run 4's mapping printed junk: "Hadel Fairing -> The Fair", "Prom McCoy ->
