@@ -428,7 +428,7 @@ export async function runWholeMeetingDraft(
   );
 
   const chat: WholeMeetingChat = (system, user, maxTokens) =>
-    input.chat(system, user, maxTokens, input.modelChoice, { timeoutMs: input.callTimeoutMs ?? 0 });
+    input.chat(system, user, maxTokens, input.modelChoice, { timeoutMs: input.callTimeoutMs });
 
   const knownNames = await loadKnownNameSources(input.sql, input.newsroomId, input.userId);
 

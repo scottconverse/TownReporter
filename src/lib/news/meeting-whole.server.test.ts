@@ -703,4 +703,56 @@ describe("whole-meeting writer, against the migrated schema", () => {
       /no story text/,
     );
   });
+
+  it("asks its chat for no fixed timeout when the desk sets none", async () => {
+    /*
+      desk_jobs 424/425: this wrapper passed `callTimeoutMs ?? 0`, and the desk
+      reads `options?.timeoutMs ?? providerBudget(...).callMs` -- so the 0 went
+      through and every rung was refused as under MIN_RUNG_MS. Unset must stay
+      undefined so the desk sizes the call itself.
+    */
+    const sql = await getSql();
+    const seen: Array<{ timeoutMs?: number } | undefined> = [];
+    const chat: ReportChat = async (system, _user, _maxTokens, _modelChoice, options) => {
+      seen.push(options);
+      if (system.includes(INVENTORY_SYSTEM)) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            items: [{ kind: "vote", text: "Airport noise policy carries unanimously", who: "", timestamp: "0:00:00", packet_page: 57, numbers: "", source_words: "And that carries unanimously." }],
+          }),
+        };
+      }
+      if (system.includes(LEDGER_STATUS_SYSTEM)) {
+        return { ok: true, text: JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the vote" }] }) };
+      }
+      if (system.includes(LEAD_WRITE_SYSTEM)) {
+        return {
+          ok: true,
+          text: JSON.stringify({ headline: "Council takes up airport noise policy", dek: "One line.", lead: "The council voted on the noise policy." }),
+        };
+      }
+      if (system.includes(COLD_CHECK_SYSTEM)) return { ok: true, text: JSON.stringify({ mismatches: [] }) };
+      return { ok: false, error: "unexpected stage" };
+    };
+    await runWholeMeetingDraft(
+      {
+        sql,
+        newsroomId: NEWSROOM,
+        userId: USER,
+        leadId,
+        artifactId,
+        videoId: VIDEO,
+        fallbackTitle: "fallback",
+        topic: "council",
+        modelChoice: "auto",
+        chat,
+      },
+      { primeGovOrigin: async () => null },
+    );
+    assert.ok(seen.length > 0, "the run reached the model");
+    for (const options of seen) {
+      assert.equal(options?.timeoutMs, undefined, "an unset desk budget reaches the model as undefined, never 0");
+    }
+  });
 });
