@@ -72,7 +72,15 @@ try {
   await page.getByText("Saved.", { exact: true }).waitFor({ timeout: 20_000 });
   step("wrote and saved the story by hand");
 
-  const publishButton = page.getByRole("button", { name: /^Publish in / }).first();
+  /*
+    D32 (Scott, Oct 10): with no section chosen the press is not stood down; it
+    is named as the override, "No section chosen. Pick one, or publish in
+    <section> anyway." (desk.story.$leadId.tsx). This lead is filed without a
+    section, so the walk accepts either shape of the live press.
+  */
+  const publishButton = page
+    .getByRole("button", { name: /^(Publish in |No section chosen\. Pick one, or publish in )/ })
+    .first();
   /*
     The desk has to say what it is waiting for, not merely grey a button out.
     0.6.67 renamed the button -- it now carries the section it would print
@@ -95,7 +103,19 @@ try {
     .filter({ hasText: /The story changed after its evidence was gathered/ })
     .first();
   await evidenceNotice.waitFor({ timeout: 30_000 });
-  if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
+  /*
+    D32: the changed-evidence block is a warning, so the check is not a
+    disabled attribute. The notice above is drawn, and the press beside it is
+    live and named as the override that prints over it -- if it were greyed,
+    the desk would be blocking where it must warn.
+  */
+  if (await publishButton.isDisabled()) {
+    throw new Error("Changed body stood the Publish press down instead of offering the evidence override");
+  }
+  const overrideName = (await publishButton.innerText()).replace(/\s+/g, " ").trim();
+  if (!/anyway/.test(overrideName)) {
+    throw new Error(`Publish press is not named as an override: ${JSON.stringify(overrideName)}`);
+  }
   /*
     The story screen's own confirm, and not the one the reasons block now draws
     with the same words. Two units met here and both found the same collision:
@@ -162,7 +182,9 @@ try {
   await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: /^Publish in / }).first().click();
   // Publishing confirms before it prints; see lifecycle-e2e.mjs for why.
-  await page.getByRole("button", { name: /^Yes, print it/ }).click();
+  // With warnings standing, the confirm is the same override the bar offers
+  // (publish-blockers.ts publishes "Publish anyway in <section>" then).
+  await page.getByRole("button", { name: /^(Yes, print it|Publish anyway in|Publish now in)/ }).click();
   const readIt = page.getByRole("link", { name: /Read it on the paper/i });
   await readIt.waitFor({ timeout: 30_000 });
   step("published it");

@@ -252,10 +252,21 @@ async function seedLead(opts) {
   const leadId = Number(lead.rows[0].id);
   must(Number.isFinite(leadId), "the seeded lead has an id");
 
+  /*
+    `model_headline` is what makes a model-drafted lead read as having a
+    section on the story page (desk.story.$leadId.tsx, sectionChosenByModel:
+    the model named one and the desk shows it). Without it the fixture's own
+    section was reported as unchosen and the page drew a second warning, "No
+    section has been chosen for this story." -- which is why this walk counted
+    two reasons where the receipt left one. The fixture stands in for a model
+    draft, so it files the model's headline beside the editor's, the way
+    cp-desk-dialogs-walk.mjs and desk-narrow-width-walk.mjs already do. Lead 1
+    keeps `topic_unchosen: true`, so its section still reads as unchosen.
+  */
   const draft = await pg.query(
     `insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
-       provenance_json, found_note, unanswered, research_json, headline_source)
-     values ($1, 1, $2, $3, $4, $5, $6, '[]', '[]', '', '[]', '{}', 'editor') returning id`,
+       provenance_json, found_note, unanswered, research_json, model_headline, headline_source)
+     values ($1, 1, $2, $3, $4, $5, $6, '[]', '[]', '', '[]', '{}', $3, 'editor') returning id`,
     [ownerId, leadId, opts.headline, opts.dek, BODY, opts.topic],
   );
   return { leadId, draftId: Number(draft.rows[0].id) };

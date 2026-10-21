@@ -68,8 +68,12 @@ async function openRowMenu(row) {
 }
 
 async function assertSharedModelPicker(picker, expectedValue, surface) {
+  /* D43: a gemini-cli row carries " · <status>" (model-picker.tsx), and the
+     status is the server's honest reason whenever the program is missing --
+     not only the word "Ready". This check is about the model names, so the
+     whole suffix goes. */
   const names = (await picker.locator("option").allInnerTexts()).map((line) =>
-    line.split("—")[0].replace(/\s+·\s+Ready$/, "").trim(),
+    line.split("—")[0].replace(/\s+·\s+.*$/, "").trim(),
   );
   if (JSON.stringify(names) !== JSON.stringify(expectedModelNames)) {
     throw new Error(`${surface} model picker choices differ: ${JSON.stringify(names)}`);
@@ -470,13 +474,15 @@ async function main() {
   // DHB1: the shared writing picker belongs on the bulk strip, and its
   // choice is the one the batch dialog will queue. Opening that dialog does
   // not start a model job; this walk stops after checking the carried choice.
-  const bulkWritingModel = page.getByLabel("Writing model").filter({ visible: true }).first();
+  // DHD1-2 names the batch picker "Model for these stories" on both the strip
+  // and the dialog; "Writing model" is the default of an unlabelled picker.
+  const bulkWritingModel = page.getByLabel("Model for these stories").filter({ visible: true }).first();
   await bulkWritingModel.waitFor({ timeout: 10_000 });
   const bulkOptions = await bulkWritingModel.locator("option").evaluateAll((nodes) =>
     nodes.map((node) => ({ value: node.value, label: node.textContent ?? "" })),
   );
   const bulkNames = bulkOptions.map((option) =>
-    option.label.split("—")[0].replace(/\s+·\s+Ready$/, "").trim(),
+    option.label.split("—")[0].replace(/\s+·\s+.*$/, "").trim(),
   );
   if (JSON.stringify(bulkNames) !== JSON.stringify(expectedModelNames)) {
     throw new Error(`the bulk picker does not match the shared model list: ${JSON.stringify(bulkNames)}`);
@@ -490,7 +496,7 @@ async function main() {
   await page.getByRole("button", { name: /Start 1 story from the selected leads/ }).click();
   const batchDialog = page.getByRole("dialog").last();
   await batchDialog.waitFor({ timeout: 10_000 });
-  const dialogModel = batchDialog.getByLabel("Writing model");
+  const dialogModel = batchDialog.getByLabel("Model for these stories");
   if ((await dialogModel.inputValue()) !== balancedCodex.value) {
     throw new Error("the selected bulk model was not carried into the draft start");
   }

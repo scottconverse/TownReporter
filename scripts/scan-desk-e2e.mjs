@@ -472,9 +472,10 @@ async function persistSuppliedScope(headline, why) {
  * dialog. The dialog copies the strip's selection as it opens, so what it
  * queues cannot drift from what the strip said it would. Every assertion
  * keeps its meaning: the desk's suggestion still preserves the editor's own
- * picks (now named in the dialog's "Leads in this batch" list), the batch
- * still never exceeds five leads, and the two chosen leads still reach Claude
- * Sonnet and come back as reviewable drafts across a reload.
+ * picks (now named in the dialog's "Leads in this batch" list), a batch past
+ * the usual five still opens and asks for the editor's approval (D32: a gate
+ * warns, it never stands the press down), and the two chosen leads still
+ * reach Claude Sonnet and come back as reviewable drafts across a reload.
  */
 async function draftBatchJourney() {
   const first = `Library storytime registration ${stamp}`;
@@ -519,12 +520,12 @@ async function draftBatchJourney() {
   await rowChoice(first).check();
   await rowChoice(second).check();
   let batch = await openBatchDialog(2);
-  await batch.getByText("2 of 5 selected").waitFor();
+  await batch.getByText("2 selected").waitFor();
 
   // "Suggested focus size" only decides what the desk proposes: choosing it
   // must leave the editor's own picks alone, and the dialog names them.
   await batch.getByLabel("Suggested focus size").selectOption("5");
-  await batch.getByText("2 of 5 selected").waitFor();
+  await batch.getByText("2 selected").waitFor();
   await expect(batchList(batch).getByRole("listitem")).toHaveCount(2);
   await expect(batchList(batch).getByText(first, { exact: true })).toHaveCount(1);
   await expect(batchList(batch).getByText(second, { exact: true })).toHaveCount(1);
@@ -532,7 +533,7 @@ async function draftBatchJourney() {
   const offered = Number(/\((\d+)\)/.exec(await addSuggested.innerText())?.[1] ?? "0");
   if (offered < 1) throw new Error("the desk offered no suggested focus to add");
   await addSuggested.click();
-  await batch.getByText(`${2 + offered} of 5 selected`).waitFor();
+  await batch.getByText(`${2 + offered} selected`).waitFor();
   await expect(batchList(batch).getByRole("listitem")).toHaveCount(2 + offered);
   await expect(batchList(batch).getByText(first, { exact: true })).toHaveCount(1);
   await expect(batchList(batch).getByText(second, { exact: true })).toHaveCount(1);
@@ -542,21 +543,27 @@ async function draftBatchJourney() {
   await expect(batchList(batch).getByText(extras[3], { exact: true })).toHaveCount(1);
   step("suggested focus adds the newest eligible lead while preserving manual selections");
 
-  // Five is the cap: at five the desk offers nothing more to add...
+  // Five is the usual size, not a cap that stands down: at five the desk
+  // offers nothing more to add and says so with "(0)" (D32: a policy gate is
+  // a warning, never a block).
   await closeBatchDialog(batch);
   for (const headline of extras.slice(0, 3)) {
     await rowChoice(headline).check();
   }
   await bulkStrip.getByText("5 selected", { exact: true }).waitFor();
   batch = await openBatchDialog(5);
-  await batch.getByText("5 of 5 selected").waitFor();
-  await expect(batch.getByRole("button", { name: /^Add suggested focus/ })).toBeDisabled();
-  // ...and a sixth selected lead disables the press that opens the batch at
-  // all, so no batch can queue more than five leads.
+  await batch.getByText("5 selected").waitFor();
+  await batch.getByRole("button", { name: /^Add suggested focus \(0\)/ }).waitFor();
+  // ...and a sixth selected lead no longer disables the press that opens the
+  // batch: the batch asks for the editor's approval instead of standing down.
   await closeBatchDialog(batch);
   await rowChoice(extras[3]).check();
   await bulkStrip.getByText("6 selected", { exact: true }).waitFor();
-  await expect(startPress(6)).toBeDisabled();
+  await expect(startPress(6)).toBeEnabled();
+  batch = await openBatchDialog(6);
+  await batch.getByText("6 selected").waitFor();
+  await batch.getByText(/a larger batch asks for your approval/).waitFor();
+  await closeBatchDialog(batch);
   for (const headline of extras) {
     await rowChoice(headline).uncheck();
   }
@@ -564,12 +571,17 @@ async function draftBatchJourney() {
   // say two again, which is the old "2 of 5 selected" assertion.
   await bulkStrip.getByText("2 selected", { exact: true }).waitFor();
   batch = await openBatchDialog(2);
-  await batch.getByText("2 of 5 selected").waitFor();
+  await batch.getByText("2 selected").waitFor();
   await expect(batchList(batch).getByRole("listitem")).toHaveCount(2);
 
-  const runtime = batch.getByLabel("Writing model");
+  // DHD1-2 renamed this picker on the Batch dialog; the strip behind it reads
+  // the same label, so the name is the dialog's own.
+  const runtime = batch.getByLabel("Model for these stories");
+  /* A gemini-cli row carries " · <status>" (model-picker.tsx), and the status
+     is the server's honest reason whenever the program is missing. The list is
+     about which models are offered, so the suffix is not part of the name. */
   const labels = (await runtime.locator("option").allInnerTexts()).map((line) =>
-    line.split("—")[0].trim(),
+    line.split("—")[0].replace(/\s+·\s+.*$/, "").trim(),
   );
   const expected = [
     "Automatic",
