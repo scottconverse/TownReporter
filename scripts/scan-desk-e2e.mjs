@@ -244,6 +244,18 @@ async function dailySettingsJourney(context, observePage) {
   if (await enabled.isChecked()) throw new Error("daily scan must start disabled");
   await panel.getByText("Timezone: America/Denver").waitFor();
   const runtime = panel.getByLabel("Writing model");
+  /*
+    DHE1-1 (3f5f7f12): while the shared picker's connections query is still in
+    flight, model-picker.tsx renders a disabled "Saved API connections —
+    loading…" option so the list is never silently short. That line is not a
+    model, and the label split below trims it to "Saved API connections", so a
+    read that lands mid-fetch sees one row more than the app is designed to
+    offer. Wait for the query to settle, then read the list the page settles
+    on -- the same full list every AI screen shows.
+  */
+  await runtime
+    .locator('option[value="custom-connections-loading"]')
+    .waitFor({ state: "detached", timeout: 45_000 });
   const labels = (await runtime.locator("option").allTextContents()).map((label) =>
     label.split("—")[0].trim(),
   );
@@ -577,6 +589,11 @@ async function draftBatchJourney() {
   // DHD1-2 renamed this picker on the Batch dialog; the strip behind it reads
   // the same label, so the name is the dialog's own.
   const runtime = batch.getByLabel("Model for these stories");
+  // Same DHE1-1 pending line as the daily row above: wait for the connections
+  // query to settle before counting the models this picker offers.
+  await runtime
+    .locator('option[value="custom-connections-loading"]')
+    .waitFor({ state: "detached", timeout: 45_000 });
   /* A gemini-cli row carries " · <status>" (model-picker.tsx), and the status
      is the server's honest reason whenever the program is missing. The list is
      about which models are offered, so the suffix is not part of the name. */
