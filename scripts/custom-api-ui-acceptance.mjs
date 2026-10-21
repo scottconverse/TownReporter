@@ -481,35 +481,49 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await finalSection.scrollIntoViewIfNeeded();
   /*
-    The check itself is unchanged. The message now names the widest offenders so
-    a red run says which element pushes the document past a 390 px screen
-    instead of only reporting that one does.
+    The check itself is unchanged. The message names the widest offenders so a
+    red run says which element pushes the document past a 390 px screen instead
+    of only reporting that one does.
+
+    WHY THIS LIST IS NOT FILTERED ANY MORE. The ci9 version skipped every
+    element that had an ancestor with a horizontal clip, and `body` counts as
+    one while a Radix dialog is open: react-remove-scroll writes
+    `overflow: hidden` on the body, and `body`'s overflow propagates to the
+    viewport rather than clipping the body's children. Every candidate was
+    therefore skipped and round 8 printed `[]`. Nothing is skipped now --
+    not clipped boxes, not fixed ones. The eight widest boxes past the edge are
+    reported, each with the overflow-x of its nearest clipping ancestor (body
+    and html are never that ancestor), so a reader can tell a real overflow
+    from one something below it clips.
   */
   const overflow = await page.evaluate(() => {
-    const clipped = (node) => {
-      for (let el = node.parentElement; el; el = el.parentElement) {
+    const clipperOf = (node) => {
+      for (
+        let el = node.parentElement;
+        el && el !== document.body && el !== document.documentElement;
+        el = el.parentElement
+      ) {
         const overflowX = getComputedStyle(el).overflowX;
         if (overflowX === "hidden" || overflowX === "auto" || overflowX === "scroll") {
-          const box = el.getBoundingClientRect();
-          if (box.right <= innerWidth + 1) return true;
+          return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""} (overflow-x: ${overflowX})`;
         }
       }
-      return false;
+      return "none";
     };
     const offenders = [];
     for (const el of document.querySelectorAll("body *")) {
-      // A fixed box is placed against the viewport and cannot widen the
-      // document's scroll area, so it is never the answer to this question.
-      if (getComputedStyle(el).position === "fixed") continue;
       const box = el.getBoundingClientRect();
       if (box.width === 0 || box.right <= innerWidth + 1) continue;
-      if (clipped(el)) continue;
+      const className = typeof el.className === "string" ? el.className : "";
       offenders.push({
         tag: el.tagName.toLowerCase(),
         id: el.id,
-        className: typeof el.className === "string" ? el.className : "",
+        className: className.slice(0, 80),
+        position: getComputedStyle(el).position,
         width: Math.round(box.width),
+        left: Math.round(box.left),
         right: Math.round(box.right),
+        clipper: clipperOf(el),
         text: (el.textContent ?? "").trim().slice(0, 60),
       });
     }
@@ -517,14 +531,19 @@ try {
     return {
       screenWidth: innerWidth,
       documentWidth: document.documentElement.scrollWidth,
-      offenders: offenders.slice(0, 5),
+      bodyWidth: document.body.scrollWidth,
+      htmlOverflow: getComputedStyle(document.documentElement).overflow,
+      bodyOverflow: getComputedStyle(document.body).overflow,
+      offenders: offenders.slice(0, 8),
     };
   });
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),
     false,
     `document is ${overflow.documentWidth}px wide on a ${overflow.screenWidth}px screen; ` +
-      `widest elements past the edge: ${JSON.stringify(overflow.offenders)}`,
+      `widest elements past the edge: ${JSON.stringify(overflow.offenders)}; ` +
+      `body scrollWidth ${overflow.bodyWidth}; html overflow ${overflow.htmlOverflow}; ` +
+      `body overflow ${overflow.bodyOverflow}`,
   );
   await page.screenshot({ path: "artifacts/custom-api-ui/mobile.png" });
   page.once("dialog", (dialog) => dialog.accept());
