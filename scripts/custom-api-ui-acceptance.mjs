@@ -406,7 +406,14 @@ try {
     compared below is the loaded one.
   */
   const customOption = batchPicker.locator("option", { hasText: "Isolated API fixture" });
-  await customOption.waitFor({ timeout: 45_000 });
+  /*
+    An <option> inside a <select> is never "visible" to Playwright -- the closed
+    select paints only its chosen line -- so the wait asks for the option to be
+    ATTACHED, the same way the Story picker above does (line 275). The assertion
+    that the saved connection is offered is the option's presence in the list
+    compared below.
+  */
+  await customOption.waitFor({ state: "attached", timeout: 45_000 });
   /*
     The expected list is what SHARED_MODEL_CHOICES offers (model-choice.ts:131-139,
     built from providersFor("story"), provider-registry.ts:1105-1110, sorted by
