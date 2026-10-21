@@ -546,7 +546,9 @@ async function publishIt() {
   };
   await page.route("**/*", holdThePublish);
   await publishButton.click();
-  await page.getByRole("button", { name: /^Yes, print it in / }).click();
+  // This paste carries warnings (draft cut off, no claims recorded), so by D32
+  // the confirm is the override press, "Publish anyway in <section>".
+  await page.getByRole("button", { name: /^(?:Yes, print it in |Publish anyway in )/ }).click();
   for (let i = 0; i < 60 && !publishUrl; i += 1) await new Promise((r) => setTimeout(r, 500));
   await page.unroute("**/*", holdThePublish);
   must(
@@ -566,8 +568,9 @@ async function publishIt() {
   const button = page.getByRole("button", { name: /^Publish in / });
   await button.waitFor({ timeout: 45_000 });
   await button.click();
-  // The desk asks once more before it goes out, and names the section again.
-  await page.getByRole("button", { name: /^Yes, print it in / }).click();
+  // The desk asks once more before it goes out, and names the section again;
+  // with the same warnings standing it reads "Publish anyway in <section>".
+  await page.getByRole("button", { name: /^(?:Yes, print it in |Publish anyway in )/ }).click();
   const read = page.getByRole("link", { name: "Read it on the paper", exact: true });
   await read.waitFor({ timeout: 60_000 });
   const href = (await read.getAttribute("href")) ?? "";

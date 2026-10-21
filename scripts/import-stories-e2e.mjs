@@ -509,7 +509,9 @@ async function oneImportedStoryPublishes(chosen) {
   // there is no separate Confirm step to take first.
   await page.getByRole("button", { name: /^Publish in / }).click();
   // The desk asks once more before it goes out, and names the section again.
-  await page.getByRole("button", { name: /^Yes, print it in / }).click();
+  // An imported story carries warnings ("No claims were recorded..."), so by
+  // D32 the confirm is the override press, "Publish anyway in <section>".
+  await page.getByRole("button", { name: /^(Yes, print it in|Publish anyway in|Publish now in) / }).click();
 
   const read = page.getByRole("link", { name: "Read it on the paper", exact: true });
   await read.waitFor({ timeout: 60_000 });
