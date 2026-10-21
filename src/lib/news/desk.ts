@@ -81,6 +81,7 @@ import { cityOfficialHost } from "./research-scope.ts";
 import {
   beatsForSource,
   hostOf,
+  officialPeerHosts,
   rankCandidates,
   siblingCandidates,
   sitemapCandidates,
@@ -710,7 +711,13 @@ export async function performReplacementCandidates(
   */
   const officialHost = cityOfficialHost(
     place?.city ?? "",
-    peers.filter((p) => p.kind === "official").map((p) => p.url),
+    /*
+      Hosts, not addresses. `sources.url` holds the full URL, and
+      `cityOfficialHost` matches only a bare host, so handing it the URLs made
+      every official row miss and left `officialHost` null -- which is why the
+      sitemap below was never read at all.
+    */
+    officialPeerHosts(peers),
     place?.state ?? "",
   );
 
