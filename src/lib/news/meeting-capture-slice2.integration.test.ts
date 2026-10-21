@@ -22,7 +22,7 @@ describe("meeting capture Slice 2 integration contract", () => {
   });
 
   it("does not re-capture a meeting already marked captured", () => {
-    const knownLine = source.match(/const known = new Set.*/)?.[0] ?? "";
+    const knownLine = source.match(/const known = new Set\(captured\.filter.*/)?.[0] ?? "";
     const uncapturedLine = source.match(/const uncaptured = found\.filter.*/)?.[0] ?? "";
     assert.match(knownLine, /status === "captured"/);
     assert.match(uncapturedLine, /!known\.has\(v\.id\)/);
