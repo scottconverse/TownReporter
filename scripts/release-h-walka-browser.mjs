@@ -191,7 +191,26 @@ async function main() {
           );
         }
       }
-      if (door !== "bulk")
+      /*
+        DHA2 (ci8-fix): the Story door draws no "Kill anyway". Its own KillDialog
+        answers the drafted warning INSIDE the "Kill, no reason" press -- the
+        request already carries `override:["lead-status-drafted"]`
+        (KillDialog.tsx:125), so lead-lifecycle.ts:86 records the override
+        and lets the kill land instead of returning the warning that would have
+        asked for a second press. Same shape as the bulk press above: what is
+        left to prove is the outcome -- killed, and Undo brings the draft back.
+      */
+      if (door === "Story") {
+        for (let i = 0; i < 60; i++) {
+          if ((await sql.query("select status from leads where id=$1", [id]))[0].status === "killed")
+            break;
+          await page.waitForTimeout(100);
+        }
+        assert.equal(
+          (await sql.query("select status from leads where id=$1", [id]))[0].status,
+          "killed",
+        );
+      } else if (door !== "bulk")
         await page.getByRole("button", { name: "Kill anyway", exact: true }).click();
       await restored(id);
       console.log(`PASS DHA2 ${door}: Undo restores draft`);
