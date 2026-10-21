@@ -295,8 +295,8 @@ it("DHH-3: every headline suggestion call leaves a receipt row saying what was a
   const receipt = JSON.parse(rows[0]!.result_json);
   assert.equal(receipt.ranModel, "deepseek-v4.1-flash");
   assert.equal(receipt.suggestions, 3);
-  assert.equal(receipt.modelEffort, "none", "DeepSeek runs with effort none, whatever the screen sent");
-  assert.equal(receipt.requestedEffort, "none");
+  assert.equal(receipt.modelEffort, "low", "DeepSeek runs with effort low (D168), whatever the screen sent");
+  assert.equal(receipt.requestedEffort, "low");
   assert.equal(rows[1]!.status, "failed");
   assert.match(rows[1]!.error ?? "", /provider said no/);
 

@@ -686,7 +686,7 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
-  it("sends the exact DeepSeek Off default as Ollama's explicit none disable", async () => {
+  it("sends the exact DeepSeek low default as Ollama's explicit level", async () => {
     const originalFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = async (_input, init) => {
@@ -717,15 +717,16 @@ describe("model-picker provider readiness", () => {
           reasoningEffort: "max",
         })).ok, true);
       });
-      assert.equal(bodies[0]!.reasoning_effort, "none", "Off must disable thinking explicitly");
-      assert.equal(bodies[1]!.reasoning_effort, "high");
-      assert.equal(bodies[2]!.reasoning_effort, "max");
+      assert.equal(bodies[0]!.reasoning_effort, "low", "the low default must be sent explicitly, or Ollama uses its own");
+      // D168: the forced local DeepSeek door is low even when the editor picked high or max.
+      assert.equal(bodies[1]!.reasoning_effort, "low");
+      assert.equal(bodies[2]!.reasoning_effort, "low");
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("carries custom DeepSeek Off, High, and Max through the exact saved model", async () => {
+  it("forces the custom DeepSeek door to low whatever effort is asked", async () => {
     const originalFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = async (_input, init) => {
@@ -753,7 +754,7 @@ describe("model-picker provider readiness", () => {
       }
       assert.deepEqual(
         bodies.map((body) => body.reasoning_effort),
-        ["none", "high", "max"],
+        ["low", "low", "low"],
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -1820,8 +1821,8 @@ describe("the DeepSeek rung's writing call", () => {
     );
     assert.equal(
       request!.body.reasoning_effort,
-      "none",
-      "the rung's Off default is sent explicitly, or Ollama re-enables thinking",
+      "low",
+      "the rung's low default (D168) is sent explicitly, or Ollama uses its own",
     );
   });
 });
