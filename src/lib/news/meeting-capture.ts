@@ -597,6 +597,16 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
   const recaptureIds = meetingArtifactRootReadable()
     ? selectRecaptureIds(await missingTranscriptArtifactVideoIds(sql, newsroomId), captured)
     : new Set<string>();
+  // A recapture target may no longer appear in the current channel listing --
+  // the feed only carries the newest uploads, and a lost artifact is usually
+  // months old. Without the record's id here the pass would choose the video
+  // and then never try it, so it re-enters the capture loop from its row.
+  for (const record of captured) {
+    if (!recaptureIds.has(record.videoId) || foundById.has(record.videoId)) continue;
+    found.push({ id: record.videoId, url: `https://www.youtube.com/watch?v=${record.videoId}`,
+      channelUrl: record.channelUrl, title: record.title, published: record.published,
+      duration: record.durationSeconds ?? 0, tab: "rss" });
+  }
   // The database is the capture source of truth. Reconcile the yt-dlp cache
   // BEFORE asking yt-dlp to capture anything; doing this only after the pass
   // lets a stale file suppress a meeting the database says is uncaptured.

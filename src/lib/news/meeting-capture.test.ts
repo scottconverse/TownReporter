@@ -308,6 +308,28 @@ describe("A10: a captured video whose transcript artifact is missing is captured
     });
   });
 
+  it("recaptures a missing-artifact video the channel listing no longer shows", async () => {
+    await withCaptureDataRoot(async (root) => {
+      const { sql } = capturePassSql({
+        artifactStatuses: { hidden00001: "missing" },
+        records: [{ ...CAPTURED_RECORD, video_id: "hidden00001", published: "2026-08-14" }],
+      });
+      const captures: string[] = [];
+      await runMeetingAwareness(sql, 900107, {
+        // The feed carries only the newest uploads; this lost meeting has
+        // scrolled off it, so the pass must take it from its own record.
+        listChannelVideos: async () => [],
+        prepareCapturePaths: () => ({ archivePath: meetingArchivePath(900107, root), outputDir: join(root, "captions") }),
+        captureMeeting: async (input) => { captures.push(input.videoId); return captionSuccess(join(root, "captions")); },
+        captureAudio: async () => ({ ok: false, reason: "unexpected", argv: [], stderr: "" }),
+        applyCapturedMeetingTranscript: (async () => ({ warnings: [] })) as unknown as NonNullable<MeetingAwarenessDeps["applyCapturedMeetingTranscript"]>,
+        withTransaction: (async (fn: (tx: Sql) => Promise<unknown>) => fn(sql)) as unknown as NonNullable<MeetingAwarenessDeps["withTransaction"]>,
+      });
+      assert.deepEqual(captures, ["hidden00001"],
+        "a chosen recapture outside the channel listing is still tried");
+    });
+  });
+
   it("leaves a captured video with a valid latest artifact alone", async () => {
     await withCaptureDataRoot(async (root) => {
       const { sql } = capturePassSql({
