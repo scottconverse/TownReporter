@@ -319,7 +319,18 @@ async function seedReviewRequiredDraft() {
 async function openTheStory(leadId) {
   await page.goto(`${base}/desk/story/${leadId}`, { waitUntil: "domcontentloaded" });
   await page.locator("textarea.astra-headline").waitFor({ timeout: 45_000 });
-  await page.getByRole("button", { name: /^Publish in / }).waitFor({ timeout: 45_000 });
+  /*
+    D32 (Oct 10, Scott: "There must always be a human override ... NOT
+    blocked"): the press changed from "Publish in <section>" to the offer to
+    print under the lead's own section anyway when no section was chosen --
+    "No section chosen. Pick one, or publish in <section> anyway."
+    (src/routes/desk.story.$leadId.tsx:4498). This walk opens such a lead
+    (topic_unchosen) as well as the Release G leads that do carry a section,
+    so the wait accepts either press.
+  */
+  await page
+    .getByRole("button", { name: /^Publish in |^No section chosen\. Pick one, or publish in / })
+    .waitFor({ timeout: 45_000 });
   step(`the story page opens on lead ${leadId}`);
 }
 
@@ -340,7 +351,7 @@ async function waitForBlockerCount(n, what) {
 }
 
 function publishButton() {
-  return page.locator("#astra-publish-bar button", { hasText: /^Publish in |^Yes, print it in / }).first();
+  return page.locator("#astra-publish-bar button", { hasText: /^Publish in |^Yes, print it in |^No section chosen\. Pick one, or publish in / }).first();
 }
 
 /** 1. The list is the first thing on the tab the page opens on. */

@@ -151,70 +151,44 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await confirmSectionAndWaitForPublishable(page, { publishable: false });
   step("the draft is written and its body saved");
 
-  // The gate holds the button down and says why. The sentence is the desk's,
-  // not this walk's: it is the same report the server refuses on.
+  // D32 (Scott, Oct 10 2026): the desk warns, it never blocks. The named-outlet
+  // check is a warning, so Publish stays live and the desk states the warning
+  // in words before the press: the Checks row is chipped "Warning", the block
+  // counts it and offers "Publish anyway", and the outlet row offers the
+  // override press the walk clicks next. (Before D32 the gate disabled Publish
+  // and the row was chipped "Blocks Publish".)
   const outlets = page.locator("#story-outlets");
   await outlets.getByText(/The body names Denver Post and the Sources do not show it/).waitFor({
     timeout: 45_000,
   });
   const print = page.getByRole("button", { name: /^Publish in / });
-  assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
+  assert.equal(await print.isDisabled(), false, "a warning must not hold printing down (D32)");
   /*
-    Two units wrote the same screen at once, and both halves of this pin are
-    real on the merged page, so both are kept.
-
-    Unit DB2 (0.6.81) merged the second unit and hit this same hunk again, with
-    a third copy of the pin on the other side. That copy was the pin as it stood
-    before the note above was written: it waited for the singular sentence only
-    (`/1 thing blocks Publish\./`, no timeout) and for an unscoped "Blocks Publish"
-    with `.first()` -- both weaker than what is here, and neither carrying
-    anything this side does not already assert, so what is kept is this side
-    whole. Its one addition is the `step(...)` line below, which the other side
-    added and which is kept: it names the state on the walk's step list, and the
-    resolution would otherwise have dropped a line of reporting rather than a
-    line of checking. (The scoping here is also why the `.first()` is not
-    needed: the row is located by `[data-blocker]` inside `#publish-blockers`.)
-
-    Unit CT part 2 (b16a07b5) deleted the mid-form heading this line used to
-    wait for -- "Deal with the named outlet first" -- and moved the reasons to
-    the top of the Checks tab, one row each with its own press. So the words
-    pinned here are the ones the block draws now: its own summary, which counts
-    the reasons and promises every row a press, and the named-outlet row
-    itself, chip and sentence, which is the desk naming this reason by
-    category and then by name. `#publish-blockers` sits on the tab the page
-    opens on (the inspector defaults to "checks"), so the row is on screen and
-    not merely in the DOM -- `scripts/publish-blockers-walk.mjs` reads the same
-    three parts of that block the same way.
-
-    The count moves the number AND the verb: publishBlockedSummary says
-    "1 thing blocks Publish" and "3 things block Publish", so the one-blocker
-    case this walk reaches is not the plural row-count spelling that
-    `publish-blockers-walk.mjs` pins. A pattern of `things? block Publish`
-    reads naturally and matches the plural only, and a wait on it against this
-    page times out with the sentence sitting in `body.innerText` -- the pin has
-    to accept either spelling.
-
-    Unit CW replaced the old gate note ("Deal with the named outlet first") in
-    the dark sticky bar with the drawn bar's own sentence -- the first reason,
-    said as the press that clears it (`publishGateNote`,
-    src/lib/news/publish-blockers.ts:248, drawn as "Review 1 name to publish."
-    at `Desk Story.dc.html:183`, rendered at
-    src/routes/desk.story.$leadId.tsx:3105). The assertion is the one the walk
-    always made -- printing is held down IN WORDS, and the words name this
-    draft's own reason -- so it also pins the drawn copy, which is the label on
-    the "Override Denver Post" press the walk clicks next. That press is the
-    same mutation CT's row button calls.
+    `#publish-blockers` sits on the tab the page opens on (the inspector
+    defaults to "checks"), so the row is on screen and not merely in the DOM --
+    `scripts/publish-blockers-walk.mjs` reads the same three parts of that block
+    the same way. A warning-only list gets publishBlockedSummary's warning
+    spelling and the "resolve them here or choose Publish anyway" promise; the
+    hard spelling ("N things block Publish. Each row has the press that clears
+    it.") is the pre-D32 state this pin used to require.
   */
   await page
-    .getByText(/\d+ things? blocks? Publish\. Each row has the press that clears it\./)
+    .getByText(/1 warning before Publish\. You can resolve them here or choose Publish anyway\./)
     .waitFor({ timeout: 45_000 });
   const reason = page.locator('#publish-blockers [data-blocker="outlet:Denver Post"]');
-  await reason.getByText("Blocks Publish", { exact: true }).waitFor({ timeout: 45_000 });
+  await reason.getByText("Warning", { exact: true }).waitFor({ timeout: 45_000 });
   await reason
     .getByText("The body names Denver Post and this draft's Sources do not show it.")
     .waitFor({ timeout: 45_000 });
-  await page.getByText("Override Denver Post to publish.").waitFor({ timeout: 45_000 });
-  step("printing is held down, in words, while Denver Post is named and uncovered");
+  await outlets.getByRole("button", { name: "Override Denver Post" }).waitFor({ timeout: 45_000 });
+  // The press itself is live and its confirm says what it does: "Publish anyway
+  // in <section>" (publishConfirmation's warning label), not "Yes, print it".
+  await print.click();
+  const publishAnyway = page.getByRole("button", { name: /^Publish anyway in / });
+  await publishAnyway.waitFor({ timeout: 45_000 });
+  await page.getByRole("button", { name: "Not yet", exact: true }).click();
+  await publishAnyway.waitFor({ state: "detached", timeout: 45_000 });
+  step("printing stays open, its confirm says Publish anyway, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
   await outlets.getByText(/Overrides recorded for this draft/).waitFor({ timeout: 45_000 });

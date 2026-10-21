@@ -527,7 +527,19 @@ async function thePublishButtonNamesTheSection() {
 /** 7. Pressing it, then the inline consequence line, prints the story. */
 async function publishing(button) {
   await button.click();
-  const yes = page.getByRole("button", { name: `Yes, print it in ${SECTION_NAME}`, exact: true });
+  /*
+    D32 (warn, never block) and D125 (TPU-2: "the panel button says 'Publish now
+    in <section>' after the claims are accepted"): with any warning drawn the
+    confirm takes the warning block's own words -- "Publish anyway in Council"
+    -- and after an accepted claim it reads "Publish now in Council"
+    (src/lib/news/publish-blockers.ts:733-738). "Yes, print it in Council" is
+    only for a piece with nothing to warn about. This story carries the
+    unchecked warning above, so all three are accepted and the press is still
+    asserted to name the section.
+  */
+  const yes = page.getByRole("button", {
+    name: new RegExp(`^(Yes, print it|Publish anyway|Publish now) in ${SECTION_NAME}$`),
+  });
   await yes.waitFor({ timeout: 20_000 });
   await yes.click();
   await waitForTruth("the story to reach the paper", async () => {

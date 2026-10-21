@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Field, InkButton } from "./desk-chrome";
 import { inputClass } from "./desk-chrome-utils";
 import type {
@@ -60,6 +60,17 @@ export function CustomAiConnections({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const locked = managementActionsLocked(busy, busyAction);
+  /*
+    Each field's label names its input by id, so the label takes Field's
+    `htmlFor` shape (desk-chrome.tsx, "TWO SHAPES, ONE FIELD"). Without it the
+    help sentence sits inside the wrapping <label> and a browser builds the
+    accessible name out of all of it -- "Connection name A name for you to
+    recognize it by, such as Gemini or My server." -- so an exact
+    `getByLabel("Connection name")` finds nothing. The help stays on screen;
+    it just stops being part of the name, and the inline sentences stay
+    attached to their input as its description.
+  */
+  const field = useId();
   /*
     `initialEditId`, applied once per id.
 
@@ -179,18 +190,22 @@ export function CustomAiConnections({
         . LiteLLM is optional and runs separately from TownReporter.
       </p>
       <form onSubmit={save} className="grid gap-4">
-        <Field label="Connection name">
+        <Field label="Connection name" htmlFor={`${field}-name`}>
           <input
+            id={`${field}-name`}
+            aria-describedby={`${field}-name-help`}
             className={inputClass}
             required
             maxLength={80}
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
-          <span className="meta">{setupFieldHelp("connectionName")}</span>
+          <span id={`${field}-name-help`} className="meta">{setupFieldHelp("connectionName")}</span>
         </Field>
-        <Field label="Base URL">
+        <Field label="Base URL" htmlFor={`${field}-base-url`}>
           <input
+            id={`${field}-base-url`}
+            aria-describedby={`${field}-base-url-help`}
             className={inputClass}
             required
             type="url"
@@ -198,11 +213,12 @@ export function CustomAiConnections({
             value={form.baseUrl}
             onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
           />
-          <span className="meta">
+          <span id={`${field}-base-url-help`} className="meta">
             {setupFieldHelp("baseUrl")} {setupFieldHelp("openaiCompatible")}
           </span>
         </Field>
         <Field
+          htmlFor={`${field}-api-key`}
           label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini API key" : "API key (optional)"}
           hint={
             isGeminiOpenAiEndpoint(form.baseUrl)
@@ -213,6 +229,8 @@ export function CustomAiConnections({
           }
         >
           <input
+            id={`${field}-api-key`}
+            aria-describedby={`${field}-api-key-help`}
             className={inputClass}
             type="password"
             autoComplete="new-password"
@@ -220,7 +238,7 @@ export function CustomAiConnections({
             value={form.apiKey}
             onChange={(e) => setForm({ ...form, apiKey: e.target.value, removeApiKey: false })}
           />
-          <span className="meta">{setupFieldHelp("apiKey")}</span>
+          <span id={`${field}-api-key-help`} className="meta">{setupFieldHelp("apiKey")}</span>
         </Field>
         {editingId && (
           <label className="meta">
@@ -239,6 +257,7 @@ export function CustomAiConnections({
           </label>
         )}
         <Field
+          htmlFor={`${field}-model-id`}
           label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini model id" : "Model id (optional)"}
           hint={
             isGeminiOpenAiEndpoint(form.baseUrl)
@@ -247,12 +266,14 @@ export function CustomAiConnections({
           }
         >
           <input
+            id={`${field}-model-id`}
+            aria-describedby={`${field}-model-id-help`}
             className={inputClass}
             required={isGeminiOpenAiEndpoint(form.baseUrl)}
             value={form.modelId}
             onChange={(e) => setForm({ ...form, modelId: e.target.value })}
           />
-          <span className="meta">{setupFieldHelp("modelId")}</span>
+          <span id={`${field}-model-id-help`} className="meta">{setupFieldHelp("modelId")}</span>
         </Field>
         {!!models.length && (
           <Field label="Discovered models">

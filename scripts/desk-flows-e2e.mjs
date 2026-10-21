@@ -46,7 +46,7 @@ const expectedModelNames = [
   "Claude Sonnet 5.5",
   "Claude Haiku 5.5",
   "Local model",
-  "DeepSeek v4.1 Flash",
+  "DeepSeek v4.1 Flash 1017",
 ];
 
 /*

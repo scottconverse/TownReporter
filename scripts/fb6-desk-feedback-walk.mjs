@@ -343,10 +343,10 @@ try {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Good morning/ }).waitFor({ timeout: 45_000 });
   /*
-    The row's own Hold opens the drawn dialog (that ask is not this unit's), so
-    the press photographed here is the dialog's: the ROW moves the instant the
-    dialog answers -- before any refetch could have come back -- and the toast
-    that reports it carries the way back.
+    Hold holds AT ONCE (f91abe06, decision D32: warn, never block -- a warning
+    on the way is answered by the toast's own retry, not by a dialog). So the
+    ROW moves the instant the press lands -- before any refetch could have come
+    back -- and the toast that reports it carries the way back.
 
     The screenshot is taken on the HELD segment, because that is where the row
     went: a held lead is not open work any more (7a), so it leaves the Open list
@@ -355,12 +355,42 @@ try {
   // The Start-story scene can finish its draft before this scene begins.
   // Hold a separate open lead: written drafts correctly cannot be held.
   const firstRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
-  await firstRow.getByRole("button", { name: /^Hold/ }).click();
-  // Start watching before the press: the confirmation is a transient toast.
-  await Promise.all([
-    page.getByText(/Held "/).first().waitFor({ timeout: 15_000 }),
-    page.getByRole("button", { name: "Hold, no reason" }).click(),
-  ]);
+  /*
+    Start watching before the press: the confirmation is a transient toast.
+
+    D187: reproduce before deciding. This timed out in CI with no page and no
+    toast text in the log, so "the toast never drew", "it drew with other
+    words", and "the press did nothing" were indistinguishable. On failure
+    this prints the page, the toast host's own text and the dialog, then lets
+    the failure stand.
+  */
+  try {
+    await Promise.all([
+      page
+        .getByText(/The lead is on hold, off the Queue until you release it\./)
+        .first()
+        .waitFor({ timeout: 15_000 }),
+      firstRow.getByRole("button", { name: /^Hold/ }).click(),
+    ]);
+  } catch (err) {
+    const body = await page.locator("body").innerText().catch((e) => `<body unreadable: ${e}>`);
+    const toasts = await page
+      .locator("[data-desk-toaster]")
+      .innerText()
+      .catch((e) => `<toast host unreadable: ${e}>`);
+    const dialog = await page
+      .locator('[role="dialog"]')
+      .innerText()
+      .catch(() => "(no dialog open)");
+    console.log("  ---- Hold failed; page says ----");
+    console.log(body.slice(0, 4000));
+    console.log("  ---- toast host says ----");
+    console.log(toasts.trim() || "(the toast host is empty)");
+    console.log("  ---- dialog says ----");
+    console.log(dialog.trim());
+    console.log("  ---- end Hold ----");
+    throw err;
+  }
   // Let the bar finish arriving: a screenshot taken mid-animation catches it
   // half-faded, which is a photograph of sonner rather than of the fix.
   await page.waitForTimeout(500);
