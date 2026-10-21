@@ -84,7 +84,7 @@ for (const ending of ["cancel", "cancel-after-model", "host", "stage", "leads", 
     }) as typeof pg.query;
     try {
       const { runDailyScanWork } = await import("./daily-scan.server.ts");
-      await assert.rejects(runDailyScanWork(job as DeskJob, {
+      const work = runDailyScanWork(job as DeskJob, {
         performScan: (j, d) => scan({ ...j, stages_json: '["Checking for meeting material","Reading the sources","Reading the sources with a model","Filing the leads"]' }, d),
         scanDeps: { ingestUrl: async () => {
           fetched = true;
@@ -92,14 +92,37 @@ for (const ending of ["cancel", "cancel-after-model", "host", "stage", "leads", 
           return { text: body, extras: [] };
         } },
         chatAdapters: {
-          claude: async () => { throw new Error("Unexpected Claude call"); },
+          /*
+            The quota case can hop one rung (codex -> claude) when the app's
+            probe reports Claude ready, and it does on a machine with the CLI
+            installed -- but not on CI's bare runner. Answer that hop with the
+            same 429 the codex rung gave, so the settlement subject (touches
+            kept, run settled failed, not paused) and the /429/ rejection are
+            the same whichever way the probe goes. Every other ending must
+            never reach Claude at all.
+          */
+          claude: async () => {
+            if (ending === "quota") return { ok: false as const, error: "429 subscription quota reached" };
+            throw new Error("Unexpected Claude call");
+          },
+          /*
+            The rung between Codex and Claude. Without an adapter here the scan
+            falls through to the REAL Gemini CLI (`runForcedChat` imports it),
+            which turns a fixture into a live provider call -- slow, and not an
+            AI call a unit test may make. Same 429 answer as the other rungs.
+          */
+          gemini: async () => {
+            if (ending === "quota") return { ok: false as const, error: "429 subscription quota reached" };
+            throw new Error("Unexpected Gemini call");
+          },
           local: async () => { throw new Error("Unexpected local call"); },
           codex: async () => {
             if (ending === "cancel-after-model") await sql`update desk_jobs set cancel_requested=true where id=${job.id}`;
             return ending === "quota" ? { ok: false, error: "429 subscription quota reached" } : { ok: true, text: '{"leads":[],"proposed_sources":[],"editor_summary":"Read"}', provider: "codex", model: "fixture" };
           },
         },
-      }), ending.startsWith("cancel") ? /Cancelled/ : ending === "quota" ? /429/ : /Injected/);
+      });
+      await assert.rejects(work, ending.startsWith("cancel") ? /Cancelled/ : ending === "quota" ? /429/ : /Injected/);
     } finally { pg.query = original; }
     const [touch] = await sql`select last_fetched_at from sources where id=${sources[0].id}`;
     const [receipt] = await sql`select finished_at,error from scan_runs where id=${run.id}`;
