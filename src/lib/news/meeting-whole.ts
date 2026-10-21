@@ -1765,6 +1765,7 @@ An unlabeled speaker is "staff"; never guess a title or a name.
 Never infer a vote or an outcome that is not recorded: "no vote was recorded" is a valid, correct sentence. If a vote was recorded, state the tally and the result exactly as the source states them.
 When the source lists more than one motion for the item, state each motion's OWN result once, in order, under that motion's own words -- never one motion's words with another's result.
 No outreach claims (do not say the city invited, urged, or encouraged unless the source says so). Use plain verbs; no verdict words (successful, failed to, controversial) except where the record itself uses them.
+Never write "in this window" or "this window": that is the transcript run's word for a slice of tape, not a word a reader knows. Never write "the speaker": name the member the record names, and when it names no one, write "one other member".
 Return compact valid JSON only: {"headline":"...","dek":"one sentence","lead":"the lead story body"}`;
 
 export function parseLeadWriteReply(
@@ -1782,6 +1783,7 @@ export function parseLeadWriteReply(
 
 export const ROUNDUP_WRITE_SYSTEM = `You are writing one short paragraph for the ALSO AT THE MEETING list under a meeting story.
 Use ONLY the source text given for this item. One or two sentences, plain verbs, no verdict words, no outreach claims, no quote that is not in the source text.
+Never write "in this window" or "this window", and never write "the speaker": name the member the record names, or write "one other member".
 State a vote or outcome only if the source text states it; otherwise say no vote was recorded.
 An unlabeled speaker is "staff".
 Return compact valid JSON only: {"paragraph":"one or two sentences"}`;
@@ -1893,6 +1895,40 @@ export const TERM_ALIASES: { captions: string[]; term: string }[] = [
  * packet acronym exactly and which is not itself a packet spelling. Each
  * replacement is recorded so the editor sees what the code changed.
  */
+/**
+ * The writer's working words, repaired in code on the finished text.
+ *
+ * Run 707's story said a motion "carries, unanimous, in this window" -- "window"
+ * is the run's own word for a slice of tape, not a word a reader of a newspaper
+ * knows -- and named "the speaker" as a vote's opponent, which is a transcript
+ * label, not a person. The prompts are told not to write either; this pass is the
+ * check that they did not, so the editor never sees the run's vocabulary.
+ */
+export function repairStoryWording(text: string): { text: string; changes: string[] } {
+  const changes: string[] = [];
+  let out = text;
+  const windowed = /\s*,?\s*(?:in\s+)?this\s+window\b/gi;
+  if (windowed.test(out)) {
+    out = out.replace(/\s*,?\s*(?:in\s+)?this\s+window\b/gi, "");
+    changes.push('"this window" phrasing removed');
+  }
+  // A vote line reports a result or a position, not merely the noun "vote":
+  // "paused before the vote was called" is prose, not a vote.
+  const voteContext = /\b(?:carries?|carried|passes?|passed|approv\w+|voted|tally|oppos\w*|unanimous|in favor|against)\b/i;
+  out = out.replace(/\bthe speaker\b/gi, (_match: string, offset: number) => {
+    const from = Math.max(out.lastIndexOf(".", offset), out.lastIndexOf("\n", offset)) + 1;
+    const nextStop = out.slice(offset).search(/[.!?\n]/);
+    const to = nextStop < 0 ? out.length : offset + nextStop;
+    const sentence = out.slice(from, to);
+    if (!voteContext.test(sentence)) return _match;
+    changes.push('"the speaker" -> "one other member" in a vote line');
+    return "one other member";
+  });
+  // The removals leave the punctuation they sat between: "unanimous,." -> "unanimous."
+  out = out.replace(/[ \t]{2,}/g, " ").replace(/\s*,\s*([.,;:])/g, "$1").replace(/\s+([.,;:])/g, "$1");
+  return { text: out, changes: [...new Set(changes)] };
+}
+
 export function applyPacketSpellings(text: string, packetText: string): { text: string; changes: string[] } {
   const changes: string[] = [];
   let out = text;
@@ -3643,7 +3679,11 @@ export async function runWholeMeetingWriter(input: {
     assembleStory({ lead: repairedLead, sections, roundups }),
     packetText,
   );
-  const body = spelled.text;
+  // Then the writer's own working words, removed from the finished text: "in
+  // this window" is the run's vocabulary, and "the speaker" is a caption label,
+  // not a person. Recorded in the notes like the spellings.
+  const worded = repairStoryWording(spelled.text);
+  const body = worded.text;
   // No lead, section or roundup text came back from the model: that is a failed
   // attempt, not a draft. Nothing is saved, so the job ends failed with this line.
   if (!body.trim()) {
@@ -3825,6 +3865,9 @@ export async function runWholeMeetingWriter(input: {
       : "",
     spelled.changes.length
       ? `PACKET SPELLINGS: ${spelled.changes.join("; ")}.`
+      : "",
+    worded.changes.length
+      ? `WORDING REPAIRS: ${worded.changes.join("; ")}.`
       : "",
     bareMoney.length
       ? `NUMBER CHECK: a bare number sits next to a money word with no "$" (${bareMoney.join(", ")}); the captions drop the dollar sign and point, so verify each for the editor.`

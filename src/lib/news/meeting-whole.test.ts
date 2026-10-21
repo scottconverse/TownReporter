@@ -40,6 +40,7 @@ import {
   parseInventoryReply,
   plainLabel,
   rankLeadItems,
+  repairStoryWording,
   runWholeMeetingWriter,
   scanVoteResults,
   termSpellingBlock,
@@ -2047,6 +2048,31 @@ describe("whole-meeting writer", () => {
     assert.equal(statuses[0]!.reason, SUBJECTLESS_REASON);
     assert.equal(statuses[1]!.status, "roundup", "an item with a real subject keeps its place");
     assert.equal(statuses[1]!.label, "Budget adoption", "the subjectless model label falls back to the item's own words");
+  });
+
+  it("strips the run's working words and never calls a member 'the speaker' in a vote line", () => {
+    /*
+      Run 707's story: "a motion for remote participation on Nov. 17 carries,
+      unanimous, in this window" and "with Mayor Pro Tem McCoy and the speaker in
+      opposition". "Window" is the run's word for a slice of tape and "the
+      speaker" is a caption label, not a person. The prompts are told; this is
+      the code check on the finished text.
+    */
+    const repaired = repairStoryWording(
+      "Council allowed remote participation in a unanimous vote; a motion for remote participation on Nov. 17 carries, unanimous, in this window.",
+    );
+    assert.doesNotMatch(repaired.text, /this window/i, "the run's word for a tape slice is removed");
+    assert.match(repaired.text, /carries, unanimous\.$/, "the sentence keeps its point and loses the working words");
+
+    const vote = repairStoryWording(
+      "The ordinance as amended then carried 5-2, with Mayor Pro Tem McCoy and the speaker in opposition.",
+    );
+    assert.doesNotMatch(vote.text, /\bthe speaker\b/i, "a vote line names no anonymous 'speaker'");
+    assert.match(vote.text, /one other member in opposition/, "an unnamed opponent is 'one other member'");
+    assert.ok(vote.changes.length > 0, "the repair is recorded for the notes");
+
+    const prose = repairStoryWording("The speaker paused before the vote was called.");
+    assert.match(prose.text, /The speaker paused/, "plain prose about a speaker is not a vote line and is left alone");
   });
 
   it("takes a name the packet prints once with its title, and maps a title to its one holder", async () => {
