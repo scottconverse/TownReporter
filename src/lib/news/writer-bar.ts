@@ -34,6 +34,24 @@ export function geminiReadinessWord(availability: ProviderAvailability | undefin
   return undefined;
 }
 
+/**
+ * The word the Gemini connection's chip carries -- never the sentence.
+ *
+ * `geminiReadinessWord` returns the whole failure sentence ("The Gemini
+ * program was not found on this server. Install it ...") when the program is
+ * not ready, and a chip is two words (`Chip`'s own comment in
+ * status-chip.tsx): the sentence is the chip's help and the card's paragraph.
+ * The other connection cards name a state this one cannot tell apart from a
+ * single readiness sentence ("Not installed" for a missing command, "Could not
+ * reach" for an address that did not answer), so the chip says only that the
+ * program is not ready.
+ */
+export function geminiChipWord(readinessWord: string | undefined, pending: boolean): string {
+  if (readinessWord === "Ready") return "Ready";
+  if (readinessWord === undefined) return pending ? "Checking" : "Warning";
+  return "Not ready";
+}
+
 function availabilityChoice(choice: string): string {
   return choice.startsWith("gemini-") ? "gemini-flash" : choice;
 }
@@ -61,8 +79,13 @@ export function customConnectionStatus(input: {
     label: input.name,
     customConnection: input,
   });
+  /*
+    A chip is two words. The connection's card wears `CONNECTION_CHIP`'s own
+    "Could not reach" for this kind, and the sentence that says why is the
+    help -- and, on the card, a paragraph under the chip.
+  */
   return problem
-    ? { kind: "unreachable", label: problem, help: problem }
+    ? { kind: "unreachable", help: problem }
     : { kind: "connected" };
 }
 

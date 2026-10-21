@@ -4,6 +4,7 @@ import { appendStoryFailoverNote } from "./automatic-failover.ts";
 import {
   customConnectionStatus,
   draftFallbackAttribution,
+  geminiChipWord,
   lastDraftInHand,
   lastDraftLine,
   lastDraftWhen,
@@ -209,6 +210,20 @@ it("keeps known quota and unknown provider messages visible", () => {
   assert.equal(readinessFailureMessage("codex-frontier", "Codex", "Transport refused the request."), "Codex is not ready: Transport refused the request.");
 });
 
+it("puts a short word in the Gemini chip, never the explaining sentence", () => {
+  // A chip is two words (`Chip`'s own comment); the sentence goes in its help.
+  assert.equal(geminiChipWord("Ready", false), "Ready");
+  assert.equal(geminiChipWord(undefined, true), "Checking");
+  assert.equal(geminiChipWord(undefined, false), "Warning");
+  assert.equal(
+    geminiChipWord("The Gemini program was not found on this server. Install it, then check again.", false),
+    "Not ready",
+  );
+  for (const word of ["Ready", "Checking", "Warning", "Not ready"]) {
+    assert.ok(!/\s{2,}|\.$/.test(word) && word.length <= 12, `${word} is a chip word`);
+  }
+});
+
 it("uses the picker key-read failure for the API connection status", () => {
   const connection = {
     id: "gemini",
@@ -226,8 +241,11 @@ it("uses the picker key-read failure for the API connection status", () => {
   const connectionStatus = customConnectionStatus(connection);
 
   assert.equal(connectionStatus.kind, "unreachable");
-  assert.equal(connectionStatus.label, pickerReason);
-  assert.equal(connectionStatus.label, "Gemini (key) — key can't be read. Fix it in Server -> Connections.");
+  // The chip says the screen's word for an unreachable connection; the
+  // sentence is the help and the card's own paragraph.
+  assert.equal(connectionStatus.label, undefined);
+  assert.equal(connectionStatus.help, pickerReason);
+  assert.equal(connectionStatus.help, "Gemini (key) — key can't be read. Fix it in Server -> Connections.");
 });
 
 it("names the picked model, actual writer, and first failure after a fallback chain", () => {

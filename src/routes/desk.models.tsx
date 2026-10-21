@@ -112,7 +112,7 @@ import {
   type ProviderKind,
   type ProviderSurface,
 } from "@/lib/news/provider-registry";
-import { customConnectionStatus, geminiReadinessWord } from "@/lib/news/writer-bar";
+import { customConnectionStatus, geminiChipWord, geminiReadinessWord } from "@/lib/news/writer-bar";
 import {
   EFFORT_FIELD_HELP,
   TEST_ALL_CONNECTIONS_LINE,
@@ -1327,6 +1327,8 @@ function ApiKeyConnections({
               </>
             }
           >
+            {/* The chip carries "Could not reach"; the reason it gives is here. */}
+            {status.help ? <p className="text-sm text-muted">{status.help}</p> : null}
             <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
             {test.isPending && test.variables?.id === row.id ? (
               <p className="text-base" role="status">Testing {row.name}: one short question sent, waiting for the answer…</p>
@@ -1381,7 +1383,7 @@ function GeminiPlanConnection() {
     <ConnectionCard
       title="Gemini (Pro plan)"
       how="Uses the Gemini command-line program and your Google sign-in"
-      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={readinessWord ?? (availability.isPending ? "Checking" : "Warning")} help={message} />}
+      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={geminiChipWord(readinessWord, availability.isPending)} help={message} />}
     >
       <p className="text-sm text-muted">{message}</p>
       <ProviderModelRows entries={entriesOfKind("gemini-cli")} />
