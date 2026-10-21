@@ -15,6 +15,7 @@ import {
   RULE_ASSIGNED_REASON,
   SECOND_LEAD_REASON,
   SECTION_WORD_CAP,
+  SUBJECTLESS_REASON,
   agendaRanges,
   applyPacketSpellings,
   applyStatuses,
@@ -34,6 +35,7 @@ import {
   mergeNearDuplicates,
   mergeRelatedItems,
   motionLines,
+  namesNoSubject,
   packetTerms,
   parseInventoryReply,
   plainLabel,
@@ -1999,6 +2001,52 @@ describe("whole-meeting writer", () => {
     assert.deepEqual(chosen.map((item) => item.itemNo), [2, 3, 4, 1], "highest impact first, item order for ties");
     assert.equal(deservesOwnSection(four[3]!), true, "the fourth item's own score earns it a section too");
     assert.equal(chosen.some((item) => item.itemNo === 5), false, "an item below the ADVANCE band stays a roundup line");
+  });
+
+  it("never reports a vote line that names no subject, and never prints a label that names none", () => {
+    /*
+      Run 707's story ended with "Vote with no tally: No vote was recorded on
+      this item..." and "Vote with no result: No vote result was recorded for
+      this item." A reader learns nothing from either. A vote line with no
+      subject attaches to the item it belongs to by time as that item's record;
+      one that cannot be attached is excluded and counted, and a label that names
+      no subject is never printed as a roundup line.
+    */
+    assert.equal(namesNoSubject("Vote with no tally"), true);
+    assert.equal(namesNoSubject("No vote was recorded on this item"), true);
+    assert.equal(namesNoSubject("Vote with no result"), true);
+    assert.equal(namesNoSubject("Ordinance 2026-69 as amended carries 5 to 2"), false, "a named subject is a subject");
+
+    const merged = mergeRelatedItems([
+      row({ itemNo: 1, kind: "agenda-item", text: "7A. Consent agenda ordinances", startSeconds: 300, endSeconds: 3600 }),
+      row({ itemNo: 2, kind: "vote", text: "Vote with no tally", startSeconds: 1800 }),
+      row({ itemNo: 3, kind: "vote", text: "Vote with no result", startSeconds: null }),
+    ]);
+    assert.equal(merged.items.length, 2, "the timed vote line joins the item it followed; the untimed one is not a story item");
+    const heading = merged.items[0]!;
+    assert.match(
+      (heading.evidence ?? []).map((line) => line.text).join("\n"),
+      /Vote with no tally/,
+      "a vote line with no subject is kept as the record of the item it belongs to",
+    );
+    const orphan = merged.items.find((item) => item.text === "Vote with no result")!;
+    assert.equal(orphan.status, "excluded", "an unattachable vote line is excluded, never roundup");
+    assert.equal(orphan.reason, SUBJECTLESS_REASON);
+
+    const statuses = applyStatuses(
+      [
+        row({ itemNo: 1, kind: "vote", text: "Vote with no tally" }),
+        row({ itemNo: 2, kind: "staff-report", text: "Budget adoption" }),
+      ],
+      [
+        { itemNo: 1, status: "roundup", label: "Vote with no tally", reason: "a vote" },
+        { itemNo: 2, status: "roundup", label: "Vote with no tally", reason: "the budget" },
+      ],
+    );
+    assert.equal(statuses[0]!.status, "excluded", "an item whose only name is a vote label is not printed");
+    assert.equal(statuses[0]!.reason, SUBJECTLESS_REASON);
+    assert.equal(statuses[1]!.status, "roundup", "an item with a real subject keeps its place");
+    assert.equal(statuses[1]!.label, "Budget adoption", "the subjectless model label falls back to the item's own words");
   });
 
   it("takes a name the packet prints once with its title, and maps a title to its one holder", async () => {

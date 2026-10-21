@@ -891,6 +891,31 @@ export function addressKeys(text: string): string[] {
   );
 }
 
+/**
+ * A vote or result line that names no subject: "Vote with no tally", "No vote
+ * was recorded on this item". Every content word in it is about the vote itself,
+ * not about anything the meeting decided.
+ */
+const SUBJECTLESS_WORDS = new Set([
+  "vote", "votes", "voting", "voted", "tally", "tallies", "result", "results",
+  "recorded", "recording", "record", "records", "item", "items", "motion", "motions",
+  "council", "meeting", "member", "members", "carries", "carried", "unanimous",
+  "this", "that", "was", "were", "with", "none", "nothing", "subject",
+]);
+
+export function namesNoSubject(text: string): boolean {
+  const words = text.toLowerCase().match(/[a-z][a-z'-]*/g) ?? [];
+  return words.length > 0 && words.filter((word) => word.length > 3 && !SUBJECTLESS_WORDS.has(word)).length === 0;
+}
+
+/**
+ * The reason a subjectless vote row carries when it cannot be attached to the
+ * item it belongs to. It is excluded, not written: a story line that says "Vote
+ * with no tally" tells a reader nothing, and the run notes account for it.
+ */
+export const SUBJECTLESS_REASON =
+  "A vote or result line named no subject and no item it could be attached to by time; it is not reported as an item of its own.";
+
 /** The kinds that are the RECORD of an agenda item, not an item of their own. */
 const RECORD_CHILD_KINDS = new Set([
   "block",
@@ -928,7 +953,16 @@ export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; 
   const agendaItems = ledger.filter((item) => item.kind === "agenda-item" && item.status !== "unread");
   const isRecordRow = (item: LedgerItem): boolean =>
     RECORD_CHILD_KINDS.has(item.kind) && item.kind !== "block";
-  if (agendaItems.length === 0) return { items: ledger, merged: 0 };
+  if (agendaItems.length === 0) {
+    return {
+      items: ledger.map((item) =>
+        isRecordRow(item) && namesNoSubject(item.text)
+          ? { ...item, status: "excluded" as LedgerStatus, reason: SUBJECTLESS_REASON }
+          : item,
+      ),
+      merged: 0,
+    };
+  }
 
   /*
     Rows that name the same ordinance or resolution number are one item: the
@@ -980,6 +1014,7 @@ export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; 
   };
 
   const absorbed = new Map<LedgerItem, LedgerItem>();
+  const subjectless = new Set<LedgerItem>();
   for (const child of ledger) {
     if (child.kind === "agenda-item" || child.status === "unread") continue;
     const byNumber = hostByInstrument.get(child);
@@ -1009,8 +1044,9 @@ export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; 
       if ((mine.length > 0 && !mine.some((key) => parentKeys.includes(key))) || addressConflict) parent = null;
     }
     if (parent && parent !== child) absorbed.set(child, parent);
+    else if (isRecordRow(child) && namesNoSubject(child.text)) subjectless.add(child);
   }
-  if (absorbed.size === 0) return { items: ledger, merged: 0 };
+  if (absorbed.size === 0 && subjectless.size === 0) return { items: ledger, merged: 0 };
 
   const childrenOf = new Map<LedgerItem, LedgerItem[]>();
   for (const [child, parent] of absorbed) {
@@ -1022,7 +1058,10 @@ export function mergeRelatedItems(ledger: LedgerItem[]): { items: LedgerItem[]; 
     .filter((item) => !absorbed.has(item))
     .map((item) => {
       const children = childrenOf.get(item);
-      return children ? foldInto(item, children) : item;
+      const folded = children ? foldInto(item, children) : item;
+      return subjectless.has(item)
+        ? { ...folded, status: "excluded" as LedgerStatus, reason: SUBJECTLESS_REASON }
+        : folded;
     })
     .map((item, index) => ({ ...item, itemNo: index + 1 }));
   return { items, merged: absorbed.size };
@@ -1479,7 +1518,13 @@ export function applyStatuses(
     if (item.status === "unread") return item;
     const proposal = byNo.get(item.itemNo);
     const named = proposal && !(proposal.status === "excluded" && !proposal.reason);
-    const label = (named ? proposal!.label : "") || item.label || plainLabel(item);
+    // The label is what the roundup prints, so it must name a subject. A model
+    // label such as "Vote with no tally" names nothing; the item's own plain
+    // words are tried instead, and an item with neither is excluded below rather
+    // than printed as a line a reader cannot use.
+    let label = (named ? proposal!.label : "") || item.label || plainLabel(item);
+    if (namesNoSubject(label)) label = plainLabel(item);
+    const subjectlessLabel = namesNoSubject(label);
     // An item the pass did not name does not get re-decided here. A stored row
     // that already carries a reason is the editor's own work -- what a rewrite
     // hands back -- and it keeps its status and reason as they stand. Only a
@@ -1491,6 +1536,9 @@ export function applyStatuses(
       : editorDecided
         ? { status: item.status, reason: item.reason }
         : { status: ruleStatus(item), reason: RULE_ASSIGNED_REASON };
+    if (proposed.status !== "excluded" && subjectlessLabel) {
+      return { ...item, status: "excluded", label, reason: SUBJECTLESS_REASON };
+    }
     if (proposed.status === "excluded" && voteResultCount(item) > 0) {
       const status: LedgerStatus = item === bestRanked ? "lead" : "roundup";
       return { ...item, status, label, reason: EXCLUDED_OVERRULED_REASON };
