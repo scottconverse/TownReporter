@@ -38,15 +38,14 @@ it("ENG-4 grokChat sends preserved custom text and exactly one guidance to every
     for (const supplied of [caller, caller + "\n\n" + RESEARCH_GUIDANCE]) {
       for (const [choice, kind] of [["claude-frontier", "claude-code"], ["gemini-flash", "gemini-cli"], ["codex-balanced", "codex"]] as const) {
         const result = await grokChat(supplied, user, 321, { choice, timeoutMs: 12345 });
-        assert.equal(result.ok, true);
-        if (!result.ok) assert.fail(result.error);
+        assert.ok(result.ok, result.ok ? "" : result.error);
         const request = JSON.parse(result.text);
         check(request.system);
         assert.equal(request.user, user);
         assert.equal(request.timeoutMs, 12345);
         let calls = 0;
         await grokChat(supplied, user, 321, { choice, timeoutMs: 12345 }, {
-          [kind]: async (_provider, input) => {
+          [kind]: async (_provider: string, input: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number }) => {
             calls++;
             check(input.system);
             assert.equal(input.user, user);
@@ -63,7 +62,7 @@ it("ENG-4 grokChat sends preserved custom text and exactly one guidance to every
         const result = await grokChat(supplied, user, 321, {
           choice: kind === "anthropic" ? "claude-frontier" : "local-model",
           localModel: { baseUrl: "http://127.0.0.1:11999/v1", id: "fixture" },
-        }, { [kind]: async (_provider, input) => { calls++; check(input.system); return { ok: true as const, text: "adapter" }; } });
+        }, { [kind]: async (_provider: string, input: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number }) => { calls++; check(input.system); return { ok: true as const, text: "adapter" }; } });
         assert.equal(result.ok, true);
         assert.equal(calls, 1);
         delete process.env.ANTHROPIC_API_KEY;

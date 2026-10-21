@@ -454,7 +454,7 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   // Automatic will actually do, read from the ladder itself. The middle rung
   // reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of its
   // own, because it runs whatever LM Studio has loaded.
-  assert.match(html, /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/);
+  assert.match(html, /DeepSeek v4\.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/);
 });
 
 test("a stored SuperGrok choice on the forced surface falls back to Automatic", () => {

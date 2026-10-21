@@ -191,7 +191,7 @@ describe("performFindReplacement", () => {
       f.deps,
     );
     assert.equal(result.ok, true);
-    assert.match(result.ok ? result.notice : "", /trial/i);
+    assert.match(result.ok && result.notice ? result.notice : "", /trial/i);
     assert.equal(f.calls.length, 0, "a page already chosen costs no model call");
     assert.equal(f.proposed.length, 1);
     assert.equal(f.proposed[0]!.url, "https://new.test/agendas");
@@ -218,7 +218,7 @@ describe("performFindReplacement", () => {
     assert.equal(f.proposed.length, 0, "no second row is filed for a page the desk already has");
     const writes = f.writes().map((q) => q.text);
     assert.ok(writes.some((text) => /update sources set status = 'trial'/i.test(text)));
-    assert.match(result.ok ? result.notice : "", /already a source/i);
+    assert.match(result.ok && result.notice ? result.notice : "", /already a source/i);
   });
 
   it("says so, and calls no model, when the desk cannot tell what the source was for", async () => {

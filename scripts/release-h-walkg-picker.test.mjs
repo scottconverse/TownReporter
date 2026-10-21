@@ -44,8 +44,8 @@ test("DHF-6/DHF-8: Automatic's effort control says what each model does, not a b
   assert.match(empty.textContent, /each model's own default/, "the words say each model uses its own default");
   assert.match(
     empty.textContent,
-    /DeepSeek v4\.1 Flash always runs with thinking off/,
-    "the words carry the DeepSeek rule: it always runs with effort None",
+    /DeepSeek v4\.1 Flash always runs with low thinking/,
+    "the words carry the DeepSeek rule: it always runs at effort Low (D168)",
   );
 });
 

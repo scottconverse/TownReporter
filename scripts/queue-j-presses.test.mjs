@@ -814,6 +814,7 @@ const modelPickerUrl = await moduleUrl("src/components/model-picker.tsx", {
   "@/lib/news/model-choice": await moduleUrl("src/lib/news/model-choice.ts"),
   "@/lib/news/provider-registry": stub(`
 export const automaticEffortNote = () => "";
+export const defaultModelEffort = () => null;
 export const modelEffortLabel = (v) => v;
 export const modelEffortsFor = () => [];
 export const pickerShownEffort = (v) => v;

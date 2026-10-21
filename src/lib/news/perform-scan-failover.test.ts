@@ -25,7 +25,7 @@ const RUNG_TIMEOUT_NO_OUTPUT = "The call timed out after 150s, 0 bytes out";
 describe("runScanChatWithFailover", () => {
   it("D159: a scheduled scan on Local model switches mid-run on a usage limit; an editor's Local pick does not", async () => {
     const LIMIT = "LLM: Provider says: you have reached your monthly usage limit (429)";
-    const run = async (source: string) => {
+    const run = async (source: "editor" | "auto" | "scheduled") => {
       const choices: string[] = [];
       const result = await runScanChatWithFailover({
         job: { id: 9, model_choice: "local-model", model_choice_source: source },

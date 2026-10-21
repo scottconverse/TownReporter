@@ -68,12 +68,34 @@ const paperContext = stub(
   return { formatDateTime: (value) => String(value), formatShortDate: (value) => String(value) };
 }`,
 );
+/*
+  The host label helper lives in `src/lib/news/findings.ts` (D171). It is a
+  pure function over the item, so the stub mirrors it exactly: a missing
+  organization reads as empty, and organization and host are joined with " · "
+  when they differ.
+*/
+const findings = stub(
+  `export function provenanceHost(item) {
+  const organization = typeof item.organization === "string" ? item.organization.trim() : "";
+  let hostname = "";
+  try {
+    hostname = item.url ? new URL(item.url).hostname.replace(/^www\\./i, "") : "";
+  } catch {
+    hostname = "";
+  }
+  if (!organization) return hostname;
+  if (!hostname) return organization;
+  const same = organization.toLowerCase().replace(/^www\\./i, "") === hostname.toLowerCase();
+  return same ? organization : organization + " · " + hostname;
+}`,
+);
 
 const provenance = await import(
   stub(
     transpile(await read("src/components/provenance.tsx"), "provenance.tsx")
       .replaceAll(JSON.stringify("@tanstack/react-router"), JSON.stringify(router))
       .replaceAll(JSON.stringify("@/lib/paper-context-state"), JSON.stringify(paperContext))
+      .replaceAll(JSON.stringify("@/lib/news/findings"), JSON.stringify(findings))
       .replaceAll(JSON.stringify("@/components/paper/source-card"), JSON.stringify(sourceCard))
       .replaceAll(JSON.stringify("react/jsx-runtime"), JSON.stringify(jsxRuntime))
       .replaceAll(JSON.stringify("react"), JSON.stringify(react)),

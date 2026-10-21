@@ -54,7 +54,14 @@ test("a blocked meeting waits longer between retries and shows its next try", as
           const [newsroomId, videoId, channelUrl, title, published] = params;
           const row = rows.get(videoId) ?? { newsroom_id: newsroomId, video_id: videoId };
           Object.assign(row, { channel_url: channelUrl, title, published, status: "not-captured" });
-          if (/youtube_retry_at/i.test(query)) {
+          /*
+            Two inserts name youtube_retry_at: the rate-limit one
+            (recordYoutubeRateLimit) writes the day/count/retry time, and
+            recordCaptureFailure only resets them to null. Match the rate-limit
+            insert by its own failure text, so a plain failure is not recorded
+            as a retry clock.
+          */
+          if (/'YouTube rate limited \(HTTP 429\)'/i.test(query)) {
             Object.assign(row, {
               status: "failed",
               failure_reason: "yt-dlp rate limited (HTTP 429)",
@@ -69,6 +76,13 @@ test("a blocked meeting waits longer between retries and shows its next try", as
           rows.set(videoId, row);
           return [];
         }
+        /*
+          A10's integrity pass asks which videos' latest transcript artifact is
+          missing. This test is about the retry clock, not the transcript
+          store, so it answers "none missing" -- no recapture is forced, and
+          the capture path under test runs unchanged.
+        */
+        if (/select distinct on \(video_id\) video_id,integrity_status/i.test(query)) return [];
         throw new Error(`Unexpected meeting query: ${query}`);
       },
     };
@@ -79,6 +93,13 @@ test("a blocked meeting waits longer between retries and shows its next try", as
         captureCount += 1;
         return { ok: false, reason: "yt-dlp rate limited (HTTP 429)", stderr: "HTTP Error 429", argv: [] };
       },
+      /*
+        D177 tries the audio download once after a refused caption download and
+        records the rate limit only if that is refused too. Stub it with the
+        same 429 so the retry clock is what this test measures -- and so no
+        yt-dlp runs.
+      */
+      captureAudio: async () => ({ ok: false, reason: "yt-dlp rate limited (HTTP 429)", stderr: "HTTP Error 429", argv: [] }),
       now: () => now,
       scheduleYoutubeRetry: (newsroomId, retryAt) => {
         if (!scheduled.some((entry) => entry.newsroomId === newsroomId && entry.retryAt.getTime() === retryAt.getTime())) {

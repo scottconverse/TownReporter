@@ -1,6 +1,6 @@
 /** Structured policy warnings and mandatory editor override auditing.
  * Callers inside a transaction must ensure the audit schema before entering it. */
-import { ensureAuditEventsSchema, type AuditSqlTag } from "./ops.ts";
+import type { AuditSqlTag } from "./ops.ts";
 import { getSql } from "../db.ts";
 
 /** One policy block, named and said. */
@@ -63,6 +63,9 @@ export async function recordEditorOverrides(
 ): Promise<number> {
   let sql = context.sql;
   if (!sql) {
+    // Loaded here, not at module load: ops.ts imports editorWarning from this
+    // file as a value, and a static value import back would form a cycle.
+    const { ensureAuditEventsSchema } = await import("./ops.ts");
     await ensureAuditEventsSchema();
     sql = await getSql();
   }
