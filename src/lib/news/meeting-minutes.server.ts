@@ -46,6 +46,11 @@ export type MinutesDeps = {
   findMeeting?: (title: string, origin: string) => Promise<{ meeting: PrimeGovMeeting; urls: string[] } | null>;
   /** Test seam: the text of a document, pages joined with a form feed. */
   documentText?: (url: URL) => Promise<string | null>;
+  /**
+   * One run's downloads, keyed by URL. Two meetings that read the same later
+   * packet download it once. Never shared between runs.
+   */
+  documentCache?: Map<string, Promise<string | null>>;
 };
 
 export type MinutesRead = {
@@ -141,6 +146,17 @@ export function bodyOf(title: string): string {
 }
 
 async function documentText(url: string, deps: MinutesDeps): Promise<string | null> {
+  const cache = deps.documentCache;
+  if (!cache) return loadDocumentText(url, deps);
+  let pending = cache.get(url);
+  if (!pending) {
+    pending = loadDocumentText(url, deps);
+    cache.set(url, pending);
+  }
+  return pending;
+}
+
+async function loadDocumentText(url: string, deps: MinutesDeps): Promise<string | null> {
   if (deps.documentText) return deps.documentText(new URL(url));
   try {
     return await fetchDocumentText(url);
@@ -293,6 +309,10 @@ export async function catchUpVotesFromMinutes(
   const origin = await (deps.originFor ?? primeGovOriginForNewsroom)(sql, newsroomId);
   if (!origin) return { meetings: [] };
 
+  // One download per packet per run: several meetings can read the same later
+  // packet for their minutes, and a packet is 190 MB in the real case.
+  const readDeps: MinutesDeps = { ...deps, documentCache: new Map() };
+
   const done: MinutesCatchUpEntry[] = [];
   for (const meeting of meetings) {
     const found = await (deps.findMeeting ?? primeGovDocumentsForTitle)(meeting.title, origin).catch(() => null);
@@ -300,7 +320,7 @@ export async function catchUpVotesFromMinutes(
       done.push({ videoId: meeting.videoId, title: meeting.title, established: 0, unestablished: meeting.unestablished, reason: "no minutes found (the portal does not list this meeting)" });
       continue;
     }
-    const read = await minutesVoteRecordsForMeeting(found.meeting, origin, deps).catch(() => ({
+    const read = await minutesVoteRecordsForMeeting(found.meeting, origin, readDeps).catch(() => ({
       records: [],
       locator: null,
       reason: NO_MINUTES,

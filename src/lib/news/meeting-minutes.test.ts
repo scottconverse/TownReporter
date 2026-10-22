@@ -124,6 +124,55 @@ describe("votes read from the minutes section", () => {
   });
 });
 
+describe("procedural motions are not the item's vote (D218)", () => {
+  const records = minutesVoteRecords(
+    minutesVotesByItem(section!.text),
+    "https://portal.example/Public/CompiledDocument?meetingTemplateId=16844#page=6",
+  );
+
+  it("gives 9I its ordinance vote, not the meeting extension recorded after it", () => {
+    // The last motion under 9I extends the meeting past 11:00 p.m. Stored as
+    // 9I's vote it would publish a vote the council never took on 9I.
+    const record = records.find((candidate) => candidate.item === "9I");
+    assert.ok(record, "9I must carry a vote record");
+    assert.match(record!.motion, /^approve O-2026-73/);
+    assert.equal(record!.mover, "Sean McCoy");
+    assert.equal(record!.seconder, "Matthew Popkin");
+    assert.equal(record!.tally, "5-2");
+    assert.equal(record!.result, "Passed");
+    assert.match(
+      (record!.notes ?? []).join(" "),
+      /skipped 1 procedural motion\(s\) under item 9I/,
+      "the skipped extension is named, not hidden",
+    );
+  });
+
+  it("keeps the adjournment, whose heading is an adjournment", () => {
+    const record = records.find((candidate) => candidate.item === "17");
+    assert.ok(record, "17. ADJOURN still votes");
+    assert.match(record!.motion, /^adjourn the meeting at 12:15 a\.m\./);
+    assert.equal(record!.tally, "7-0");
+    assert.equal(record!.result, "Passed");
+    assert.equal(record!.notes, undefined, "the only motion is the item's own");
+  });
+
+  it("leaves an item with only a procedural motion without a record", () => {
+    const text = [
+      "MINUTES",
+      "City Council Regular Session",
+      "October 6, 2026",
+      "9. CONSENT AGENDA",
+      "A. O-2026-99, A Bill For An Ordinance",
+      "MOTION",
+      "Sean McCoy moved, seconded by Diane Crist, to extend the meeting past 11:00 p.m. at 10:55 p.m.",
+      "Carried: 5 – 2",
+    ].join("\n");
+    const votes = minutesVotesByItem(text);
+    assert.equal(votes["9A"]?.length, 1, "the motion is parsed");
+    assert.equal(minutesVoteRecords(votes, "https://portal.example/#page=6").length, 0, "but it establishes nothing");
+  });
+});
+
 describe("what makes a vote established", () => {
   const minutesRecord = {
     item: "4A",

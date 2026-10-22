@@ -186,6 +186,42 @@ test("a newsroom with no unestablished vote rows reads nothing", async () => {
   assert.equal(read.downloads.length, 0, "no meetings means no download at all");
 });
 
+test("two meetings reading the same later packet download it once", async () => {
+  // Oct 6 and Oct 13 of the same body both look ahead to the Oct 20 packet for
+  // their minutes. One run, one download: a packet is 190 MB in the real case.
+  const newsroomId = 846_041;
+  await seed(newsroomId);
+  const sql = await getSql();
+  const OCT13: PrimeGovMeeting = { ...OCT6, id: 3101, date: "2026-10-13", dateTime: "2026-10-13T19:00:00" };
+  const SECOND_VIDEO = "cg-votes-oct13";
+  await sql.query(
+    `insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status)
+     values($1,$2,'https://youtube.com/@city','City Council Regular Session October 13, 2026','2026-10-14','captured')`,
+    [newsroomId, SECOND_VIDEO],
+  );
+  await sql.query(
+    `insert into meeting_structured_votes(newsroom_id,video_id,item,established,result,provenance,disagreements)
+     values($1,$2,'4A',false,'not established','[]','[]')`,
+    [newsroomId, SECOND_VIDEO],
+  );
+
+  const downloads: string[] = [];
+  const read = {
+    now: () => NOW,
+    findMeeting: async (title: string) => ({ meeting: /October 13/.test(title) ? OCT13 : OCT6, urls: [] }),
+    portalMeetings: async () => [OCT6, OCT13, OCT20],
+    documentText: async (url: URL) => {
+      downloads.push(url.toString());
+      return FIXTURE;
+    },
+  };
+  const run = await catchUpVotesFromMinutes(sql, newsroomId, read);
+
+  assert.equal(run.meetings.length, 2, "both meetings were caught up");
+  assert.equal(downloads.length, 1, "the shared packet was downloaded once for the run");
+  assert.match(downloads[0]!, /meetingTemplateId=16844/);
+});
+
 test("reports the reason when the minutes cannot be found", async () => {
   const newsroomId = 846_031;
   await seed(newsroomId);

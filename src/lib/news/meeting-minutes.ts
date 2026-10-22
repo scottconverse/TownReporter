@@ -17,6 +17,8 @@ import type { VoteRecord } from "./meeting-story-section5.ts";
 export type MinutesMotion = {
   /** The agenda item that voted, e.g. "4A" for a motion under 4 > A. */
   item: string;
+  /** The item's heading text, e.g. "17. ADJOURN". Decides the adjournment case. */
+  heading: string;
   /** The "to ..." clause only, not the whole motion block. */
   motion: string;
   mover: string;
@@ -149,13 +151,16 @@ export function minutesVotesByItem(sectionText: string): Record<string, MinutesM
   const lines = stripPageFooters(sectionText).split(/\r?\n|\f/);
   const byItem: Record<string, MinutesMotion[]> = {};
   let top = "";
+  let topText = "";
+  let subText = "";
   let current = "";
   let blockItem = "";
+  let blockHeading = "";
   let block: string[] | null = null;
 
   const flush = () => {
     if (block && blockItem) {
-      const motion = motionFromBlock(blockItem, block.join("\n"));
+      const motion = motionFromBlock(blockItem, block.join("\n"), blockHeading);
       if (motion) (byItem[motion.item] ??= []).push(motion);
     }
     block = null;
@@ -166,6 +171,7 @@ export function minutesVotesByItem(sectionText: string): Record<string, MinutesM
       flush();
       block = [];
       blockItem = current;
+      blockHeading = [topText, subText].filter(Boolean).join(" ");
       continue;
     }
     // Inside a motion block only a vote line ends it: an agenda-style line in
@@ -178,19 +184,22 @@ export function minutesVotesByItem(sectionText: string): Record<string, MinutesM
     const heading = line.match(TOP_HEADING);
     if (heading) {
       top = heading[1]!;
+      topText = line.trim();
+      subText = "";
       current = top;
       continue;
     }
     const sub = line.match(SUB_HEADING);
     if (sub && top) {
       current = `${top}${sub[1]!}`;
+      subText = line.trim();
     }
   }
   flush();
   return byItem;
 }
 
-function motionFromBlock(item: string, raw: string): MinutesMotion | null {
+function motionFromBlock(item: string, raw: string, heading: string): MinutesMotion | null {
   const text = raw.replace(/\s+/g, " ").trim();
   const vote = text.match(/\b(Carried|Failed)\s*:\s*(\d{1,3})\s*\S\s*(\d{1,3})\b/);
   if (!vote) return null;
@@ -202,6 +211,7 @@ function motionFromBlock(item: string, raw: string): MinutesMotion | null {
   if (!motion) return null;
   return {
     item,
+    heading,
     motion,
     mover: moved[1]!.trim(),
     seconder: moved[2]!.trim(),
@@ -211,12 +221,22 @@ function motionFromBlock(item: string, raw: string): MinutesMotion | null {
   };
 }
 
+/*
+  Housekeeping motions that are not the item's decision. Item 9I of the Oct 6,
+  2026 minutes voted on O-2026-73 and then, last, "to extend the meeting past
+  11:00 p.m."; storing the extension as 9I's vote would publish a wrong vote.
+  An item that really is an adjournment ("17. ADJOURN") keeps its motion: the
+  heading, not the clause, says whether the motion is housekeeping.
+*/
+const PROCEDURAL_MOTION =
+  /^(?:extend (?:the meeting|past)|extend .*\bpast \d|(?:take a )?recess|take a (?:short )?break|adjourn|suspend the rules)/i;
+
 /**
  * The minutes' motions as vote records, keyed by item, ready for
  * `extractStructuredVote`.
  *
- * Several motions under one item: the LAST is the item's decision, and the row
- * says so rather than hiding the others.
+ * Procedural motions are dropped first; among what remains the LAST is the
+ * item's decision, and the row says so rather than hiding the others.
  */
 export function minutesVoteRecords(
   byItem: Record<string, MinutesMotion[]>,
@@ -224,8 +244,20 @@ export function minutesVoteRecords(
 ): (VoteRecord & { item: string })[] {
   const records: (VoteRecord & { item: string })[] = [];
   for (const [item, motions] of Object.entries(byItem)) {
-    const chosen = motions[motions.length - 1];
+    const last = motions[motions.length - 1];
+    if (!last) continue;
+    const deciding = /\badjourn/i.test(last.heading)
+      ? motions
+      : motions.filter((motion) => !PROCEDURAL_MOTION.test(motion.motion));
+    const chosen = deciding[deciding.length - 1];
     if (!chosen) continue;
+    const skipped = motions.length - deciding.length;
+    const notes = [
+      ...(deciding.length > 1
+        ? [`minutes list ${deciding.length} motions under item ${item}; the last is used`]
+        : []),
+      ...(skipped ? [`skipped ${skipped} procedural motion(s) under item ${item}`] : []),
+    ];
     records.push({
       item,
       motion: chosen.motion,
@@ -236,10 +268,7 @@ export function minutesVoteRecords(
       source: "minutes",
       locator,
       excerpt: chosen.excerpt,
-      notes:
-        motions.length > 1
-          ? [`minutes list ${motions.length} motions under item ${item}; the last is used`]
-          : undefined,
+      notes: notes.length ? notes : undefined,
     });
   }
   return records;
