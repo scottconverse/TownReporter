@@ -11,7 +11,7 @@ import {
   savedStoryReadiness,
   type StoryReadiness,
 } from "./story-readiness.ts";
-import { oldDraftSentence } from "./publish-blockers.ts";
+import { meetingEditorChecksNotice, oldDraftSentence } from "./publish-blockers.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
@@ -1209,6 +1209,16 @@ export const getLead = createServerFn({ method: "GET" })
       ? staleCitationNotice(meetingPublishEvidence.stale)
       : null;
     /*
+      MS-WIRE W3: what the meeting writer asked a person to check before this
+      draft prints. Editor-only, and the Publish dialog warns over it.
+    */
+    const meetingEditorChecks = drafts[0]
+      ? await (await import("./meeting-ledger.server.ts")).loadDraftEditorChecks(sql, {
+          newsroomId: owned(context),
+          draftId: Number(drafts[0].id),
+        })
+      : [];
+    /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
       panel shows -- the ledger (unread rows first), the checked claims (flagged
       first, each with its reviewed mark), the full meeting notes, and the run
@@ -1370,6 +1380,7 @@ export const getLead = createServerFn({ method: "GET" })
       draftMeetingEvidence,
       meetingPublishNotice,
       meetingCitationNotice,
+      meetingEditorChecks,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -6817,6 +6828,24 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       warnings.push({
         key: "meeting-citation-stale",
         sentence: staleCitationNotice(evidence.stale),
+      });
+    }
+
+    /*
+      MS-WIRE W3: the meeting writer's check list, read from the row inside the
+      fence. Same key and same sentence as the page's own blocker, so a stale
+      tab and a refused press agree, and the acknowledgement the page sends back
+      (`meeting-editor-checks`) is the key recorded here.
+    */
+    const { loadDraftEditorChecks } = await import("./meeting-ledger.server.ts");
+    const editorChecks = await loadDraftEditorChecks(tx, {
+      newsroomId: owned(context),
+      draftId: Number(row.id),
+    });
+    if (editorChecks.length) {
+      warnings.push({
+        key: "meeting-editor-checks",
+        sentence: meetingEditorChecksNotice(editorChecks),
       });
     }
 

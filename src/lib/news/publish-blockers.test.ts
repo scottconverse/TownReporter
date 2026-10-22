@@ -567,3 +567,39 @@ describe("TPU-4: a recorded acceptance is known again after a reload", () => {
     assert.equal(acceptanceRecordedFor(0, 2), false);
   });
 });
+
+/*
+  MS-WIRE W3: the meeting writer ends its work with the items a person must
+  check before the story prints. They are a warning with a "Publish anyway"
+  path, the same shape `meeting-citation-stale` has.
+*/
+describe("MS-WIRE: the meeting writer's check list", () => {
+  it("warns once for two items and names both", () => {
+    const rows = publishBlockers(
+      withState({
+        meetingEditorChecks: ["Check the 6-1 tally.", "The parking figure is read off a slide."],
+      }),
+    ).filter((blocker) => blocker.key === "meeting-editor-checks");
+    assert.equal(rows.length, 1, "one warning, not one per item");
+    assert.equal(rows[0]!.kind, "warning");
+    assert.match(
+      rows[0]!.sentence,
+      /^The meeting writer asks you to check 2 things before publishing: 1\. Check the 6-1 tally\. 2\. The parking figure is read off a slide\.$/,
+    );
+  });
+
+  it("says nothing for an empty list", () => {
+    assert.deepEqual(keys({ meetingEditorChecks: [] }), []);
+    assert.deepEqual(keys({ meetingEditorChecks: undefined }), []);
+  });
+
+  it("keeps Publish on with Publish anyway, and the acknowledgement carries the key", () => {
+    const decision = publishConfirmation(
+      publishBlockers(withState({ meetingEditorChecks: ["Check the 6-1 tally."] })),
+      "Council",
+    );
+    assert.equal(decision.enabled, true);
+    assert.equal(decision.confirmLabel, "Publish anyway in Council");
+    assert.ok(decision.acknowledgedWarningKeys.includes("meeting-editor-checks"));
+  });
+});

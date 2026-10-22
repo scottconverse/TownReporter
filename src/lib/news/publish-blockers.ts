@@ -189,6 +189,12 @@ export type PublishBlockerState = {
    */
   meetingCitationNotice?: string;
   /**
+   * MS-WIRE W3: the meeting writer's pre-publication check list
+   * (`drafts.editor_checks`). Empty or absent adds no row; one or more adds the
+   * `meeting-editor-checks` warning, which the editor may publish over.
+   */
+  meetingEditorChecks?: readonly string[];
+  /**
    * TPW-2: when the saved draft was last written (its `updated_at`, ISO). A draft
    * older than OLD_DRAFT_DAYS adds one warning; absent adds none.
    */
@@ -623,7 +629,40 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  /*
+    ── WHAT THE MEETING WRITER ASKS A PERSON TO CHECK (MS-WIRE W3) ────────────
+    The skill ends its work with the items that rest only on captions, a number
+    read off a screen, a disputed figure, or a sentence with legal risk. They
+    are a WARNING, not a wall (Scott's editor-control rule): the list is printed
+    in the confirm dialog, and "Publish anyway" prints over it.
+  */
+  if (state.meetingEditorChecks?.length) {
+    blockers.push({
+      key: "meeting-editor-checks",
+      kind: "warning",
+      sentence: meetingEditorChecksNotice(state.meetingEditorChecks),
+      action: { label: "Review the checks", target: { kind: "evidence-review" } },
+    });
+  }
+
   return blockers;
+}
+
+/**
+ * The one sentence the meeting writer's check list is published over:
+ * "The meeting writer asks you to check 2 things before publishing: 1. … 2. …".
+ *
+ * The same builder feeds the server's refusal (desk.ts `collectWarnings`), so
+ * the dialog and a refused press cannot say different things about the same
+ * draft.
+ */
+export function meetingEditorChecksNotice(checks: readonly string[]): string {
+  const items = checks.map((check) => String(check ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const count = items.length;
+  const lead = `The meeting writer asks you to check ${count} thing${count === 1 ? "" : "s"} before publishing:`;
+  return items.length
+    ? `${lead} ${items.map((item, index) => `${index + 1}. ${item}`).join(" ")}`
+    : lead;
 }
 
 /**

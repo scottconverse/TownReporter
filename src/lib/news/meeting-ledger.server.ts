@@ -133,8 +133,35 @@ export type MeetingAccounting = {
   claims: ClaimRow[];
   /** The run's check results and cold-check mismatches, uncapped. */
   meetingNotes: string;
+  /**
+   * MS-WIRE W1: the meeting writer's pre-publication check list, one plain
+   * sentence per item. Editor-only; the Publish dialog warns on the same rows.
+   */
+  editorChecks: string[];
   runStats: RunStats | null;
 };
+
+/**
+ * The editor's check list off a draft row, in either driver's shape (jsonb
+ * arrives parsed on Neon and as a JSON string under PGLite).
+ */
+export function parseEditorChecks(raw: unknown): string[] {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+/** The check list stored on one draft, scoped to its newsroom. */
+export async function loadDraftEditorChecks(
+  sql: Sql,
+  input: { newsroomId: number; draftId: number },
+): Promise<string[]> {
+  const rows = await sql.query<{ editor_checks: unknown }>(
+    `select editor_checks from drafts where id=$1 and newsroom_id=$2`,
+    [input.draftId, input.newsroomId],
+  );
+  return parseEditorChecks(rows[0]?.editor_checks);
+}
 
 /**
  * The accounting for the most recent draft of this lead that has ledger rows --
@@ -151,9 +178,24 @@ export async function loadMeetingAccounting(
       where newsroom_id=$1 and lead_id=$2 order by draft_id desc limit 1`,
     [input.newsroomId, input.leadId],
   );
-  const draftId = reporting?.draftId ?? (latest[0] ? Number(latest[0].draft_id) : null);
+  /*
+    MS-WIRE W1: a skill-writer draft writes no ledger rows -- its accounting is
+    the editor file and the check list on the draft row. The panel therefore
+    describes the newest draft that HAS that record when there is one, and only
+    falls back to the newest ledgered draft for a draft from the retired writer.
+  */
+  const skillRecord = await sql.query<{ draft_id: number }>(
+    `select id as draft_id from drafts
+      where newsroom_id=$1 and lead_id=$2
+        and (coalesce(meeting_notes,'') <> '' or coalesce(jsonb_array_length(editor_checks),0) > 0)
+      order by id desc limit 1`,
+    [input.newsroomId, input.leadId],
+  );
+  const draftId = skillRecord[0]
+    ? Number(skillRecord[0].draft_id)
+    : reporting?.draftId ?? (latest[0] ? Number(latest[0].draft_id) : null);
   if (draftId === null) {
-    return { draftId: null, ledger: [], claims: [], meetingNotes: "", runStats: null };
+    return { draftId: null, ledger: [], claims: [], meetingNotes: "", editorChecks: [], runStats: null };
   }
 
   const ledgerRows = await sql.query<{
@@ -197,8 +239,8 @@ export async function loadMeetingAccounting(
       order by (check_status='flagged') desc, id`,
     [input.newsroomId, draftId],
   );
-  const draft = await sql.query<{ meeting_notes: string | null; run_stats: unknown }>(
-    `select meeting_notes,run_stats from drafts where id=$1 and newsroom_id=$2`,
+  const draft = await sql.query<{ meeting_notes: string | null; run_stats: unknown; editor_checks: unknown }>(
+    `select meeting_notes,run_stats,editor_checks from drafts where id=$1 and newsroom_id=$2`,
     [draftId, input.newsroomId],
   );
 
@@ -237,6 +279,7 @@ export async function loadMeetingAccounting(
       reviewedAt: row.reviewed_at ? new Date(row.reviewed_at).toISOString() : null,
     })),
     meetingNotes: draft[0]?.meeting_notes ?? "",
+    editorChecks: parseEditorChecks(draft[0]?.editor_checks),
     runStats: parseRunStats(draft[0]?.run_stats),
   };
 }

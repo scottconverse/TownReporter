@@ -104,6 +104,8 @@ type FixtureInput = {
   evidenceCheckUpdatedAt?: string;
   /** The editor pressed Cancel on the check and the worker has not acknowledged it yet. */
   evidenceCheckCancelled?: boolean;
+  /** MS-WIRE W3: the meeting writer's pre-publication check list. */
+  editorChecks?: string[];
 };
 
 /**
@@ -125,8 +127,8 @@ async function fixture(input: FixtureInput = {}) {
   const body = input.body ?? "The council approved the plan on Tuesday night.";
   const research = JSON.stringify(input.research ?? {});
   const [draft] = await sql.query<{ id: number }>(
-    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,$4,$5,$6,$7,'[]','','[]','news','[]','[]',$8) returning id",
-    [USER, NEWSROOM, lead.id, headline, dek, body, topic, research],
+    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,editor_checks) values($1,$2,$3,$4,$5,$6,$7,'[]','','[]','news','[]','[]',$8,$9::jsonb) returning id",
+    [USER, NEWSROOM, lead.id, headline, dek, body, topic, research, JSON.stringify(input.editorChecks ?? [])],
   );
   if (!input.unchecked) {
     const { evidenceReviewToken } = await vite.ssrLoadModule("/src/lib/news/draft-evidence.ts");
@@ -528,6 +530,45 @@ it("refuses a stale meeting citation, then prints it acknowledged, preserving th
   );
   assert.equal(await articleCount(ackRun.leadId), 1);
   assert.deepEqual(keys(await overrideRows(ackRun.leadId)), ["meeting-citation-stale"]);
+});
+
+it("warns over the meeting writer's check list, then prints it acknowledged", async () => {
+  /*
+    MS-WIRE W3: the skill writer's check list is a WARNING, not a wall. It
+    refuses the press unacknowledged (so nobody prints past a check they were
+    never shown), and the same press with `meeting-editor-checks` acknowledged
+    prints and records exactly that override.
+  */
+  const setup = () =>
+    fixture({
+      notes: { todo: [] },
+      editorChecks: ["Check the 6-1 tally against the recording.", "The parking figure is read off a slide."],
+    });
+  const refusedRun = await setup();
+  const refused = await performPublish(
+    { userId: USER, newsroomId: NEWSROOM },
+    refusedRun.leadId,
+    "council",
+  );
+  assert.equal(refused.ok, false, "the check list must refuse an unacknowledged press");
+  const warning = warningsOf(refused)?.find((w) => w.key === "meeting-editor-checks");
+  assert.ok(warning, JSON.stringify(warningsOf(refused)));
+  assert.match(warning!.sentence, /asks you to check 2 things before publishing/);
+  assert.match(warning!.sentence, /Check the 6-1 tally against the recording\./);
+  assert.equal(await articleCount(refusedRun.leadId), 0, "the publish must not happen");
+
+  const ackRun = await setup();
+  const published = await performPublish(
+    { userId: USER, newsroomId: NEWSROOM },
+    ackRun.leadId,
+    "council",
+    undefined,
+    {},
+    ["meeting-editor-checks"],
+  );
+  assert.equal(published.ok, true, refusalOf(published));
+  assert.equal(await articleCount(ackRun.leadId), 1);
+  assert.deepEqual(keys(await overrideRows(ackRun.leadId)), ["meeting-editor-checks"]);
 });
 
 /* ------------------------------------------------------------------------ */

@@ -2535,6 +2535,8 @@ function StoryPage() {
        it defensively so this route compiles whether or not it has landed yet,
        and so a missing field is simply no warning. */
     meetingCitationNotice: data.meetingCitationNotice ?? undefined,
+    /* MS-WIRE W3: the meeting writer's check list; a warning over the press. */
+    meetingEditorChecks: data.meetingEditorChecks ?? undefined,
     /* TPW-2: when the saved draft was last written; an old one draws one warning. */
     draftWrittenAt: data.draft?.updated_at ?? null,
   });
