@@ -9,6 +9,7 @@ import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 import { restoreYoutubeCaptureRetries, tickYoutubeCaptureRetries } from "./meeting-capture.ts";
 import { getSql } from "../db.ts";
+import { tickMinutesVotes } from "./meeting-minutes.server.ts";
 import { tickNewsletterMailboxes } from "./newsletter-poll.server.ts";
 
 /**
@@ -148,6 +149,19 @@ export function startUnattendedScheduler(): void {
         await tickSourceTrials();
       } catch (err) {
         console.error("[townreporter] source trial tick failed:", err);
+      }
+      /*
+        Goal C unit C2 (D214 amendment): meetings captured before the minutes
+        reader existed learn the votes their official minutes recorded. Its own
+        try/catch, like the jobs above: a portal that is slow or down must not
+        cost the day's retention work. Each newsroom is held to one run per six
+        hours inside the tick, so the hourly clock cannot re-read a packet it
+        has just read.
+      */
+      try {
+        await tickMinutesVotes(await getSql());
+      } catch (err) {
+        console.error("[townreporter] minutes vote catch-up failed:", err);
       }
     } finally {
       statsTicking = false;

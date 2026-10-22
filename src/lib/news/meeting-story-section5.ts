@@ -183,6 +183,19 @@ export type VoteRecord = {
   result: string;
   source: VoteSource;
   locator?: string | null;
+  /*
+    The verbatim record the motion was read from -- the MOTION block of the
+    minutes, whitespace-collapsed. Optional: a record read from a structured
+    vote source or an older row has no such block, and a missing excerpt must
+    never make a vote unreadable.
+  */
+  excerpt?: string | null;
+  /*
+    What the reader had to decide to get to this one record, in the same words
+    the disagreements list uses ("minutes list 3 motions under item 9I; the last
+    is used"). Carried into `disagreements` when this record is chosen.
+  */
+  notes?: string[];
 };
 
 export type StructuredVote = {
@@ -194,7 +207,11 @@ export type StructuredVote = {
   tally: string | null;
   result: string;
   source: VoteSource | null;
-  provenance: { source: VoteSource; locator: string | null }[];
+  /*
+    `excerpt` is the verbatim record behind a locator (the MOTION block of the
+    minutes). Optional so every row written before it existed stays readable.
+  */
+  provenance: { source: VoteSource; locator: string | null; excerpt?: string }[];
   disagreements: string[];
 };
 
@@ -251,8 +268,13 @@ export function extractStructuredVote(input: {
       disagreements,
     };
   }
-  const provenance = [{ source: chosen.source, locator: chosen.locator ?? null }];
+  const provenance: { source: VoteSource; locator: string | null; excerpt?: string }[] = [
+    chosen.excerpt
+      ? { source: chosen.source, locator: chosen.locator ?? null, excerpt: chosen.excerpt }
+      : { source: chosen.source, locator: chosen.locator ?? null },
+  ];
   if (input.transcript) provenance.push({ source: input.transcript.source, locator: input.transcript.excerpt.slice(0, 160) });
+  if (chosen.notes?.length) disagreements.push(...chosen.notes);
   return {
     item: input.item,
     established: true,

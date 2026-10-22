@@ -1,6 +1,7 @@
 import { fetchPublicHttp } from "./fetch-url.ts";
 import { compiledDocumentUrl, preferredDocuments, type PrimeGovMeeting } from "./primegov.ts";
 import type { VoteRecord } from "./meeting-story-section5.ts";
+import { minutesVoteRecordsForMeeting, type MinutesDeps } from "./meeting-minutes.server.ts";
 
 export type PrimeGovVoteRecord = VoteRecord & { item: string };
 export type PrimeGovVoteDocuments = { minutes: PrimeGovVoteRecord[]; packet: PrimeGovVoteRecord[] };
@@ -90,17 +91,35 @@ async function readVoteDocument(
   }
 }
 
-/** Read the meeting's official minutes and packet, when PrimeGov lists them. */
+/**
+ * Read the meeting's official minutes and packet.
+ *
+ * The minutes come from the minutes reader (./meeting-minutes.server.ts), which
+ * knows that a city may list no Minutes document on the meeting and still print
+ * that meeting's minutes inside a LATER meeting's packet. The packet here is
+ * still read on its own, exactly as before: it is a second source to disagree
+ * with, never a substitute for the minutes.
+ *
+ * When the reader finds nothing -- an older minutes document with no MOTION
+ * blocks, say -- the document the portal lists as this meeting's minutes is
+ * read the old way rather than dropped, so a meeting that used to establish a
+ * vote still does.
+ */
 export async function primeGovVoteRecordsForMeeting(
   meeting: PrimeGovMeeting,
   origin: string,
+  deps: MinutesDeps = {},
 ): Promise<PrimeGovVoteDocuments> {
   const documents = preferredDocuments(meeting);
   const minutes = documents.find((document) => /\bminutes\b/i.test(document.templateName));
   const packet = documents.find((document) => /\bpacket\b/i.test(document.templateName));
-  const [minuteRecords, packetRecords] = await Promise.all([
-    minutes ? readVoteDocument(origin, minutes, "minutes") : Promise.resolve([]),
+  const [read, packetRecords] = await Promise.all([
+    minutesVoteRecordsForMeeting(meeting, origin, deps).catch(() => ({ records: [], locator: null, reason: "" })),
     packet ? readVoteDocument(origin, packet, "packet") : Promise.resolve([]),
   ]);
+  let minuteRecords = read.records;
+  if (!minuteRecords.length && minutes) {
+    minuteRecords = await readVoteDocument(origin, minutes, "minutes");
+  }
   return { minutes: minuteRecords, packet: packetRecords };
 }
