@@ -155,13 +155,17 @@ async function buildGuardedFetch(): Promise<FetchLike> {
  * silently falling back to global fetch would remove connect-time DNS-rebinding
  * protection after the hostname preflight has already succeeded.
  */
-export async function resolveFetch(): Promise<FetchLike> {
+async function resolveTransport(): Promise<FetchLike> {
   let transport = fetchOverride;
   if (!transport && typeof window === "undefined") {
     if (guardedFetchImpl === undefined) guardedFetchImpl = await buildGuardedFetch();
     transport = guardedFetchImpl;
   }
-  const send: FetchLike = transport ?? ((u, i) => fetch(u, i));
+  return transport ?? ((u, i) => fetch(u, i));
+}
+
+export async function resolveFetch(): Promise<FetchLike> {
+  const send = await resolveTransport();
   return async (url, init) => {
     const response = await send(url, init);
     const ctype = response.headers.get("content-type") ?? "";
@@ -254,6 +258,51 @@ export async function fetchPublicHttp(
 ): Promise<Response> {
   const tracked = await fetchPublicHttpTracked(url, hops, signal, schedule);
   return tracked.response;
+}
+
+/**
+ * A public document too large for the shared body cap (D219).
+ *
+ * The cap in `body-limit.ts` is right for everything else this desk reads, but a
+ * council packet is 190 MB as a matter of course, and a minutes reader that
+ * refuses it reads no minutes. The safety rules of `fetchPublicHttpOnce` are
+ * kept hop for hop -- `assertPublicHttpUrl` on every redirect target and the
+ * DNS-rebinding-guarded transport, never bare global fetch on the server -- and
+ * only the response cap is left off. The caller owns the body: it must stream
+ * the response to disk and enforce `maxBytes` itself.
+ */
+export async function fetchPublicLargeDocument(
+  url: URL,
+  opts: { maxBytes: number; signal?: AbortSignal; hops?: number },
+): Promise<Response> {
+  const send = await resolveTransport();
+  async function go(u: URL, left: number): Promise<Response> {
+    opts.signal?.throwIfAborted();
+    await assertPublicHttpUrl(u.toString());
+    const res = await send(u, {
+      redirect: "manual",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 TownReporter/1.0",
+        Accept: "application/pdf,*/*;q=0.1",
+      },
+      // The caller's signal carries the whole download's clock; a per-hop
+      // header timeout here would abort the body of a large file mid-stream.
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      if (left <= 0) throw new Error("Too many redirects");
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error("Redirect with no location");
+      return go(new URL(loc, u), left - 1);
+    }
+    const declared = Number(res.headers.get("content-length") ?? "");
+    if (Number.isFinite(declared) && declared > opts.maxBytes) {
+      throw new Error(`the document is larger than this reader will fetch (${declared} bytes)`);
+    }
+    return res;
+  }
+  return go(url, opts.hops ?? 4);
 }
 
 function stripHtml(html: string) {

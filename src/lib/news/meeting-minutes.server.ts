@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
-import { fetchPublicHttp } from "./fetch-url.ts";
+import { fetchPublicLargeDocument } from "./fetch-url.ts";
 import {
   compiledDocumentUrl,
   dateFromTitle,
@@ -100,13 +100,27 @@ export async function minutesVoteRecordsForMeeting(
       .filter((candidate) => candidate.id !== meeting.id && bodyOf(candidate.title) === bodyTitle)
       .map((candidate) => ({ meeting: candidate, at: Date.parse(candidate.dateTime || candidate.date) }))
       .filter(({ at }) => Number.isFinite(at) && at > target && at - target <= LOOKAHEAD_DAYS * 86_400_000)
-      .sort((a, b) => a.at - b.at)
-      .slice(0, LOOKAHEAD_MEETINGS);
+      // An executive session is closed to the public and carries no minutes.
+      .filter(({ meeting: candidate }) => !/\bexecutive\b/i.test(candidate.title))
+      .sort((a, b) => a.at - b.at);
   } catch {
     return { records: [], locator: null, reason: NO_MINUTES };
   }
 
-  for (const { meeting: candidate } of later) {
+  // A council approves the previous meeting's minutes at a REGULAR session; a
+  // study or work session of the same body in between is not where they land.
+  // Prefer Regular Sessions. Only when the window has none at all fall back to
+  // whatever non-executive meeting lists a Packet, nearest first.
+  const regularSessions = later.filter(({ meeting: candidate }) => /regular session/i.test(candidate.title));
+  const lookAhead = (
+    regularSessions.length
+      ? regularSessions
+      : later.filter(({ meeting: candidate }) =>
+          preferredDocuments(candidate).some((document) => /\bpacket\b/i.test(document.templateName)),
+        )
+  ).slice(0, LOOKAHEAD_MEETINGS);
+
+  for (const { meeting: candidate } of lookAhead) {
     const packet = preferredDocuments(candidate).find((document) => /\bpacket\b/i.test(document.templateName));
     if (!packet) continue;
     const url = documentUrl(origin, packet);
@@ -178,7 +192,11 @@ export async function fetchDocumentText(url: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "townreporter-minutes-"));
   const file = join(directory, "document.pdf");
   try {
-    const response = await fetchPublicHttp(new URL(url), 4, controller.signal);
+    const response = await fetchPublicLargeDocument(new URL(url), {
+      maxBytes: MAX_BYTES,
+      signal: controller.signal,
+      hops: 4,
+    });
     if (!response.ok || !response.body) throw new Error(`the minutes document answered ${response.status}`);
     const handle = await import("node:fs/promises").then((fs) => fs.open(file, "w"));
     try {

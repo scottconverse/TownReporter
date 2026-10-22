@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertHttpUrl,
   fetchPublicHttp,
+  fetchPublicLargeDocument,
   fetchSourceText,
   isBlockedAddress,
   setFetchImplForTests,
@@ -248,6 +249,82 @@ describe("assertHttpUrl", () => {
   it("accepts public https civic hosts", () => {
     const u = assertHttpUrl("https://www.longmontcolorado.gov/government/city-council");
     assert.equal(u.hostname, "www.longmontcolorado.gov");
+  });
+});
+
+describe("fetchPublicLargeDocument", () => {
+  /** 30 MB, one megabyte at a time: a stream, never a 30 MB buffer. */
+  function thirtyMegabyteBody(): ReadableStream<Uint8Array> {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    return new ReadableStream({
+      pull(controller) {
+        if (sent >= 30) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        sent += 1;
+      },
+    });
+  }
+
+  it("reads a 30 MB packet the shared cap still refuses", async () => {
+    // guards: a council packet is 190 MB, and the minutes reader that refuses it
+    // reads no minutes (D219). The 25 MB cap stays for every other caller.
+    try {
+      setFetchImplForTests(
+        (async () =>
+          new Response(thirtyMegabyteBody(), {
+            headers: {
+              "content-type": "application/pdf",
+              "content-length": String(30 * 1024 * 1024),
+            },
+          })) as unknown as import("./fetch-url.ts").FetchLike,
+      );
+      await assert.rejects(
+        () => fetchPublicHttp(new URL("https://1.1.1.1/packet.pdf")),
+        /25000000/,
+        "the shared cap still refuses the same document",
+      );
+
+      const res = await fetchPublicLargeDocument(new URL("https://1.1.1.1/packet.pdf"), {
+        maxBytes: 400 * 1024 * 1024,
+      });
+      assert.equal(res.ok, true);
+      let total = 0;
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        total += chunk.byteLength;
+      }
+      assert.equal(total, 30 * 1024 * 1024, "the whole body came through uncapped");
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("re-validates each hop and refuses a redirect onto loopback", async () => {
+    const fetched: string[] = [];
+    setFetchImplForTests((async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      fetched.push(url);
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/latest/meta-data/" },
+      });
+    }) as unknown as import("./fetch-url.ts").FetchLike);
+    try {
+      await assert.rejects(
+        () => fetchPublicLargeDocument(new URL("http://1.1.1.1/packet.pdf"), {
+          maxBytes: 400 * 1024 * 1024,
+        }),
+        /not fetchable/,
+      );
+      assert.equal(fetched.length, 1, "the blocked host was never fetched");
+      assert.match(fetched[0]!, /^http:\/\/1\.1\.1\.1/);
+    } finally {
+      setFetchImplForTests(null);
+    }
   });
 });
 

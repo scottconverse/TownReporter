@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { minutesSectionFor, minutesVoteRecords, minutesVotesByItem } from "./meeting-minutes.ts";
+import { minutesVoteRecordsForMeeting } from "./meeting-minutes.server.ts";
 import { extractStructuredVote } from "./meeting-story-section5.ts";
+import type { PrimeGovMeeting } from "./primegov.ts";
 
 /*
   Council votes from the official minutes (Goal C unit C2, design D214).
@@ -259,5 +261,59 @@ describe("what makes a vote established", () => {
     });
     assert.equal(vote.established, true);
     assert.match(vote.disagreements[0] ?? "", /minutes list 2 motions under item 12A; the last is used/);
+  });
+});
+
+describe("which later meeting's packet carries the minutes", () => {
+  /*
+    Longmont approves minutes at a Regular Session ("4. APPROVAL OF MINUTES").
+    The portal lists an executive and a study session of the same body between
+    the meeting and its next Regular Session, and with a plain "next three
+    meetings" look-ahead those came first and the minutes were read from the
+    wrong documents (D219).
+  */
+  function meeting(
+    id: number,
+    title: string,
+    dateTime: string,
+    templateId: number | null,
+  ): PrimeGovMeeting {
+    return {
+      id,
+      title,
+      date: dateTime.slice(0, 10),
+      dateTime,
+      time: dateTime.slice(11, 16),
+      location: "City Council Chambers",
+      documentList:
+        templateId === null
+          ? []
+          : [{ id, templateId, compileOutputType: 1, templateName: "Packet", link: null }],
+    };
+  }
+
+  const AUG25 = meeting(4001, "City Council Regular Session", "2026-08-25T19:00:00", null);
+  const EXEC_SEP8 = meeting(4002, "City Council Executive Session", "2026-09-08T17:30:00", 9003);
+  const REGULAR_SEP8 = meeting(4003, "City Council Regular Session", "2026-09-08T19:00:00", 9001);
+  const STUDY_SEP15 = meeting(4004, "City Council Study Session", "2026-09-15T19:00:00", 9004);
+  const REGULAR_SEP22 = meeting(4005, "City Council Regular Session", "2026-09-22T19:00:00", 9002);
+
+  it("reads the later Regular Sessions only, nearest first", async () => {
+    const downloads: string[] = [];
+    const read = await minutesVoteRecordsForMeeting(AUG25, "https://city.primegov.com", {
+      portalMeetings: async () => [AUG25, EXEC_SEP8, REGULAR_SEP8, STUDY_SEP15, REGULAR_SEP22],
+      documentText: async (url: URL) => {
+        downloads.push(url.toString());
+        return FIXTURE;
+      },
+    });
+
+    assert.equal(read.records.length, 0, "this fixture holds no August minutes");
+    assert.equal(downloads.length, 2, "only the two Regular Sessions were read");
+    assert.match(downloads[0]!, /meetingTemplateId=9001/, "September 8 first, the nearest");
+    assert.match(downloads[1]!, /meetingTemplateId=9002/, "then September 22");
+    for (const url of downloads) {
+      assert.equal(/meetingTemplateId=9003|meetingTemplateId=9004/.test(url), false);
+    }
   });
 });
