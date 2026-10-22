@@ -195,8 +195,27 @@ describe("claudeCliCandidates", () => {
   dirs, PATH is emptied, and the npm prefix is injected, so nothing about the
   machine running the suite can satisfy the lookup.
 */
+const ON_WINDOWS = process.platform === "win32";
+
+/*
+  Each expected path below is built in the layout `claudeCliCandidates()` builds
+  for the platform the suite is running on: `<prefix>\\node_modules\\…\\claude.exe`
+  on Windows, `<prefix>/lib/node_modules/…/claude` elsewhere. A test that hard-codes
+  the Windows layout asserts against a candidate the server never offers on Linux,
+  so it fails there for a reason that has nothing to do with the lookup.
+*/
 const npmInstallUnder = (prefix: string) =>
-  `${prefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+  ON_WINDOWS
+    ? `${prefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`
+    : join(prefix, "lib", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude");
+
+/** Anthropic's native installer: `%USERPROFILE%\\.local\\bin\\claude.exe`, else `~/.local/bin/claude`. */
+const nativeInstallUnder = (home: string) =>
+  ON_WINDOWS ? `${home}\\.local\\bin\\claude.exe` : join(home, ".local", "bin", "claude");
+
+/** A bare `claude` (or `claude.exe` on Windows) sitting in a PATH directory. */
+const pathInstallUnder = (dir: string) =>
+  ON_WINDOWS ? `${dir}\\claude.exe` : join(dir, "claude");
 
 /** Old code has no injection seam: the optional call leaves the cache unread. */
 function injectNpmPrefix(prefix: string | null | undefined) {
@@ -239,10 +258,10 @@ describe("findClaudeCli finds a standard install (D212)", () => {
     }
   });
 
-  it("finds the native installer under the profile's .local\\bin", async () => {
+  it("finds the native installer under the profile's .local bin", async () => {
     const profile = await mkdtemp(join(tmpdir(), "tr-claude-local-"));
     const appData = await mkdtemp(join(tmpdir(), "tr-claude-appdata-"));
-    const bin = `${profile}\\.local\\bin\\claude.exe`;
+    const bin = nativeInstallUnder(profile);
     const restore = withEnv({
       APPDATA: appData,
       CLAUDE_CLI_PATH: undefined,
@@ -264,11 +283,11 @@ describe("findClaudeCli finds a standard install (D212)", () => {
     }
   });
 
-  it("finds claude.exe in a PATH directory", async () => {
+  it("finds the claude binary in a PATH directory", async () => {
     const profile = await mkdtemp(join(tmpdir(), "tr-claude-path-profile-"));
     const appData = await mkdtemp(join(tmpdir(), "tr-claude-appdata-"));
     const pathDir = await mkdtemp(join(tmpdir(), "tr-claude-onpath-"));
-    const bin = `${pathDir}\\claude.exe`;
+    const bin = pathInstallUnder(pathDir);
     const restore = withEnv({
       APPDATA: appData,
       CLAUDE_CLI_PATH: undefined,
