@@ -390,7 +390,7 @@ function ArticlePage() {
                 <span>/</span>
                 <SectionTag topic={article.topic} className="tag">
                   {sectionName}
-                  {isOpinion ? " · Perspective" : ""}
+                  {isOpinion ? " · Opinion" : ""}
                 </SectionTag>
               </>
             )}
