@@ -152,7 +152,9 @@ Copy-Item -LiteralPath (Join-Path $repo '.output') -Destination $app -Recurse
 foreach ($file in @('package.json', 'package-lock.json', 'LICENSE', 'Start TownReporter.cmd', 'Stop TownReporter.cmd', 'Configure AI.cmd')) {
   Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $app
 }
-foreach ($dir in @('migrations', 'ops', 'licenses')) { Copy-Item -LiteralPath (Join-Path $repo $dir) -Destination $app -Recurse }
+# The reporting skills ship beside the app: the runner reads them from `<cwd>/<skill>`
+# (resolveCivicMethodDir, resolveReportLocalNewsDir), so Setup.exe must carry them.
+foreach ($dir in @('migrations', 'ops', 'licenses', 'civic-scanner', 'report-local-news')) { Copy-Item -LiteralPath (Join-Path $repo $dir) -Destination $app -Recurse }
 # Required redistribution notices are legal payload, not product documentation.
 Copy-Item -LiteralPath (Join-Path $repo 'THIRD_PARTY_NOTICES.md') -Destination (Join-Path $app 'THIRD_PARTY_NOTICES.txt')
 foreach ($dir in @('scripts', 'installer')) { New-Item -ItemType Directory -Path (Join-Path $app $dir) | Out-Null }

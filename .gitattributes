@@ -26,3 +26,9 @@ artifacts/** export-ignore
 /HANDOFF-2026-*.md export-ignore
 /HANDOFF-SESSION-*.md export-ignore
 /HANDOFF-BUILD-LIST.md export-ignore
+
+# The report-local-news skill states a sha256 for its audit script, and its
+# SKILL.md must stay byte-identical to that script. Git must not rewrite line
+# endings on either file or the hash a rebuilt copy is checked against changes.
+report-local-news/SKILL.md -text
+report-local-news/scripts/audit.py -text
