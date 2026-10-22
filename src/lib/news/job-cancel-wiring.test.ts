@@ -106,7 +106,7 @@ const PINS: { kind: string; file: string; pattern: RegExp; what: string }[] = [
   {
     kind: "draft",
     file: "desk.ts",
-    pattern: /await throwIfJobCancelled\(job\.id\);[\s\S]{0,1400}?const style = await repairDraftStyle\(/,
+    pattern: /await throwIfJobCancelled\(job\.id\);[\s\S]{0,1800}?await repairDraftStyle\(/,
     what: "the fifth model call (the style repair) is behind a boundary of its own",
   },
   {

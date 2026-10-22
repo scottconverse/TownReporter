@@ -1143,6 +1143,7 @@ describe("MS-WIRE: the meeting writer's model warning", () => {
     const warned = await commitStoryDraftForAuthenticatedEditor(input, deps);
     assert.equal(warned.ok, false);
     if (warned.ok) assert.fail("a Claude pick must warn before the writer runs");
+    assert.ok("warning" in warned);
     assert.equal(warned.warning.key, "meeting-writer-model-unproven");
     assert.equal(
       warned.warning.sentence,
@@ -1182,6 +1183,7 @@ describe("MS-WIRE: the meeting writer's model warning", () => {
     const warned = await commitStoryDraftForAuthenticatedEditor(input, deps);
     assert.equal(warned.ok, false);
     if (warned.ok) assert.fail("Codex cannot run the meeting writer");
+    assert.ok("warning" in warned);
     assert.equal(warned.warning.key, "meeting-writer-model-unproven");
     assert.equal(
       warned.warning.sentence,
