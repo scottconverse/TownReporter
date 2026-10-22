@@ -109,6 +109,13 @@ const HEADLINE = `Leak guard fixture story ${RUN}`;
 const SLUG = `leak-guard-fixture-${RUN}`;
 const TOPIC = "council";
 const CORRECTION_BODY = `We corrected a date in this story. Marker ${RUN}.`;
+/*
+  MS-WIRE W2: the meeting writer's editor-only record. The editor file and the
+  check list are written to the draft row and read only on the story page; the
+  markers below can appear in a public response only if one of them leaked.
+*/
+const MEETING_EDITOR_NOTE = `EDITOR FILE MARKER ${RUN}`;
+const MEETING_EDITOR_CHECK = `CHECK MARKER ${RUN}`;
 
 /**
  * Strings that must never appear on the wire, anywhere in a public response:
@@ -132,6 +139,9 @@ function assertNoLeak(label: string, body: string) {
     /written-by-the-editor/,
     `${label}: the literal "written-by-the-editor" reached the response`,
   );
+  // MS-WIRE W1/W2: the meeting writer's editor-only columns.
+  assert.doesNotMatch(body, new RegExp(MEETING_EDITOR_NOTE), `${label}: the meeting editor file leaked`);
+  assert.doesNotMatch(body, new RegExp(MEETING_EDITOR_CHECK), `${label}: a meeting editor check leaked`);
 }
 
 if (dbProbe.ok) {
@@ -230,6 +240,19 @@ if (dbProbe.ok) {
     [USER_ID, HEADLINE],
   );
   const draftId = draftRow.rows[0]!.id;
+  /*
+    MS-WIRE W1/W2: a meeting draft with the writer's editor-only record filled
+    in. `editor_checks` is the new column migration 0155 adds; `meeting_notes`
+    is its neighbour. Neither may ever reach a reader.
+  */
+  await probeClient.query(
+    `insert into drafts
+       (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form,
+        meeting_notes, editor_checks, run_stats)
+     values ($1, 1, null, $2, '', 'A meeting draft fixture with no citation to leak.',
+             'council', '[]', 'reported', $3, $4::jsonb, '{"writer":"report-local-news"}'::jsonb)`,
+    [USER_ID, `Meeting leak guard fixture ${RUN}`, MEETING_EDITOR_NOTE, JSON.stringify([MEETING_EDITOR_CHECK])],
+  );
   await probeClient.query(
     `insert into editorial_extras (draft_id, newsroom_id, source_kind, source_ref)
      values ($1, 1, 'written-by-the-editor', 'pasted into the Opinion desk')`,
