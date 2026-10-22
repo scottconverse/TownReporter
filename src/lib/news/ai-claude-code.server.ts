@@ -234,6 +234,11 @@ export function buildClaudeCodeArgs(input: {
   system?: string;
   systemPromptFile?: string;
   deepSeek?: boolean;
+  /**
+   * Agent runs stream their events instead of returning one envelope. The rest
+   * of the argv is identical, so one builder keeps the two from drifting.
+   */
+  stream?: boolean;
 }): string[] {
   return [
     "-p",
@@ -255,9 +260,47 @@ export function buildClaudeCodeArgs(input: {
     "--exclude-dynamic-system-prompt-sections",
     "--model", input.model,
     ...(input.reasoningEffort ? ["--effort", input.reasoningEffort] : []),
-    "--output-format", "json",
+    ...(input.stream
+      ? ["--output-format", "stream-json", "--verbose"]
+      : ["--output-format", "json"]),
     ...(input.deepSeek ? DEEPSEEK_NO_MCP_ARGS : []),
   ];
+}
+
+/**
+ * Point a child at a DeepSeek relay route.
+ *
+ * Every Anthropic-shaped variable the CLI reads is set, including the three
+ * tier aliases and the subagent model: leaving one of them unset makes the CLI
+ * ask the relay for a Claude model name that does not exist there. Shared by
+ * the one-shot chat call and the agent run so the two can never disagree about
+ * how DeepSeek is reached.
+ */
+function applyDeepSeekRelayEnv(
+  env: NodeJS.ProcessEnv,
+  input: { model: string; apiKey?: string; relayBaseUrl: string },
+): NodeJS.ProcessEnv {
+  Object.assign(env, {
+    ANTHROPIC_BASE_URL: input.relayBaseUrl,
+    ANTHROPIC_AUTH_TOKEN: input.apiKey || "ollama",
+    ANTHROPIC_API_KEY: "",
+    ANTHROPIC_MODEL: input.model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: input.model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: input.model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: input.model,
+    ANTHROPIC_SMALL_FAST_MODEL: input.model,
+    CLAUDE_CODE_SUBAGENT_MODEL: input.model,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    // The CLI does not recognize the DeepSeek model name, so it assumes a
+    // 200,000-token window and auto-compacts against it. Measured Oct 20 2026
+    // (Claude Code 2.1.296): a one-line prompt already sends ~183,000 input
+    // tokens (the system prompt plus every configured MCP server's tools), so
+    // the first tool result overflowed the assumed window and the draft died
+    // with "Autocompact is thrashing". DeepSeek v4.1 Flash's real window is
+    // 1,048,576 (Scott's DSH standard); telling the CLI so ends the thrash.
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(DEEPSEEK_CONTEXT_WINDOW),
+  });
+  return env;
 }
 
 /**
@@ -371,29 +414,13 @@ export async function claudeCodeChat(opts: {
       throw error;
     })
     : undefined;
-  const childEnv = claudeChildEnv();
-  if (opts.deepSeek && relay) {
-    Object.assign(childEnv, {
-      ANTHROPIC_BASE_URL: relay.baseUrl,
-      ANTHROPIC_AUTH_TOKEN: opts.deepSeek.apiKey || "ollama",
-      ANTHROPIC_API_KEY: "",
-      ANTHROPIC_MODEL: opts.model,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: opts.model,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: opts.model,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: opts.model,
-      ANTHROPIC_SMALL_FAST_MODEL: opts.model,
-      CLAUDE_CODE_SUBAGENT_MODEL: opts.model,
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-      // The CLI does not recognize the DeepSeek model name, so it assumes a
-      // 200,000-token window and auto-compacts against it. Measured Oct 20 2026
-      // (Claude Code 2.1.296): a one-line prompt already sends ~183,000 input
-      // tokens (the system prompt plus every configured MCP server's tools), so
-      // the first tool result overflowed the assumed window and the draft died
-      // with "Autocompact is thrashing". DeepSeek v4.1 Flash's real window is
-      // 1,048,576 (Scott's DSH standard); telling the CLI so ends the thrash.
-      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(DEEPSEEK_CONTEXT_WINDOW),
-    });
-  }
+  const childEnv = opts.deepSeek && relay
+    ? applyDeepSeekRelayEnv(claudeChildEnv(), {
+      model: opts.model,
+      apiKey: opts.deepSeek.apiKey,
+      relayBaseUrl: relay.baseUrl,
+    })
+    : claudeChildEnv();
 
   return new Promise<ClaudeCodeResult>((resolve) => {
     const startedAt = Date.now();
@@ -481,6 +508,238 @@ export async function claudeCodeChat(opts: {
       /* the child died before reading; `close` reports the real reason */
     });
     child.stdin?.end(opts.user);
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Agent runs: one prompt, a working folder, and whatever the agent does next.
+ * ------------------------------------------------------------------ */
+
+/** Longest step text a job will show. A step is a line on a progress bar. */
+export const AGENT_STEP_MAX_CHARS = 120;
+
+export type ClaudeAgentRunResult = {
+  ok: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  /** A plain sentence for the operator. Present whenever `ok` is false. */
+  error?: string;
+  durationMs: number;
+  /** The agent's final message, when the CLI reported one. */
+  lastText?: string;
+};
+
+/**
+ * The one line of a stream event that a job can show as its current step.
+ *
+ * `stream-json` emits one JSON object per line. Only two things become a step:
+ * a Bash call's own `description` (the agent's own words for what it is doing)
+ * and a short assistant remark. Tool RESULTS are deliberately ignored -- they
+ * carry whole file contents and page text, and a step belongs on a progress
+ * bar, not in a log that outlives the run.
+ */
+export function agentStepFromEvent(event: unknown, maxChars = AGENT_STEP_MAX_CHARS): string | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const record = event as { type?: unknown; message?: { content?: unknown } };
+  if (record.type !== "assistant") return undefined;
+  const content = record.message?.content;
+  if (!Array.isArray(content)) return undefined;
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const item = block as { type?: unknown; text?: unknown; input?: unknown };
+    if (item.type === "tool_use" && item.input && typeof item.input === "object") {
+      const description = (item.input as { description?: unknown }).description;
+      if (typeof description === "string" && description.trim()) {
+        return oneLine(description, maxChars);
+      }
+    }
+  }
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const item = block as { type?: unknown; text?: unknown };
+    // A long text block is the draft itself. Only a remark short enough to be
+    // a status line is a step.
+    if (item.type === "text" && typeof item.text === "string") {
+      const flat = item.text.replace(/\s+/g, " ").trim();
+      if (flat && flat.length <= maxChars) return flat;
+    }
+  }
+  return undefined;
+}
+
+/** Collapse a string to one line, at most `maxChars` long. */
+function oneLine(text: string, maxChars: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > maxChars ? `${flat.slice(0, Math.max(0, maxChars - 1))}…` : flat;
+}
+
+/**
+ * Run the CLI as an AGENT in a folder.
+ *
+ * WHY THIS IS NOT `claudeCodeChat`. The meeting writer is Scott's own skill run
+ * as-is (D200): the agent reads `SKILL.md` from its working folder, follows it,
+ * and uses the shell (curl, pdftotext, python) the way the skill tells it to.
+ * So there is no desk system prompt here -- the CLI's own system prompt is what
+ * teaches it to use tools -- the working directory is the run's folder rather
+ * than a temp directory, and the output is a stream of events rather than one
+ * answer, because a nine-minute run has to be able to say what it is doing.
+ *
+ * Wall time is the caller's `timeoutMs`. On timeout the whole process tree is
+ * killed: an agent that is left running would keep spending with nobody
+ * reading its answer.
+ */
+export async function claudeCodeAgentRun(opts: {
+  /** The folder the agent works in. It is created by the caller, not here. */
+  workDir: string;
+  /** The whole assignment, sent on stdin. */
+  prompt: string;
+  model: string;
+  /** Same relay contract as `claudeCodeChat`: upstream base URL, released after. */
+  deepSeek?: { baseUrl: string; apiKey?: string };
+  reasoningEffort?: ModelEffort | null;
+  timeoutMs: number;
+  /** One short line per step. Never file contents, never environment values. */
+  onEvent?: (text: string) => void;
+}): Promise<ClaudeAgentRunResult> {
+  const startedAt = Date.now();
+  const done = (result: Omit<ClaudeAgentRunResult, "durationMs">): ClaudeAgentRunResult => ({
+    ...result,
+    durationMs: Date.now() - startedAt,
+  });
+
+  if (!opts.deepSeek && opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
+    return done({
+      ok: false,
+      exitCode: null,
+      timedOut: false,
+      error: `Unsupported Claude effort ${opts.reasoningEffort}. Supported values: ${CLAUDE_CLI_EFFORTS.join(", ")}.`,
+    });
+  }
+
+  const bin = await findClaudeCli();
+  if (!bin) return done({ ok: false, exitCode: null, timedOut: false, error: CLAUDE_CLI_MISSING });
+
+  const args = buildClaudeCodeArgs({
+    model: opts.model,
+    // As with chat, DeepSeek runs at the relay's low effort: the CLI's own
+    // `--effort` values are Claude's, and the relay sets DeepSeek's thinking.
+    reasoningEffort: opts.deepSeek ? undefined : opts.reasoningEffort,
+    deepSeek: Boolean(opts.deepSeek),
+    stream: true,
+  });
+
+  const relay = opts.deepSeek
+    ? await (await import("./deepseek-relay.server.ts")).deepSeekRelayRoute(opts.deepSeek)
+    : undefined;
+  const childEnv = relay && opts.deepSeek
+    ? applyDeepSeekRelayEnv(claudeChildEnv(), {
+      model: opts.model,
+      apiKey: opts.deepSeek.apiKey,
+      relayBaseUrl: relay.baseUrl,
+    })
+    : claudeChildEnv();
+
+  return new Promise<ClaudeAgentRunResult>((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        // The folder is the agent's whole world: SKILL.md, the transcript, its
+        // own outputs. Nothing about the paper is reachable by relative path.
+        cwd: opts.workDir,
+        windowsHide: true,
+        env: childEnv,
+      });
+    } catch {
+      relay?.release();
+      resolve(done({ ok: false, exitCode: null, timedOut: false, error: CLAUDE_CLI_MISSING }));
+      return;
+    }
+
+    let stdoutBuffer = "";
+    let stderr = "";
+    let lastText: string | undefined;
+    let settled = false;
+    const finish = (result: Omit<ClaudeAgentRunResult, "durationMs">) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      relay?.release();
+      resolve(done(result));
+    };
+
+    const timer = setTimeout(() => {
+      killTree(child);
+      const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
+      const limit = opts.timeoutMs >= 60_000
+        ? `${Math.round(opts.timeoutMs / 60_000)} minutes`
+        : `${Math.round(opts.timeoutMs / 1_000)} seconds`;
+      finish({
+        ok: false,
+        exitCode: null,
+        timedOut: true,
+        error: `The writer timed out after ${limit}${tail ? ` — ${tail}` : ""}`,
+        lastText,
+      });
+    }, opts.timeoutMs);
+
+    /** Read one complete stdout line, if it is an event worth reading. */
+    const readLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let event: { type?: unknown; result?: unknown; is_error?: unknown };
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        // A CLI that printed a non-JSON line (a banner, a progress glyph) is not
+        // a failure; the run's outcome comes from its exit code and its result
+        // event.
+        return;
+      }
+      if (event.type === "result" && typeof event.result === "string") {
+        lastText = event.result;
+        return;
+      }
+      const step = agentStepFromEvent(event);
+      if (!step) return;
+      try {
+        opts.onEvent?.(step);
+      } catch {
+        // A progress callback must never end a run.
+      }
+    };
+
+    child.stdout?.on("data", (d) => {
+      stdoutBuffer += String(d);
+      let newline = stdoutBuffer.indexOf("\n");
+      while (newline !== -1) {
+        readLine(stdoutBuffer.slice(0, newline));
+        stdoutBuffer = stdoutBuffer.slice(newline + 1);
+        newline = stdoutBuffer.indexOf("\n");
+      }
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", () =>
+      finish({ ok: false, exitCode: null, timedOut: false, error: CLAUDE_CLI_MISSING, lastText }));
+    child.on("close", (code) => {
+      // The last line may arrive without its newline.
+      if (stdoutBuffer.trim()) readLine(stdoutBuffer);
+      stdoutBuffer = "";
+      if (code !== 0 && !lastText) {
+        const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
+        finish({ ok: false, exitCode: code, timedOut: false, error: `The writer failed: ${detail}`, lastText });
+        return;
+      }
+      finish({ ok: true, exitCode: code, timedOut: false, lastText });
+    });
+
+    child.stdin?.on("error", () => {
+      /* the child died before reading; `close` reports the real reason */
+    });
+    child.stdin?.end(opts.prompt);
   });
 }
 
