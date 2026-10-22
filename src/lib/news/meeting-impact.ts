@@ -179,7 +179,7 @@ Score each item on four newsworthiness dimensions, each 1 (least) to 5 (most):
 For each item, also write one short sentence of justification for each dimension, in a "*Reason" field beside it.
 Then choose a status for the item:
 - "lead": the story should lead with it (the most consequential decision for residents). Choose at most two.
-- "roundup": it belongs in a short ALSO AT THE MEETING list under the lead.
+- "roundup": it belongs in a short Also at the meeting list under the lead.
 - "excluded": it is not news (routine procedure, a duplicate, an announcement already covered).
 Do NOT rank by how many votes an item holds, how many dollar figures it names, or how long it ran: three routine unanimous votes are not more newsworthy than one decision that changes a resident's life, and a long presentation with a big budget number is not automatically the lead. Judge by what the decision does.
 An item that holds a recorded decision is never "excluded": if the meeting decided it, it is at least roundup.

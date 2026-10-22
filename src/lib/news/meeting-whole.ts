@@ -214,7 +214,7 @@ export type WholeMeetingResult = {
   packetRead: boolean;
 };
 
-export const ROUNDUP_HEADING = "ALSO AT THE MEETING";
+export const ROUNDUP_HEADING = "Also at the meeting";
 export const WINDOW_CHARS = 12_000;
 export const WINDOW_PACKET_CHARS = 12_000;
 export const INVENTORY_REPLY_TOKENS = 3_000;
@@ -1230,7 +1230,7 @@ You are given a numbered ledger of every item a council meeting covered.
 Judge each item by its EVIDENCE, not by its heading: what was said, how many votes were recorded and their tallies, the dollars named, the minutes of tape. An item whose heading reads like routine procedure ("MEETING CALLED TO ORDER", "CITY MANAGER REMARKS") may hold the meeting's main news -- read its evidence before you call it routine.
 Choose, for each item, exactly one status:
 - "lead": the story should lead with it (the meeting's most consequential decision). Choose at most two.
-- "roundup": it belongs in a short ALSO AT THE MEETING list under the lead.
+- "roundup": it belongs in a short Also at the meeting list under the lead.
 - "excluded": it is not news (routine procedure, a duplicate, an announcement already covered).
 An item that holds a recorded vote result is never "excluded": if the vote matters enough to record, it is at least roundup.
 Give a one-line reason for each status. Never invent an item or a vote.

@@ -37,9 +37,13 @@ const DRAFT = [
 
 test("the ALSO AT THE MEETING line is drawn as a heading, not a paragraph", () => {
   const html = render(DRAFT);
+  /*
+    Unit C11 (D215): the stored line keeps its capitals -- the skill writer
+    still emits them -- but the reader is shown the page's sentence case.
+  */
   assert.match(
     html,
-    /<h2[^>]*>ALSO AT THE MEETING<\/h2>/,
+    /<h2[^>]*>Also at the meeting<\/h2>/,
     "the roundup title must be an h2 in the editor's preview",
   );
   assert.doesNotMatch(
@@ -56,5 +60,15 @@ test("the ALSO AT THE MEETING line is drawn as a heading, not a paragraph", () =
 
 test("the published reading draws the same line as a heading", () => {
   const html = render(DRAFT, true);
-  assert.match(html, /<h2[^>]*>ALSO AT THE MEETING<\/h2>/, "the public page agrees with the preview");
+  assert.match(html, /<h2[^>]*>Also at the meeting<\/h2>/, "the public page agrees with the preview");
+});
+
+test("a stored '## Also at the meeting:' line draws the same heading", () => {
+  const html = render([
+    "The council set a noise policy.",
+    "## Also at the meeting:",
+    "Airport fund budget: The 2027 airport fund budget totals $733,170.",
+  ].join("\n\n"));
+  assert.match(html, /<h2[^>]*>Also at the meeting<\/h2>/, "the marker and colon are not printed");
+  assert.doesNotMatch(html, /<h2[^>]*>## /, "and neither is the markdown marker");
 });

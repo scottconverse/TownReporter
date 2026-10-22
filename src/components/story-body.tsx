@@ -60,6 +60,14 @@ function Inline({ text, publicReading = false }: { text: string; publicReading?:
  * and the rule is cheap enough to prove through the renderer -- story-body's
  * own test draws the block and looks for the `<h2>`.
  */
+/*
+  The standing roundup title, whatever case or `## ` marker the stored body
+  used. The skill writer still emits capitals and its own tests assert that;
+  what the reader sees is this heading, always in the page's sentence case.
+*/
+const ROUNDUP_HEADING_BLOCK = /^also at the meeting\s*:?$/i;
+const ROUNDUP_HEADING_TEXT = "Also at the meeting";
+
 function storyBlockHeading(
   block: string,
   { publicReading = false, claimsUsed = false }: { publicReading?: boolean; claimsUsed?: boolean } = {},
@@ -82,7 +90,7 @@ function storyBlockHeading(
   if (publicReading && /^claims and sources\s*:?$/i.test(heading)) {
     return claimsUsed ? "hidden" : "claims";
   }
-  if (block.startsWith("## ") || /^also at the meeting\s*:?$/i.test(heading)) return "h2";
+  if (block.startsWith("## ") || ROUNDUP_HEADING_BLOCK.test(heading)) return "h2";
   return null;
 }
 
@@ -129,7 +137,13 @@ export function StoryBody({
                   THU-9: "show it once").
                 */
                 text={
-                  kind === "claims" ? "Claims and sources" : block.startsWith("## ") ? block.slice(3) : heading
+                  kind === "claims"
+                    ? "Claims and sources"
+                    : ROUNDUP_HEADING_BLOCK.test(heading)
+                      ? ROUNDUP_HEADING_TEXT
+                      : block.startsWith("## ")
+                        ? block.slice(3)
+                        : heading
                 }
                 publicReading={publicReading}
               />

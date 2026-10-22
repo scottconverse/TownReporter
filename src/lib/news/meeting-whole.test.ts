@@ -532,7 +532,7 @@ const COLD_STATUS = JSON.stringify({
   the $511,000 shortfall, the $15,330 human services cut, the $495,670 savings,
   NextLight's budget -- was lost. A moved lead pick, or any item with five dollar
   figures or twenty minutes of tape, is written as its own short section under
-  its plain label, after the lead story and before ALSO AT THE MEETING, at most
+  its plain label, after the lead story and before Also at the meeting, at most
   two of them.
 */
 const SECTIONS_AGENDA: AgendaListItem[] = [
@@ -1190,7 +1190,7 @@ describe("whole-meeting writer", () => {
     assert.match(tapeOnly!.note, /not a verified recording/i);
   });
 
-  it("puts the ALSO AT THE MEETING heading before the roundup paragraphs", async () => {
+  it("puts the Also at the meeting heading before the roundup paragraphs", async () => {
     /*
       The assembled body is the lead story, then the heading, then one paragraph
       per roundup item, each starting with the item's name. A reader must meet
@@ -1209,7 +1209,7 @@ describe("whole-meeting writer", () => {
     assert.ok(leadAt >= 0 && headingAt >= 0 && firstItemAt >= 0, "all three parts must be present");
     assert.ok(headingAt > leadAt, "the heading follows the lead story");
     assert.ok(firstItemAt > headingAt, "the roundup items follow the heading");
-    assert.match(body, /ALSO AT THE MEETING\n\nAirport fund budget: /, "the heading leads the list");
+    assert.match(body, /Also at the meeting\n\nAirport fund budget: /, "the heading leads the list");
   });
 
   it("rewrites from the stored ledger without reading the tape again", async () => {
@@ -1904,7 +1904,7 @@ describe("whole-meeting writer", () => {
     const roundupAt = result.body.indexOf(ROUNDUP_HEADING);
     assert.ok(leadAt >= 0 && libraryAt > leadAt, "the sections come after the lead story");
     assert.ok(budgetAt > leadAt, "both sections come after the lead story");
-    assert.ok(roundupAt > libraryAt && roundupAt > budgetAt, "and both come before ALSO AT THE MEETING");
+    assert.ok(roundupAt > libraryAt && roundupAt > budgetAt, "and both come before Also at the meeting");
     assert.match(result.body.slice(roundupAt), /Electrify Longmont Day: A short roundup line\./, "the small item stays a short roundup line");
     assert.match(
       result.meetingNotes,
