@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { markClaimReviewed, saveLedgerItemStatus } from "@/lib/news/desk";
 import { clockFromSeconds } from "@/lib/news/meeting-whole";
 import {
@@ -36,22 +35,19 @@ import type { ClaimRow, LedgerItemRow, MeetingAccounting } from "@/lib/news/meet
  *   - A row the run could not read is shown FIRST, in the warning colour, and
  *     says so in words: "This part of the tape was not read." An editor cannot
  *     decide about a story built on a gap they cannot see.
- *   - Nothing here prints. The ledger does not print until the editor presses
- *     "Rewrite from ledger", which is a normal draft that reuses these rows.
+ *   - Nothing here prints. The panel is a reading of the draft's own record.
  *
- * Item 2 of the work order (the rewrite button) sits ABOVE the collapsible, not
- * inside it: items 1, 3, 4 and 5 are the reading, and the button is the press
- * that acts on what was read, so it stays reachable with the panel shut.
+ * MS-WIRE W5 (D201): the meeting writer is Scott's report-local-news skill, run
+ * as an agent. Its record is the EDITOR FILE and the list of things to check
+ * before publishing, so the panel shows those above the (often empty) ledger.
+ * "Rewrite from ledger" is retired: the writer reads the tape itself, and a
+ * draft is redrafted with the same "Draft with AI" press as any other story.
  */
 export function MeetingLedgerPanel({
   leadId,
   accounting,
   transcriptArtifactId,
   locked,
-  onRewrite,
-  liveRewriteEnabled = false,
-  rewritePhase,
-  rewriteReason,
 }: {
   /** The story page's own query key: a save refetches this lead, nothing else. */
   leadId: number;
@@ -60,20 +56,24 @@ export function MeetingLedgerPanel({
   transcriptArtifactId: number | null;
   /** On a published story the ledger is read-only, like every other write here. */
   locked: boolean;
-  onRewrite: () => void;
-  liveRewriteEnabled?: boolean;
-  rewritePhase: ActionPhase;
-  rewriteReason?: string | null;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(true);
+  const editorNotes = accounting?.meetingNotes.trim() ?? "";
+  const editorChecks = accounting?.editorChecks ?? [];
 
   /*
-    Hidden when there are no rows: a lead whose draft predates WR1, or a story
-    written from a packet alone, has nothing to account for, and an empty panel
-    would be one more thing to read past on every other story in the paper.
+    Hidden when there is nothing to account for: a lead whose draft predates
+    WR1, or a story written from a packet alone. A skill-writer draft has no
+    ledger rows, but its editor file is exactly what this panel is for, so the
+    record -- not the row count -- decides whether the panel is drawn.
   */
-  if (!accounting || accounting.draftId === null || accounting.ledger.length === 0) return null;
+  if (
+    !accounting ||
+    accounting.draftId === null ||
+    (accounting.ledger.length === 0 && !editorNotes && editorChecks.length === 0)
+  )
+    return null;
 
   /*
     Unread first, then the run's own numbering. The query already sorts this
@@ -94,25 +94,6 @@ export function MeetingLedgerPanel({
 
   return (
     <div className="meeting-ledger-panel">
-      <div className="meeting-ledger-rewrite">
-        <ActionButton
-          tone="secondary"
-          phase={rewritePhase}
-          workingLabel="Rewriting from the ledger…"
-          doneLabel="Rewrite started"
-          reason={rewriteReason ?? null}
-          disabled={locked && !liveRewriteEnabled}
-          disabledReason={locked && !liveRewriteEnabled ? "This story is published, so its draft is read-only." : null}
-          onAct={onRewrite}
-        >
-          Rewrite from ledger
-        </ActionButton>
-        <p className="note-hint">
-          Writes a new draft from the ledger below — the same items, in the statuses you set — and
-          does not read the tape again. The draft it replaces stays until the new one lands.
-        </p>
-      </div>
-
       <details
         className="meeting-ledger"
         open={open}
@@ -129,6 +110,37 @@ export function MeetingLedgerPanel({
 
         {stats ? <p className="meeting-ledger-stats">{stats}</p> : null}
 
+        {editorChecks.length ? (
+          <div className="note-sec">
+            <p className="side-label">
+              Check before publishing ({editorChecks.length})
+            </p>
+            <p className="note-one">
+              The writer asks a person to check these against the record. The Publish dialog lists
+              the same items, and you may publish over them.
+            </p>
+            <ul className="meeting-editor-checks">
+              {editorChecks.map((check, index) => (
+                <li key={index} className="note-one">
+                  {check}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {editorNotes ? (
+          <div className="note-sec">
+            <p className="side-label">Editor notes (never published)</p>
+            <p className="note-one">
+              The writer's own file: the claim checks, the fact sheet, the ledger and the legal
+              notes. None of this is part of the story.
+            </p>
+            <pre className="meeting-notes-full">{accounting.meetingNotes}</pre>
+          </div>
+        ) : null}
+
+        {ledger.length ? (
         <div className="note-sec">
           <p className="side-label">Every item the run found</p>
           <p className="note-one">
@@ -145,6 +157,7 @@ export function MeetingLedgerPanel({
             />
           ))}
         </div>
+        ) : null}
 
         <ClaimsList
           claims={accounting.claims}
@@ -152,16 +165,6 @@ export function MeetingLedgerPanel({
           onSaved={() => void qc.invalidateQueries({ queryKey: ["lead", leadId] })}
         />
 
-        {accounting.meetingNotes.trim() ? (
-          <div className="note-sec">
-            <p className="side-label">Meeting notes</p>
-            <p className="note-one">
-              The run's own record: what each check found, and every place the cold check and the
-              draft disagreed. Shown in full.
-            </p>
-            <pre className="meeting-notes-full">{accounting.meetingNotes}</pre>
-          </div>
-        ) : null}
       </details>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useDeskMutation } from "@/components/desk-action";
 import { resolveLeadDuplicate as resolveLeadDuplicateRaw, setLeadStatus as setLeadStatusRaw } from "@/lib/news/desk";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
-import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -24,7 +24,7 @@ import {
 } from "@/lib/news/publish-blockers";
 import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/components/publish-bar-result";
 import { PublishConfirmation, acceptanceAnnouncement } from "@/components/publish-confirmation";
-import { ActionButton, type ActionPhase } from "@/components/action-button";
+import { ActionButton } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { KILL_TOAST_MS, restoreStatus } from "@/components/fast-kill";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
@@ -427,8 +427,6 @@ function StoryPage() {
     last, so the done word and the working word land on the button that was
     pressed and not on its neighbour.
   */
-  const [rewriteDone, setRewriteDone] = useState(false);
-  const pressWasRewrite = useRef(false);
   /*
     Whether a person has chosen the section on this page (0.6.67).
 
@@ -868,10 +866,8 @@ function StoryPage() {
     appliedFp.current = fp;
     expectedDraftJobId.current = null;
     /* Unit UI1a2: the draft this press started has arrived, so the control's
-       done word comes off and it reads "Redraft" again. The ledger panel's
-       rewrite button is the same press, so its done word comes off with it. */
+       done word comes off and it reads "Redraft" again. */
     setRedraftDone(false);
-    setRewriteDone(false);
     priorDraftJobId.current = data.job?.id ?? null;
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
@@ -1015,34 +1011,25 @@ function StoryPage() {
       is what every other press on this screen passes, so the order and the
       arguments of `saveReportingNotes` then `draftLead` are unchanged.
     */
-    mutationFn: async (input: string | { fromLedger?: boolean; transcriptArtifactId?: number } | undefined) => {
+    mutationFn: async (input: string | { transcriptArtifactId?: number } | undefined) => {
       /*
-        WR1 phase 2: one press, two sources. A string (or nothing) means the
-        ordinary Draft/Redraft, reading the tape and the packet; `{fromLedger}`
-        means the Meeting ledger panel's "Rewrite from ledger", which queues the
-        same kind of job with `reuseLedger` set -- the worker then skips reading
-        the tape and writes from the stored ledger and the editor's statuses.
-        Keeping them in one mutation is what makes the progress, the wait and
-        the landing identical; only the server call differs.
+        A string (or nothing) is the ordinary Draft/Redraft, reading the tape
+        and the packet; `{transcriptArtifactId}` re-drafts from another saved
+        transcript of the same meeting. MS-WIRE W5: the ledger panel's "Rewrite
+        from ledger" press is retired -- the meeting writer reads the tape
+        itself, so this is the one Draft path for every lead.
       */
       const direction = typeof input === "string" ? input : undefined;
-      const fromLedger = typeof input === "object" && input !== null && input.fromLedger === true;
       await saveReportingNotes({
         data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       const pickedArtifactId = typeof input === "object" && input !== null ? input.transcriptArtifactId : undefined;
       const meetingArtifactId = pickedArtifactId ?? selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
       const modelChoiceExplicit = modelChoiceTouched.current || Boolean(data?.job?.model_choice);
-      if (fromLedger)
-        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId } });
       return draftLead({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId, override: writerAction.override } });
     },
-    onMutate: (input) => {
+    onMutate: () => {
       setMsg("");
-      /* Which button was pressed, recorded from the press itself so the phase
-         below never has to guess. */
-      pressWasRewrite.current =
-        typeof input === "object" && input !== null && input.fromLedger === true;
       hadBodyAtStart.current = Boolean(data?.draft?.body);
       bodyAtStart.current = data?.draft?.body ?? "";
       priorDraftJobId.current = data?.job?.id ?? null;
@@ -1056,9 +1043,7 @@ function StoryPage() {
       setAwaitingDraftJobAck(false);
       if (answered(res) && res.ok) {
         expectedDraftJobId.current = res.jobId;
-        /* Unit UI1a2: the press took, so the control that made it says so. */
-        if (pressWasRewrite.current) setRewriteDone(true);
-        else setRedraftDone(true);
+        setRedraftDone(true);
       }
       /*
         A refused press (including Cancel on its warning) created no job. Drop
@@ -3354,23 +3339,6 @@ function StoryPage() {
               }
               reverifyingMeetingCitations={draftMeetingReview.isPending || reverifyLive.isPending}
               meetingAccounting={data.meetingAccounting}
-              onRewriteFromLedger={
-                locked || paperGate.blocked
-                  ? undefined
-                  : onPaper
-                    ? () => rewriteLive.mutate(undefined)
-                  : () => draft.mutate({ fromLedger: true })
-              }
-              rewritePhase={
-                rewriteLive.isPending ? "working" : waiting && pressWasRewrite.current
-                  ? "working"
-                  : rewriteDone
-                    ? "done"
-                    : draft.isError && draftProblem && pressWasRewrite.current
-                      ? "failed"
-                      : "idle"
-              }
-              rewriteReason={pressWasRewrite.current ? draftProblem : null}
             />
             {/*
           The fold used to print a count of failures -- "13 provider or page
@@ -3883,7 +3851,6 @@ function StoryPage() {
           )}
       {locked && data.draft ? <div>
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton>
-        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
       </div> : null}
       {draftRunningShown ? <section className="astra-model-research">
         <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
@@ -5032,9 +4999,6 @@ function ReportingNotesPane({
   reverifyingMeetingCitations,
   currentDraftId,
   meetingAccounting,
-  onRewriteFromLedger,
-  rewritePhase,
-  rewriteReason,
 }: {
   leadId: number;
   notes: ReportingNotes;
@@ -5056,10 +5020,6 @@ function ReportingNotesPane({
   currentDraftId: number | null;
   /** WR1 phase 2: the whole-meeting run's accounting for this lead (see getLead). */
   meetingAccounting: MeetingAccounting | null;
-  /** The ledger panel's "Rewrite from ledger", or undefined when it cannot run. */
-  onRewriteFromLedger?: () => void;
-  rewritePhase: ActionPhase;
-  rewriteReason?: string | null;
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
@@ -5339,7 +5299,6 @@ function ReportingNotesPane({
           plain words; the raw lines stay inside for support.
         */}
       <MeetingLedgerPanel
-        liveRewriteEnabled={Boolean(onRewriteFromLedger)}
         leadId={leadId}
         accounting={meetingAccounting}
         transcriptArtifactId={
@@ -5348,9 +5307,6 @@ function ReportingNotesPane({
             : null
         }
         locked={locked}
-        onRewrite={onRewriteFromLedger ?? (() => {})}
-        rewritePhase={onRewriteFromLedger ? rewritePhase : "idle"}
-        rewriteReason={rewriteReason}
       />
       {hasDraft ? <DraftHistoryPanel leadId={leadId} currentDraftId={currentDraftId} /> : null}
       {!filled ? (

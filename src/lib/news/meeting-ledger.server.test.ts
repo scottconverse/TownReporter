@@ -320,3 +320,40 @@ describe("meeting ledger writes", () => {
     assert.deepEqual(none, [], "another newsroom's lead has no ledger for this caller");
   });
 });
+
+/*
+  MS-WIRE W5: the meeting writer (the report-local-news skill) writes no ledger
+  rows. Its record is the editor file and the check list on the draft row, and
+  the panel has to find them all the same -- before this, a draft with no
+  meeting_ledger_items answered `draftId: null` and the panel drew nothing.
+*/
+describe("MS-WIRE: a skill-writer draft is accounted for without ledger rows", () => {
+  it("reads the editor file and the check list off the draft itself", async () => {
+    const sql = await getSql();
+    const [lead] = await sql.query<{ id: number }>(
+      `insert into leads(user_id,newsroom_id,headline,why,topic,source_urls)
+       values ($1,$2,'Council approves the housing plan','the tape covers it','council','[]') returning id`,
+      [USER, NEWSROOM],
+    );
+    const [draft] = await sql.query<{ id: number }>(
+      `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,meeting_notes,editor_checks,run_stats)
+       values ($1,$2,$3,'Council approves the housing plan','','body','council',$4,$5::jsonb,$6::jsonb)
+       returning id`,
+      [
+        USER,
+        NEWSROOM,
+        lead.id,
+        "EDITOR FILE: NOT FOR PUBLICATION\n\nCheck the 6-1 tally against the recording.",
+        JSON.stringify(["Check the 6-1 tally against the recording."]),
+        JSON.stringify({ wallMs: 90_000, modelCalls: 1, inputTokens: 0, outputTokens: 0, writer: "report-local-news", skillVersion: "3.1", model: "deepseek-v4.1-flash:1017-cloud" }),
+      ],
+    );
+    const accounting = await loadMeetingAccounting(sql, { newsroomId: NEWSROOM, leadId: Number(lead.id) });
+    assert.equal(accounting.draftId, Number(draft.id), "the skill draft is the one the panel describes");
+    assert.deepEqual(accounting.ledger, [], "the skill writer keeps no ledger rows");
+    assert.match(accounting.meetingNotes, /^EDITOR FILE: NOT FOR PUBLICATION/);
+    assert.deepEqual(accounting.editorChecks, ["Check the 6-1 tally against the recording."]);
+    assert.equal(accounting.runStats?.writer, "report-local-news");
+    assert.equal(accounting.runStats?.skillVersion, "3.1");
+  });
+});
