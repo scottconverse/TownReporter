@@ -209,7 +209,7 @@ test("both pages print the same label, from the same module", () => {
       `${page} must print the shared label as its own element's own text`,
     );
   }
-  assert.equal(ROUTINE_EDITION_UPDATE_LABEL, "Automatic routine-notice update");
+  assert.equal(ROUTINE_EDITION_UPDATE_LABEL, "Routine update");
 });
 
 test("the detector reads the marker the worker writes, and nothing else", () => {

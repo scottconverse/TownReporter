@@ -39,7 +39,7 @@
 export const ROUTINE_EDITION_UPDATE_PREFIX = "Routine edition update:";
 
 /** What the reader is told about one of those rows, so it is not read as an editor's. */
-export const ROUTINE_EDITION_UPDATE_LABEL = "Automatic routine-notice update";
+export const ROUTINE_EDITION_UPDATE_LABEL = "Routine update";
 
 /** True when this correction body was written by the routine-notice worker rather than an editor. */
 export function correctionIsAutomatic(body: string): boolean {
