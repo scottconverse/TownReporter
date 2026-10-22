@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
 import { cliAppDataDir, claudeChildEnv } from "./cli-child-env.server.ts";
@@ -82,6 +82,80 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
  * The npm install also ships a real binary — prefer it, and let the operator
  * override when the layout differs.
  */
+const IS_WINDOWS = process.platform === "win32";
+
+const NPM_PREFIX_TIMEOUT_MS = 5_000;
+
+/** npm's global prefix, read once per process. `undefined` = not read yet, `null` = none. */
+let cachedNpmGlobalPrefix: string | null | undefined;
+
+function readNpmGlobalPrefix(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      // Fixed text, no user input. `npm` on Windows is `npm.cmd`, which needs
+      // a shell to run at all; the argument list is a constant.
+      child = spawn(IS_WINDOWS ? "npm.cmd" : "npm", ["prefix", "-g"], {
+        shell: IS_WINDOWS,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let stdout = "";
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+      finish(null);
+    }, NPM_PREFIX_TIMEOUT_MS);
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      stdout += String(chunk);
+    });
+    child.on("error", () => finish(null));
+    child.on("close", (code) => {
+      const value = stdout.trim().replace(/[\\/]+$/, "");
+      finish(code === 0 && value ? value : null);
+    });
+  });
+}
+
+/**
+ * npm's real global prefix (`npm prefix -g`), cached for the process, including
+ * a "none" answer. The standard install of `@anthropic-ai/claude-code` lives
+ * under it, and on this machine that is not `%APPDATA%\\npm` (D209).
+ */
+export async function npmGlobalPrefix(): Promise<string | null> {
+  if (cachedNpmGlobalPrefix === undefined) cachedNpmGlobalPrefix = await readNpmGlobalPrefix();
+  return cachedNpmGlobalPrefix;
+}
+
+/** Tests only: inject the npm prefix (or clear the cache with `undefined`). */
+export function setNpmGlobalPrefixForTest(prefix: string | null | undefined) {
+  cachedNpmGlobalPrefix = prefix;
+}
+
+function claudeOnPath(): string[] {
+  const raw = process.env.PATH;
+  if (!raw) return [];
+  return raw
+    .split(delimiter)
+    .map((dir) => dir.trim())
+    .filter(Boolean)
+    .map((dir) => (IS_WINDOWS ? `${dir}\\claude.exe` : `${dir}/claude`));
+}
+
 export function claudeCliCandidates(): string[] {
   const explicit = process.env.CLAUDE_CLI_PATH?.trim();
   if (explicit) return [explicit];
@@ -92,8 +166,20 @@ export function claudeCliCandidates(): string[] {
     out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
   }
   if (home) {
-    out.push(`${home}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude`);
+    // Anthropic's native installer puts the binary here.
+    if (IS_WINDOWS) out.push(`${home}\\.local\\bin\\claude.exe`);
     out.push(`${home}/.local/bin/claude`);
+  }
+  if (cachedNpmGlobalPrefix) {
+    out.push(
+      IS_WINDOWS
+        ? `${cachedNpmGlobalPrefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`
+        : `${cachedNpmGlobalPrefix}/lib/node_modules/@anthropic-ai/claude-code/bin/claude`,
+    );
+  }
+  out.push(...claudeOnPath());
+  if (home) {
+    out.push(`${home}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude`);
   }
   out.push("/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude");
   out.push("/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude");
@@ -109,6 +195,7 @@ let resolvedBin: string | undefined;
  */
 export async function findClaudeCli(): Promise<string | null> {
   if (resolvedBin !== undefined) return resolvedBin;
+  await npmGlobalPrefix();
   const { access } = await import("node:fs/promises");
   for (const candidate of claudeCliCandidates()) {
     try {

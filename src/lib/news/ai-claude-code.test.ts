@@ -14,6 +14,7 @@ import {
   parseCliEnvelope,
   resetClaudeCliCache,
 } from "./ai-claude-code.server.ts";
+import * as claudeCliModule from "./ai-claude-code.server.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
@@ -183,12 +184,133 @@ describe("claudeCliCandidates", () => {
   });
 });
 
+/*
+  D212 / unit F1: a CLI installed the standard way must be found. On this PC
+  `npm i -g @anthropic-ai/claude-code` lands under npm's real global prefix
+  (`npm prefix -g`), not `%APPDATA%\\npm`, and Anthropic's native installer
+  lands at `%USERPROFILE%\\.local\\bin\\claude.exe`. The old candidate list
+  knew neither, so the live paper reported "Claude Code CLI not found" (D209).
+
+  Each test pins the whole lookup: APPDATA and the profile point at fresh temp
+  dirs, PATH is emptied, and the npm prefix is injected, so nothing about the
+  machine running the suite can satisfy the lookup.
+*/
+const npmInstallUnder = (prefix: string) =>
+  `${prefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+
+/** Old code has no injection seam: the optional call leaves the cache unread. */
+function injectNpmPrefix(prefix: string | null | undefined) {
+  const fn = (claudeCliModule as {
+    setNpmGlobalPrefixForTest?: (value: string | null | undefined) => void;
+  }).setNpmGlobalPrefixForTest;
+  fn?.(prefix);
+}
+
+async function writeCli(file: string) {
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, "");
+}
+
+describe("findClaudeCli finds a standard install (D212)", () => {
+  it("finds the npm install under npm's real global prefix", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-prefix-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-appdata-"));
+    const prefix = await mkdtemp(join(tmpdir(), "tr-claude-npm-"));
+    const bin = npmInstallUnder(prefix);
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: "",
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(prefix);
+    try {
+      await writeCli(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+      await rm(prefix, { recursive: true, force: true });
+    }
+  });
+
+  it("finds the native installer under the profile's .local\\bin", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-local-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-appdata-"));
+    const bin = `${profile}\\.local\\bin\\claude.exe`;
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: "",
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(null);
+    try {
+      await writeCli(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+    }
+  });
+
+  it("finds claude.exe in a PATH directory", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-path-profile-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-appdata-"));
+    const pathDir = await mkdtemp(join(tmpdir(), "tr-claude-onpath-"));
+    const bin = `${pathDir}\\claude.exe`;
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: pathDir,
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(null);
+    try {
+      await writeCli(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+      await rm(pathDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("findClaudeCli looks again after a miss", () => {
   it("returns null before the CLI exists, then finds it once it appears", async () => {
     const profile = await mkdtemp(join(tmpdir(), "tr-claude-profile-"));
     const bin = `${join(profile, "AppData", "Roaming")}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
-    const restore = withEnv({ APPDATA: undefined, CLAUDE_CLI_PATH: undefined, HOME: undefined, USERPROFILE: profile });
+    /*
+      PATH emptied and the npm prefix injected as "none": since D212 the lookup
+      also asks npm and PATH, and the machine running this suite has a real CLI
+      in both. A miss has to be a miss for every candidate, not just the
+      profile's.
+    */
+    const restore = withEnv({
+      APPDATA: undefined,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: "",
+    });
     resetClaudeCliCache();
+    injectNpmPrefix(null);
     try {
       assert.equal(await findClaudeCli(), null);
       await mkdir(dirname(bin), { recursive: true });
@@ -196,6 +318,7 @@ describe("findClaudeCli looks again after a miss", () => {
       assert.equal(await findClaudeCli(), bin);
     } finally {
       restore();
+      injectNpmPrefix(undefined);
       resetClaudeCliCache();
       await rm(profile, { recursive: true, force: true });
     }
