@@ -419,10 +419,20 @@ function parseRunStats(raw: unknown): RunStats | null {
     const value = Number(record[key]);
     return Number.isFinite(value) ? value : 0;
   };
+  const text = (key: string): string | undefined => {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+  };
   return {
     wallMs: number("wallMs"),
     modelCalls: number("modelCalls"),
     inputTokens: number("inputTokens"),
     outputTokens: number("outputTokens"),
+    // MS-WIRE W1: the skill writer's own facts, carried through unchanged.
+    ...(text("writer") ? { writer: text("writer")! } : {}),
+    ...(text("skillVersion") ? { skillVersion: text("skillVersion")! } : {}),
+    ...(text("model") ? { model: text("model")! } : {}),
+    ...(text("requestedModel") ? { requestedModel: text("requestedModel")! } : {}),
+    ...(text("workDir") ? { workDir: text("workDir")! } : {}),
   };
 }

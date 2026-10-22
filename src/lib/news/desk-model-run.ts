@@ -214,6 +214,12 @@ export type PerformDraftWorkDeps = {
   reportAndDraft?: typeof reportAndDraft;
   /** Fakeable provider boundary for the ordinary Story call-level fallback. */
   chat?: typeof import("./ai.ts").grokChat;
+  /**
+   * Test seam for the meeting writer's agent call (MS-WIRE W1). Production
+   * uses `claudeCodeAgentRun`; a test injects a stub that writes the run's
+   * `story.txt` and `CHECK-FIRST.txt`, so no CLI, login or network is needed.
+   */
+  meetingWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
   /** Test seam for the pre-writer uploaded-document stage. Production uses
    * readStoryDocuments; the seam keeps its provider failure at the same
    * Automatic failover boundary without requiring a live provider in tests. */

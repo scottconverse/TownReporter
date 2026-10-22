@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assignmentPrompt,
+  claimsAndSourcesUrls,
   EDITOR_FILE_MARKER,
   formatTranscript,
   meetingStamp,
@@ -160,5 +161,30 @@ describe("assignmentPrompt", () => {
       assert.ok(prompt.includes(banned), `the prompt names the banned file ${banned}`);
     }
     assert.equal(/TownReporter|deepseek|claude|coordinator/i.test(prompt), false);
+  });
+});
+
+describe("claimsAndSourcesUrls", () => {
+  it("takes the https links from the CLAIMS AND SOURCES block, deduped and in order", () => {
+    const urls = claimsAndSourcesUrls(PROOF);
+    assert.ok(urls.length > 0);
+    assert.deepEqual(urls, [
+      "https://longmont.primegov.com/public/portal",
+      "https://www.youtube.com/watch?v=rsagM9xn28Y",
+    ]);
+    assert.equal(urls.every((url) => url.startsWith("https://")), true);
+  });
+
+  it("reads nothing before the block and drops an http link", () => {
+    const body = [
+      "A link in the story body is not a source line: https://example.com/in-body",
+      "",
+      "CLAIMS AND SOURCES",
+      "",
+      "Claim: A fact.",
+      "Source: a page. https://example.com/record.",
+      "Source: an old page. http://example.com/not-secure",
+    ].join("\n");
+    assert.deepEqual(claimsAndSourcesUrls(body), ["https://example.com/record"]);
   });
 });

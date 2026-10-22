@@ -181,6 +181,19 @@ export type RunStats = {
   modelCalls: number;
   inputTokens: number;
   outputTokens: number;
+  /*
+    The skill writer's own facts (MS-WIRE W1). The retired whole-meeting writer
+    counted model calls and tokens; the skill is one agent run, so what an
+    editor can actually check is which instructions and which model wrote the
+    story, and where the run's files are.
+  */
+  writer?: string;
+  skillVersion?: string;
+  /** The model the run actually used. */
+  model?: string;
+  /** The picker choice, when the run used a different model than the editor picked. */
+  requestedModel?: string;
+  workDir?: string;
 };
 
 export type WholeMeetingResult = {

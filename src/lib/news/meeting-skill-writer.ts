@@ -170,6 +170,30 @@ export function parseSkillStory(text: string): SkillStory | SkillStoryFailure {
 }
 
 /**
+ * The https sources the draft's own CLAIMS AND SOURCES block names.
+ *
+ * The block is part of the published story, and every claim under it carries
+ * its source as a link. Those links are the draft's `source_urls`: what the
+ * desk checks before publishing and what the reader can follow afterwards.
+ * http links are dropped -- the desk cites https only -- and the list is
+ * capped so one chatty run cannot fill the column.
+ */
+export function claimsAndSourcesUrls(body: string, max = 40): string[] {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().toUpperCase() === "CLAIMS AND SOURCES");
+  if (start === -1) return [];
+  const seen = new Set<string>();
+  for (const line of lines.slice(start + 1)) {
+    for (const match of line.matchAll(/https?:\/\/[^\s<>()"']+/gi)) {
+      // A link at the end of a sentence arrives with the period on it.
+      const url = match[0].replace(/[.,;:]+$/, "");
+      if (/^https:\/\//i.test(url)) seen.add(url);
+    }
+  }
+  return [...seen].slice(0, Math.max(0, max));
+}
+
+/**
  * The editor's pre-publication checklist, as plain lines.
  *
  * The agent writes it as sentences, but a bullet or a number can slip in; the

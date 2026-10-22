@@ -65,7 +65,7 @@ import {
 import { applyReadCadence } from "./source-cadence.ts";
 import { checkRate, recordDeskRun, audit } from "./ops";
 import { auditOverrides, checkOverride, type OverrideWarning } from "./override.ts";
-import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
+import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, resolveProvider, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -126,6 +126,7 @@ import {
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { usesWholeMeetingWriter } from "./meeting-whole.ts";
+import { claimsAndSourcesUrls } from "./meeting-skill-writer.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
@@ -295,11 +296,12 @@ import {
   rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
+  type ReportedDraftResult,
 } from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 import { repairDraftStyle } from "./draft-audit-repair.ts";
 import { styleRepairCall } from "./draft-audit.server.ts";
-import { styleAuditSummary, styleRecordFromRepair } from "./draft-audit-record.ts";
+import { styleAuditSummary, styleRecordForSavedText, styleRecordFromRepair } from "./draft-audit-record.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
@@ -308,6 +310,7 @@ import {
   FORCED_FAILOVER_LADDER,
   isAutomaticRungId,
   modelEffort,
+  providerEntry,
   recordedModelEffort,
   type ModelEffort,
   type ProviderOverrides,
@@ -321,6 +324,53 @@ import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
+}
+
+/** Claude picker choices: they may run the meeting writer through the CLI agent. */
+const CLAUDE_MEETING_WRITER_CHOICES = new Set([
+  "claude-fable",
+  "claude-sonnet",
+  "claude-haiku",
+  "claude-frontier",
+]);
+
+/** The one tested meeting-writer model (D202), used when a pick cannot run it. */
+const DEEPSEEK_MEETING_WRITER_MODEL = "deepseek-v4.1-flash:1017-cloud";
+
+/**
+ * Which model -- and which transport -- the meeting writer runs on (D202).
+ *
+ * DeepSeek v4.1 Flash 1017 is the tested model and runs through the CLI agent
+ * pointed at the DeepSeek relay, exactly as `ai.ts` builds that relay for the
+ * rest of the desk. A Claude pick runs through the same agent on its own CLI
+ * model. Any other pick runs on DeepSeek, and `substitutedFrom` is what the run
+ * stats record so the receipt never claims the editor's pick wrote the story.
+ */
+function meetingWriterRuntime(choice: string):
+  | { ok: true; model: string; deepSeek?: { baseUrl: string; apiKey?: string }; substitutedFrom?: string }
+  | { ok: false; error: string } {
+  if (CLAUDE_MEETING_WRITER_CHOICES.has(choice)) {
+    const entry = providerEntry(choice as Parameters<typeof providerEntry>[0]);
+    if (entry?.model) return { ok: true, model: entry.model };
+  }
+  const endpoint = resolveProvider("deepseek-flash");
+  if (!endpoint || !("baseUrl" in endpoint) || !endpoint.baseUrl) {
+    return {
+      ok: false,
+      error:
+        "The meeting writer needs DeepSeek v4.1 Flash 1017, and this desk has no endpoint configured for it.",
+    };
+  }
+  const model = "model" in endpoint && endpoint.model ? endpoint.model : DEEPSEEK_MEETING_WRITER_MODEL;
+  return {
+    ok: true,
+    model,
+    deepSeek: {
+      baseUrl: endpoint.baseUrl,
+      apiKey: endpoint.apiKey === "not-needed" ? undefined : endpoint.apiKey,
+    },
+    ...(choice === "deepseek-flash" ? {} : { substitutedFrom: choice }),
+  };
 }
 
 async function lockManualScanClaim(writeSql: Sql, job: DeskJob): Promise<boolean> {
@@ -4118,25 +4168,24 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     editorialAssignment: prevNotes.editorialAssignment?.text ?? null,
   });
   /*
-    Rewrite from ledger (WR1 phase 2): "Rewrite from ledger" queues an ordinary
-    draft job that carries `reuseLedger` in its receipt, the only free-form
-    column `desk_jobs` has. The worker reads that flag here -- before the run,
-    because a fail-over switch rewrites `result_json` to a receipt of its own
-    partway through -- and, when set, hands the writer the ledger already stored
-    for this lead instead of reading the tape again.
+    MS-WIRE W1: WHICH MODEL THE MEETING WRITER RUNS (D202, Scott B1).
+
+    The writer is an agent with tools -- it reads a whole transcript, fetches
+    the city's packet and runs a script -- so only a model that can use tools
+    and has been tested for it may run it. DeepSeek v4.1 Flash 1017 is the
+    tested model. A Claude pick runs through the same CLI agent with that CLI
+    model. Every other pick (Codex, Gemini, Local model, a custom connection)
+    runs on DeepSeek anyway, and the run stats record what was asked for.
+
+    `reuseLedger` is deliberately NOT read here any more: "Rewrite from ledger"
+    is retired (MS-WIRE W5), and the skill always reads the transcript itself.
   */
-  const reuseLedger = (() => {
-    try {
-      return Boolean((JSON.parse(job.result_json || "{}") as { reuseLedger?: unknown }).reuseLedger);
-    } catch {
-      return false;
-    }
-  })();
-  // The writer runs inside `waitForModel` so the stall ticker keeps working; the
-  // ledger, claims, notes and run stats it produces are carried out through this
-  // closure and persisted against the draft row below, after the INSERT gives
-  // them a draft id.
-  let wholeAccounting: import("./meeting-whole.server.ts").WholeMeetingDraftResult | null = null;
+  const writerRuntime = meetingWriterRuntime(effectiveStoryModelChoice(job.model_choice));
+  // The skill writer runs inside `waitForModel` so the stall ticker keeps
+  // working; what it produced is carried out through this closure and written
+  // against the draft row below, after the INSERT gives it a draft id.
+  let skillDraft: import("./meeting-skill-writer.server.ts").MeetingSkillWriterSuccess | null = null;
+  let skillRunStats: import("./meeting-whole.ts").RunStats | null = null;
   await throwIfJobCancelled(job.id);
   /*
     The single longest await in the app: one call covering report.ts's plan,
@@ -4148,43 +4197,83 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const reported = await waitForModel({
     jobId: job.id,
     label: () => modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
-    run: async () => {
+    run: async (): Promise<ReportedDraftResult> => {
       if (!wholeMeetingLead)
         return runReportWithCheckpoint({
           ...draftInput,
           modelChoice: effectiveStoryModelChoice(job.model_choice),
         });
-      // A rewrite reuses the stored ledger -- the editor's statuses and all --
-      // and skips the fetch and inventory passes. The length guard means an
-      // empty read falls back to the normal full run rather than writing a draft
-      // off a ledger that is not there.
-      const storedLedger = reuseLedger
-        ? await (await import("./meeting-ledger.server.ts")).loadStoredLedgerForRewrite(sql, {
-            newsroomId: owned(context),
-            leadId,
-          })
-        : undefined;
-      const whole = await (await import("./meeting-whole.server.ts")).runWholeMeetingDraft({
+      if (!writerRuntime.ok) return { error: writerRuntime.error };
+      /*
+        THE MEETING WRITER (D200/D201): Scott's report-local-news skill, run as
+        an agent in the draft's own folder. It reads the whole tape and writes
+        the story and its editor file; the parsed result becomes the draft
+        below. A failed run is the job's plain failure -- no model is swapped
+        in behind the editor's back.
+      */
+      const { runMeetingSkillWriter } = await import("./meeting-skill-writer.server.ts");
+      const skill = await runMeetingSkillWriter({
         sql,
         newsroomId: owned(context),
-        userId: context.userId,
-        leadId,
+        jobId: job.id,
         artifactId: selectedMeetingArtifactId ?? Number(lead.meeting_artifact_id),
         videoId: meetingMaterial?.meeting.videoId ?? lead.meeting_video_id ?? "",
-        fallbackTitle: lead.headline,
-        // The draft files under the lead's own section, so the sections trigger
-        // resolves to a section this newsroom actually has.
-        topic: lead.topic ?? "",
-        videoUrl: meetingMaterial?.videoUrl ?? urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
-        modelChoice: effectiveStoryModelChoice(job.model_choice),
-        chat:
-          reportDeps.chat ??
-          (async () => ({ ok: false as const, error: "The writing provider is not available." })),
+        title: meetingMaterial?.meeting.title ?? lead.headline,
+        meetingDate: meetingMaterial?.meeting.date ?? "",
+        model: writerRuntime.model,
+        deepSeek: writerRuntime.deepSeek,
+        reasoningEffort: writerRuntime.deepSeek ? undefined : effortFromJob(job),
         onStage: (stage) => setStage(job.id, stage),
-        reuseLedger: storedLedger?.length ? storedLedger : undefined,
+        run: deps.meetingWriterRun,
       });
-      wholeAccounting = whole;
-      return whole.draft;
+      if (!skill.ok) return { error: skill.error };
+      skillDraft = skill;
+      skillRunStats = {
+        wallMs: skill.durationMs,
+        modelCalls: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        writer: "report-local-news",
+        skillVersion: skill.skillVersion,
+        model: writerRuntime.model,
+        workDir: skill.workDir,
+        ...(writerRuntime.substitutedFrom ? { requestedModel: writerRuntime.substitutedFrom } : {}),
+      };
+      /*
+        The story the skill wrote IS the draft: its first line is the headline,
+        its second the dek, the rest the body (which keeps ALSO AT THE MEETING
+        and CLAIMS AND SOURCES -- both publish). The editor file and the checks
+        are editor-only and are written to their own columns below.
+      */
+      return {
+        headline: skill.headline,
+        dek: skill.dek,
+        body: skill.body,
+        topic: lead.topic ?? "",
+        source_urls: claimsAndSourcesUrls(skill.body),
+        citation_status: "review-required",
+        integrity_notes: "",
+        memory_entities: [],
+        form: "reported",
+        provenance: [],
+        found_note: "",
+        findings: [],
+        unanswered: [],
+        research_memo: {
+          news: "",
+          why_it_matters: "",
+          angle: "",
+          form: "reported",
+          questions: [],
+          unknowns: [],
+          follow: "",
+          captured: [],
+          // The skill read the whole tape, so citations are derived against
+          // every candidate the meeting stored, not against one focus.
+          meetingEvidenceWide: true,
+        },
+        claims: [],
+      };
     },
   });
   if ("error" in reported) throw new Error(reported.error);
@@ -4214,22 +4303,32 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     Nothing here publishes and nothing here is a verdict. What is left over
     becomes a review reason and a list the editor can read and ignore.
   */
-  const style = await repairDraftStyle({
-    headline: reported.headline,
-    dek: reported.dek,
-    body: reported.body,
-    form: String(reported.form ?? ""),
-    repair: styleRepairCall({
-      /*
-        Both paths above wire this. The fallback keeps the type honest and turns
-        an unwired chat into a plain refusal -- the audit still runs, the draft
-        is untouched, and the note says so -- rather than a crash mid-draft.
-      */
-      chat:
-        reportDeps.chat ??
-        (async () => ({ ok: false, error: "The writing provider is not available." })),
-    }),
-  });
+  /*
+    MS-WIRE W1: the meeting skill's body is NOT sent to `repairDraftStyle`.
+    The skill already ran its own audit (scripts/audit.py --meeting) and its
+    prose is the record the run's ledger and claims describe; a model rewrite
+    here would reword a body those citations were not derived from. The text is
+    still MEASURED -- `styleRecordForSavedText` runs the same code-only audit --
+    so the Checks pane keeps its style findings, without a rewrite.
+  */
+  const style = skillDraft
+    ? null
+    : await repairDraftStyle({
+        headline: reported.headline,
+        dek: reported.dek,
+        body: reported.body,
+        form: String(reported.form ?? ""),
+        repair: styleRepairCall({
+          /*
+            Both paths above wire this. The fallback keeps the type honest and turns
+            an unwired chat into a plain refusal -- the audit still runs, the draft
+            is untouched, and the note says so -- rather than a crash mid-draft.
+          */
+          chat:
+            reportDeps.chat ??
+            (async () => ({ ok: false, error: "The writing provider is not available." })),
+        }),
+      });
   /*
     THE FINAL DRAFT'S WRITE DOOR, and the checkpoint's is the same one further
     up (`reportDeps.onWriterDraft`).
@@ -4251,8 +4350,19 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     `draftBody` is cleaned before the meeting-citation derivation rather than
     after, so the citations describe the body actually being stored.
   */
-  const draftBody = storableText(style.body);
-  const styleRecord = styleRecordFromRepair(style, { checkedAt: new Date().toISOString() });
+  const draftBody = storableText(skillDraft ? reported.body : style!.body);
+  const styleRecord = style
+    ? styleRecordFromRepair(style, { checkedAt: new Date().toISOString() })
+    : /* The skill's body, measured and not rewritten (MS-WIRE W1). */
+      styleRecordForSavedText(
+        {
+          headline: reported.headline,
+          dek: reported.dek,
+          body: draftBody,
+          form: String(reported.form ?? ""),
+        },
+        new Date().toISOString(),
+      );
 
   // Discovery exclusions are not citation rules: a watched page or a root
   // dashboard can be the substantive primary record. Preserve the reporter's
@@ -4418,24 +4528,22 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     if (savedDraft) {
       let transcriptLinkCreated = false;
       /*
-        WR1'S ACCOUNTING, AGAINST THE ROW THAT NOW EXISTS.
+        THE MEETING WRITER'S EDITOR-ONLY RECORD (MS-WIRE W1).
 
-        The ledger rows, the claim checks, the (uncapped) meeting notes and the
-        run stats are written here rather than in the report pass because they
-        need a draft id and the id is the INSERT's `returning`. Same transaction
-        as the INSERT, so a ledger that cannot be written fails the draft rather
-        than leaving an unaccounted one on the desk.
+        The editor file, the items the writer asks a person to check before
+        publishing, and the run's facts are written against the row the INSERT
+        just made -- in the same transaction, so a draft can never be saved
+        without the record that says how it was written. The item lines are also
+        what the publish warning counts (see `meeting-editor-checks`).
       */
-      if (wholeAccounting) {
-        await (await import("./meeting-whole.server.ts")).persistWholeMeetingAccounting(sql, {
-          newsroomId: owned(context),
-          draftId: Number(savedDraft.id),
-          leadId,
-          ledger: wholeAccounting.ledger,
-          claims: wholeAccounting.claims,
-          meetingNotes: wholeAccounting.meetingNotes,
-          runStats: wholeAccounting.runStats,
-        });
+      if (skillDraft) {
+        await sql`
+          update drafts set
+            meeting_notes = ${storableText(skillDraft.editorFile)},
+            editor_checks = ${JSON.stringify(sanitizeJsonLeaves(skillDraft.checks))}::jsonb,
+            run_stats = ${JSON.stringify(sanitizeJsonLeaves(skillRunStats))}::jsonb
+          where id = ${Number(savedDraft.id)} and newsroom_id = ${owned(context)}
+        `;
       }
       /*
         Link a meeting draft to the transcript it drew from.
