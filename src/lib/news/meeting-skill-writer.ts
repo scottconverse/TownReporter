@@ -89,7 +89,7 @@ export function assignmentPrompt(input: {
     "## Output",
     "- Write the full deliverable (both blocks, exactly as the skill lays them out) to story.txt in your working folder. Keep draft.txt for the script runs.",
     "- Write the script's final run output to audit-final.txt.",
-    "- Write CHECK-FIRST.txt: one line per item the editor must check before publishing, the same kind of items the skill flags for the editor (a vote or a quote that rests only on captions, a number read off a screen, a disputed figure, a sentence with legal risk). Plain sentences, one per line. No bullets, no numbering.",
+    "- Write CHECK-FIRST.txt: AT MOST 3 lines, the items an editor must check before publishing that would do the most harm if wrong, most harmful first: a sentence with legal risk, then the lead's central fact or number, then a vote or a quote that rests only on captions. Everything else you flagged stays in the EDITOR FILE, not here. Plain sentences, one per line. No bullets, no numbering. If nothing rises to that level, write an empty file.",
     "- Write RUN-NOTES.md: which records you opened (URLs), what you could not get and why, the final script result line, and your ranking record line. Last line: RUN-DONE.",
     "",
     "## Limits",
@@ -198,7 +198,9 @@ export function claimsAndSourcesUrls(body: string, max = 40): string[] {
  *
  * The agent writes it as sentences, but a bullet or a number can slip in; the
  * story page shows these as a list, so the mark is stripped and the sentence
- * kept. At most 30 survive -- a checklist nobody can read is not a check.
+ * kept. At most 3 survive, the first 3 in the file (Scott's rule, Oct 7 and
+ * D204: an editor checks 1 to 3 things, not thirty). The agent already ranks
+ * them most harmful first; the app holds the cap even if it sends more.
  */
 export function parseCheckFirst(text: string): string[] {
   return String(text ?? "")
@@ -206,5 +208,5 @@ export function parseCheckFirst(text: string): string[] {
     .map((line) => line.trim())
     .map((line) => line.replace(/^(?:[-*•·–—]+|\d+[.)])\s*/, "").trim())
     .filter(Boolean)
-    .slice(0, 30);
+    .slice(0, 3);
 }

@@ -67,7 +67,7 @@ describe("parseSkillStory", () => {
 });
 
 describe("parseCheckFirst", () => {
-  it("keeps plain sentences, strips list marks, and stops at 30", () => {
+  it("keeps plain sentences, strips list marks, and keeps at most 3", () => {
     const text = [
       "Check the $36.3 million figure against the packet.",
       "- The mural square footage.",
@@ -75,13 +75,17 @@ describe("parseCheckFirst", () => {
       "",
       "1. The Nov. 3 second reading.",
     ].join("\n");
+    // Three survive; the fourth line is dropped, not merged or reordered.
     assert.deepEqual(parseCheckFirst(text), [
       "Check the $36.3 million figure against the packet.",
       "The mural square footage.",
       "The 5 to 2 vote",
-      "The Nov. 3 second reading.",
     ]);
-    assert.equal(parseCheckFirst(Array.from({ length: 40 }, (_, index) => `Item ${index}`).join("\n")).length, 30);
+    // Scott's rule (Oct 7, D204): an editor checks 1 to 3 things, not thirty.
+    assert.deepEqual(
+      parseCheckFirst(Array.from({ length: 40 }, (_, index) => `Item ${index}`).join("\n")),
+      ["Item 0", "Item 1", "Item 2"],
+    );
     assert.deepEqual(parseCheckFirst(""), []);
   });
 });
@@ -152,6 +156,15 @@ describe("assignmentPrompt", () => {
     assert.match(prompt, /CHECK-FIRST\.txt/);
     assert.match(prompt, /RUN-NOTES\.md/);
     assert.match(prompt, /Last line: RUN-DONE/);
+  });
+
+  it("asks for at most 3 CHECK-FIRST items, most harmful first", () => {
+    assert.match(
+      prompt,
+      /Write CHECK-FIRST\.txt: AT MOST 3 lines, the items an editor must check before publishing that would do the most harm if wrong, most harmful first/,
+    );
+    assert.match(prompt, /Everything else you flagged stays in the EDITOR FILE, not here\./);
+    assert.match(prompt, /If nothing rises to that level, write an empty file\./);
   });
 
   it("carries the limits, and none of this app's internals", () => {
