@@ -77,6 +77,12 @@ type PickerControls<T extends StoryModelChoice> = {
   layout?: "stacked" | "inline";
   effort?: ModelEffort | null;
   onEffortChange?: (value: ModelEffort | null) => void;
+  /**
+   * MS-WIRE W4: this lead is drafted by the meeting writer, which needs a
+   * tool-using agent. Draws one line naming the tested model; the run itself
+   * warns (and, on "Run anyway", redirects) in the Draft press.
+   */
+  meetingWriter?: boolean;
 };
 
 type Props =
@@ -639,6 +645,11 @@ export function ModelPicker(props: Props) {
       <span id={helpId} className="model-picker-help">
         {help}
       </span>
+      {props.meetingWriter ? (
+        <span className="model-picker-help">
+          Meeting writer: tested with DeepSeek v4.1 Flash 1017.
+        </span>
+      ) : null}
       {props.onEffortChange ? (
         <div
           className={["model-picker", props.layout].filter(Boolean).join(" ")}

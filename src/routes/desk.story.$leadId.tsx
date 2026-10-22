@@ -34,6 +34,7 @@ import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
 import { transcriptSourceName, transcriptToPickFromFailure } from "@/lib/news/meeting-transcript-alignment-copy";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
+import { usesWholeMeetingWriter } from "@/lib/news/meeting-whole";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import {
@@ -575,6 +576,20 @@ function StoryPage() {
     },
   });
 
+  /*
+    MS-WIRE W4: does this lead's Draft go to the meeting writer? The picker
+    says so beside the help line, and the Draft press warns about an untested
+    or unusable model. Same rule as the server (`usesWholeMeetingWriter`), so
+    the note and the warning cannot disagree about which leads are meetings.
+  */
+  const meetingWriterLead = usesWholeMeetingWriter({
+    hasMeetingMaterial: Boolean(
+      data?.lead.meeting_lead_purpose === "transcript-story" && data?.lead.meeting_video_id,
+    ),
+    editorialAssignment: data
+      ? (parseNotes(data.lead.notes_json).editorialAssignment?.text ?? null)
+      : null,
+  });
   const meetingTranscriptChoices = data?.meetingTranscriptChoices ?? [];
   const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence({ ...state, revision: data?.evidenceToken }), [data?.evidenceToken]);
   const selectedMeetingArtifactId = selectedMeetingTranscriptArtifactId
@@ -3433,6 +3448,7 @@ function StoryPage() {
                   effort={modelEffort}
                   onEffortChange={setModelEffort}
                   disabled={waiting || reconcileActive || savePending}
+                  meetingWriter={meetingWriterLead}
                   compact
                 />
                 {modelChoice === "auto" ? (
@@ -3871,7 +3887,7 @@ function StoryPage() {
       </div> : null}
       {draftRunningShown ? <section className="astra-model-research">
         <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
-        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} compact />
+        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} meetingWriter={meetingWriterLead} compact />
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
       </section> : null}
       <div className="work-bar astra-story-actions">

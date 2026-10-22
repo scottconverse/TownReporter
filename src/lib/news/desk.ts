@@ -4239,6 +4239,29 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       });
       if (!skill.ok) return { error: skill.error };
       skillDraft = skill;
+      /*
+        What the editor picked, read off the job's own receipt (MS-WIRE W4). A
+        pick the writer cannot run is redirected to DeepSeek at commit time, so
+        the job row no longer says what was asked for -- the receipt does. Only
+        a DeepSeek run can be a substitution: a Claude pick runs as itself.
+      */
+      const requestedRuntime = (() => {
+        try {
+          const value = (JSON.parse(job.result_json || "{}") as { requestedRuntime?: unknown })
+            .requestedRuntime;
+          return typeof value === "string" ? value : "";
+        } catch {
+          return "";
+        }
+      })();
+      const substitutedFrom =
+        writerRuntime.substitutedFrom ??
+        (writerRuntime.deepSeek &&
+        requestedRuntime &&
+        requestedRuntime !== "deepseek-flash" &&
+        requestedRuntime !== "auto"
+          ? requestedRuntime
+          : undefined);
       skillRunStats = {
         wallMs: skill.durationMs,
         modelCalls: 1,
@@ -4248,7 +4271,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         skillVersion: skill.skillVersion,
         model: writerRuntime.model,
         workDir: skill.workDir,
-        ...(writerRuntime.substitutedFrom ? { requestedModel: writerRuntime.substitutedFrom } : {}),
+        ...(substitutedFrom ? { requestedModel: substitutedFrom } : {}),
       };
       /*
         The story the skill wrote IS the draft: its first line is the headline,

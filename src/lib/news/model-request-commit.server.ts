@@ -20,6 +20,7 @@ import {
   type StoryModelChoice,
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
+import { usesWholeMeetingWriter } from "./meeting-whole.ts";
 import { recordedModelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
@@ -194,6 +195,14 @@ async function prepareStoryWriter(
   return { ok: true as const, preflight, customModelLabel, effectiveChoice };
 }
 
+/** Claude picker choices that may run the meeting writer, but are untested for it. */
+const MEETING_WRITER_CLAUDE_CHOICES = new Set([
+  "claude-fable",
+  "claude-sonnet",
+  "claude-haiku",
+  "claude-frontier",
+]);
+
 export type StoryDraftCommitDeps = {
   /** Trusted server preflight for a composite file-and-draft action. */
   ratePreflight?: boolean;
@@ -232,6 +241,13 @@ export async function commitStoryDraftForAuthenticatedEditor(
 ) {
   const refusal = await paperSetupRefusalFor(input.context, "draft this story", input.override);
   if (refusal) return refusal;
+  /*
+    MS-WIRE W4: what the editor actually picked, before the saved assignment
+    rewrites it. "Automatic" is a pick in its own right -- and for the meeting
+    writer Automatic means DeepSeek v4.1 Flash 1017 (D202), whatever the
+    general Story assignment says.
+  */
+  const requestedChoice = input.modelChoice;
   const assignment = await resolveRequestedJobModel(
     input.context.newsroomId,
     "story-draft",
@@ -287,6 +303,67 @@ export async function commitStoryDraftForAuthenticatedEditor(
     if (warning) return commitWarning(warning);
     meetingArtifactId = input.meetingArtifactId;
     meetingVideoId = artifact.video_id;
+  }
+
+  /*
+    MS-WIRE W4 (D202, Scott B1): WHICH MODEL MAY RUN THE MEETING WRITER.
+
+    A whole-meeting lead is drafted by the report-local-news skill run as an
+    agent with tools. Two things follow, and both are told to the editor BEFORE
+    anything is queued:
+
+      - a Claude pick is a tool-using CLI agent but has not been tested for
+        this writer, so it warns and, on "Run anyway", runs on that CLI model;
+      - Codex, Gemini, Local model and a custom connection cannot drive the
+        writer at all, so they warn and, on "Run anyway", the run uses DeepSeek
+        v4.1 Flash 1017 -- the tested model -- and both the job's failover note
+        and the run stats say so.
+
+    Automatic and DeepSeek itself are the tested path and warn about nothing.
+    This is a WARNING, never a wall: an editor who reads it can go ahead.
+  */
+  const editorialAssignment = parseNotes(leads[0].notes_json).editorialAssignment?.text ?? null;
+  const wholeMeetingLead = usesWholeMeetingWriter({
+    hasMeetingMaterial: Boolean(
+      leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id,
+    ),
+    editorialAssignment,
+  });
+  let writerRedirect: { requested: StoryModelChoice; automatic?: boolean } | null = null;
+  if (wholeMeetingLead) {
+    // Automatic IS the tested path for this writer: it means DeepSeek here.
+    const writerTarget = requestedChoice === "auto" ? "deepseek-flash" : requestedChoice;
+    if (MEETING_WRITER_CLAUDE_CHOICES.has(writerTarget)) {
+      const warning = await editorWarning(
+        input.context,
+        input.override,
+        "meeting-writer-model-unproven",
+        "This model has not been tested with the meeting writer yet. DeepSeek v4.1 Flash 1017 has.",
+        { kind: "lead", id: input.leadId },
+      );
+      if (warning) return commitWarning(warning);
+    } else if (writerTarget !== "deepseek-flash") {
+      const warning = await editorWarning(
+        input.context,
+        input.override,
+        "meeting-writer-model-unproven",
+        "This model cannot run the meeting writer, which needs a tool-using agent. Run anyway uses DeepSeek v4.1 Flash 1017.",
+        { kind: "lead", id: input.leadId },
+      );
+      if (warning) return commitWarning(warning);
+      // The editor read the sentence and pressed "Run anyway": the run uses
+      // the tested model, and `writerRedirect` keeps the pick for the receipt.
+      writerRedirect = { requested: writerTarget };
+      input = { ...input, modelChoice: "deepseek-flash", modelEffort: null };
+    } else if (input.modelChoice !== "deepseek-flash") {
+      /*
+        Automatic reached some other rung (a saved Story assignment) -- e.g.
+        Codex. The editor picked nothing wrong, so there is no warning to
+        read; the run still uses the tested model, and the job records it.
+      */
+      writerRedirect = { requested: requestedChoice, automatic: true };
+      input = { ...input, modelChoice: "deepseek-flash", modelEffort: null };
+    }
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
@@ -347,7 +424,9 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
     resultJson: JSON.stringify({
       ...initialModelRuntimeReceipt({
-        requestedRuntime: input.modelChoice,
+        // MS-WIRE W4: the receipt names the model the editor PICKED even when
+        // the meeting writer runs on DeepSeek instead (see `writerRedirect`).
+        requestedRuntime: writerRedirect?.requested ?? input.modelChoice,
         requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
@@ -367,6 +446,19 @@ export async function commitStoryDraftForAuthenticatedEditor(
   if (preflight.switchReceipt) {
     await setJobStage(job.id, preflight.switchReceipt.stage);
     await setJobFailoverNote(job.id, preflight.switchReceipt.note);
+  }
+  /*
+    MS-WIRE W4: a pick that cannot run the meeting writer leaves a durable
+    record, not just a dialog the editor clicked past. The stage line is what
+    the card shows while the run works; the failover note is what the Done card
+    keeps saying afterwards.
+  */
+  if (writerRedirect) {
+    const sentence = writerRedirect.automatic
+      ? "Meeting writer: Automatic uses DeepSeek v4.1 Flash 1017 here."
+      : `Meeting writer: ${modelChoiceLabel(writerRedirect.requested)} cannot run it, so this run uses DeepSeek v4.1 Flash 1017.`;
+    await setJobStage(job.id, sentence);
+    await setJobFailoverNote(job.id, sentence);
   }
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice || (job.research_scope ?? "public") !== researchScope) {

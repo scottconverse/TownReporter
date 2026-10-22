@@ -1097,3 +1097,139 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(enqueueCalls, 0);
   });
 });
+
+/*
+  MS-WIRE W4 (D202, Scott B1): the meeting writer needs a tool-using agent, and
+  only DeepSeek v4.1 Flash 1017 has been tested with it. A Claude pick warns
+  and, on "Run anyway", runs as itself; every other pick warns and, on "Run
+  anyway", runs on DeepSeek, with the substitution recorded on the job.
+*/
+describe("MS-WIRE: the meeting writer's model warning", () => {
+  async function meetingLead(user: string) {
+    const sql = await getSql();
+    await ensureJobsSchema();
+    const videoId = `ms${user.replace(/[^a-z0-9]/gi, "")}`.slice(0, 11);
+    const [artifact] = await sql.query<{ id: number }>(
+      `insert into meeting_transcript_artifacts
+         (newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
+       values (1,$1,'fixture.vtt','vtt',$2,'yt-dlp-captions','transcript-only') returning id`,
+      [videoId, `sha-${videoId}`],
+    );
+    const [lead] = await sql.query<{ id: number }>(
+      `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,
+                         meeting_video_id,meeting_artifact_id,meeting_lead_purpose)
+       values ($1,1,$2,'Why','council','new','[]','',1,'{}',$3,$4,'transcript-story')
+       returning id`,
+      [user, `${user} meeting lead`, videoId, artifact.id],
+    );
+    return lead.id;
+  }
+  const ready = (choice?: string) =>
+    choice === "deepseek-flash" || choice === "auto"
+      ? { ok: true as const, choice: "deepseek-flash" as const, label: "DeepSeek v4.1 Flash 1017" }
+      : { ok: true as const, choice: choice as never, label: String(choice) };
+
+  it("warns for a Claude pick, then queues it as itself when the editor runs it anyway", async () => {
+    const leadId = await meetingLead("mswire-claude");
+    const input = {
+      context: { userId: "mswire-claude", newsroomId: 1 },
+      leadId,
+      modelChoice: "claude-fable" as const,
+    };
+    const deps = {
+      probeProvider: async (choice?: string) => ready(choice),
+      enqueueJob: (options: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...options, kick: false }),
+    };
+    const warned = await commitStoryDraftForAuthenticatedEditor(input, deps);
+    assert.equal(warned.ok, false);
+    if (warned.ok) assert.fail("a Claude pick must warn before the writer runs");
+    assert.equal(warned.warning.key, "meeting-writer-model-unproven");
+    assert.equal(
+      warned.warning.sentence,
+      "This model has not been tested with the meeting writer yet. DeepSeek v4.1 Flash 1017 has.",
+    );
+    const sql = await getSql();
+    const [noJob] = await sql.query<{ count: number }>(
+      "select count(*)::int as count from desk_jobs where user_id='mswire-claude'",
+    );
+    assert.equal(Number(noJob.count), 0, "nothing is queued before the editor decides");
+
+    const queued = await commitStoryDraftForAuthenticatedEditor(
+      { ...input, override: ["meeting-writer-model-unproven"] },
+      deps,
+    );
+    assert.equal(queued.ok, true);
+    if (!queued.ok) assert.fail("Run anyway queues the Claude run");
+    const [job] = await sql.query<{ model_choice: string; result_json: string }>(
+      "select model_choice,result_json from desk_jobs where id=$1",
+      [queued.jobId],
+    );
+    assert.equal(job.model_choice, "claude-fable");
+    assert.equal(JSON.parse(job.result_json).requestedRuntime, "claude-fable");
+  });
+
+  it("warns for a Codex pick, and Run anyway queues DeepSeek and says so on the job", async () => {
+    const leadId = await meetingLead("mswire-codex");
+    const input = {
+      context: { userId: "mswire-codex", newsroomId: 1 },
+      leadId,
+      modelChoice: "codex-balanced" as const,
+    };
+    const deps = {
+      probeProvider: async (choice?: string) => ready(choice),
+      enqueueJob: (options: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...options, kick: false }),
+    };
+    const warned = await commitStoryDraftForAuthenticatedEditor(input, deps);
+    assert.equal(warned.ok, false);
+    if (warned.ok) assert.fail("Codex cannot run the meeting writer");
+    assert.equal(warned.warning.key, "meeting-writer-model-unproven");
+    assert.equal(
+      warned.warning.sentence,
+      "This model cannot run the meeting writer, which needs a tool-using agent. Run anyway uses DeepSeek v4.1 Flash 1017.",
+    );
+
+    const queued = await commitStoryDraftForAuthenticatedEditor(
+      { ...input, override: ["meeting-writer-model-unproven"] },
+      deps,
+    );
+    assert.equal(queued.ok, true);
+    if (!queued.ok) assert.fail("Run anyway queues the tested model");
+    const sql = await getSql();
+    const [job] = await sql.query<{ model_choice: string; result_json: string; failover_note: string }>(
+      "select model_choice,result_json,failover_note from desk_jobs where id=$1",
+      [queued.jobId],
+    );
+    assert.equal(job.model_choice, "deepseek-flash", "the run uses the tested model");
+    const receipt = JSON.parse(job.result_json);
+    assert.equal(receipt.requestedRuntime, "codex-balanced", "the receipt still names what was picked");
+    assert.equal(receipt.actualRuntime, "deepseek-flash");
+    assert.match(job.failover_note, /DeepSeek v4\.1 Flash 1017/);
+  });
+
+  it("warns about nothing for DeepSeek or Automatic", async () => {
+    for (const [user, choice] of [
+      ["mswire-deepseek", "deepseek-flash"],
+      ["mswire-auto", "auto"],
+    ] as const) {
+      const leadId = await meetingLead(user);
+      const result = await commitStoryDraftForAuthenticatedEditor(
+        { context: { userId: user, newsroomId: 1 }, leadId, modelChoice: choice },
+        {
+          probeProvider: async (picked?: string) => ready(picked),
+          enqueueJob: (options: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...options, kick: false }),
+        },
+      );
+      assert.equal(result.ok, true, `${choice} is the tested path: ${JSON.stringify(result)}`);
+      if (!result.ok) continue;
+      const sql = await getSql();
+      const [job] = await sql.query<{ model_choice: string; result_json: string; failover_note: string }>(
+        "select model_choice,result_json,failover_note from desk_jobs where id=$1",
+        [result.jobId],
+      );
+      // Automatic means DeepSeek for this writer, whatever the Story
+      // assignment says; the job and its receipt say so.
+      assert.equal(job.model_choice, "deepseek-flash");
+      assert.equal(JSON.parse(job.result_json).actualRuntime, "deepseek-flash");
+    }
+  });
+});
