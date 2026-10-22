@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { copyDatabaseName, isCopyOf, parseCopyStamp } from "../ops/lib-promote-db.mjs";
+import { copyDatabaseName, isCopyOf, parseCopyStamp, prerolloutPruneList } from "../ops/lib-promote-db.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -468,7 +468,7 @@ test("-WhatIf lets only the READ-ONLY database commands carry the live-promote f
       "$base = @{ PROMOTE_DB_LIVE_PROMOTE = '' }",
       "$rows = @()",
       "$WhatIfPreference = $true",
-      "foreach ($c in 'names','preflight','state','copy','wait-for-zero','swap-back','rollback') {",
+      "foreach ($c in 'names','preflight','state','copy','wait-for-zero','swap-back','rollback','prune') {",
       "  $e = Get-PromoteDbCommandEnvironment -Command $c -Environment $base",
       "  $rows += \"whatif:$c=$($e['PROMOTE_DB_LIVE_PROMOTE'])\"",
       "}",
@@ -492,7 +492,7 @@ test("-WhatIf lets only the READ-ONLY database commands carry the live-promote f
     for (const c of ["names", "preflight", "state"]) {
       assert.ok(out.includes(`whatif:${c}=1`), `-WhatIf must let the read-only ${c} carry the flag: ${out}`);
     }
-    for (const c of ["copy", "wait-for-zero", "swap-back", "rollback"]) {
+    for (const c of ["copy", "wait-for-zero", "swap-back", "rollback", "prune"]) {
       assert.ok(out.includes(`whatif:${c}=;`), `-WhatIf must NOT give ${c} the flag (a dry run may not touch 5433): ${out}`);
     }
     for (const c of ["names", "copy", "swap-back", "rollback"]) {
@@ -511,7 +511,7 @@ test("a 5433 URL without the flag is refused by copy, swap-back and rollback; -W
   // even if the guard were gone.
   const { runCommand } = await import("../ops/lib-promote-db.mjs");
   const url = "postgres://u:p@db.invalid:5433/townreporter";
-  for (const command of ["copy", "wait-for-zero", "swap-back", "rollback"]) {
+  for (const command of ["copy", "wait-for-zero", "swap-back", "rollback", "prune"]) {
     const answer = await runCommand(command, { adminUrl: url, databaseUrl: url, livePromote: false });
     assert.equal(answer.ok, false, `${command} ran on a 5433 URL without the flag`);
     assert.match(answer.refusal, /port 5433/, `${command} was refused for some other reason: ${answer.refusal}`);
@@ -2574,6 +2574,64 @@ test("a resumed run takes the copy's freshness from the copy step, not from the 
     assert.match(result, /staleNext=dbcopy$/, `the stale log did not parse: ${result}`);
   } finally {
     await cleanup(install);
+  }
+});
+
+/**
+ * D216: every promote leaves one more copy of the database, and nothing used
+ * to remove them -- fifty had piled up. After a good promote the `prune`
+ * command drops this database's copies except the newest three, always
+ * keeping the copy that run made, and touches nothing else.
+ *
+ * This is the CHOOSING half, as a pure function, and it is the only place in
+ * the tree that decides a database may be dropped -- so the names that must
+ * never be dropped are spelled out here rather than left to the SQL.
+ */
+test("the prune keeps the newest three copies by stamp, and never anything that is not this database's copy", () => {
+  // Fifty copies of the paper's database, one per second.
+  const stamp = (i) => `202610010000${String(i).padStart(2, "0")}`;
+  const copies = Array.from({ length: 50 }, (_, i) => copyDatabaseName("townreporter", stamp(i)));
+  const untouched = [
+    // The live database, a failed-rollout database, another paper's copy, and
+    // two names that look like copies but are not (no stamp, wrong length).
+    "townreporter",
+    "townreporter_failed_20261021221439",
+    "otherpaper_prerollout_20261021221439",
+    "townreporter_prerollout_bad",
+    "townreporter_prerollout_2026102122143",
+    "townreporter_prerollout_202610212214399",
+  ];
+
+  const plan = prerolloutPruneList([...copies, ...untouched], "townreporter");
+  assert.equal(plan.keep.length, 3, `50 copies must leave 3 kept, not ${plan.keep.length}`);
+  assert.equal(plan.drop.length, 47, `50 copies must drop 47, not ${plan.drop.length}`);
+  assert.deepEqual(plan.keep, copies.slice(47), "the three kept are not the newest by stamp");
+  assert.deepEqual(plan.drop, copies.slice(0, 47), "the 47 dropped are not the oldest, in stamp order");
+  for (const name of untouched) {
+    assert.ok(!plan.drop.includes(name), `${name} must never be in the drop list`);
+    assert.ok(!plan.keep.includes(name), `${name} is not a copy, so it is not in the keep list either`);
+  }
+
+  // The copy this run made is kept even when it is older than the newest
+  // three -- a clock that went backwards must not delete the one thing this
+  // promote can roll back to.
+  const older = copies[4];
+  const forThisRun = prerolloutPruneList([...copies, ...untouched], "townreporter", 3, older);
+  assert.deepEqual(forThisRun.keep, [older, ...copies.slice(47)], "this run's older copy was not kept");
+  assert.equal(forThisRun.drop.length, 46);
+  assert.ok(!forThisRun.drop.includes(older), "this run's copy is in the drop list");
+
+  // A current copy that is not on the server changes nothing: there is
+  // nothing to keep, and the newest three are still the newest three.
+  const gone = prerolloutPruneList([...copies], "townreporter", 3, "townreporter_prerollout_19990101000000");
+  assert.deepEqual(gone.keep, copies.slice(47));
+  assert.equal(gone.drop.length, 47);
+
+  // Fewer than keep + 1 copies: nothing is dropped at all.
+  for (const count of [0, 1, 3]) {
+    const small = prerolloutPruneList(copies.slice(0, count), "townreporter");
+    assert.deepEqual(small.drop, [], `dropped a copy when only ${count} exist`);
+    assert.equal(small.keep.length, count, `kept the wrong number when only ${count} exist`);
   }
 });
 

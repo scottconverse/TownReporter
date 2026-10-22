@@ -1634,11 +1634,37 @@ if ($fail.Count -gt 0) {
   Show-RollbackOffer $rollbackCommand $dbCopy
   Die "Promotion finished but the paper is not healthy. The backup is at $backupNote" '' "The paper is up but something about it is wrong -- read the checks above and logs\townreporter.log. The backup is at $backupNote"
 }
+<#
+  D216: the pre-rollout copies piled up -- every promote made one and nothing
+  removed them, and fifty had collected by October 2026. The failure path
+  above has already left, so the paper is up and the checks passed: drop this
+  database's copies except the newest three, always keeping the copy this run
+  made.
+
+  NOTHING HERE MAY CHANGE THE PROMOTE'S RESULT. A refusal, a drop that another
+  session blocks, a connection that will not open -- each is one warning in
+  the log and nothing else. A -WhatIf run prunes nothing, and a run with no
+  copy has nothing to prune.
+#>
+if ($dbCopy -and -not $WhatIfPreference) {
+  try {
+    $pruned = Invoke-PromoteDatabasePrune -Log $log -App $app -Database $dbName -CurrentCopy $dbCopy -Stamp $dbStamp -Failed $dbFailed -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
+    if ($pruned.Ok) {
+      foreach ($name in @($pruned.Data.dropped)) { Write-PromoteLog $log "prune: dropped $name" }
+      foreach ($warning in @($pruned.Data.warnings)) { Write-PromoteLog $log "prune: warning -- $warning" }
+      Write-PromoteLog $log "$($pruned.Data.summary)"
+    } else {
+      Write-PromoteLog $log "prune: kept the copies and warned instead -- $($pruned.Failure)"
+    }
+  } catch {
+    Write-PromoteLog $log "prune: kept the copies and warned instead -- $($_.Exception.Message)"
+  }
+}
 Write-PromoteLog $log "done: promoted. The paper is up and the archive is intact."
 Write-PromoteLog $log "backup kept at $backupNote"
 if ($dbCopy) {
-  Write-PromoteLog $log "the database copy is kept at $dbCopy. Nothing deletes it; remove it by hand when you are sure this release is good."
-  Show "  Database copy kept at $dbCopy (nothing deletes it automatically)."
+  Write-PromoteLog $log "the database copy is kept at $dbCopy; this run's copy is never pruned, and older copies beyond the newest three are pruned after a good promote."
+  Show "  Database copy kept at $dbCopy (this run's copy is never pruned; older ones beyond the newest three are removed after a good promote)."
   Write-PromoteLog $log "to put the database back by hand (this loses everything written since the new app started): $rollbackCommand"
 }
 Show "  Promoted. The paper is up and the archive is intact." Green

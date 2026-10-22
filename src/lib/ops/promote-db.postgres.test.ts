@@ -1286,4 +1286,47 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.equal(viaCommand.ok, true, `the copy command refused: ${viaCommand.refusal}`);
     assert.ok((await databaseNames()).includes(copyDatabaseName(live, stamp)));
   });
+
+  it("prunes the older pre-rollout copies, keeping the newest three and this run's copy", async () => {
+    /*
+      D216. Every promote leaves one more copy and nothing used to remove
+      them, so fifty piled up. The `prune` command, run once after a good
+      promote, keeps the newest three by stamp and drops the rest -- this
+      run's copy always included -- and nothing else.
+    */
+    const live = scratchName("prune");
+    await createDatabase(live);
+    const base = Date.parse("2026-10-21T22:14:30Z");
+    const stamps = Array.from({ length: 5 }, (_, i) => formatStamp(new Date(base + i * 1000)));
+    for (const copyStamp of stamps) await createDatabase(copyDatabaseName(live, copyStamp));
+    // Never touched: the failed-rollout database and another paper's copy.
+    const failed = failedDatabaseName(live, stamps[0]);
+    const foreign = `otherpaper_prerollout_${stamps[0]}`;
+    await createDatabase(failed);
+    await createDatabase(foreign);
+
+    const env = {
+      ...process.env,
+      PROMOTE_DB_ADMIN_URL: adminUrl,
+      PROMOTE_DB_DATABASE: live,
+      PROMOTE_DB_COPY: copyDatabaseName(live, stamps[4]),
+      PROMOTE_DB_STAMP: stamps[4],
+      PROMOTE_DB_TIMEOUT_SECONDS: "60",
+    };
+    const pruned = await runCommand("prune", readConfig(env as NodeJS.ProcessEnv));
+    assert.equal(pruned.ok, true, `the prune refused: ${pruned.refusal || pruned.error}`);
+    assert.deepEqual(pruned.dropped, [copyDatabaseName(live, stamps[0]), copyDatabaseName(live, stamps[1])]);
+    assert.match(String(pruned.summary), /^prune: kept .*; dropped 2$/);
+
+    const names = await databaseNames();
+    const left = names.filter((name) => isCopyOf(name, live)).sort();
+    assert.deepEqual(
+      left,
+      [2, 3, 4].map((i) => copyDatabaseName(live, stamps[i])).sort(),
+      "the server does not hold exactly the newest three copies",
+    );
+    assert.ok(names.includes(failed), "a failed-rollout database was dropped");
+    assert.ok(names.includes(foreign), "another paper's copy was dropped");
+    assert.ok(names.includes(live), "the live database itself was dropped");
+  });
 });

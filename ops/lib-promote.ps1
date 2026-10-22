@@ -327,6 +327,7 @@ function Get-PromoteChildTimeoutSeconds {
     'dbcopy' { return 600 }
     'dbswap' { return 600 }
     'dbstate' { return 120 }
+    'prune' { return 120 }
     default { return 0 }
   }
 }
@@ -1768,6 +1769,30 @@ function Invoke-PromoteDatabaseState {
   )
   $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
   return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'state' -Step 'dbstate' -Environment $values
+}
+
+<#
+  Housekeeping, once the promote is done and the paper is up (D216): drop this
+  database's pre-rollout copies except the newest three, always keeping the
+  copy this run made. The library chooses and executes; this only runs it.
+
+  NOTHING IT DOES MAY CHANGE THE PROMOTE'S RESULT. The caller runs it after
+  the success path is certain and treats every answer -- a refusal, a failure,
+  a timeout -- as a log line. See the call in ops\promote.ps1.
+#>
+function Invoke-PromoteDatabasePrune {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$CurrentCopy,
+    [Parameter(Mandatory = $true)][string]$Stamp,
+    [string]$Failed = "",
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = ""
+  )
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $CurrentCopy -Failed $Failed -Stamp $Stamp
+  return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'prune' -Step 'prune' -Environment $values
 }
 
 <#

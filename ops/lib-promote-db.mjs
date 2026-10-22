@@ -31,9 +31,13 @@
  * failed one -- must start with `townreporter` and be a plain identifier. A
  * name that does not is refused with a sentence, before anything is done.
  *
- * NOTHING IS EVER DELETED. Not by this module and not by the promotion that
- * calls it. Copies and failed databases are kept, named in the log, and left
- * for the owner to remove by hand.
+ * COPIES ARE PRUNED, FAILED DATABASES ARE NOT (D216). Every promotion takes one
+ * more copy and nothing used to remove them, so fifty piled up. After a
+ * successful promote the `prune` command drops this database's pre-rollout
+ * copies except the newest three, and never the copy the run just made. It
+ * touches nothing else: not the live database, not any `_failed_` database
+ * (those stay for the owner to remove by hand), and not a name this module's
+ * own naming rules do not accept for this database.
  *
  * This file takes an ADMIN connection string and names, and does the database
  * work only. The order of a promotion, the log, the stop-the-app window and
@@ -352,6 +356,51 @@ export function isCopyOf(copy, database) {
 }
 
 /**
+ * Which pre-rollout copies to keep and which to drop.
+ *
+ * WHY THIS IS A SEPARATE, PURE FUNCTION. It is the only place in the tree that
+ * decides a database may be deleted, so the decision has to be readable and
+ * testable without a server. `prunePrerolloutCopies` below executes it; nothing
+ * else chooses.
+ *
+ * WHAT IT WILL NEVER DROP, whatever it is handed:
+ *
+ *   - the live database itself, or any `_failed_` database: they are not
+ *     copies, and only names `isCopyOf` accepts for THIS database are eligible;
+ *   - a copy of another database (`otherpaper_prerollout_...`);
+ *   - a name that merely looks close (`townreporter_prerollout_bad`, no stamp);
+ *   - the copy this run just made, even when it is somehow not among the
+ *     newest `keep` (a clock that went backwards, a resumed run carrying an
+ *     older stamp).
+ *
+ * Copies are kept by stamp order: the newest `keep` survive, and the rest are
+ * dropped, oldest first in stamp order. With fewer than `keep` + 1 copies
+ * nothing is dropped at all.
+ *
+ * @param {string[]} names every database name the server reports
+ * @param {string} database the live database whose copies these are
+ * @param {number} [keep] how many copies to keep
+ * @param {string} [currentCopy] this run's copy, always kept
+ * @returns {{ keep: string[], drop: string[] }} both in stamp order
+ */
+export function prerolloutPruneList(names, database, keep = 3, currentCopy = "") {
+  const db = String(database ?? "").trim();
+  const keepCount = Number.isFinite(Number(keep)) ? Math.max(0, Math.floor(Number(keep))) : 0;
+  const copies = (Array.isArray(names) ? names : [])
+    .map((name) => String(name ?? "").trim())
+    .filter((name) => name && isCopyOf(name, db));
+  // The stamp is 14 fixed digits, so string order is chronological order.
+  copies.sort((a, b) => ((parseCopyStamp(a) ?? "") < (parseCopyStamp(b) ?? "") ? -1 : 1));
+  const kept = new Set(copies.slice(Math.max(0, copies.length - keepCount)));
+  const current = String(currentCopy ?? "").trim();
+  if (current && copies.includes(current)) kept.add(current);
+  return {
+    keep: copies.filter((name) => kept.has(name)),
+    drop: copies.filter((name) => !kept.has(name)),
+  };
+}
+
+/**
  * The naming rules, once, for EVERY command.
  *
  * WHY ONE FUNCTION. These rules used to be spelled out at each command, and
@@ -443,6 +492,7 @@ const COMMAND_NAMES = {
   "swap-back": { requireCopy: true, requireFailed: true },
   rollback: { requireCopy: true, requireFailed: true },
   state: {},
+  prune: {},
 };
 
 /**
@@ -1514,6 +1564,73 @@ export async function stateOf(options) {
 }
 
 /**
+ * Drop this database's older pre-rollout copies, keeping the newest few.
+ *
+ * Called once, after a promote has finished and the paper is up (D216). Every
+ * promote makes one more copy and nothing used to remove them; fifty had
+ * piled up by October 2026. The choosing is `prerolloutPruneList`; this
+ * function only lists the server's databases, runs that choice, and executes
+ * it.
+ *
+ * A DROP IS THE EXACT NAME FROM THE LIST, quoted -- never a pattern. And a
+ * failure to drop one (another session connected to it, a privilege the admin
+ * role lacks) is a WARNING and not a failure: the paper is already up and this
+ * housekeeping must never turn a good promote into a bad exit code. The
+ * report still says ok, and names what it could not drop in `warnings`.
+ *
+ * @param {{ adminUrl: string, database: string, currentCopy?: string, stamp?: string, keep?: number, timeoutSeconds?: number, livePromote?: boolean }} options
+ * @returns {Promise<Record<string, any>>}
+ */
+export async function prunePrerolloutCopies(options) {
+  const keep = Number.isFinite(Number(options.keep)) ? Math.max(0, Math.floor(Number(options.keep))) : 3;
+  /** @type {Record<string, any>} */
+  const report = {
+    command: "prune",
+    ok: false,
+    refusal: "",
+    keep,
+    kept: [],
+    dropped: [],
+    warnings: [],
+    summary: "",
+  };
+  const guard = checkLivePortGuard([options.adminUrl], options.livePromote);
+  if (guard) return { ...report, refusal: guard };
+  const namesRefusal = validateCommandNames({
+    database: options.database,
+    copy: options.currentCopy,
+    stamp: options.stamp,
+  });
+  if (namesRefusal) return { ...report, refusal: namesRefusal };
+
+  const outcome = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: options.timeoutSeconds }, async (client) => {
+    const listed = await client.query("select datname from pg_database");
+    const names = listed.rows.map((row) => String(row.datname));
+    const plan = prerolloutPruneList(names, options.database, keep, options.currentCopy);
+    const dropped = [];
+    /** @type {string[]} */
+    const warnings = [];
+    for (const name of plan.drop) {
+      try {
+        await client.query(`drop database ${quoteIdent(name)}`);
+        dropped.push(name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`could not drop ${name}: ${message}`);
+      }
+    }
+    return { kept: plan.keep, dropped, warnings };
+  });
+
+  report.kept = outcome.kept;
+  report.dropped = outcome.dropped;
+  report.warnings = outcome.warnings;
+  report.summary = `prune: kept ${report.kept.length > 0 ? report.kept.join(", ") : "none"}; dropped ${report.dropped.length}`;
+  report.ok = true;
+  return report;
+}
+
+/**
  * Bytes as a person reads them, for the sentences above.
  * @param {number} bytes
  * @returns {string}
@@ -1672,18 +1789,29 @@ export async function runCommand(command, config, measureFreeBytes) {
         stamp: config.stamp,
         livePromote: config.livePromote,
       });
+    case "prune":
+      // Housekeeping after a successful promote: the paper is already up, so
+      // a refusal or a failed drop here is reported and never fails the run.
+      return prunePrerolloutCopies({
+        adminUrl: config.adminUrl,
+        database: databaseForNames,
+        currentCopy: config.copy,
+        stamp: config.stamp,
+        timeoutSeconds: config.timeoutSeconds,
+        livePromote: config.livePromote,
+      });
     default:
       return {
         command,
         ok: false,
         refusal:
           `"${command}" is not one of this script's commands ` +
-          "(names, preflight, copy, wait-for-zero, swap-back, rollback, state).",
+          "(names, preflight, copy, wait-for-zero, swap-back, rollback, state, prune).",
       };
   }
 }
 
-const USAGE = "usage: node ops/lib-promote-db.mjs <names|preflight|copy|wait-for-zero|swap-back|rollback|state>";
+const USAGE = "usage: node ops/lib-promote-db.mjs <names|preflight|copy|wait-for-zero|swap-back|rollback|state|prune>";
 
 /**
  * The command line, which is how ops\promote.ps1 calls this.
