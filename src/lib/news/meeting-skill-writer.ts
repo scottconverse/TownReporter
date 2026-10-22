@@ -110,8 +110,15 @@ export type SkillStory = {
   headline: string;
   /** The standfirst under it. */
   dek: string;
-  /** Everything else in the publish block, including the roundup and the claims. */
+  /** Everything publishable except the claims: the story and `ALSO AT THE MEETING`. */
   body: string;
+  /**
+   * The skill's `CLAIMS AND SOURCES` block, from its heading line on, or ""
+   * when the writer wrote none. It is the editor's checking tool, not prose
+   * for a reader (D217): the proof run's block was 48 source lines naming the
+   * same two records, and readers saw every one of them under the story.
+   */
+  claims: string;
   /** The marker line and everything after it: never published. */
   editorFile: string;
 };
@@ -123,15 +130,28 @@ export type SkillStoryFailure = {
   error: string;
 };
 
+/** The line that opens the skill's claim-by-claim source list. */
+export const CLAIMS_AND_SOURCES_HEADING = "CLAIMS AND SOURCES";
+
 /**
  * Split the agent's `story.txt` into the part a reader sees and the part only
  * an editor sees.
  *
  * The skill lays the deliverable out in two blocks separated by a line reading
  * `EDITOR FILE: NOT FOR PUBLICATION`. The publish block is the headline, the
- * dek, and the body -- which itself keeps `ALSO AT THE MEETING` and `CLAIMS AND
- * SOURCES`, because both are part of what the editor publishes. Everything from
- * the marker on is the editor's file: claim checks, the fact sheet, the ledger.
+ * dek, and the body.
+ *
+ * The body keeps `ALSO AT THE MEETING` but NOT `CLAIMS AND SOURCES` (D217).
+ * Scott's skill still writes the claim-by-claim list, and it must -- that list
+ * is the run's own audit and the reader's guarantee that a fact was checked.
+ * But it is the editor's checking tool, not prose: the Oct. 20 proof run's
+ * block ran 48 source lines that named the same two records, and a reader
+ * scrolling the story saw every one. So the block is cut out of the body here,
+ * returned as `claims`, and re-attached to the editor file. A `---` rule just
+ * above the heading goes with it, so the body does not end on a stray line.
+ *
+ * Everything from the marker on is the editor's file: claim checks, the fact
+ * sheet, the ledger.
  *
  * A missing marker is a refusal rather than a guess: publishing the editor file
  * would put the meeting ledger and the legal notes on the paper.
@@ -156,7 +176,22 @@ export function parseSkillStory(text: string): SkillStory | SkillStoryFailure {
   // The body starts after the dek's own line, so its original blank lines and
   // paragraph breaks survive.
   const bodyStart = nonEmpty[1]?.index ?? nonEmpty[0]!.index;
-  const body = publish.slice(bodyStart + 1).join("\n").trim();
+  const claimsStart = publish.findIndex(
+    (line) => line.trim().toUpperCase() === CLAIMS_AND_SOURCES_HEADING,
+  );
+  // The claims block runs from its heading to the end of the publish block, plus
+  // a horizontal rule just above it when the skill put one there.
+  let bodyEnd = publish.length;
+  if (claimsStart !== -1) {
+    bodyEnd = claimsStart;
+    for (let index = claimsStart - 1; index >= 0; index -= 1) {
+      const line = publish[index]!.trim();
+      if (!line) continue;
+      if (line === "---") bodyEnd = index;
+      break;
+    }
+  }
+  const body = publish.slice(bodyStart + 1, bodyEnd).join("\n").trim();
   if (!body) {
     return { ok: false, reason: "empty-body", error: "The writer produced a headline but no story." };
   }
@@ -165,16 +200,21 @@ export function parseSkillStory(text: string): SkillStory | SkillStoryFailure {
     headline,
     dek,
     body,
+    claims: claimsStart === -1 ? "" : publish.slice(claimsStart).join("\n").trim(),
     editorFile: lines.slice(marker).join("\n").trim(),
   };
 }
 
 /**
- * The https sources the draft's own CLAIMS AND SOURCES block names.
+ * The https sources a CLAIMS AND SOURCES block names.
  *
- * The block is part of the published story, and every claim under it carries
- * its source as a link. Those links are the draft's `source_urls`: what the
- * desk checks before publishing and what the reader can follow afterwards.
+ * Call it with the story's `claims` (`parseSkillStory`), not its body: since
+ * D217 the block is no longer part of the published text, but it is still
+ * where the draft's `source_urls` come from -- what the desk checks before
+ * publishing and what the reader can follow afterwards. Because the block
+ * begins with its own heading, a caller that still holds the whole story can
+ * pass that too.
+ *
  * http links are dropped -- the desk cites https only -- and the list is
  * capped so one chatty run cannot fill the column.
  */
@@ -191,6 +231,77 @@ export function claimsAndSourcesUrls(body: string, max = 40): string[] {
     }
   }
   return [...seen].slice(0, Math.max(0, max));
+}
+
+/** AP's month forms: five abbreviated with a period, five short ones spelled out. */
+const AP_MONTHS = [
+  "Jan.", "Feb.", "March", "April", "May", "June",
+  "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec.",
+];
+const MONTH_NAMES = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
+/**
+ * `Oct. 20, 2026` -- the meeting date the way the paper writes it.
+ *
+ * The sources line under a meeting story names its date, and a story that read
+ * `October 20, 2026` beside every other AP date on the page would mark it as
+ * written by somebody who is not an editor. Only the date's own numbers are
+ * read -- the month by name or an ISO `YYYY-MM-DD` -- so a time zone can never
+ * move the day, and text with no readable date returns "" (the sources line
+ * then says `meeting video` with no date rather than guess one).
+ */
+export function apMeetingDate(date: string): string {
+  const raw = String(date ?? "").trim();
+  if (!raw) return "";
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})\b/.exec(raw);
+  if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]) - 1;
+    day = Number(iso[3]);
+  } else {
+    const named = /([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/.exec(raw);
+    if (!named) return "";
+    month = MONTH_NAMES.indexOf(named[1]!.toLowerCase());
+    day = Number(named[2]);
+    year = Number(named[3]);
+  }
+  if (month < 0 || month > 11 || day < 1 || day > 31) return "";
+  return `${AP_MONTHS[month]} ${day}, ${year}`;
+}
+
+/**
+ * The one sources line that closes a meeting story (D217).
+ *
+ *   Sources: [Oct. 20, 2026 meeting video](https://www.youtube.com/watch?v=ID) and [council packet](https://...).
+ *
+ * The claims list that used to carry all of this is now the editor's, so the
+ * reader is given the two records the story rests on -- the tape and the
+ * packet -- in one sentence. The packet is linked only when the portal lookup
+ * actually found THIS meeting's packet: a bare `council packet` is honest, a
+ * link to the portal's front page is not.
+ */
+export function meetingSourcesLine(input: {
+  date: string;
+  videoId: string;
+  title: string;
+  packetUrl: string | null;
+}): string {
+  const dated = apMeetingDate(input.date);
+  const videoLabel = dated ? `${dated} meeting video` : "meeting video";
+  const videoId = String(input.videoId ?? "").trim();
+  const video = videoId
+    ? `[${videoLabel}](https://www.youtube.com/watch?v=${videoId})`
+    : videoLabel;
+  const packetLabel = /council/i.test(String(input.title ?? "")) ? "council packet" : "meeting packet";
+  const packetUrl = String(input.packetUrl ?? "").trim();
+  const packet = packetUrl ? `[${packetLabel}](${packetUrl})` : packetLabel;
+  return `Sources: ${video} and ${packet}.`;
 }
 
 /**

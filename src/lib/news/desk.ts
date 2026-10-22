@@ -4236,6 +4236,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         reasoningEffort: writerRuntime.deepSeek ? undefined : effortFromJob(job),
         onStage: (stage) => setStage(job.id, stage),
         run: deps.meetingWriterRun,
+        packetUrlForMeeting: deps.meetingPacketUrl,
       });
       if (!skill.ok) return { error: skill.error };
       skillDraft = skill;
@@ -4275,16 +4276,18 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       };
       /*
         The story the skill wrote IS the draft: its first line is the headline,
-        its second the dek, the rest the body (which keeps ALSO AT THE MEETING
-        and CLAIMS AND SOURCES -- both publish). The editor file and the checks
-        are editor-only and are written to their own columns below.
+        its second the dek, the rest the body (which keeps ALSO AT THE MEETING,
+        and closes with the app's one Sources line). CLAIMS AND SOURCES is NOT
+        published (D217): the block is the editor's checking tool, so it rides
+        in the editor file written to `meeting_notes` below, and its links are
+        still where `source_urls` come from.
       */
       return {
         headline: skill.headline,
         dek: skill.dek,
         body: skill.body,
         topic: lead.topic ?? "",
-        source_urls: claimsAndSourcesUrls(skill.body),
+        source_urls: claimsAndSourcesUrls(skill.claims),
         citation_status: "review-required",
         integrity_notes: "",
         memory_entities: [],

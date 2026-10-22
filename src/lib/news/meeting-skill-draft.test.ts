@@ -126,6 +126,7 @@ test("a whole-meeting draft is the skill writer's story, with its editor file an
     await performDraftWork(job, {
       readStoryDocuments: async () => "",
       meetingWriterRun: run,
+      meetingPacketUrl: async () => "https://example.gov/Public/CompiledDocument?meetingTemplateId=4",
       setJobStage: async () => undefined,
       setJobFailoverNote: async () => undefined,
     });
@@ -145,10 +146,22 @@ test("a whole-meeting draft is the skill writer's story, with its editor file an
     assert.equal(draft!.headline, "Longmont approves the housing plan");
     assert.equal(draft!.dek, "The council voted 6-1 Tuesday for the plan.");
     assert.match(draft!.body, /ALSO AT THE MEETING/);
+    // D217: the claims list is not in the published body; one sources line is.
+    assert.equal(draft!.body.includes("CLAIMS AND SOURCES"), false);
+    assert.equal(
+      draft!.body.endsWith(
+        // No capture record names a date or a council, so the line says
+        // "meeting video" and "meeting packet" (D217).
+        "Sources: [meeting video](https://www.youtube.com/watch?v=mskill00001) and [meeting packet](https://example.gov/Public/CompiledDocument?meetingTemplateId=4).",
+      ),
+      true,
+    );
     assert.equal(draft!.topic, "council");
     assert.equal(draft!.model_body, draft!.body, "the model's own body is filed beside the editor's");
     assert.deepEqual(JSON.parse(draft!.source_urls), ["https://www.youtube.com/watch?v=mskill00001"]);
     assert.match(draft!.meeting_notes ?? "", /^EDITOR FILE: NOT FOR PUBLICATION/);
+    // The editor's notes keep the claims block the reader no longer sees.
+    assert.match(draft!.meeting_notes ?? "", /CLAIMS AND SOURCES/);
     assert.deepEqual(draft!.editor_checks, CHECKS);
     assert.equal(draft!.run_stats?.writer, "report-local-news");
     assert.equal(draft!.run_stats?.model, "deepseek-v4.1-flash:1017-cloud");

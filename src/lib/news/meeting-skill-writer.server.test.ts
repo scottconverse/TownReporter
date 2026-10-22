@@ -31,6 +31,7 @@ const PROOF_STORY = readFileSync(
 
 const NEWSROOM = 942;
 const VIDEO = "mskillVid01";
+const PACKET_URL = "https://longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=9&compileOutputType=1";
 
 let artifactId = 0;
 let storageRoot = "";
@@ -98,6 +99,7 @@ describe("runMeetingSkillWriter", () => {
       sql,
       artifactId,
       onStage: (text) => stages.push(text),
+      packetUrlForMeeting: async () => PACKET_URL,
       run: writingRunner({
         "story.txt": PROOF_STORY,
         "CHECK-FIRST.txt": ["Check the $36.3 million figure against the packet.", "- The mural square footage."].join("\n"),
@@ -111,10 +113,21 @@ describe("runMeetingSkillWriter", () => {
     assert.equal(result.headline, "Longmont adds $36.3 million to 1st and Main transit center");
     assert.match(result.dek, /^The council also approved a development agreement/);
     assert.match(result.body, /ALSO AT THE MEETING/);
-    assert.match(result.body, /CLAIMS AND SOURCES/);
+    // D217: the claims list is the editor's, and the body closes with one
+    // sources line instead.
+    assert.equal(result.body.includes("CLAIMS AND SOURCES"), false);
     assert.equal(result.body.includes("EDITOR FILE: NOT FOR PUBLICATION"), false);
+    assert.equal(
+      result.body.endsWith(
+        `Sources: [Oct. 20, 2026 meeting video](https://www.youtube.com/watch?v=${VIDEO}) and [council packet](${PACKET_URL}).`,
+      ),
+      true,
+    );
     assert.match(result.editorFile, /^EDITOR FILE: NOT FOR PUBLICATION/);
     assert.match(result.editorFile, /MEETING LEDGER/);
+    // Nothing the skill wrote is lost: the claims block rides in the editor file.
+    assert.match(result.editorFile, /CLAIMS AND SOURCES/);
+    assert.match(result.claims, /^CLAIMS AND SOURCES/);
     assert.deepEqual(result.checks, [
       "Check the $36.3 million figure against the packet.",
       "The mural square footage.",
@@ -140,6 +153,44 @@ describe("runMeetingSkillWriter", () => {
     assert.equal(transcript[1], "");
     assert.equal(transcript[2], "0:00:19  Thank you.");
     assert.equal(transcript[3], "5:38:07  Motion carries, seven to zero.");
+  });
+
+  it("closes on a bare council packet when the packet lookup fails", async () => {
+    const sql = await getSql();
+    const result = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 10,
+      run: writingRunner({ "story.txt": PROOF_STORY }),
+      packetUrlForMeeting: async () => {
+        throw new Error("the portal refused the read");
+      },
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      result.body.endsWith(`Sources: [Oct. 20, 2026 meeting video](https://www.youtube.com/watch?v=${VIDEO}) and council packet.`),
+      true,
+    );
+    assert.equal(result.body.includes("primegov"), false);
+  });
+
+  it("says meeting packet for a body that is not the council", async () => {
+    const sql = await getSql();
+    const result = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 11,
+      title: "Longmont Planning and Zoning Commission",
+      run: writingRunner({ "story.txt": PROOF_STORY }),
+      packetUrlForMeeting: async () => PACKET_URL,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.body.includes("[meeting packet]("), true);
+    assert.equal(result.body.includes("council packet"), false);
   });
 
   it("fails with a plain sentence when the writer writes no story", async () => {

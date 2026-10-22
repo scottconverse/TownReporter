@@ -220,6 +220,12 @@ export type PerformDraftWorkDeps = {
    * `story.txt` and `CHECK-FIRST.txt`, so no CLI, login or network is needed.
    */
   meetingWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
+  /**
+   * Test seam for the packet link in the story's sources line (D217).
+   * Production reads the newsroom's own PrimeGov portal; a test injects the
+   * URL so the draft never reaches the network.
+   */
+  meetingPacketUrl?: import("./meeting-skill-writer.server.ts").MeetingPacketLookup;
   /** Test seam for the pre-writer uploaded-document stage. Production uses
    * readStoryDocuments; the seam keeps its provider failure at the same
    * Automatic failover boundary without requiring a live provider in tests. */

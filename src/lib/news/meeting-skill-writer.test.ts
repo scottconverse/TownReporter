@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  apMeetingDate,
   assignmentPrompt,
   claimsAndSourcesUrls,
   EDITOR_FILE_MARKER,
   formatTranscript,
+  meetingSourcesLine,
   meetingStamp,
   parseCheckFirst,
   parseSkillStory,
@@ -31,16 +33,69 @@ describe("parseSkillStory", () => {
     if (!story.ok) return;
     assert.equal(story.headline, "Longmont adds $36.3 million to 1st and Main transit center");
     assert.match(story.dek, /^The council also approved a development agreement/);
-    // The publish block keeps the roundup and the claim-by-claim sources.
+    // The publish block keeps the roundup but NOT the claim-by-claim sources
+    // (D217: the list is the editor's checking tool, not reader prose).
     assert.match(story.body, /ALSO AT THE MEETING/);
-    assert.match(story.body, /CLAIMS AND SOURCES/);
+    assert.equal(story.body.includes("CLAIMS AND SOURCES"), false);
     assert.equal(story.body.includes(EDITOR_FILE_MARKER), false);
+    // The block itself comes back whole, heading first.
+    assert.match(story.claims, /^CLAIMS AND SOURCES/);
+    assert.match(story.claims, /Source \(primary record\)/);
     // ...and the editor file starts at the marker and carries the ledger.
     assert.match(story.editorFile, new RegExp(`^${EDITOR_FILE_MARKER}`));
     assert.match(story.editorFile, /MEETING LEDGER/);
     // The proof story has exactly one marker; a second one would mean the
     // split above happened at the wrong place.
     assert.equal(PROOF.split(EDITOR_FILE_MARKER).length - 1, 1);
+  });
+
+  it("moves the claims block to `claims`, and its links stay the draft's sources", () => {
+    const story = parseSkillStory(PROOF);
+    assert.equal(story.ok, true);
+    if (!story.ok) return;
+    // The same two records the published body used to list, now read off the
+    // editor's copy of the block.
+    assert.deepEqual(claimsAndSourcesUrls(story.claims), [
+      "https://longmont.primegov.com/public/portal",
+      "https://www.youtube.com/watch?v=rsagM9xn28Y",
+    ]);
+    // The roundup is still the last thing a reader sees under the story.
+    assert.equal(story.body.trimEnd().endsWith("at 4th Avenue and Kimbark Street."), true);
+  });
+
+  it("takes a horizontal rule above the claims heading with the block", () => {
+    const story = parseSkillStory(
+      [
+        "A headline",
+        "",
+        "A dek",
+        "",
+        "The story.",
+        "",
+        "---",
+        "",
+        "CLAIMS AND SOURCES",
+        "",
+        "Claim: a fact. https://example.com/record",
+        "",
+        EDITOR_FILE_MARKER,
+        "",
+        "Notes.",
+      ].join("\n"),
+    );
+    assert.equal(story.ok, true);
+    if (!story.ok) return;
+    assert.equal(story.body, "The story.");
+    assert.match(story.claims, /^CLAIMS AND SOURCES/);
+    assert.equal(story.claims.includes("---"), false);
+  });
+
+  it("returns an empty claims text when the writer wrote no block", () => {
+    const story = parseSkillStory(`A headline\n\nA dek\n\nThe story.\n\n${EDITOR_FILE_MARKER}\nnotes\n`);
+    assert.equal(story.ok, true);
+    if (!story.ok) return;
+    assert.equal(story.claims, "");
+    assert.equal(story.body, "The story.");
   });
 
   it("refuses a story with no editor-file marker instead of publishing the notes", () => {
@@ -174,6 +229,52 @@ describe("assignmentPrompt", () => {
       assert.ok(prompt.includes(banned), `the prompt names the banned file ${banned}`);
     }
     assert.equal(/TownReporter|deepseek|claude|coordinator/i.test(prompt), false);
+  });
+});
+
+describe("apMeetingDate", () => {
+  it("writes an AP date and never moves the day", () => {
+    assert.equal(apMeetingDate("October 20, 2026"), "Oct. 20, 2026");
+    assert.equal(apMeetingDate("2026-10-20"), "Oct. 20, 2026");
+    assert.equal(apMeetingDate("September 3, 2026"), "Sept. 3, 2026");
+    // The five short months stay spelled out.
+    assert.equal(apMeetingDate("March 4, 2026"), "March 4, 2026");
+    assert.equal(apMeetingDate("July 4, 2026"), "July 4, 2026");
+    assert.equal(apMeetingDate("August 1, 2026"), "Aug. 1, 2026");
+  });
+
+  it("returns nothing for text it cannot read as a date", () => {
+    assert.equal(apMeetingDate(""), "");
+    assert.equal(apMeetingDate("last Tuesday"), "");
+    assert.equal(apMeetingDate("Smarch 4, 2026"), "");
+  });
+});
+
+describe("meetingSourcesLine", () => {
+  it("links the tape and this meeting's packet in one sentence", () => {
+    assert.equal(
+      meetingSourcesLine({
+        date: "October 20, 2026",
+        videoId: "rsagM9xn28Y",
+        title: "Longmont City Council Regular Session",
+        packetUrl: "https://longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=9",
+      }),
+      "Sources: [Oct. 20, 2026 meeting video](https://www.youtube.com/watch?v=rsagM9xn28Y) and [council packet](https://longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=9).",
+    );
+  });
+
+  it("leaves the packet as plain words when there is no packet to link", () => {
+    assert.equal(
+      meetingSourcesLine({ date: "October 20, 2026", videoId: "abc", title: "Council", packetUrl: null }),
+      "Sources: [Oct. 20, 2026 meeting video](https://www.youtube.com/watch?v=abc) and council packet.",
+    );
+  });
+
+  it("says meeting packet for a body that is not the council, and drops an unknown date", () => {
+    assert.equal(
+      meetingSourcesLine({ date: "", videoId: "abc", title: "Planning and Zoning Commission", packetUrl: null }),
+      "Sources: [meeting video](https://www.youtube.com/watch?v=abc) and meeting packet.",
+    );
   });
 });
 

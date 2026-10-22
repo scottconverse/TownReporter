@@ -33,6 +33,7 @@ import { claudeCodeAgentRun, type ClaudeAgentRunResult } from "./ai-claude-code.
 import {
   assignmentPrompt,
   formatTranscript,
+  meetingSourcesLine,
   meetingStamp,
   parseCheckFirst,
   parseSkillStory,
@@ -48,6 +49,9 @@ export type MeetingSkillWriterSuccess = {
   headline: string;
   dek: string;
   body: string;
+  /** The skill's CLAIMS AND SOURCES block, kept for `source_urls` (D217). */
+  claims: string;
+  /** The editor file plus the claims block: what `drafts.meeting_notes` holds. */
   editorFile: string;
   /** Items the editor must check before publishing. Empty when none were written. */
   checks: string[];
@@ -79,6 +83,72 @@ export type MeetingSkillWriterRunner = (input: {
   timeoutMs: number;
   onEvent?: (text: string) => void;
 }) => Promise<ClaudeAgentRunResult>;
+
+/**
+ * The meeting's packet document URL, or null when there is none to cite.
+ *
+ * D217: the story closes with one sources line, and its packet link must be
+ * THIS meeting's packet. The lookup is a parameter so a test never reaches the
+ * portal; production's is `primeGovPacketUrlForMeeting`.
+ */
+export type MeetingPacketLookup = (input: {
+  sql: Sql;
+  newsroomId: number;
+  title: string;
+}) => Promise<string | null>;
+
+/** How long the sources line will wait for the portal before going unlinked. */
+export const MEETING_PACKET_LOOKUP_TIMEOUT_MS = 10_000;
+
+/**
+ * The packet this meeting's portal lists, as a document URL.
+ *
+ * Only a document whose template name says "packet" counts, and a real Packet
+ * PDF is preferred over the portal's `HTML Packet` viewer: the reader is being
+ * given a record they can open and read, not a JavaScript shell. The origin is
+ * the newsroom's own watched portal -- a city with no PrimeGov source gets no
+ * link rather than a link to somebody else's city.
+ */
+export async function primeGovPacketUrlForMeeting(input: {
+  sql: Sql;
+  newsroomId: number;
+  title: string;
+}): Promise<string | null> {
+  const { primeGovOriginForNewsroom } = await import("./primegov-source.ts");
+  const { compiledDocumentUrl, primeGovDocumentsForTitle } = await import("./primegov.ts");
+  const origin = await primeGovOriginForNewsroom(input.sql, input.newsroomId);
+  if (!origin) return null;
+  const found = await primeGovDocumentsForTitle(input.title, origin);
+  const packets = (found?.meeting.documentList ?? []).filter((doc) => /packet/i.test(doc.templateName));
+  if (!packets.length) return null;
+  const chosen = packets.find((doc) => !/html\s*packet/i.test(doc.templateName)) ?? packets[0]!;
+  return compiledDocumentUrl(origin, chosen);
+}
+
+/** A lookup bounded in time and forgiving of failure: no packet is a bare label. */
+async function packetUrlOrNull(input: {
+  lookup: MeetingPacketLookup;
+  sql: Sql;
+  newsroomId: number;
+  title: string;
+}): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      input.lookup({ sql: input.sql, newsroomId: input.newsroomId, title: input.title }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), MEETING_PACKET_LOOKUP_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    // The portal is a nicety on this line: a timeout, a refused read or a
+    // changed page leaves the words "council packet" and no link. It never
+    // invents one.
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Where a run's folder goes: the newsroom's meeting storage, else a data root. */
 export async function meetingRunRoot(
@@ -162,6 +232,8 @@ export async function runMeetingSkillWriter(input: {
   run?: MeetingSkillWriterRunner;
   /** Injected for tests: today's date as the desk would say it. */
   today?: string;
+  /** Injected for tests: this meeting's packet document URL. */
+  packetUrlForMeeting?: MeetingPacketLookup;
   env?: Record<string, string | undefined>;
 }): Promise<MeetingSkillWriterResult> {
   const skill = resolveReportLocalNewsDir(input.env ?? process.env);
@@ -240,12 +312,35 @@ export async function runMeetingSkillWriter(input: {
   const story = parseSkillStory(storyText);
   if (!story.ok) return { ok: false, error: story.error, workDir };
 
+  /*
+    D217: one sources line closes the story, and the claims block moves to the
+    editor's notes. The reader is told where the story came from in a sentence;
+    the 48-line claim-by-claim list stays in the editor file, where the editor
+    checking the story can see every one of them and nothing is lost.
+  */
+  const packetUrl = await packetUrlOrNull({
+    lookup: input.packetUrlForMeeting ?? primeGovPacketUrlForMeeting,
+    sql: input.sql,
+    newsroomId: input.newsroomId,
+    title: input.title,
+  });
+  const body = [
+    story.body,
+    meetingSourcesLine({
+      date: input.meetingDate,
+      videoId: input.videoId,
+      title: input.title,
+      packetUrl,
+    }),
+  ].join("\n\n");
+
   return {
     ok: true,
     headline: story.headline,
     dek: story.dek,
-    body: story.body,
-    editorFile: story.editorFile,
+    body,
+    claims: story.claims,
+    editorFile: story.claims ? `${story.editorFile}\n\n${story.claims}` : story.editorFile,
     checks: parseCheckFirst(readOptional(workDir, "CHECK-FIRST.txt")),
     skillVersion,
     workDir,
