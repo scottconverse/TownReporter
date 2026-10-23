@@ -221,6 +221,26 @@ export type PerformDraftWorkDeps = {
    */
   meetingWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
   /**
+   * Test seam for the NEWS writer's agent call (D234). The same shape and the
+   * same purpose as `meetingWriterRun`: production spawns the CLI, a test
+   * injects a stub that writes the run's `story.txt`, so no CLI, login or
+   * network is needed.
+   */
+  newsWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
+  /**
+   * Test seam for D234 point 4, the saved copies of a news skill draft's
+   * sources. Production uses the same `ingest`/`capture` the four-pass writer
+   * uses; a test injects both so no page is fetched and the number of captures
+   * is countable.
+   */
+  newsSourceCopy?: {
+    ingest?: (url: string) => Promise<import("./report.ts").FetchedDoc>;
+    capture?: (
+      userId: string,
+      doc: import("./report.ts").FetchedDoc,
+    ) => Promise<{ version_id: number | null; capture_event_id: number | null }>;
+  };
+  /**
    * Test seam for the packet link in the story's sources line (D217).
    * Production reads the newsroom's own PrimeGov portal; a test injects the
    * URL so the draft never reaches the network.

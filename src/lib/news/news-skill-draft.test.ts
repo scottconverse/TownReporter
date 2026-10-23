@@ -1,0 +1,318 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, test } from "node:test";
+import { createServer, type ViteDevServer } from "vite";
+import type { DeskJob } from "./jobs.ts";
+import type { MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts";
+import type { ReportedDraftResult } from "./desk-model-run.ts";
+
+/*
+  D234: the report-local-news skill writes NORMAL news leads, not only meetings.
+
+  The blind test (Goals/TownReporter-WRITER-TEST-C-2026-10-22.md) graded the
+  same five leads written three ways and the skill, run once as an agent, won
+  five of five. These tests prove the desk's wiring for that: which writer gets
+  which pick, that a news body is never given a sources line a reader did not
+  have before, the fallback to the four-pass writer on the same pick, and the
+  saved copies of the sources.
+
+  The agent is the injected `run`: it writes the files a real run writes and
+  returns, so no CLI, login or network is needed.
+*/
+
+let vite: ViteDevServer;
+let getSql: typeof import("../db.ts").getSql;
+let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
+let performDraftWork: typeof import("./desk.ts").performDraftWork;
+let providerEntry: typeof import("./provider-registry.ts").providerEntry;
+
+before(async () => {
+  vite = await createServer({
+    configFile: false,
+    cacheDir: join(tmpdir(), `townreporter-news-skill-draft-${process.pid}`),
+    server: { middlewareMode: true, hmr: { port: 0 } },
+    resolve: { alias: { "@": join(process.cwd(), "src") } },
+  });
+  ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
+  ({ ensureJobsSchema } = await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
+  ({ performDraftWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ providerEntry } = await vite.ssrLoadModule("/src/lib/news/provider-registry.ts"));
+});
+after(async () => vite?.close());
+
+const SOURCE_URLS = [
+  "https://records.example.gov/ordinance-2026-14",
+  "https://records.example.gov/council-agenda-oct-20",
+  "https://news.example.com/housing-plan-vote",
+];
+
+const STORY = [
+  "Longmont approves the housing plan",
+  "",
+  "The council voted 6-1 Tuesday for the plan.",
+  "",
+  "The City Council approved the housing plan on Tuesday night after a short debate, according to the ordinance and the agenda.",
+  "",
+  "CLAIMS AND SOURCES",
+  "",
+  "Claim: The council approved the housing plan.",
+  `Source (primary record): Ordinance 2026-14. ${SOURCE_URLS[0]}`,
+  `Source (primary record): Agenda, item 4. ${SOURCE_URLS[1]}`,
+  `Source (secondary): The local outlet's account. ${SOURCE_URLS[2]}`,
+  "",
+  "EDITOR FILE: NOT FOR PUBLICATION",
+  "",
+  "Check the 6-1 tally against the minutes.",
+].join("\n");
+
+const CHECKS = ["Check the 6-1 tally against the minutes."];
+
+const REPORTED = {
+  headline: "Standard writer headline",
+  dek: "A dek.",
+  body: "The standard writer's body.",
+  topic: "housing",
+  source_urls: [],
+  integrity_notes: "",
+  memory_entities: [],
+  form: "news",
+  provenance: [],
+  found_note: "",
+  findings: [],
+  unanswered: [],
+  claims: [],
+  research_memo: {},
+} as unknown as ReportedDraftResult;
+
+/** One newsroom, one news lead (no meeting fields) and one running draft job. */
+async function fixture(room: number, choice: string) {
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const user = `news-skill-editor-${room}`;
+  const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-news-skill-run-"));
+  await sql.query("insert into newsrooms(id,name) values($1,'News skill room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  await sql.query(
+    "insert into meeting_capture_settings(newsroom_id,storage_root) values($1,$2) on conflict(newsroom_id) do update set storage_root=excluded.storage_root",
+    [room, storageRoot],
+  );
+  const [lead] = await sql.query<{ id: number }>(
+    `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json)
+     values($1,$2,'Longmont weighs the housing plan','A vote is scheduled','housing','new',$3,'Staff report says 700 units',1,'{}')
+     returning id`,
+    [user, room, JSON.stringify(SOURCE_URLS)],
+  );
+  const [jobRow] = await sql.query<{ id: number }>(
+    `insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token)
+     values($1,$2,'draft',$3,$4,'editor','public','default','running','Writing',$5)
+     returning id`,
+    [user, room, lead.id, choice, `news-skill-claim-${room}`],
+  );
+  const job = {
+    id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
+    model_choice: choice, model_choice_source: "editor", research_scope: "public",
+    lane: "default", status: "running", stage: "Writing", claim_token: `news-skill-claim-${room}`,
+  } as DeskJob;
+  const readDraft = async () => {
+    const [draft] = await sql.query<{
+      headline: string; dek: string; body: string; topic: string; source_urls: string;
+      meeting_notes: string | null; editor_checks: unknown; run_stats: Record<string, unknown> | null;
+    }>(
+      `select headline,dek,body,topic,source_urls,meeting_notes,editor_checks,run_stats
+         from drafts where newsroom_id=$1 and lead_id=$2 order by id desc limit 1`,
+      [room, lead.id],
+    );
+    return draft!;
+  };
+  return { sql, user, lead, job, readDraft };
+}
+
+function storyWriter(handed: Array<{ prompt: string; model: string; deepSeek?: unknown }>): MeetingSkillWriterRunner {
+  return async (input) => {
+    handed.push({ prompt: input.prompt, model: input.model, deepSeek: input.deepSeek });
+    writeFileSync(join(input.workDir, "story.txt"), STORY, "utf8");
+    writeFileSync(join(input.workDir, "CHECK-FIRST.txt"), `${CHECKS.join("\n")}\n`, "utf8");
+    return { ok: true, exitCode: 0, timedOut: false, durationMs: 4242, lastText: "RUN-DONE" };
+  };
+}
+
+test("a DeepSeek pick on a news lead runs the skill writer, and the story gets no added sources line", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88610, "deepseek-flash");
+    const handed: Array<{ prompt: string; model: string; deepSeek?: unknown }> = [];
+    const reportCalls: Array<{ modelChoice: string }> = [];
+    const captured: string[] = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: storyWriter(handed),
+      reportAndDraft: async (input) => {
+        reportCalls.push({ modelChoice: String(input.modelChoice) });
+        return REPORTED;
+      },
+      newsSourceCopy: {
+        ingest: async (url) => ({ url, title: "Saved page", text: "Page text", extras: [] }),
+        capture: async (_userId, doc) => {
+          captured.push(doc.url);
+          return { version_id: 1, capture_event_id: 2 };
+        },
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.equal(handed.length, 1, "one agent run");
+    assert.equal(handed[0]!.model, "deepseek-v4.1-flash:1017-cloud");
+    assert.ok(handed[0]!.deepSeek, "the DeepSeek relay the meeting writer builds");
+    assert.match(handed[0]!.prompt, /Write ONE straight local news story about ONE lead/);
+    assert.equal(reportCalls.length, 0, "the four-pass writer is not called");
+
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Longmont approves the housing plan");
+    assert.equal(draft.dek, "The council voted 6-1 Tuesday for the plan.");
+    // D234 point 3: the reader sees nothing new -- no sources sentence is added.
+    assert.equal(draft.body.includes("CLAIMS AND SOURCES"), false);
+    assert.equal(/^Sources: /m.test(draft.body), false);
+    assert.match(draft.body, /The City Council approved the housing plan on Tuesday night/);
+    // The claims block and the editor file stay the editor's.
+    assert.match(draft.meeting_notes ?? "", /^EDITOR FILE: NOT FOR PUBLICATION/);
+    assert.match(draft.meeting_notes ?? "", /CLAIMS AND SOURCES/);
+    assert.deepEqual(draft.editor_checks, CHECKS);
+    assert.deepEqual(JSON.parse(draft.source_urls), SOURCE_URLS);
+    assert.equal(draft.run_stats?.writer, "report-local-news");
+    assert.equal(draft.run_stats?.model, "deepseek-v4.1-flash:1017-cloud");
+    assert.equal(draft.run_stats?.wallMs, 4242);
+    assert.deepEqual(captured, SOURCE_URLS, "every final source URL is saved once");
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
+test("a Claude pick on a news lead runs the skill writer on that Claude model, as itself", async () => {
+  const { job, readDraft } = await fixture(88611, "claude-sonnet");
+  const handed: Array<{ prompt: string; model: string; deepSeek?: unknown }> = [];
+  await performDraftWork(job, {
+    readStoryDocuments: async () => "",
+    newsWriterRun: storyWriter(handed),
+    reportAndDraft: async () => {
+      throw new Error("the four-pass writer must not run on a Claude pick");
+    },
+    newsSourceCopy: {
+      ingest: async (url) => ({ url, title: "", text: "text", extras: [] }),
+      capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+    },
+    setJobStage: async () => undefined,
+    setJobFailoverNote: async () => undefined,
+  });
+
+  assert.equal(handed.length, 1);
+  assert.equal(handed[0]!.model, providerEntry("claude-sonnet")?.model);
+  assert.equal(handed[0]!.deepSeek, undefined, "a Claude pick runs on its own CLI model");
+  const draft = await readDraft();
+  assert.equal(draft.run_stats?.model, providerEntry("claude-sonnet")?.model);
+  assert.equal(draft.run_stats?.requestedModel, undefined, "a news lead is never a substitution");
+});
+
+test("a Codex pick on a news lead keeps the four-pass writer on Codex", async () => {
+  const { job, readDraft } = await fixture(88612, "codex-balanced");
+  const handed: Array<{ prompt: string; model: string }> = [];
+  const reportCalls: Array<{ modelChoice: string }> = [];
+  await performDraftWork(job, {
+    readStoryDocuments: async () => "",
+    newsWriterRun: storyWriter(handed),
+    reportAndDraft: async (input) => {
+      reportCalls.push({ modelChoice: String(input.modelChoice) });
+      return REPORTED;
+    },
+    setJobStage: async () => undefined,
+    setJobFailoverNote: async () => undefined,
+  });
+
+  assert.equal(handed.length, 0, "the skill is not called on a pick that cannot run it");
+  assert.deepEqual(reportCalls, [{ modelChoice: "codex-balanced" }]);
+  const draft = await readDraft();
+  assert.equal(draft.headline, "Standard writer headline");
+  // No skill record is claimed: the run stats name no model because the
+  // four-pass writer's own run is what the job's receipt describes.
+  assert.equal(draft.run_stats, null);
+  assert.equal(job.model_choice, "codex-balanced", "the pick the editor made is the pick that ran");
+});
+
+test("a failed skill run falls back to the four-pass writer on the same pick, and says so", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88613, "deepseek-flash");
+    const stages: string[] = [];
+    const notes: string[] = [];
+    const reportCalls: Array<{ modelChoice: string }> = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      // A run that ended politely and wrote no story.txt: the failure the
+      // runner reports with its own sentence.
+      newsWriterRun: async () => ({ ok: true, exitCode: 0, timedOut: false, durationMs: 5, lastText: "" }),
+      reportAndDraft: async (input) => {
+        reportCalls.push({ modelChoice: String(input.modelChoice) });
+        return REPORTED;
+      },
+      setJobStage: async (_id, stage) => {
+        stages.push(stage);
+      },
+      setJobFailoverNote: async (_id, note) => {
+        notes.push(note);
+      },
+    });
+
+    const sentence = "The research writer failed: The writer finished without a story. Writing with the standard writer.";
+    assert.deepEqual(reportCalls, [{ modelChoice: "deepseek-flash" }], "the same pick writes the fallback");
+    assert.ok(stages.includes(sentence), `stage line: ${stages.join(" | ")}`);
+    assert.ok(notes.includes(sentence), `failover note: ${notes.join(" | ")}`);
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Standard writer headline");
+    assert.deepEqual(draft.run_stats, {
+      writer: "standard",
+      researchWriterError: "The writer finished without a story.",
+    });
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
+test("three source URLs are each saved, and one that cannot be fetched does not fail the draft", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88614, "deepseek-flash");
+    const handed: Array<{ prompt: string; model: string }> = [];
+    const captured: Array<{ url: string; text: string }> = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: storyWriter(handed),
+      reportAndDraft: async () => {
+        throw new Error("the four-pass writer must not run when the skill succeeds");
+      },
+      newsSourceCopy: {
+        ingest: async (url) => {
+          if (url === SOURCE_URLS[1]) throw new Error("The page refused the read.");
+          return { url, title: "Saved page", text: "Page text", extras: [] };
+        },
+        capture: async (_userId, doc) => {
+          captured.push({ url: doc.url, text: doc.text });
+          return { version_id: 1, capture_event_id: 2 };
+        },
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.equal(captured.length, 3, "one save per final source URL");
+    assert.deepEqual(captured.map((row) => row.url), SOURCE_URLS);
+    // The page that could not be read is still recorded, with no text, which is
+    // how `capture` writes a fetch-failed row.
+    assert.equal(captured[1]!.text, "");
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Longmont approves the housing plan", "the draft is saved anyway");
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});

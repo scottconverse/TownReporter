@@ -994,7 +994,7 @@ function parseTrail(raw: unknown): Partial<ProvenanceItem>[] {
   return out;
 }
 
-async function defaultCapture(userId: string, newsroomId: number, doc: FetchedDoc) {
+export async function defaultCapture(userId: string, newsroomId: number, doc: FetchedDoc) {
   try {
     const hash = await sha256(doc.text || doc.url);
     const rec = await rememberCapture({
