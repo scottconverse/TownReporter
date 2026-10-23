@@ -108,6 +108,8 @@ type FixtureInput = {
   editorChecks?: string[];
   /** D235: what wrote the draft. `{ writer: "report-local-news" }` is the news skill. */
   runStats?: Record<string, unknown>;
+  /** A meeting-story lead: a meeting video and the transcript-story purpose. */
+  meetingVideoId?: string;
 };
 
 /**
@@ -121,8 +123,16 @@ async function fixture(input: FixtureInput = {}) {
   const notes = input.notes ?? { todo: [] };
   const status = input.status ?? "new";
   const [lead] = await sql.query<{ id: number }>(
-    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen) values($1,$2,'Council approves the plan','Why',$3,$4,'[]','',1,$5,false) returning id",
-    [USER, NEWSROOM, topic, status, JSON.stringify(notes)],
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen,meeting_video_id,meeting_lead_purpose) values($1,$2,'Council approves the plan','Why',$3,$4,'[]','',1,$5,false,$6,$7) returning id",
+    [
+      USER,
+      NEWSROOM,
+      topic,
+      status,
+      JSON.stringify(notes),
+      input.meetingVideoId ?? null,
+      input.meetingVideoId ? "transcript-story" : null,
+    ],
   );
   const headline = input.headline ?? "Council approves the plan";
   const dek = input.dek ?? "The plan passed.";
@@ -600,6 +610,33 @@ it("says \"The writer\", not \"The meeting writer\", on a news-skill draft's ref
   assert.match(
     warning!.sentence,
     /^The writer asks you to check 2 things before publishing: 1\. Check the 6-1 tally against the recording\. 2\. The parking figure is read off a slide\.$/,
+  );
+  assert.equal(await articleCount(leadId), 0, "the publish must not happen");
+});
+
+it("keeps \"The meeting writer\" on a meeting draft's refusal (D235)", async () => {
+  /*
+    D235: BOTH writers tag their run `writer: "report-local-news"`, so that
+    column cannot tell a meeting draft from a news draft. The lead decides: a
+    transcript-story lead is the meeting writer, and its refusal must say so.
+  */
+  const { leadId } = await fixture({
+    notes: { todo: [] },
+    meetingVideoId: "meeting-video-abc123",
+    runStats: { writer: "report-local-news" },
+    editorChecks: ["Check the 6-1 tally against the recording.", "The parking figure is read off a slide."],
+  });
+  const refused = await performPublish(
+    { userId: USER, newsroomId: NEWSROOM },
+    leadId,
+    "council",
+  );
+  assert.equal(refused.ok, false, "the check list must refuse an unacknowledged press");
+  const warning = warningsOf(refused)?.find((w) => w.key === "meeting-editor-checks");
+  assert.ok(warning, JSON.stringify(warningsOf(refused)));
+  assert.match(
+    warning!.sentence,
+    /^The meeting writer asks you to check 2 things before publishing: 1\. Check the 6-1 tally against the recording\. 2\. The parking figure is read off a slide\.$/,
   );
   assert.equal(await articleCount(leadId), 0, "the publish must not happen");
 });

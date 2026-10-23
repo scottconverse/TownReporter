@@ -9,6 +9,9 @@ import {
   lastDraftLine,
   lastDraftWhen,
   modelAndResearchLabel,
+  modelMoveFromNote,
+  workingLabelText,
+  writerNoteLabel,
   pastDraftPickName,
   readinessDot,
   readinessFailureMessage,
@@ -528,5 +531,56 @@ describe("a saved draft's 'you picked' names the pick as its run recorded it", (
       modelAndResearchLabel({ runningLine: "", pickerModel: "DeepSeek v4.1 Flash 1017", pickerModelChoice: "deepseek-flash", requestedModelChoice: "claude-frontier", requestedModel: "Claude Opus", writerModel: "Claude Opus" }),
       "DeepSeek v4.1 Flash 1017",
     );
+  });
+});
+
+/*
+  A3: a writer fallback is not a model move. The news skill's fallback writes
+  its sentence into `failover_note` too, and the button used to read ANY note
+  as a switch -- "Switched to another model…" while the SAME model wrote the
+  story -- and the note line called it "Model note:".
+*/
+describe("a writer fallback is not a model move", () => {
+  const fallback =
+    "The research writer could not finish (The writer finished without a story). The story is being written the usual way, on the same model.";
+
+  it("names the model a real move note moved to", () => {
+    assert.equal(
+      modelMoveFromNote("This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out."),
+      "Codex Sol 6.1 (balanced)",
+    );
+  });
+
+  it("returns undefined for the writer fallback sentence", () => {
+    assert.equal(modelMoveFromNote(fallback), undefined);
+    assert.equal(modelMoveFromNote(null), undefined);
+  });
+
+  it("keeps the ordinary drafting label on a fallback", () => {
+    // The old inline rule printed `Switched to … ?? "another model"` for any note.
+    assert.equal(
+      workingLabelText({ state: "running", failoverNote: fallback, hasBody: false }),
+      "Drafting…",
+    );
+    assert.equal(
+      workingLabelText({ state: "running", failoverNote: fallback, hasBody: true }),
+      "Redrafting…",
+    );
+  });
+
+  it("still shows the switch on a real move", () => {
+    assert.equal(
+      workingLabelText({
+        state: "running",
+        failoverNote: "This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out.",
+        hasBody: false,
+      }),
+      "Switched to Codex Sol 6.1 (balanced)…",
+    );
+  });
+
+  it("labels the note by what it says", () => {
+    assert.equal(writerNoteLabel("This draft moved to Gemini Flash because Codex returned nothing."), "Model note:");
+    assert.equal(writerNoteLabel(fallback), "Writer note:");
   });
 });

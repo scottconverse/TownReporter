@@ -245,6 +245,43 @@ export function switchReasonFromNote(failoverNote: string | null | undefined): s
 }
 
 /**
+ * The model a failover note says the draft MOVED to, or undefined.
+ *
+ * `failover_note` also carries sentences that are not a model move: the news
+ * skill's fallback writes "The research writer could not finish (…). The story
+ * is being written the usual way, on the same model." and stores it here as
+ * well as in the stage. The same model is writing, so the receipt must not
+ * claim a switch -- only a note that says "moved to X" names a new model.
+ */
+export function modelMoveFromNote(note: string | null | undefined): string | undefined {
+  const name = /moved to (.+?) because/i.exec(note ?? "");
+  return name?.[1]?.trim() || undefined;
+}
+
+/** The label over the draft's note: a model move is a model note, anything else is a writer note. */
+export function writerNoteLabel(note: string | null | undefined): "Model note:" | "Writer note:" {
+  return modelMoveFromNote(note) ? "Model note:" : "Writer note:";
+}
+
+/**
+ * The button's label while a draft runs. Only a real model move (or a running
+ * switch sentence that names one) is a switch; a writer fallback on the SAME
+ * model leaves the ordinary "Drafting…"/"Redrafting…" in place.
+ */
+export function workingLabelText(input: {
+  state: "recovering" | string;
+  failoverNote: string | null | undefined;
+  runningSwitchSentence?: string;
+  hasBody: boolean;
+}): string {
+  if (input.state === "recovering") return "Recovering…";
+  const moved = modelMoveFromNote(input.failoverNote);
+  if (moved) return input.runningSwitchSentence ?? `Switched to ${moved}…`;
+  if (input.runningSwitchSentence) return input.runningSwitchSentence;
+  return input.hasBody ? "Redrafting…" : "Drafting…";
+}
+
+/**
  * While a draft runs on a different model than the editor picked, say so in
  * words: which model is writing and the reason the job recorded for the switch.
  */

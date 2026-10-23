@@ -13,6 +13,7 @@ import {
 } from "./story-readiness.ts";
 import { meetingEditorChecksNotice, oldDraftSentence } from "./publish-blockers.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
+import { isMeetingStoryLead } from "./meeting-lead-kind.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
   insertProposedNewsroomSource,
@@ -4268,6 +4269,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   */
   const resolvedStoryChoice = effectiveStoryModelChoice(job.model_choice);
   const newsWriterLead =
+    !isMeetingStoryLead(lead) &&
     !wholeMeetingLead &&
     (resolvedStoryChoice === "deepseek-flash" || CLAUDE_MEETING_WRITER_CHOICES.has(resolvedStoryChoice));
   // The skill writer runs inside `waitForModel` so the stall ticker keeps
@@ -4393,7 +4395,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         */
         newsSkillFallbackError = skillError;
         const reason = String(skillError).trim().replace(/[.!?]+$/, "");
-        const sentence = `The research writer failed: ${reason}. Writing with the standard writer.`;
+        const sentence = `The research writer could not finish (${reason}). The story is being written the usual way, on the same model.`;
         await setStage(job.id, sentence);
         await setFailoverNote(job.id, sentence);
         await throwIfJobCancelled(job.id);

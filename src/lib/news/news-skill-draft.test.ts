@@ -87,8 +87,13 @@ const REPORTED = {
   research_memo: {},
 } as unknown as ReportedDraftResult;
 
-/** One newsroom, one news lead (no meeting fields) and one running draft job. */
-async function fixture(room: number, choice: string) {
+/**
+ * One newsroom, one news lead (no meeting fields) and one running draft job.
+ * `meeting` gives the lead a transcript story and an aligned artifact, and
+ * names one agenda item in its editor notes, which is the case that keeps the
+ * one-item meeting path.
+ */
+async function fixture(room: number, choice: string, options: { meeting?: boolean } = {}) {
   await ensureJobsSchema();
   const sql = await getSql();
   const user = `news-skill-editor-${room}`;
@@ -99,11 +104,44 @@ async function fixture(room: number, choice: string) {
     "insert into meeting_capture_settings(newsroom_id,storage_root) values($1,$2) on conflict(newsroom_id) do update set storage_root=excluded.storage_root",
     [room, storageRoot],
   );
+  let meetingArtifactId: number | null = null;
+  const videoId = `meeting-video-${room}`;
+  if (options.meeting) {
+    const [artifact] = await sql.query<{ id: number }>(
+      `insert into meeting_transcript_artifacts(newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
+       values($1,$2,'C:/scratch/transcript.vtt','vtt',$3,'captions','transcript-only') returning id`,
+      [room, videoId, "c".repeat(64)],
+    );
+    meetingArtifactId = artifact!.id;
+    await sql.query(
+      `insert into meeting_transcript_segments(artifact_id,segment_index,start_seconds,end_seconds,excerpt,caption_sha256)
+       values($1,0,0,30,'The council takes up ordinance 2026-46.','d')`,
+      [meetingArtifactId],
+    );
+    await sql.query(
+      `insert into meeting_agenda_chunks(newsroom_id,video_id,artifact_id,item,title,start_seconds,end_seconds,segment_indexes)
+       values($1,$2,$3,'9B2','Ordinance 2026-46',0,30,'[0]')`,
+      [room, videoId, meetingArtifactId],
+    );
+  }
+  const notesJson = options.meeting
+    ? JSON.stringify({ editorialAssignment: { origin: "story-workspace", text: "Cover item 9B2" } })
+    : "{}";
   const [lead] = await sql.query<{ id: number }>(
-    `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json)
-     values($1,$2,'Longmont weighs the housing plan','A vote is scheduled','housing','new',$3,'Staff report says 700 units',1,'{}')
+    `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,
+                       meeting_video_id,meeting_artifact_id,meeting_lead_purpose)
+     values($1,$2,'Longmont weighs the housing plan','A vote is scheduled','housing','new',$3,'Staff report says 700 units',1,$4,
+            $5,$6,$7)
      returning id`,
-    [user, room, JSON.stringify(SOURCE_URLS)],
+    [
+      user,
+      room,
+      JSON.stringify(SOURCE_URLS),
+      notesJson,
+      options.meeting ? videoId : null,
+      meetingArtifactId,
+      options.meeting ? "transcript-story" : null,
+    ],
   );
   const [jobRow] = await sql.query<{ id: number }>(
     `insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token)
@@ -226,6 +264,45 @@ test("a Claude pick on a news lead runs the skill writer on that Claude model, a
   assert.equal(draft.run_stats?.requestedModel, undefined, "a news lead is never a substitution");
 });
 
+test("a meeting lead whose notes name one agenda item never goes to the news writer", async () => {
+  /*
+    A1 (Critical): a meeting lead whose editor assignment names one item
+    ("Cover item 9B2") is not a whole-meeting lead, and the news writer is told
+    "This is not a meeting: there is no transcript" -- it never reads the tape.
+    It must go to the one-item meeting path with the transcript evidence (D234:
+    "Meetings unchanged"), on a pick that runs the news skill.
+  */
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88616, "deepseek-flash", { meeting: true });
+    const handed: Array<{ prompt: string; model: string }> = [];
+    const reportCalls: Array<{ modelChoice: string }> = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: async (input) => {
+        handed.push({ prompt: input.prompt, model: input.model });
+        return { ok: true, exitCode: 0, timedOut: false, durationMs: 5, lastText: "" };
+      },
+      // The whole-meeting agent is not under test here; it must not start.
+      meetingWriterRun: async () => {
+        throw new Error("the whole-meeting writer must not run for a one-item assignment");
+      },
+      reportAndDraft: async (input) => {
+        reportCalls.push({ modelChoice: String(input.modelChoice) });
+        return REPORTED;
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+    assert.equal(handed.length, 0, "the news writer must never be handed a meeting lead");
+    assert.deepEqual(reportCalls, [{ modelChoice: "deepseek-flash" }], "the one-item meeting path writes it");
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Standard writer headline");
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
 test("a Codex pick on a news lead keeps the four-pass writer on Codex", async () => {
   const { job, readDraft } = await fixture(88612, "codex-balanced");
   const handed: Array<{ prompt: string; model: string }> = [];
@@ -275,7 +352,8 @@ test("a failed skill run falls back to the four-pass writer on the same pick, an
       },
     });
 
-    const sentence = "The research writer failed: The writer finished without a story. Writing with the standard writer.";
+    const sentence =
+      "The research writer could not finish (The writer finished without a story). The story is being written the usual way, on the same model.";
     assert.deepEqual(reportCalls, [{ modelChoice: "deepseek-flash" }], "the same pick writes the fallback");
     assert.ok(stages.includes(sentence), `stage line: ${stages.join(" | ")}`);
     assert.ok(notes.includes(sentence), `failover note: ${notes.join(" | ")}`);
@@ -355,4 +433,51 @@ test("a saved source copy reads the page with no model OCR, never the four-pass 
   assert.equal(picked, injected);
   await picked(SOURCE_URLS[0]!);
   assert.equal(appReads, 0);
+});
+
+test("a writer folder that cannot be created is a returned failure, not a thrown one", async () => {
+  /*
+    A4 (Major): the folder step ran outside any try. A storage root pointing at
+    a file made `mkdirSync` throw out of `runNewsSkillWriter`, past the desk's
+    fallback -- which only answers a RETURNED failure -- and the draft died.
+    The desk must be able to fall back, so the function reports it.
+  */
+  const { runNewsSkillWriter } = (await vite.ssrLoadModule(
+    "/src/lib/news/news-skill-writer.server.ts",
+  )) as typeof import("./news-skill-writer.server.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const room = 88617;
+  await sql.query("insert into newsrooms(id,name) values($1,'Blocked folder room') on conflict(id) do nothing", [room]);
+  // A storage root that is an existing FILE: every mkdir beneath it fails.
+  const filePath = join(mkdtempSync(join(tmpdir(), "townreporter-blocked-root-")), "not-a-folder");
+  writeFileSync(filePath, "x", "utf8");
+  await sql.query(
+    "insert into meeting_capture_settings(newsroom_id,storage_root) values($1,$2) on conflict(newsroom_id) do update set storage_root=excluded.storage_root",
+    [room, filePath],
+  );
+
+  let ran = false;
+  const result = await runNewsSkillWriter({
+    sql,
+    newsroomId: room,
+    jobId: 424242,
+    lead: {
+      id: 1,
+      headline: "A lead",
+      why: null,
+      topic: null,
+      sourceUrls: "[]",
+      evidence: null,
+      notesJson: "{}",
+    },
+    model: "deepseek-v4.1-flash:1017-cloud",
+    run: async () => {
+      ran = true;
+      return { ok: true, exitCode: 0, timedOut: false, durationMs: 1, lastText: "" };
+    },
+  });
+  assert.equal(ran, false, "the agent never starts without a folder");
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /^The writer could not set up its folder: /);
 });

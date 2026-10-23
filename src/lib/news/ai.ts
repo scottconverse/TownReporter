@@ -517,7 +517,7 @@ async function resolveCustomProvider(
  * this says whether it can actually run — which for the CLI means the binary is
  * on disk. Async because that is a filesystem question.
  */
-function connectionError(label: string, err: unknown): string {
+export function connectionError(label: string, err: unknown): string {
   const name = err instanceof Error ? err.name : "";
   if (/Timeout|Abort/i.test(name)) return `${label} readiness check timed out.`;
   // Name the cause: Oct 22-23 2026 drafts said only "unreachable" while the

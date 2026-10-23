@@ -100,14 +100,29 @@ export async function runNewsSkillWriter(input: {
     };
   }
 
-  const root = await meetingRunRoot(input.sql, input.newsroomId, input.env ?? process.env);
-  const workDir = join(root, "news-runs", `newsroom-${input.newsroomId}`, `job-${input.jobId}`);
-  mkdirSync(join(workDir, "scripts"), { recursive: true });
-  // Copied, never linked: the agent must not be able to edit the shipped copy.
-  for (const file of REPORT_LOCAL_NEWS_REQUIRED_FILES) {
-    copyFileSync(join(skill.dir, file), join(workDir, file));
+  /*
+    The folder is built before the agent starts. A storage root the app cannot
+    write to (a stale setting pointing at a file, a full disk, a permission
+    change) used to throw out of this function, past the desk's fallback, which
+    only answers a RETURNED failure. It returns one now.
+  */
+  let workDir: string;
+  let skillVersion: string;
+  try {
+    const root = await meetingRunRoot(input.sql, input.newsroomId, input.env ?? process.env);
+    workDir = join(root, "news-runs", `newsroom-${input.newsroomId}`, `job-${input.jobId}`);
+    mkdirSync(join(workDir, "scripts"), { recursive: true });
+    // Copied, never linked: the agent must not be able to edit the shipped copy.
+    for (const file of REPORT_LOCAL_NEWS_REQUIRED_FILES) {
+      copyFileSync(join(skill.dir, file), join(workDir, file));
+    }
+    skillVersion = readReportLocalNewsVersion(skill.dir);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `The writer could not set up its folder: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
-  const skillVersion = readReportLocalNewsVersion(skill.dir);
 
   const headline = String(input.lead.headline ?? "");
   const topic = String(input.lead.topic ?? "");

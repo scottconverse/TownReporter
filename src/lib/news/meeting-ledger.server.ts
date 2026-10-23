@@ -4,6 +4,7 @@ import type { Sql } from "../db.ts";
 import { storableText } from "./storable-text.ts";
 import type { LedgerEvidence, LedgerItem, LedgerStatus, LedgerMotion, RunStats } from "./meeting-whole.ts";
 import { parseImpactScore, type ImpactScore } from "./meeting-impact.ts";
+import { isMeetingStoryLead } from "./meeting-lead-kind.ts";
 
 /** jsonb arrives parsed on Neon and as a JSON string under PGLite; accept both. */
 function parseEvidence(raw: unknown): LedgerEvidence[] {
@@ -153,21 +154,37 @@ export function parseEditorChecks(raw: unknown): string[] {
 
 /**
  * The check list stored on one draft, scoped to its newsroom, plus which writer
- * put it there: `run_stats->>'writer'` is `report-local-news` on a draft the
- * news skill wrote, and absent on a meeting draft (D235). The Publish warning
- * says "The writer" for the former and "The meeting writer" for the latter.
+ * put it there. BOTH writers tag their run `writer: "report-local-news"` -- the
+ * news skill at desk.ts and the meeting skill in the meeting branch -- so that
+ * column cannot tell them apart. The draft's LEAD decides: a meeting-story lead
+ * is "The meeting writer", every other draft is "The writer" (D235).
  */
 export async function loadDraftEditorChecks(
   sql: Sql,
   input: { newsroomId: number; draftId: number },
 ): Promise<{ checks: string[]; fromNewsWriter: boolean }> {
-  const rows = await sql.query<{ editor_checks: unknown; writer: string | null }>(
-    `select editor_checks, run_stats->>'writer' as writer from drafts where id=$1 and newsroom_id=$2`,
+  const rows = await sql.query<{
+    editor_checks: unknown;
+    writer: string | null;
+    meeting_video_id: string | null;
+    meeting_lead_purpose: string | null;
+  }>(
+    `select d.editor_checks, d.run_stats->>'writer' as writer,
+            l.meeting_video_id, l.meeting_lead_purpose
+       from drafts d
+       left join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
+      where d.id=$1 and d.newsroom_id=$2`,
     [input.draftId, input.newsroomId],
   );
+  const row = rows[0];
   return {
-    checks: parseEditorChecks(rows[0]?.editor_checks),
-    fromNewsWriter: rows[0]?.writer === "report-local-news",
+    checks: parseEditorChecks(row?.editor_checks),
+    fromNewsWriter:
+      row?.writer === "report-local-news" &&
+      !isMeetingStoryLead({
+        meeting_video_id: row?.meeting_video_id,
+        meeting_lead_purpose: row?.meeting_lead_purpose,
+      }),
   };
 }
 

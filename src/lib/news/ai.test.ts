@@ -5,6 +5,7 @@ import { resetClaudeCliCache } from "./ai-claude-code.server.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import type { LocalCatalog, LocalModelEntry, LocalModelKind, LocalServerKind } from "./local-models.ts";
 import {
+  connectionError,
   plannerModel,
   GROK_UNAVAILABLE,
   grokChat,
@@ -1867,4 +1868,28 @@ for (const retry of [false, true]) it(`preserves custom provider detail when ${r
     if(retry)assert.match(result.error,/Google says quota exhausted/);
     assert.equal(result.meta?.timedOut,true);
   }finally{globalThis.fetch=original;}
+});
+
+/*
+  A7 (commit 13088b8f): the "unreachable" sentence names what threw. Drafts said
+  only "unreachable" while the server answered every probe, and nothing recorded
+  the cause. The detail is de-duplicated and cut at 160 characters.
+*/
+describe("connectionError", () => {
+  it("names the cause behind an unreachable provider", () => {
+    const error = new Error("fetch failed", {
+      cause: { code: "ECONNREFUSED", message: "connect ECONNREFUSED 127.0.0.1:1299" },
+    });
+    const sentence = connectionError("Local model", error);
+    assert.match(sentence, /ECONNREFUSED/);
+    assert.match(sentence, /\)$/);
+    assert.match(sentence, /connect ECONNREFUSED 127\.0\.0\.1:1299/);
+  });
+
+  it("keeps the old sentence when there is nothing to add", () => {
+    assert.equal(
+      connectionError("Local model", new Error("")),
+      "Local model is unreachable. Check that it is running and that this machine is online.",
+    );
+  });
 });

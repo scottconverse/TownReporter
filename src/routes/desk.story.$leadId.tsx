@@ -161,7 +161,10 @@ import {
   writerIsReady,
   writerDraftAction,
   writerUnavailableReason,
+  workingLabelText,
+  writerNoteLabel,
 } from "@/lib/news/writer-bar";
+import { isMeetingStoryLead } from "@/lib/news/meeting-lead-kind";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
   DraftReconcileControl,
@@ -3342,11 +3345,7 @@ function StoryPage() {
               }
               reverifyingMeetingCitations={draftMeetingReview.isPending || reverifyLive.isPending}
               meetingAccounting={data.meetingAccounting}
-              meetingLead={Boolean(
-                data.lead.meeting_video_id &&
-                  data.lead.meeting_artifact_id &&
-                  data.lead.meeting_lead_purpose === "transcript-story",
-              )}
+              meetingLead={isMeetingStoryLead(data.lead)}
             />
             {/*
           The fold used to print a count of failures -- "13 provider or page
@@ -3824,7 +3823,7 @@ function StoryPage() {
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
               {data.job?.failover_note ? (
-                <p className="meta">Model note: {jobProgressView(data.job, data.lead.id, data.draft?.id ?? null).failoverNote}</p>
+                <p className="meta">{writerNoteLabel(data.job.failover_note)} {jobProgressView(data.job, data.lead.id, data.draft?.id ?? null).failoverNote}</p>
               ) : null}
             </form>
           ) : waiting ? null : locked || killRecord ? (
@@ -3971,13 +3970,12 @@ function StoryPage() {
                       : "idle"
               }
               workingLabel={
-                jobState === "recovering"
-                  ? "Recovering…"
-                  : data.job?.failover_note
-                    ? runningSwitchSentence ?? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
-                    : data.draft?.body
-                      ? "Redrafting…"
-                      : "Drafting…"
+                workingLabelText({
+                  state: jobState,
+                  failoverNote: data.job?.failover_note,
+                  runningSwitchSentence,
+                  hasBody: Boolean(data.draft?.body),
+                })
               }
               doneLabel={data.draft?.body ? "Redraft started" : "Draft started"}
               reason={draft.isError && draftProblem ? draftProblem : null}

@@ -18,7 +18,8 @@ export function runStatsLine(stats: RunStats | null): string {
     recorded.
   */
   if (stats?.writer) {
-    const minutes = Math.max(1, Math.round(stats.wallMs / 60_000));
+    const hasWall = Number.isFinite(stats.wallMs);
+    const minutes = hasWall ? Math.max(1, Math.round(stats.wallMs / 60_000)) : 0;
     const skill = stats.skillVersion ? `${stats.writer} v${stats.skillVersion}` : stats.writer;
     const asked =
       stats.requestedModel && stats.requestedModel !== stats.model
@@ -27,7 +28,7 @@ export function runStatsLine(stats: RunStats | null): string {
     return [
       `Written by ${skill}`,
       stats.model ? `model ${stats.model}${asked}` : "",
-      `took ${minutes} min`,
+      hasWall ? `took ${minutes} min` : "",
       stats.workDir ? `run folder ${stats.workDir}` : "",
     ]
       .filter(Boolean)
