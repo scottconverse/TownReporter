@@ -293,6 +293,7 @@ import {
   MIN_RUNG_MS,
   NO_MODEL_IN_TIME,
   extendDeadlineForRung,
+  pickSourceCopyIngest,
   rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
@@ -4160,11 +4161,20 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     time, in app code with no model. A page that cannot be read is recorded as
     fetch-failed by `capture` and never fails the draft: the story is already
     written, and a source copy is for the editor's checking, not for the text.
+
+    The page read is `pickSourceCopyIngest`'s, never `reportDeps.ingest`: on a
+    batch the batch reader carries an OCR switch callback that moves the job's
+    model choice to a Codex or Claude pick, so a story the skill already wrote
+    on DeepSeek would leave a receipt naming a model that did not write it --
+    and spend model calls -- for copies this code makes with no model at all.
   */
   const saveSourceCopies = async (urls: readonly string[], jobId: number) => {
     if (!urls.length) return;
-    const ingest = reportDeps.ingest ?? deps.newsSourceCopy?.ingest ??
-      (await import("./report.ts")).defaultIngest;
+    const ingest = pickSourceCopyIngest(
+      deps.newsSourceCopy,
+      owned(context),
+      (await import("./report.ts")).defaultIngest,
+    );
     const capture =
       reportDeps.capture ??
       deps.newsSourceCopy?.capture ??

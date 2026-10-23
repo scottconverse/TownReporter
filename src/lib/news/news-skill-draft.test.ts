@@ -6,7 +6,8 @@ import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
 import type { MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts";
-import type { ReportedDraftResult } from "./desk-model-run.ts";
+import { pickSourceCopyIngest, type ReportedDraftResult } from "./desk-model-run.ts";
+import type { IngestOptions } from "./ingest.ts";
 
 /*
   D234: the report-local-news skill writes NORMAL news leads, not only meetings.
@@ -161,6 +162,11 @@ test("a DeepSeek pick on a news lead runs the skill writer, and the story gets n
       },
       setJobStage: async () => undefined,
       setJobFailoverNote: async () => undefined,
+      // D234 fix 1: saving the sources' copies is app code with no model, so
+      // it must never move the job's model choice off the DeepSeek pick.
+      setJobModelRuntime: async () => {
+        throw new Error("a saved source copy must not switch the job's model");
+      },
     });
 
     assert.equal(handed.length, 1, "one agent run");
@@ -185,6 +191,11 @@ test("a DeepSeek pick on a news lead runs the skill writer, and the story gets n
     assert.equal(draft.run_stats?.model, "deepseek-v4.1-flash:1017-cloud");
     assert.equal(draft.run_stats?.wallMs, 4242);
     assert.deepEqual(captured, SOURCE_URLS, "every final source URL is saved once");
+    const [row] = await (await getSql()).query<{ model_choice: string }>(
+      "select model_choice from desk_jobs where id=$1",
+      [job.id],
+    );
+    assert.equal(row?.model_choice, "deepseek-flash", "the receipt still names the writer's model");
   } finally {
     delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
   }
@@ -315,4 +326,33 @@ test("three source URLs are each saved, and one that cannot be fetched does not 
   } finally {
     delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
   }
+});
+
+test("a saved source copy reads the page with no model OCR, never the four-pass writer's reader", async () => {
+  const asked: Array<{ url: string; options?: IngestOptions }> = [];
+  const reader = pickSourceCopyIngest(undefined, 88615, async (url, options) => {
+    asked.push({ url, options });
+    return { url, title: "", text: "", extras: [] };
+  });
+  await reader(SOURCE_URLS[0]!);
+
+  // D234 fix 1: `allowModelOcr: false` is what keeps the copy mechanical. On a
+  // batch the four-pass writer's reader carries an OCR switch callback that
+  // moves the job's model choice, so a DeepSeek story's receipt would name a
+  // model that did not write it -- and spend model calls to do it.
+  assert.deepEqual(asked, [
+    { url: SOURCE_URLS[0]!, options: { allowModelOcr: false, newsroomId: "88615" } },
+  ]);
+
+  // A test's own reader still wins, and the app's reader is then never reached.
+  const injected = async (url: string) => ({ url, title: "", text: "", extras: [] });
+  let appReads = 0;
+  const picked = pickSourceCopyIngest({ ingest: injected }, 88615, async (url, options) => {
+    void options;
+    appReads += 1;
+    return { url, title: "", text: "", extras: [] };
+  });
+  assert.equal(picked, injected);
+  await picked(SOURCE_URLS[0]!);
+  assert.equal(appReads, 0);
 });
