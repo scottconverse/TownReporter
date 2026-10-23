@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  looksLikeProviderUnavailable,
   planAutomaticFailover,
   automaticFailoverReason,
   failoverReasonPhrase,
@@ -365,5 +366,47 @@ describe("an empty draft moves to the next model and says why", () => {
 
   it("names the model that returned the empty draft", () => {
     assert.equal(failoverReasonPhrase("Codex Sol", "empty"), "Codex Sol returned an empty draft");
+  });
+});
+
+/**
+ * Live case 2026-10-22, production jobs 436 and 437: a draft running on the
+ * shared LM Studio model died when another program unloaded that model
+ * mid-generation. The 400 names the model as gone, so it is an unavailable
+ * provider and the ladder moves to the next ready rung instead of failing.
+ */
+describe("a model unloaded under the draft is an unavailable provider", () => {
+  const LIVE_UNLOADED = "Local model (flint): Provider says: Model unloaded by user or API request. (400)";
+
+  it("classifies the live wording and its nearby forms as unavailable", () => {
+    for (const error of [
+      LIVE_UNLOADED,
+      "DeepSeek v4.1 Flash 1017: Provider says: Model unloaded by user or API request. (400)",
+      "Local model: Provider says: No models loaded. (404)",
+      "Local model (flint): Provider says: model is not loaded (400)",
+    ]) {
+      assert.equal(looksLikeProviderUnavailable(error), true, error);
+    }
+  });
+
+  it("still treats a model's own refusal and a cut-off reply as not unavailable", () => {
+    for (const error of [
+      "Local model (flint) declined to write this story.",
+      "Local model (flint): reply was cut off because the output token limit was reached (finish reason: length).",
+      "The model unloaded its opinion in 900 words.",
+    ]) {
+      assert.equal(looksLikeProviderUnavailable(error), false, error);
+    }
+  });
+
+  it("moves Automatic to the next ready rung on the live wording", async () => {
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "codex-balanced",
+      ladder: CODEX_TO_SONNET,
+      error: LIVE_UNLOADED,
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+    });
+    assert.deepEqual(plan, { next: "claude-sonnet", label: "Claude Sonnet", reason: "unavailable" });
   });
 });

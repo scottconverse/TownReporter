@@ -91,11 +91,17 @@ export function looksLikeProviderQuota(detail: string | null | undefined): boole
 
 /** Connection failures and unavailable provider endpoints are safe to try on
  * the next Automatic rung. Content refusals and empty successful responses do
- * not match this classifier. */
+ * not match this classifier.
+ *
+ * Live case 2026-10-22, production jobs 436 and 437: the draft was running on
+ * the shared LM Studio model when another program on the machine unloaded it
+ * ("Provider says: Model unloaded by user or API request. (400)"). That is the
+ * server saying the model is gone, not the model saying no, so the ladder
+ * moves on instead of ending the draft. */
 export function looksLikeProviderUnavailable(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
-    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|Gemini program was not found|Gemini program could not start|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
+    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|Gemini program was not found|Gemini program could not start|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable|model unloaded by (?:user|api)|model (?:was |has been )unloaded|no models? (?:is |are )?loaded|model is not loaded/i.test(
       detail!,
     )
   );
