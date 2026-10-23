@@ -8,13 +8,25 @@ import { isMeetingStoryLead } from "./meeting-lead-kind.ts";
   a video id alone is not a meeting story, and the purpose alone is not either.
 */
 describe("isMeetingStoryLead", () => {
-  it("is true for a transcript-story lead with a meeting video", () => {
+  it("is true for a transcript-story lead with a meeting video and a stored transcript", () => {
     assert.equal(
       isMeetingStoryLead({
         meeting_video_id: "abc123",
+        meeting_artifact_id: 67,
         meeting_lead_purpose: "transcript-story",
       }),
       true,
+    );
+  });
+
+  it("is false for a transcript-story lead with no stored transcript", () => {
+    assert.equal(
+      isMeetingStoryLead({
+        meeting_video_id: "abc123",
+        meeting_artifact_id: null,
+        meeting_lead_purpose: "transcript-story",
+      }),
+      false,
     );
   });
 

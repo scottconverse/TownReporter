@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendStoryFailoverNote } from "./automatic-failover.ts";
+import { appendStoryFailoverNote, failoverNoteSentence } from "./automatic-failover.ts";
 import {
   customConnectionStatus,
   draftFallbackAttribution,
+  failoverDestinationFromNote,
   geminiChipWord,
   lastDraftInHand,
   lastDraftLine,
@@ -582,5 +583,79 @@ describe("a writer fallback is not a model move", () => {
   it("labels the note by what it says", () => {
     assert.equal(writerNoteLabel("This draft moved to Gemini Flash because Codex returned nothing."), "Model note:");
     assert.equal(writerNoteLabel(fallback), "Writer note:");
+  });
+});
+
+/*
+  R2-UX-1 (D241): a draft job never stores the sentence -- `setJobFailoverNote`
+  writes the trail `appendStoryFailoverNote` builds ("<reason> → <label>"). The
+  bar read only the sentence, so a REAL move was labeled "Writer note:" and the
+  running button said "Drafting…" instead of "Switched to <model>…".
+*/
+describe("a draft's real failover trail reads as a model move", () => {
+  const fallback =
+    "The research writer could not finish (The writer finished without a story). The story is being written the usual way, on the same model.";
+  const oneMove = appendStoryFailoverNote(
+    "",
+    failoverNoteSentence("Codex Sol 6.1", "Gemini 3.8 Flash", "timeout"),
+  );
+
+  it("names the destination of a one-hop trail", () => {
+    assert.equal(modelMoveFromNote(oneMove), "Codex Sol 6.1");
+    assert.equal(writerNoteLabel(oneMove), "Model note:");
+    assert.equal(
+      workingLabelText({ state: "running", failoverNote: oneMove, hasBody: false }),
+      "Switched to Codex Sol 6.1…",
+    );
+  });
+
+  it("is not a move when the note is only the writer fallback sentence", () => {
+    assert.equal(modelMoveFromNote(fallback), undefined);
+    assert.equal(writerNoteLabel(fallback), "Writer note:");
+    assert.equal(
+      workingLabelText({ state: "running", failoverNote: fallback, hasBody: false }),
+      "Drafting…",
+    );
+  });
+
+  it("names the move that follows the fallback sentence", () => {
+    const note = appendStoryFailoverNote(
+      fallback,
+      failoverNoteSentence("Codex Sol 6.1", "Gemini 3.8 Flash", "quota"),
+    );
+    assert.equal(modelMoveFromNote(note), "Codex Sol 6.1");
+    assert.equal(writerNoteLabel(note), "Model note:");
+  });
+
+  /*
+    The fallback sentence carries the skill's own error text inside its
+    parentheses, and an error text can hold an arrow. The trail's separator is
+    an arrow too, so an arrow inside the sentence used to cut the sentence in
+    two and the tail of it read as a model name: "Switched to ..." for a draft
+    that never moved.
+  */
+  for (const arrow of ["->", "→"] as const) {
+    it(`keeps a fallback sentence whole when its reason holds "${arrow}"`, () => {
+      const odd = `The research writer could not finish (step 2 ${arrow} step 3 failed). The story is being written the usual way, on the same model.`;
+      assert.equal(appendStoryFailoverNote("", odd), odd);
+      assert.equal(modelMoveFromNote(odd), undefined);
+      assert.equal(writerNoteLabel(odd), "Writer note:");
+      assert.equal(
+        workingLabelText({ state: "running", failoverNote: odd, hasBody: false }),
+        "Drafting…",
+      );
+      assert.equal(failoverDestinationFromNote(odd), undefined);
+    });
+  }
+
+  it("still names the real move that follows a fallback sentence whose reason holds an arrow", () => {
+    const odd =
+      "The research writer could not finish (step 2 -> step 3 failed). The story is being written the usual way, on the same model.";
+    const move = failoverNoteSentence("Codex Sol 6.1", "Gemini 3.8 Flash", "quota");
+    const note = appendStoryFailoverNote(odd, move);
+    const plainNote = appendStoryFailoverNote(fallback, move);
+    assert.equal(modelMoveFromNote(note), "Codex Sol 6.1");
+    assert.equal(failoverDestinationFromNote(note), "Codex Sol 6.1");
+    assert.equal(switchReasonFromNote(note), switchReasonFromNote(plainNote));
   });
 });

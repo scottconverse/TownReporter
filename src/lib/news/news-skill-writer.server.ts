@@ -108,6 +108,8 @@ export async function runNewsSkillWriter(input: {
   */
   let workDir: string;
   let skillVersion: string;
+  const headline = String(input.lead.headline ?? "");
+  const topic = String(input.lead.topic ?? "");
   try {
     const root = await meetingRunRoot(input.sql, input.newsroomId, input.env ?? process.env);
     workDir = join(root, "news-runs", `newsroom-${input.newsroomId}`, `job-${input.jobId}`);
@@ -117,28 +119,31 @@ export async function runNewsSkillWriter(input: {
       copyFileSync(join(skill.dir, file), join(workDir, file));
     }
     skillVersion = readReportLocalNewsVersion(skill.dir);
+    /*
+      The assignment file is part of setting the folder up. A write that fails
+      here (a leftover DIRECTORY named LEAD.md, a full disk, a permission
+      change) used to throw past the desk's fallback, which only answers a
+      RETURNED failure; the same returned sentence covers it now.
+    */
+    writeFileSync(
+      join(workDir, "LEAD.md"),
+      newsLeadFile({
+        id: input.lead.id,
+        headline,
+        why: String(input.lead.why ?? ""),
+        topic,
+        sourceUrls: sourceUrlsFromColumn(input.lead.sourceUrls),
+        evidence: String(input.lead.evidence ?? ""),
+        notesJson: input.lead.notesJson,
+      }),
+      "utf8",
+    );
   } catch (error) {
     return {
       ok: false,
       error: `The writer could not set up its folder: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-
-  const headline = String(input.lead.headline ?? "");
-  const topic = String(input.lead.topic ?? "");
-  writeFileSync(
-    join(workDir, "LEAD.md"),
-    newsLeadFile({
-      id: input.lead.id,
-      headline,
-      why: String(input.lead.why ?? ""),
-      topic,
-      sourceUrls: sourceUrlsFromColumn(input.lead.sourceUrls),
-      evidence: String(input.lead.evidence ?? ""),
-      notesJson: input.lead.notesJson,
-    }),
-    "utf8",
-  );
 
   const prompt = newsAssignmentPrompt({
     headline,

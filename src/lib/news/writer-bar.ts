@@ -228,6 +228,31 @@ export function draftFallbackAttribution(input: {
 }
 
 /**
+ * The writer fallback sentence as the news skill writes it, reason and all.
+ * Its parentheses hold the skill's own error text, which can itself contain the
+ * trail's arrow -- so the whole sentence has to be shielded before a note is
+ * split into hops (see `trailHops`).
+ */
+const FALLBACK_SENTENCE = /The research writer could not finish \([\s\S]*?\)\. The story is being written the usual way, on the same model\.?/g;
+
+/**
+ * A `failover_note` split into hops, with each writer-fallback sentence kept
+ * whole. `appendStoryFailoverNote` keeps a non-move note as one segment, but an
+ * arrow inside that sentence's parentheses would otherwise cut it in two and
+ * its tail would read as a model name. Each sentence is swapped for an
+ * arrow-free placeholder before the split, then put back in its hop.
+ */
+function trailHops(note: string): string[] {
+  const sentences: string[] = [];
+  /* Private-use sentinels: printable to a linter, and no note is written with them. */
+  const shielded = note.replace(FALLBACK_SENTENCE, (sentence) => `\uE000FALLBACK${sentences.push(sentence) - 1}\uE001`);
+  const separator = shielded.includes(FAILOVER_TRAIL_SEPARATOR) ? FAILOVER_TRAIL_SEPARATOR : " -> ";
+  return shielded
+    .split(separator)
+    .map(hop => hop.replace(/\uE000FALLBACK(\d+)\uE001/g, (_, index: string) => sentences[Number(index)]));
+}
+
+/**
  * The reason the job itself recorded for its latest switch. `failover_note` holds
  * either the sentence "This draft moved to <X> because <Y>" or the trail
  * "<Y> → <X>" that `appendStoryFailoverNote` builds (older rows: "<Y> -> <X>");
@@ -240,22 +265,35 @@ export function switchReasonFromNote(failoverNote: string | null | undefined): s
   if (!note) return undefined;
   const sentence = /^This draft moved to .+? because (.+)$/i.exec(note);
   if (sentence) return sentence[1].replace(/\.$/, "");
-  const hops = note.includes(FAILOVER_TRAIL_SEPARATOR) ? note.split(FAILOVER_TRAIL_SEPARATOR) : note.split(" -> ");
+  const hops = trailHops(note);
   return hops.length > 1 ? hops[hops.length - 2].replace(/\.$/, "") : undefined;
 }
 
 /**
  * The model a failover note says the draft MOVED to, or undefined.
  *
+ * A draft job stores the move in the trail form `appendStoryFailoverNote`
+ * builds -- "<reason> → <model>", older rows "<reason> -> <model>" -- so the
+ * destination is the LAST segment of that trail, the same hop
+ * `failoverDestinationFromNote` names. The durable sentence "This draft moved
+ * to <X> because <Y>" is still read for older rows.
+ *
  * `failover_note` also carries sentences that are not a model move: the news
  * skill's fallback writes "The research writer could not finish (…). The story
  * is being written the usual way, on the same model." and stores it here as
- * well as in the stage. The same model is writing, so the receipt must not
- * claim a switch -- only a note that says "moved to X" names a new model.
+ * well as in the stage. A note that is only that sentence names no model, and
+ * neither does a trail whose last segment is that sentence. The same model is
+ * writing, so the receipt must not claim a switch.
  */
 export function modelMoveFromNote(note: string | null | undefined): string | undefined {
-  const name = /moved to (.+?) because/i.exec(note ?? "");
-  return name?.[1]?.trim() || undefined;
+  const text = (note ?? "").trim();
+  if (!text) return undefined;
+  const name = /moved to (.+?) because/i.exec(text);
+  if (name) return name[1]?.trim() || undefined;
+  const hops = trailHops(text);
+  if (hops.length < 2) return undefined;
+  const last = hops[hops.length - 1].replace(/\.$/, "").trim();
+  return last && !/^The research writer could not finish/.test(last) ? last : undefined;
 }
 
 /** The label over the draft's note: a model move is a model note, anything else is a writer note. */
@@ -362,7 +400,7 @@ export function failoverDestinationFromNote(failoverNote: string | null | undefi
   if (!note) return undefined;
   const sentence = /^This draft moved to (.+?) because .+$/i.exec(note);
   if (sentence) return sentence[1].trim() || undefined;
-  const hops = note.includes(FAILOVER_TRAIL_SEPARATOR) ? note.split(FAILOVER_TRAIL_SEPARATOR) : note.split(" -> ");
+  const hops = trailHops(note);
   return hops.length > 1 ? hops[hops.length - 1].replace(/\.$/, "").trim() || undefined : undefined;
 }
 

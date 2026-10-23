@@ -662,8 +662,9 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
 /**
  * The one sentence a check list is published over:
  * "The meeting writer asks you to check 2 things before publishing: 1. … 2. …"
- * for a meeting draft, or the same with just "The writer" for a draft the
- * report-local-news skill wrote (D235).
+ * for a meeting draft, or the same with just "The writer" when the draft's lead
+ * is not a meeting story (isMeetingStoryLead, meeting-lead-kind.ts) and the
+ * report-local-news skill wrote it (D235).
  *
  * The same builder feeds the server's refusal (desk.ts `collectWarnings`), so
  * the dialog and a refused press cannot say different things about the same

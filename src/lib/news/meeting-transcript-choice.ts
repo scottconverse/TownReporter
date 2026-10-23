@@ -36,10 +36,22 @@ export function meetingTranscriptChoices(
     .sort((a, b) => Number(b.kind === "whisper") - Number(a.kind === "whisper"));
 }
 
+/**
+ * The transcript a meeting draft starts on: the first one the writer can use.
+ *
+ * Whisper outranks the captions only when it is aligned to the agenda items --
+ * a Whisper transcript with no agenda items makes the draft fail at once
+ * ("not aligned to agenda items"), even when the captions are aligned. So an
+ * aligned Whisper transcript wins, then aligned captions, then the old order
+ * (any Whisper, then any captions) for a meeting with nothing aligned.
+ */
 export function defaultMeetingTranscriptArtifactId(
   choices: readonly MeetingTranscriptChoice[],
 ): number | null {
-  return choices.find((choice) => choice.kind === "whisper")?.artifactId
+  const aligned = (choice: MeetingTranscriptChoice) => (choice.agendaItemCount ?? 0) > 0;
+  return choices.find((choice) => choice.kind === "whisper" && aligned(choice))?.artifactId
+    ?? choices.find((choice) => choice.kind === "captions" && aligned(choice))?.artifactId
+    ?? choices.find((choice) => choice.kind === "whisper")?.artifactId
     ?? choices.find((choice) => choice.kind === "captions")?.artifactId
     ?? null;
 }

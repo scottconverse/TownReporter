@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -277,6 +277,7 @@ test("a meeting lead whose notes name one agenda item never goes to the news wri
     const { job, readDraft } = await fixture(88616, "deepseek-flash", { meeting: true });
     const handed: Array<{ prompt: string; model: string }> = [];
     const reportCalls: Array<{ modelChoice: string }> = [];
+    const draftInputs: Array<{ extraEvidence?: unknown; extraEvidenceMode?: unknown }> = [];
     await performDraftWork(job, {
       readStoryDocuments: async () => "",
       newsWriterRun: async (input) => {
@@ -289,6 +290,7 @@ test("a meeting lead whose notes name one agenda item never goes to the news wri
       },
       reportAndDraft: async (input) => {
         reportCalls.push({ modelChoice: String(input.modelChoice) });
+        draftInputs.push({ extraEvidence: input.extraEvidence, extraEvidenceMode: input.extraEvidenceMode });
         return REPORTED;
       },
       setJobStage: async () => undefined,
@@ -296,6 +298,13 @@ test("a meeting lead whose notes name one agenda item never goes to the news wri
     });
     assert.equal(handed.length, 0, "the news writer must never be handed a meeting lead");
     assert.deepEqual(reportCalls, [{ modelChoice: "deepseek-flash" }], "the one-item meeting path writes it");
+    // R2-ENG-2: the one-item path is handed the transcript, not just the model.
+    assert.equal(draftInputs[0]?.extraEvidenceMode, "meeting-transcript");
+    assert.match(
+      String(draftInputs[0]?.extraEvidence),
+      /The council takes up ordinance 2026-46\./,
+      "the one-item meeting path reads the stored transcript",
+    );
     const draft = await readDraft();
     assert.equal(draft.headline, "Standard writer headline");
   } finally {
@@ -541,6 +550,54 @@ test("a writer folder that cannot be created is a returned failure, not a thrown
     },
   });
   assert.equal(ran, false, "the agent never starts without a folder");
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /^The writer could not set up its folder: /);
+});
+
+test("an assignment file that cannot be written is a returned failure, not a thrown one", async () => {
+  /*
+    R2-ENG-1 (Minor): the folder was built inside a try, but the LEAD.md write
+    sat outside it, so a failure there threw past the desk's fallback. The write
+    is part of the folder setup now and returns the same sentence.
+  */
+  const { runNewsSkillWriter } = (await vite.ssrLoadModule(
+    "/src/lib/news/news-skill-writer.server.ts",
+  )) as typeof import("./news-skill-writer.server.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const room = 88618;
+  const jobId = 424243;
+  await sql.query("insert into newsrooms(id,name) values($1,'Blocked assignment room') on conflict(id) do nothing", [room]);
+  const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-blocked-assignment-"));
+  await sql.query(
+    "insert into meeting_capture_settings(newsroom_id,storage_root) values($1,$2) on conflict(newsroom_id) do update set storage_root=excluded.storage_root",
+    [room, storageRoot],
+  );
+  // The folder builds fine, but a DIRECTORY sits where LEAD.md must go: writeFileSync throws EISDIR.
+  const workDir = join(storageRoot, "news-runs", `newsroom-${room}`, `job-${jobId}`);
+  mkdirSync(join(workDir, "LEAD.md"), { recursive: true });
+
+  let ran = false;
+  const result = await runNewsSkillWriter({
+    sql,
+    newsroomId: room,
+    jobId,
+    lead: {
+      id: 1,
+      headline: "A lead",
+      why: null,
+      topic: null,
+      sourceUrls: "[]",
+      evidence: null,
+      notesJson: "{}",
+    },
+    model: "deepseek-v4.1-flash:1017-cloud",
+    run: async () => {
+      ran = true;
+      return { ok: true, exitCode: 0, timedOut: false, durationMs: 1, lastText: "" };
+    },
+  });
+  assert.equal(ran, false, "the agent never starts without its assignment file");
   assert.equal(result.ok, false);
   assert.match((result as { error: string }).error, /^The writer could not set up its folder: /);
 });

@@ -159,8 +159,9 @@ export function parseEditorChecks(raw: unknown): string[] {
  * The check list stored on one draft, scoped to its newsroom, plus which writer
  * put it there. BOTH writers tag their run `writer: "report-local-news"` -- the
  * news skill at desk.ts and the meeting skill in the meeting branch -- so that
- * column cannot tell them apart. The draft's LEAD decides: a meeting-story lead
- * is "The meeting writer", every other draft is "The writer" (D235).
+ * column cannot tell them apart. A draft is "The writer" when the skill wrote it
+ * AND its lead is not a meeting story (isMeetingStoryLead); every other draft
+ * with checks is "The meeting writer" (D235).
  */
 export async function loadDraftEditorChecks(
   sql: Sql,
@@ -170,10 +171,11 @@ export async function loadDraftEditorChecks(
     editor_checks: unknown;
     writer: string | null;
     meeting_video_id: string | null;
+    meeting_artifact_id: number | null;
     meeting_lead_purpose: string | null;
   }>(
     `select d.editor_checks, d.run_stats->>'writer' as writer,
-            l.meeting_video_id, l.meeting_lead_purpose
+            l.meeting_video_id, l.meeting_artifact_id, l.meeting_lead_purpose
        from drafts d
        left join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
       where d.id=$1 and d.newsroom_id=$2`,
@@ -186,6 +188,7 @@ export async function loadDraftEditorChecks(
       row?.writer === "report-local-news" &&
       !isMeetingStoryLead({
         meeting_video_id: row?.meeting_video_id,
+        meeting_artifact_id: row?.meeting_artifact_id,
         meeting_lead_purpose: row?.meeting_lead_purpose,
       }),
   };

@@ -83,6 +83,7 @@ async function wipe() {
   await sql.query("delete from desk_jobs where newsroom_id=$1", [NEWSROOM]);
   await sql.query("delete from drafts where newsroom_id=$1", [NEWSROOM]);
   await sql.query("delete from leads where newsroom_id=$1", [NEWSROOM]);
+  await sql.query("delete from meeting_transcript_artifacts where newsroom_id=$1", [NEWSROOM]);
   await sql.query("delete from newsroom_members where newsroom_id=$1", [NEWSROOM]);
   await sql.query("insert into newsroom_members(user_id,role,newsroom_id) values($1,'editor',$2)", [
     USER,
@@ -108,7 +109,7 @@ type FixtureInput = {
   editorChecks?: string[];
   /** D235: what wrote the draft. `{ writer: "report-local-news" }` is the news skill. */
   runStats?: Record<string, unknown>;
-  /** A meeting-story lead: a meeting video and the transcript-story purpose. */
+  /** A meeting-story lead: a meeting video, a stored transcript, and the transcript-story purpose. */
   meetingVideoId?: string;
 };
 
@@ -122,8 +123,18 @@ async function fixture(input: FixtureInput = {}) {
   const topic = input.topic ?? "council";
   const notes = input.notes ?? { todo: [] };
   const status = input.status ?? "new";
+  // A meeting-story lead names a stored transcript too (isMeetingStoryLead).
+  let meetingArtifactId: number | null = null;
+  if (input.meetingVideoId) {
+    const [artifact] = await sql.query<{ id: number }>(
+      `insert into meeting_transcript_artifacts(newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
+       values($1,$2,'C:/scratch/transcript.vtt','vtt',$3,'captions','transcript-only') returning id`,
+      [NEWSROOM, input.meetingVideoId, "c".repeat(64)],
+    );
+    meetingArtifactId = artifact!.id;
+  }
   const [lead] = await sql.query<{ id: number }>(
-    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen,meeting_video_id,meeting_lead_purpose) values($1,$2,'Council approves the plan','Why',$3,$4,'[]','',1,$5,false,$6,$7) returning id",
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen,meeting_video_id,meeting_artifact_id,meeting_lead_purpose) values($1,$2,'Council approves the plan','Why',$3,$4,'[]','',1,$5,false,$6,$7,$8) returning id",
     [
       USER,
       NEWSROOM,
@@ -131,6 +142,7 @@ async function fixture(input: FixtureInput = {}) {
       status,
       JSON.stringify(notes),
       input.meetingVideoId ?? null,
+      meetingArtifactId,
       input.meetingVideoId ? "transcript-story" : null,
     ],
   );
