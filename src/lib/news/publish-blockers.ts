@@ -637,9 +637,11 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
 
   /*
     ── WHAT THE WRITER ASKS A PERSON TO CHECK (MS-WIRE W3, D235) ──────────────
-    Both writers -- the meeting writer and the report-local-news skill -- end
-    their work with the items that rest only on captions, a number read off a
-    screen, a disputed figure, or a sentence with legal risk. They are a
+    One writer, the report-local-news skill, runs on meeting leads and on news
+    leads, and ends its work with the items that rest only on captions, a number
+    read off a screen, a disputed figure, or a sentence with legal risk. The
+    lead kind (`isMeetingStoryLead`, meeting-lead-kind.ts) decides whether the
+    warning says "The meeting writer" or "The writer". They are a
     WARNING, not a wall (Scott's editor-control rule): the list is printed in
     the confirm dialog, and "Publish anyway" prints over it.
   */

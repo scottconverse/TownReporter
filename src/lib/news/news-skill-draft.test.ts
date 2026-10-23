@@ -406,6 +406,69 @@ test("three source URLs are each saved, and one that cannot be fetched does not 
   }
 });
 
+test("source copies are saved three at a time, not one at a time", async () => {
+  const sixUrls = Array.from({ length: 6 }, (_, index) => `https://records.example.gov/page-${index + 1}`);
+  const story = [
+    "Longmont approves the housing plan",
+    "",
+    "The council voted 6-1 Tuesday for the plan.",
+    "",
+    "The City Council approved the housing plan on Tuesday night after a short debate, according to the ordinance and the agenda.",
+    "",
+    "CLAIMS AND SOURCES",
+    "",
+    ...sixUrls.map((url) => `Source (primary record): Page. ${url}`),
+    "",
+    "EDITOR FILE: NOT FOR PUBLICATION",
+    "",
+    "Check the tally.",
+  ].join("\n");
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job } = await fixture(88619, "deepseek-flash");
+    let running = 0;
+    let peak = 0;
+    const stages: string[] = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: async (input) => {
+        writeFileSync(join(input.workDir, "story.txt"), story, "utf8");
+        writeFileSync(join(input.workDir, "CHECK-FIRST.txt"), "Check the tally.\n", "utf8");
+        return { ok: true, exitCode: 0, timedOut: false, durationMs: 1, lastText: "RUN-DONE" };
+      },
+      reportAndDraft: async () => {
+        throw new Error("the four-pass writer must not run when the skill succeeds");
+      },
+      newsSourceCopy: {
+        // ENG-7: a slow read per URL is what makes overlap visible. One at a
+        // time gives a peak of 1; the same work three at a time gives 3.
+        ingest: async (url) => {
+          running += 1;
+          peak = Math.max(peak, running);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          running -= 1;
+          return { url, title: "Saved page", text: "Page text", extras: [] };
+        },
+        capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+      },
+      setJobStage: async (_id, stage) => {
+        stages.push(stage);
+      },
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.ok(peak > 1, `the copies were saved one at a time (highest at once: ${peak})`);
+    assert.ok(peak <= 3, `more than three copies ran at once (highest at once: ${peak})`);
+    // The stage line keeps the words it had: finished count of the total.
+    assert.deepEqual(
+      [...stages].sort(),
+      sixUrls.map((_, index) => `Saving copies of the sources (${index + 1} of 6)`).sort(),
+    );
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
 test("a saved source copy reads the page with no model OCR, never the four-pass writer's reader", async () => {
   const asked: Array<{ url: string; options?: IngestOptions }> = [];
   const reader = pickSourceCopyIngest(undefined, 88615, async (url, options) => {

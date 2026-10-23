@@ -44,7 +44,7 @@ import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetupWarning } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, withRetry, IngestFetchError, BlockedAfterRenderError } from "./ingest";
+import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError, BlockedAfterRenderError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
   BLOCKED_TRIES_PER_HOST_PER_DAY,
@@ -4187,9 +4187,15 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       deps.newsSourceCopy?.capture ??
       (async (userId: string, doc: import("./report.ts").FetchedDoc) =>
         (await import("./report.ts")).defaultCapture(userId, owned(context), doc));
-    for (let index = 0; index < urls.length; index += 1) {
-      const url = urls[index]!;
-      await setStage(jobId, `Saving copies of the sources (${index + 1} of ${urls.length})`);
+    /*
+      ENG-7: three at a time, the same width the four-pass writer's own source
+      reads use (`mapLimit`, imported from ingest.ts). Ten sources one at a time
+      was ten sequential waits on the network after the story was already
+      written. The stage line still counts finished URLs, so the editor sees
+      the same words moving as before.
+    */
+    let done = 0;
+    await mapLimit([...urls], 3, async (url) => {
       try {
         const document = await ingest(url);
         await capture(job.user_id, document);
@@ -4202,7 +4208,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           /* A copy that cannot be saved never fails a written draft. */
         }
       }
-    }
+      done += 1;
+      await setStage(jobId, `Saving copies of the sources (${done} of ${urls.length})`);
+    });
   };
   /*
     B8B item 2: the draft kind had no Cancel check of its own.

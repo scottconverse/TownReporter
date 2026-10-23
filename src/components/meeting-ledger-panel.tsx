@@ -12,17 +12,18 @@ import {
   isRanked,
 } from "@/lib/news/meeting-impact";
 import { runStatsLine } from "@/components/meeting-ledger-stats";
-import { ledgerHeading } from "@/components/meeting-ledger-heading";
+import { editorNotesSentence, ledgerHeading } from "@/components/meeting-ledger-heading";
 import type { ClaimRow, LedgerItemRow, MeetingAccounting } from "@/lib/news/meeting-ledger.server";
 
 /**
  * The Meeting ledger panel (WR1 phase 2).
  *
- * A whole-meeting run reads the tape window by window and writes down every item
- * it found -- the motion, the vote, the proclamation, and the parts of the tape
- * it never got a readable answer about. That accounting is stored against the
- * draft. This panel is where an editor reads it and changes it: which items the
- * story leads on, which ones go in the roundup, which ones are left out and why.
+ * The writer is the report-local-news skill, run as an agent. Its record is the
+ * editor file and the list of things to check before publishing; the ledger rows
+ * are often empty. That record is stored against the draft. This panel is where
+ * an editor reads it and changes it: which items the story leads on, which ones
+ * go in the roundup, which ones are left out and why. On a news draft the same
+ * panel shows the writer's notes, not a meeting's accounting (D234 point 5).
  *
  * What it is FOR. The writer already decides all of that, and the draft it
  * produces is one answer among several. Before this panel the editor had the
@@ -149,10 +150,7 @@ export function MeetingLedgerPanel({
         {editorNotes ? (
           <div className="note-sec">
             <p className="side-label">Editor notes (never published)</p>
-            <p className="note-one">
-              The writer's own file: the claim checks, the fact sheet, the ledger and the legal
-              notes. None of this is part of the story.
-            </p>
+            <p className="note-one">{editorNotesSentence(fromMeeting)}</p>
             <pre className="meeting-notes-full">{accounting.meetingNotes}</pre>
           </div>
         ) : null}

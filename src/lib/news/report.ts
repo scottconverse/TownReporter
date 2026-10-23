@@ -177,6 +177,13 @@ export type FetchedDoc = {
   version_id?: number | null;
   capture_event_id?: number | null;
   extraction_method?: string;
+  /*
+    ENG-5: a scanned page that produced no text is not a failed fetch. The
+    reader sets this, and `defaultCapture` saves the copy as "needs-ocr" so the
+    desk can show the editor why the page is empty instead of calling it broken.
+  */
+  needsOcr?: boolean;
+  needsOcrReason?: string;
 };
 
 export type RetainedSource = FetchedDoc & {
@@ -1005,7 +1012,8 @@ export async function defaultCapture(userId: string, newsroomId: number, doc: Fe
       text: doc.text.slice(0, 2_000_000),
       hash,
       status: doc.text ? 200 : 0,
-      outcome: doc.text ? "fetched" : "fetch-failed",
+      // ENG-5: the same outcome `investigate.ts` saves for a needs-ocr page.
+      outcome: doc.text ? "fetched" : doc.needsOcr ? "needs-ocr" : "fetch-failed",
       classification: "discovered",
       triggerKind: "draft",
       pages: doc.pages,
@@ -1092,6 +1100,8 @@ export async function defaultIngest(
       notices: got.notices ?? [],
       pages: got.pages,
       extraction_method: got.extractionMethod,
+      needsOcr: got.needsOcr,
+      needsOcrReason: got.needsOcrReason,
     };
   } catch {
     return { url, title: describeSourceUrl(url).title, text: "", extras: [] };

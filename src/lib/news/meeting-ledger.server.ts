@@ -61,11 +61,14 @@ function safeParse(raw: string): unknown {
 }
 
 /**
- * The reading half of WR1's screens: the accounting a whole-meeting run left on
+ * The reading half of WR1's screens: the accounting a reporting run left on
  * a lead, and the two writes an editor makes against it.
  *
- * The pipeline (`meeting-whole.server.ts`) writes these rows once, at draft
- * time. Everything here is what happens AFTER -- an editor reads the ledger,
+ * The rows are written by `persistReportingActionLedger` (reporting-ledger-adapter.ts):
+ * once at draft time from the civic reporting run, and again from this file when
+ * an editor saves a status on a draft that has no rows yet. The meeting writer
+ * is the report-local-news skill run as an agent (`meeting-skill-writer.server.ts`).
+ * Everything here is what happens AFTER -- an editor reads the ledger,
  * changes a status, marks a claim checked -- plus the read that feeds the story
  * page's Meeting ledger panel. Split out so the writes can be driven against a
  * migrated PGlite with no model and no network.

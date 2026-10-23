@@ -12,6 +12,7 @@ let getSql: typeof import("../db.ts").getSql;
 let getPaperConfig: typeof import("./paper-settings.ts").getPaperConfig;
 let rememberCapture: typeof import("./investigate.ts").rememberCapture;
 let reportAndDraft: typeof ReportAndDraft;
+let defaultCapture: typeof import("./report.ts").defaultCapture;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 
 before(async () => {
@@ -23,7 +24,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ getPaperConfig } = await vite.ssrLoadModule("/src/lib/news/paper-settings.ts"));
   ({ rememberCapture } = await vite.ssrLoadModule("/src/lib/news/investigate.ts"));
-  ({ reportAndDraft } = await vite.ssrLoadModule("/src/lib/news/report.ts"));
+  ({ reportAndDraft, defaultCapture } = await vite.ssrLoadModule("/src/lib/news/report.ts"));
   ({ performDraftWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
 });
 
@@ -307,6 +308,70 @@ it("keeps paper identity, captures, and hydrated provenance in the report newsro
       url,
     ]);
     await sql.query("delete from paper_settings where newsroom_id=$1", [newsroomId]);
+    await sql.query("delete from newsrooms where id=$1", [newsroomId]);
+  }
+});
+
+/*
+  ENG-5: a scanned page that produced no text is not a broken fetch.
+
+  The skill writer reads pages in its own folder and the desk saves a copy
+  afterwards through `defaultCapture`. A packet that is image-only came back
+  with an empty `text` and was recorded as "fetch-failed", which told the editor
+  the page could not be read at all. It read fine; it needs OCR. The row now
+  says so, and a page that genuinely failed still says "fetch-failed".
+*/
+it("saves a scanned source page as needs-ocr, and a broken one as fetch-failed", async () => {
+  const sql = await getSql();
+  const newsroomId = 99803;
+  const userId = "report-capture-ocr";
+  const scannedUrl = "https://records.example.gov/scanned-packet.pdf";
+  const brokenUrl = "https://records.example.gov/refused-packet.pdf";
+  await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict(id) do nothing", [
+    newsroomId,
+    "OCR newsroom",
+  ]);
+  try {
+    const scanned = await defaultCapture(userId, newsroomId, {
+      url: scannedUrl,
+      title: "Scanned packet",
+      text: "",
+      extras: [],
+      needsOcr: true,
+      needsOcrReason: "Every page is an image.",
+    });
+    const broken = await defaultCapture(userId, newsroomId, {
+      url: brokenUrl,
+      title: "Refused packet",
+      text: "",
+      extras: [],
+    });
+    const [scannedRow] = await sql.query<{ fetch_outcome: string }>(
+      "select fetch_outcome from capture_events where id=$1",
+      [scanned.capture_event_id],
+    );
+    const [brokenRow] = await sql.query<{ fetch_outcome: string }>(
+      "select fetch_outcome from capture_events where id=$1",
+      [broken.capture_event_id],
+    );
+    assert.equal(scannedRow?.fetch_outcome, "needs-ocr");
+    assert.equal(brokenRow?.fetch_outcome, "fetch-failed");
+  } finally {
+    for (const target of [scannedUrl, brokenUrl]) {
+      await sql.query("delete from capture_events where newsroom_id=$1 and source_url=$2", [
+        newsroomId,
+        target,
+      ]);
+      await sql.query("delete from artifact_chunks where newsroom_id=$1 and version_id in (select id from artifact_versions where newsroom_id=$1 and url=$2)", [
+        newsroomId,
+        target,
+      ]);
+      await sql.query("delete from artifact_versions where newsroom_id=$1 and url=$2", [
+        newsroomId,
+        target,
+      ]);
+    }
+    await sql.query("delete from newsroom_members where newsroom_id=$1", [newsroomId]);
     await sql.query("delete from newsrooms where id=$1", [newsroomId]);
   }
 });

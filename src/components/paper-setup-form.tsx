@@ -283,9 +283,9 @@ export function PaperSetupForm({
           }
         />
         <span className="mt-1 block text-xs text-ink-2">
-          One name and title per line. Meeting captions often misspell names;
-          the whole-meeting writer corrects caption names against this list
-          before it writes, and flags any name it cannot match.
+          One name and title per line. Meeting captions often misspell names.
+          The writers do not check names against this list yet, so check the
+          names in a meeting story against it.
         </span>
       </label>
 
