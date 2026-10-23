@@ -104,8 +104,10 @@ type FixtureInput = {
   evidenceCheckUpdatedAt?: string;
   /** The editor pressed Cancel on the check and the worker has not acknowledged it yet. */
   evidenceCheckCancelled?: boolean;
-  /** MS-WIRE W3: the meeting writer's pre-publication check list. */
+  /** MS-WIRE W3: the writer's pre-publication check list. */
   editorChecks?: string[];
+  /** D235: what wrote the draft. `{ writer: "report-local-news" }` is the news skill. */
+  runStats?: Record<string, unknown>;
 };
 
 /**
@@ -130,6 +132,12 @@ async function fixture(input: FixtureInput = {}) {
     "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,editor_checks) values($1,$2,$3,$4,$5,$6,$7,'[]','','[]','news','[]','[]',$8,$9::jsonb) returning id",
     [USER, NEWSROOM, lead.id, headline, dek, body, topic, research, JSON.stringify(input.editorChecks ?? [])],
   );
+  if (input.runStats) {
+    await sql.query("update drafts set run_stats=$1::jsonb where id=$2", [
+      JSON.stringify(input.runStats),
+      draft.id,
+    ]);
+  }
   if (!input.unchecked) {
     const { evidenceReviewToken } = await vite.ssrLoadModule("/src/lib/news/draft-evidence.ts");
     const { topicConfirmationFingerprint } = await vite.ssrLoadModule("/src/lib/news/notes.ts");
@@ -569,6 +577,31 @@ it("warns over the meeting writer's check list, then prints it acknowledged", as
   assert.equal(published.ok, true, refusalOf(published));
   assert.equal(await articleCount(ackRun.leadId), 1);
   assert.deepEqual(keys(await overrideRows(ackRun.leadId)), ["meeting-editor-checks"]);
+});
+
+it("says \"The writer\", not \"The meeting writer\", on a news-skill draft's refusal (D235)", async () => {
+  /*
+    D235: the report-local-news skill leaves the same check list, but its
+    stories are not meeting stories. The refused press must name "The writer".
+  */
+  const { leadId } = await fixture({
+    notes: { todo: [] },
+    runStats: { writer: "report-local-news" },
+    editorChecks: ["Check the 6-1 tally against the recording.", "The parking figure is read off a slide."],
+  });
+  const refused = await performPublish(
+    { userId: USER, newsroomId: NEWSROOM },
+    leadId,
+    "council",
+  );
+  assert.equal(refused.ok, false, "the check list must refuse an unacknowledged press");
+  const warning = warningsOf(refused)?.find((w) => w.key === "meeting-editor-checks");
+  assert.ok(warning, JSON.stringify(warningsOf(refused)));
+  assert.match(
+    warning!.sentence,
+    /^The writer asks you to check 2 things before publishing: 1\. Check the 6-1 tally against the recording\. 2\. The parking figure is read off a slide\.$/,
+  );
+  assert.equal(await articleCount(leadId), 0, "the publish must not happen");
 });
 
 /* ------------------------------------------------------------------------ */

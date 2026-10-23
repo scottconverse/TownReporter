@@ -293,6 +293,7 @@ import {
   MIN_RUNG_MS,
   NO_MODEL_IN_TIME,
   extendDeadlineForRung,
+  pickSourceCopyIngest,
   rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
@@ -1209,15 +1210,20 @@ export const getLead = createServerFn({ method: "GET" })
       ? staleCitationNotice(meetingPublishEvidence.stale)
       : null;
     /*
-      MS-WIRE W3: what the meeting writer asked a person to check before this
-      draft prints. Editor-only, and the Publish dialog warns over it.
+      MS-WIRE W3: what the writer asked a person to check before this draft
+      prints. Editor-only, and the Publish dialog warns over it. D235: the
+      loader also says which writer left the list, so the sentence names the
+      news skill ("The writer") rather than the meeting writer when that is
+      who wrote it.
     */
-    const meetingEditorChecks = drafts[0]
+    const editorChecksRow = drafts[0]
       ? await (await import("./meeting-ledger.server.ts")).loadDraftEditorChecks(sql, {
           newsroomId: owned(context),
           draftId: Number(drafts[0].id),
         })
-      : [];
+      : { checks: [], fromNewsWriter: false };
+    const meetingEditorChecks = editorChecksRow.checks;
+    const meetingEditorChecksFromNewsWriter = editorChecksRow.fromNewsWriter;
     /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
       panel shows -- the ledger (unread rows first), the checked claims (flagged
@@ -1381,6 +1387,7 @@ export const getLead = createServerFn({ method: "GET" })
       meetingPublishNotice,
       meetingCitationNotice,
       meetingEditorChecks,
+      meetingEditorChecksFromNewsWriter,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -4151,6 +4158,52 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
   /*
+    D234 point 4: SAVED COPIES OF A NEWS SKILL DRAFT'S SOURCES.
+
+    The four-pass writer captures every page it reads as it reads it. The skill
+    writer reads pages in its own folder and only names them in its CLAIMS AND
+    SOURCES block, so the desk saves those pages itself afterwards -- the same
+    two steps the four-pass writer uses, `ingest` then `capture`, one URL at a
+    time, in app code with no model. A page that cannot be read is recorded as
+    fetch-failed by `capture` and never fails the draft: the story is already
+    written, and a source copy is for the editor's checking, not for the text.
+
+    The page read is `pickSourceCopyIngest`'s, never `reportDeps.ingest`: on a
+    batch the batch reader carries an OCR switch callback that moves the job's
+    model choice to a Codex or Claude pick, so a story the skill already wrote
+    on DeepSeek would leave a receipt naming a model that did not write it --
+    and spend model calls -- for copies this code makes with no model at all.
+  */
+  const saveSourceCopies = async (urls: readonly string[], jobId: number) => {
+    if (!urls.length) return;
+    const ingest = pickSourceCopyIngest(
+      deps.newsSourceCopy,
+      owned(context),
+      (await import("./report.ts")).defaultIngest,
+    );
+    const capture =
+      reportDeps.capture ??
+      deps.newsSourceCopy?.capture ??
+      (async (userId: string, doc: import("./report.ts").FetchedDoc) =>
+        (await import("./report.ts")).defaultCapture(userId, owned(context), doc));
+    for (let index = 0; index < urls.length; index += 1) {
+      const url = urls[index]!;
+      await setStage(jobId, `Saving copies of the sources (${index + 1} of ${urls.length})`);
+      try {
+        const document = await ingest(url);
+        await capture(job.user_id, document);
+      } catch {
+        // A refused or broken read is still a capture: `capture` writes it as
+        // fetch-failed when the text is empty, which is what the desk shows.
+        try {
+          await capture(job.user_id, { url, title: url, text: "", extras: [] });
+        } catch {
+          /* A copy that cannot be saved never fails a written draft. */
+        }
+      }
+    }
+  };
+  /*
     B8B item 2: the draft kind had no Cancel check of its own.
 
     `waitForModel` below polls `cancel_requested` while the report runs, but
@@ -4192,11 +4245,42 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     is retired (MS-WIRE W5), and the skill always reads the transcript itself.
   */
   const writerRuntime = meetingWriterRuntime(effectiveStoryModelChoice(job.model_choice));
+  /*
+    D234: WHICH WRITER GETS A LEAD THAT IS NOT A MEETING.
+
+    The blind test (Goals/TownReporter-WRITER-TEST-C-2026-10-22.md) graded the
+    same five leads written three ways, and Scott's report-local-news skill run
+    once as an agent was best in five of five -- against 52 sources for 20 from
+    the four-pass writer. So a news lead now goes to the skill too, on the
+    picks that can run it: DeepSeek v4.1 Flash 1017 (the tested model) and the
+    Claude picks, which the CLI agent runs as themselves. Every OTHER pick --
+    Codex, Gemini, a local model, a custom connection, "configured" -- keeps
+    the four-pass writer on that pick exactly as before, because the skill is
+    an agent with tools and only these models have been proved able to work it.
+
+    "Automatic" needs no case here: `draft-batch.server.ts` resolves it to one
+    concrete pick before the job runs and the job row stores that runtime, so
+    the resolved pick is what arrives in `job.model_choice`.
+
+    A news lead is NEVER moved to another model: unlike a meeting, a failed
+    skill run falls back to the four-pass writer on the SAME pick (below), so
+    the receipt always names the model that actually wrote the story.
+  */
+  const resolvedStoryChoice = effectiveStoryModelChoice(job.model_choice);
+  const newsWriterLead =
+    !wholeMeetingLead &&
+    (resolvedStoryChoice === "deepseek-flash" || CLAUDE_MEETING_WRITER_CHOICES.has(resolvedStoryChoice));
   // The skill writer runs inside `waitForModel` so the stall ticker keeps
   // working; what it produced is carried out through this closure and written
   // against the draft row below, after the INSERT gives it a draft id.
   let skillDraft: import("./meeting-skill-writer.server.ts").MeetingSkillWriterSuccess | null = null;
   let skillRunStats: import("./meeting-whole.ts").RunStats | null = null;
+  /*
+    D234 point 2: when the news skill run fails, the four-pass writer finishes
+    the draft on the same pick, and the row records who wrote it rather than
+    pretending the skill did.
+  */
+  let newsSkillFallbackError: string | null = null;
   await throwIfJobCancelled(job.id);
   /*
     The single longest await in the app: one call covering report.ts's plan,
@@ -4209,10 +4293,119 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     jobId: job.id,
     label: () => modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
     run: async (): Promise<ReportedDraftResult> => {
+      if (newsWriterLead) {
+        let skillError = "";
+        let skill: import("./meeting-skill-writer.server.ts").MeetingSkillWriterResult | null = null;
+        if (!writerRuntime.ok) {
+          skillError = writerRuntime.error;
+        } else {
+          /*
+            THE NEWS WRITER (D234): the same report-local-news skill, the same
+            agent, the same folder discipline as a meeting run -- handed ONE
+            lead and told to research it. The model is the editor's resolved
+            pick and never a substitute: a Claude pick runs as itself, and a
+            DeepSeek pick runs through the desk's DeepSeek relay.
+          */
+          const { runNewsSkillWriter } = await import("./news-skill-writer.server.ts");
+          skill = await runNewsSkillWriter({
+            sql,
+            newsroomId: owned(context),
+            jobId: job.id,
+            lead: {
+              id: lead.id,
+              headline: lead.headline,
+              why: lead.why,
+              topic: lead.topic,
+              sourceUrls: lead.source_urls,
+              evidence: lead.evidence,
+              notesJson: lead.notes_json ?? null,
+            },
+            model: writerRuntime.model,
+            deepSeek: writerRuntime.deepSeek,
+            reasoningEffort: writerRuntime.deepSeek ? undefined : effortFromJob(job),
+            onStage: (stage) => setStage(job.id, stage),
+            run: deps.newsWriterRun,
+          });
+          if (!skill.ok) skillError = skill.error;
+        }
+        if (skill && skill.ok) {
+          skillDraft = skill;
+          /*
+            The run's own facts for the receipt: which instructions and which
+            model wrote the story, and where its files are. The model is the
+            one that ran -- a news lead is never swapped behind the editor's
+            back, so there is no `requestedModel` here.
+          */
+          skillRunStats = {
+            wallMs: skill.durationMs,
+            modelCalls: 1,
+            inputTokens: 0,
+            outputTokens: 0,
+            writer: "report-local-news",
+            skillVersion: skill.skillVersion,
+            model: writerRuntime.ok ? writerRuntime.model : "",
+            workDir: skill.workDir,
+          };
+          const sourceUrls = claimsAndSourcesUrls(skill.claims);
+          await saveSourceCopies(sourceUrls, job.id);
+          /*
+            The skill's own body is the draft. NOTHING is appended to it: a
+            reader of a news story must see exactly what they see today when
+            the four-pass writer writes it (D234 point 3). CLAIMS AND SOURCES
+            is not published -- it rides in the editor file written to
+            `meeting_notes` below, and its links are where `source_urls` come
+            from.
+          */
+          return {
+            headline: skill.headline,
+            dek: skill.dek,
+            body: skill.body,
+            topic: lead.topic ?? "",
+            source_urls: sourceUrls,
+            citation_status: "review-required",
+            integrity_notes: "",
+            memory_entities: [],
+            form: "reported",
+            provenance: [],
+            found_note: "",
+            findings: [],
+            unanswered: [],
+            research_memo: {
+              news: "",
+              why_it_matters: "",
+              angle: "",
+              form: "reported",
+              questions: [],
+              unknowns: [],
+              follow: "",
+              captured: [],
+            },
+            claims: [],
+          };
+        }
+        /*
+          D234 point 2: THE FALLBACK. A skill run that failed does not hand the
+          editor an error -- the four-pass writer finishes the same draft on
+          the SAME pick, and the row says which writer actually wrote it. The
+          editor is told plainly, in the stage line and in the job's note, that
+          the research writer failed and why. Cancel still wins: it is asked
+          again here, before the fallback spends its four model calls.
+        */
+        newsSkillFallbackError = skillError;
+        const reason = String(skillError).trim().replace(/[.!?]+$/, "");
+        const sentence = `The research writer failed: ${reason}. Writing with the standard writer.`;
+        await setStage(job.id, sentence);
+        await setFailoverNote(job.id, sentence);
+        await throwIfJobCancelled(job.id);
+        return runReportWithCheckpoint({
+          ...draftInput,
+          modelChoice: resolvedStoryChoice,
+        });
+      }
       if (!wholeMeetingLead)
         return runReportWithCheckpoint({
           ...draftInput,
-          modelChoice: effectiveStoryModelChoice(job.model_choice),
+          modelChoice: resolvedStoryChoice,
         });
       if (!writerRuntime.ok) return { error: writerRuntime.error };
       /*
@@ -4579,6 +4772,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             meeting_notes = ${storableText(skillDraft.editorFile)},
             editor_checks = ${JSON.stringify(sanitizeJsonLeaves(skillDraft.checks))}::jsonb,
             run_stats = ${JSON.stringify(sanitizeJsonLeaves(skillRunStats))}::jsonb
+          where id = ${Number(savedDraft.id)} and newsroom_id = ${owned(context)}
+        `;
+      } else if (newsSkillFallbackError) {
+        /*
+          D234 point 2: the research writer failed and the standard writer
+          finished the draft. The row says so, with the error that sent it
+          there, so an editor reading the run's facts is never told the skill
+          wrote something it did not write.
+        */
+        await sql`
+          update drafts set
+            run_stats = ${JSON.stringify(sanitizeJsonLeaves({
+              writer: "standard",
+              researchWriterError: newsSkillFallbackError,
+            }))}::jsonb
           where id = ${Number(savedDraft.id)} and newsroom_id = ${owned(context)}
         `;
       }
@@ -6858,20 +7066,21 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     }
 
     /*
-      MS-WIRE W3: the meeting writer's check list, read from the row inside the
-      fence. Same key and same sentence as the page's own blocker, so a stale
-      tab and a refused press agree, and the acknowledgement the page sends back
+      MS-WIRE W3: the writer's check list, read from the row inside the fence.
+      Same key and same sentence as the page's own blocker -- including D235's
+      "The writer" wording for a news-skill draft -- so a stale tab and a
+      refused press agree, and the acknowledgement the page sends back
       (`meeting-editor-checks`) is the key recorded here.
     */
     const { loadDraftEditorChecks } = await import("./meeting-ledger.server.ts");
-    const editorChecks = await loadDraftEditorChecks(tx, {
+    const { checks: editorChecks, fromNewsWriter } = await loadDraftEditorChecks(tx, {
       newsroomId: owned(context),
       draftId: Number(row.id),
     });
     if (editorChecks.length) {
       warnings.push({
         key: "meeting-editor-checks",
-        sentence: meetingEditorChecksNotice(editorChecks),
+        sentence: meetingEditorChecksNotice(editorChecks, { fromNewsWriter }),
       });
     }
 

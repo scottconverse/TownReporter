@@ -195,6 +195,12 @@ export type PublishBlockerState = {
    */
   meetingEditorChecks?: readonly string[];
   /**
+   * D235: the check list on this draft came from the news skill
+   * (`run_stats->>'writer'` is `report-local-news`), so the warning's lead says
+   * "The writer", not "The meeting writer". Absent keeps the meeting wording.
+   */
+  meetingEditorChecksFromNewsWriter?: boolean;
+  /**
    * TPW-2: when the saved draft was last written (its `updated_at`, ISO). A draft
    * older than OLD_DRAFT_DAYS adds one warning; absent adds none.
    */
@@ -630,17 +636,20 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   }
 
   /*
-    ── WHAT THE MEETING WRITER ASKS A PERSON TO CHECK (MS-WIRE W3) ────────────
-    The skill ends its work with the items that rest only on captions, a number
-    read off a screen, a disputed figure, or a sentence with legal risk. They
-    are a WARNING, not a wall (Scott's editor-control rule): the list is printed
-    in the confirm dialog, and "Publish anyway" prints over it.
+    ── WHAT THE WRITER ASKS A PERSON TO CHECK (MS-WIRE W3, D235) ──────────────
+    Both writers -- the meeting writer and the report-local-news skill -- end
+    their work with the items that rest only on captions, a number read off a
+    screen, a disputed figure, or a sentence with legal risk. They are a
+    WARNING, not a wall (Scott's editor-control rule): the list is printed in
+    the confirm dialog, and "Publish anyway" prints over it.
   */
   if (state.meetingEditorChecks?.length) {
     blockers.push({
       key: "meeting-editor-checks",
       kind: "warning",
-      sentence: meetingEditorChecksNotice(state.meetingEditorChecks),
+      sentence: meetingEditorChecksNotice(state.meetingEditorChecks, {
+        fromNewsWriter: state.meetingEditorChecksFromNewsWriter,
+      }),
       action: { label: "Review the checks", target: { kind: "evidence-review" } },
     });
   }
@@ -649,17 +658,23 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
 }
 
 /**
- * The one sentence the meeting writer's check list is published over:
- * "The meeting writer asks you to check 2 things before publishing: 1. … 2. …".
+ * The one sentence a check list is published over:
+ * "The meeting writer asks you to check 2 things before publishing: 1. … 2. …"
+ * for a meeting draft, or the same with just "The writer" for a draft the
+ * report-local-news skill wrote (D235).
  *
  * The same builder feeds the server's refusal (desk.ts `collectWarnings`), so
  * the dialog and a refused press cannot say different things about the same
  * draft.
  */
-export function meetingEditorChecksNotice(checks: readonly string[]): string {
+export function meetingEditorChecksNotice(
+  checks: readonly string[],
+  options: { fromNewsWriter?: boolean } = {},
+): string {
   const items = checks.map((check) => String(check ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
   const count = items.length;
-  const lead = `The meeting writer asks you to check ${count} thing${count === 1 ? "" : "s"} before publishing:`;
+  const who = options.fromNewsWriter ? "The writer" : "The meeting writer";
+  const lead = `${who} asks you to check ${count} thing${count === 1 ? "" : "s"} before publishing:`;
   return items.length
     ? `${lead} ${items.map((item, index) => `${index + 1}. ${item}`).join(" ")}`
     : lead;

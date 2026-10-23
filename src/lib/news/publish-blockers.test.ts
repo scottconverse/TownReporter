@@ -588,6 +588,21 @@ describe("MS-WIRE: the meeting writer's check list", () => {
     );
   });
 
+  it("says \"The writer\", not \"The meeting writer\", on a news-skill draft (D235)", () => {
+    const rows = publishBlockers(
+      withState({
+        meetingEditorChecks: ["Check the 6-1 tally.", "The parking figure is read off a slide."],
+        meetingEditorChecksFromNewsWriter: true,
+      }),
+    ).filter((blocker) => blocker.key === "meeting-editor-checks");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.kind, "warning");
+    assert.match(
+      rows[0]!.sentence,
+      /^The writer asks you to check 2 things before publishing: 1\. Check the 6-1 tally\. 2\. The parking figure is read off a slide\.$/,
+    );
+  });
+
   it("says nothing for an empty list", () => {
     assert.deepEqual(keys({ meetingEditorChecks: [] }), []);
     assert.deepEqual(keys({ meetingEditorChecks: undefined }), []);

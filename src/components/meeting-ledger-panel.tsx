@@ -12,6 +12,7 @@ import {
   isRanked,
 } from "@/lib/news/meeting-impact";
 import { runStatsLine } from "@/components/meeting-ledger-stats";
+import { ledgerHeading } from "@/components/meeting-ledger-heading";
 import type { ClaimRow, LedgerItemRow, MeetingAccounting } from "@/lib/news/meeting-ledger.server";
 
 /**
@@ -48,6 +49,7 @@ export function MeetingLedgerPanel({
   accounting,
   transcriptArtifactId,
   locked,
+  fromMeeting,
 }: {
   /** The story page's own query key: a save refetches this lead, nothing else. */
   leadId: number;
@@ -56,6 +58,14 @@ export function MeetingLedgerPanel({
   transcriptArtifactId: number | null;
   /** On a published story the ledger is read-only, like every other write here. */
   locked: boolean;
+  /**
+   * D234 point 5: is this draft a meeting's? The report-local-news skill now
+   * writes ordinary news leads too, and their editor file lands in the same
+   * columns -- so the panel draws for them as well. It is still the writer's
+   * notes there, not a meeting ledger, and the heading says so. Nothing else
+   * on the panel changes.
+   */
+  fromMeeting: boolean;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(true);
@@ -100,12 +110,19 @@ export function MeetingLedgerPanel({
         onToggle={(e) => setOpen(e.currentTarget.open)}
       >
         <summary>
-          Meeting ledger
-          <span className="meeting-ledger-count">
-            {ledger.length} item{ledger.length === 1 ? "" : "s"}
-            {unreadCount ? ` · ${unreadCount} not read` : ""}
-            {unsetTreatmentCount ? ` · ${unsetTreatmentCount} treatments not set` : ""}
-          </span>
+          {/*
+            D234: a news draft's record is the writer's notes, not a meeting
+            ledger, and it has no items to count. A meeting draft's words are
+            exactly what they were.
+          */}
+          {ledgerHeading(fromMeeting)}
+          {fromMeeting ? (
+            <span className="meeting-ledger-count">
+              {ledger.length} item{ledger.length === 1 ? "" : "s"}
+              {unreadCount ? ` · ${unreadCount} not read` : ""}
+              {unsetTreatmentCount ? ` · ${unsetTreatmentCount} treatments not set` : ""}
+            </span>
+          ) : null}
         </summary>
 
         {stats ? <p className="meeting-ledger-stats">{stats}</p> : null}

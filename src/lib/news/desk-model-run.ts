@@ -221,6 +221,27 @@ export type PerformDraftWorkDeps = {
    */
   meetingWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
   /**
+   * Test seam for the NEWS writer's agent call (D234). The same shape and the
+   * same purpose as `meetingWriterRun`: production spawns the CLI, a test
+   * injects a stub that writes the run's `story.txt`, so no CLI, login or
+   * network is needed.
+   */
+  newsWriterRun?: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner;
+  /**
+   * Test seam for D234 point 4, the saved copies of a news skill draft's
+   * sources. Production reads each page through `pickSourceCopyIngest` below
+   * (never the four-pass writer's `reportDeps.ingest`, which on a batch can
+   * switch the job's model); a test injects both so no page is fetched and the
+   * number of captures is countable.
+   */
+  newsSourceCopy?: {
+    ingest?: (url: string) => Promise<import("./report.ts").FetchedDoc>;
+    capture?: (
+      userId: string,
+      doc: import("./report.ts").FetchedDoc,
+    ) => Promise<{ version_id: number | null; capture_event_id: number | null }>;
+  };
+  /**
    * Test seam for the packet link in the story's sources line (D217).
    * Production reads the newsroom's own PrimeGov portal; a test injects the
    * URL so the draft never reaches the network.
@@ -259,6 +280,37 @@ export type PerformDraftWorkDeps = {
    * forced-runtime validator. */
   validateBatchRuntime?: typeof import("./forced-runtime.server.ts").validateForcedRuntime;
 };
+
+/**
+ * D234 point 4 (fix 1): which reader saves the copies of a news skill draft's
+ * source pages.
+ *
+ * The saved copies are made by app code with NO AI, so the reader is the
+ * mechanical one: `defaultIngest` with `allowModelOcr: false`, the same flag
+ * the reporting-line Pull reader passes (pull.server.ts). It must never be the
+ * four-pass writer's `reportDeps.ingest` -- on a batch that reader carries an
+ * OCR switch callback that calls `setModelRuntime` and moves `job.model_choice`
+ * to a Codex or Claude pick, so a story the skill already wrote on DeepSeek
+ * would leave a receipt naming a model that did not write it, and spend model
+ * calls doing it. A page that needs OCR stays `needs-ocr` for the editor,
+ * exactly as it does on Pull.
+ *
+ * Lives here, not in desk.ts, because desk.ts imports `@/lib/db` and cannot be
+ * loaded by a plain `node --test` process (see this file's docstring). The
+ * default reader is a parameter so a test can watch the options it is handed
+ * without fetching a page.
+ */
+export function pickSourceCopyIngest(
+  injected: PerformDraftWorkDeps["newsSourceCopy"] | undefined,
+  newsroomId: number,
+  defaultReader: (
+    url: string,
+    ocrOptions?: import("./ingest.ts").IngestOptions,
+  ) => Promise<import("./report.ts").FetchedDoc>,
+): (url: string) => Promise<import("./report.ts").FetchedDoc> {
+  if (injected?.ingest) return injected.ingest;
+  return (url) => defaultReader(url, { allowModelOcr: false, newsroomId: String(newsroomId) });
+}
 
 /**
  * The first attempt failed. If the job was on Automatic and the failure

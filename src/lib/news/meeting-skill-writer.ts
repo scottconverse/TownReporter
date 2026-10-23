@@ -101,6 +101,88 @@ export function assignmentPrompt(input: {
   ].join("\n");
 }
 
+/**
+ * The assignment handed to the agent for an ordinary NEWS lead.
+ *
+ * The same job as `assignmentPrompt`, handed the same way, for the other kind
+ * of lead the skill writes: one straight story about one lead, researched from
+ * public records, with no meeting, no transcript and no packet. This text is
+ * the arm-C harness's prompt (writer-test-c/harness/run-c.mjs lines 75-100)
+ * word for word -- the wording is the thing that was measured in the blind
+ * test, so it is copied rather than improved.
+ */
+export function newsAssignmentPrompt(input: {
+  /** The lead's headline, as the desk holds it. */
+  headline: string;
+  /** The lead's topic, as the desk holds it. */
+  topic: string;
+  /** Today's date, as the editor's desk would say it (e.g. "Wednesday, Oct. 21, 2026"). */
+  today: string;
+}): string {
+  return [
+    `Your instructions are the file SKILL.md in your working folder. Read ALL of it first, every line, then follow it exactly. It is the only rule set for this job. Today is ${input.today} (America/Denver).`,
+    "",
+    "## The assignment (what the editor's desk hands you)",
+    `- Write ONE straight local news story about ONE lead: "${input.headline}" (topic: ${input.topic}). Full story mode. This is not a meeting: there is no transcript, no packet, no ALSO AT THE MEETING section, and no ledger.`,
+    "- The lead, its evidence and every source URL are in LEAD.md in your working folder. Read all of it. Open every source URL it lists, and follow what they lead to.",
+    "- Research it yourself from public records and public reporting: the agency, city, county or state record the lead names (clerks, recorders, filings, agendas, resolutions, notice pages, TRACER, dashboards), and any other outlet's account of the same event. Use curl and pdftotext in the shell; web tools may not work here.",
+    "- The audit script is at scripts/audit.py. Run it with: python scripts/audit.py draft.txt",
+    "",
+    "## Output",
+    "- Write the full deliverable (both blocks, exactly as the skill lays them out, including the CLAIMS AND SOURCES block and the EDITOR FILE) to story.txt in your working folder. Keep draft.txt for the script runs.",
+    "- Write the script's final run output to audit-final.txt.",
+    "- Write CHECK-FIRST.txt: AT MOST 3 lines, the items an editor must check before publishing that would do the most harm if wrong, most harmful first: a sentence with legal risk, then the lead's central fact or number, then a quote or figure that rests on a single source. Everything else you flagged stays in the EDITOR FILE, not here. Plain sentences, one per line. No bullets, no numbering. If nothing rises to that level, write an empty file.",
+    "- Write RUN-NOTES.md: which records you opened (URLs), what you could not get and why, the final script result line, and your ranking record line. Last line: RUN-DONE.",
+    "",
+    "## Limits",
+    "- Work only inside your working folder. Do not search the disk (no find, rg, grep -r or dir /s over other folders).",
+    "- Never open or print environment.private.json, any .env file, any file with .private in its name, session.json or auth.json.",
+    "- No outreach: send no email or message to anyone. No posting anywhere.",
+    "- No questions: nobody can answer. If something is unclear, choose the reading the skill supports, note it in the EDITOR FILE, and keep going.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * The lead file the agent reads (`LEAD.md`), built the way the arm-C harness
+ * built it (writer-test-c/harness/run-c.mjs lines 46-66).
+ *
+ * Everything the desk knows about the lead, laid out in the same headings, so
+ * the run folder alone says what the writer was asked to report.
+ */
+export function newsLeadFile(input: {
+  id: number | string;
+  headline: string;
+  why: string;
+  topic: string;
+  sourceUrls: readonly string[];
+  evidence: string;
+  notesJson: string | null;
+}): string {
+  return [
+    `# LEAD ${input.id}`,
+    ``,
+    `## Headline`,
+    input.headline,
+    ``,
+    `## Why it is news`,
+    input.why,
+    ``,
+    `## Topic`,
+    input.topic,
+    ``,
+    `## Source URLs`,
+    ...(input.sourceUrls.length ? input.sourceUrls.map((u) => `- ${u}`) : ["- (none supplied)"]),
+    ``,
+    `## Evidence`,
+    input.evidence,
+    ``,
+    `## Editor's notes (reporting leads, not established facts)`,
+    input.notesJson ?? "",
+    ``,
+  ].join("\n");
+}
+
 /** Everything before the marker is publishable; the marker and after are not. */
 export const EDITOR_FILE_MARKER = "EDITOR FILE: NOT FOR PUBLICATION";
 

@@ -2535,8 +2535,11 @@ function StoryPage() {
        it defensively so this route compiles whether or not it has landed yet,
        and so a missing field is simply no warning. */
     meetingCitationNotice: data.meetingCitationNotice ?? undefined,
-    /* MS-WIRE W3: the meeting writer's check list; a warning over the press. */
+    /* MS-WIRE W3: the writer's check list; a warning over the press. D235: the
+       news skill's list says "The writer", a meeting draft's says "The meeting
+       writer". */
     meetingEditorChecks: data.meetingEditorChecks ?? undefined,
+    meetingEditorChecksFromNewsWriter: data.meetingEditorChecksFromNewsWriter ?? false,
     /* TPW-2: when the saved draft was last written; an old one draws one warning. */
     draftWrittenAt: data.draft?.updated_at ?? null,
   });
@@ -3339,6 +3342,11 @@ function StoryPage() {
               }
               reverifyingMeetingCitations={draftMeetingReview.isPending || reverifyLive.isPending}
               meetingAccounting={data.meetingAccounting}
+              meetingLead={Boolean(
+                data.lead.meeting_video_id &&
+                  data.lead.meeting_artifact_id &&
+                  data.lead.meeting_lead_purpose === "transcript-story",
+              )}
             />
             {/*
           The fold used to print a count of failures -- "13 provider or page
@@ -4999,6 +5007,7 @@ function ReportingNotesPane({
   reverifyingMeetingCitations,
   currentDraftId,
   meetingAccounting,
+  meetingLead,
 }: {
   leadId: number;
   notes: ReportingNotes;
@@ -5020,6 +5029,14 @@ function ReportingNotesPane({
   currentDraftId: number | null;
   /** WR1 phase 2: the whole-meeting run's accounting for this lead (see getLead). */
   meetingAccounting: MeetingAccounting | null;
+  /**
+   * D234 point 5: true when this lead is a meeting (a stored transcript the
+   * whole-meeting writer reads). A news lead's draft now carries the skill
+   * writer's editor file too, in the same columns, so the panel draws for it
+   * -- but its heading is "Writer's notes", not "Meeting ledger", because
+   * there is no meeting to account for.
+   */
+  meetingLead: boolean;
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
@@ -5307,6 +5324,7 @@ function ReportingNotesPane({
             : null
         }
         locked={locked}
+        fromMeeting={meetingLead}
       />
       {hasDraft ? <DraftHistoryPanel leadId={leadId} currentDraftId={currentDraftId} /> : null}
       {!filled ? (
