@@ -353,6 +353,20 @@ sign-in steps on the computer/account running TownReporter, then reload and
 retry. Opinion's help also covers the required editorial voice file. This is
 guidance, not an automatic installer or sign-in button.
 
+### Draft many stories at once
+
+Start as many drafts as you like, from Queue rows or from each story page, and
+move on. Leaving a page does not stop a draft: every draft is a `desk_jobs` row
+that the server runs, not the browser. The `draft` lane runs two at a time
+(`LANE_CONCURRENCY` in `src/lib/news/jobs.ts`); the rest wait as `queued` and
+start oldest first when a slot frees. Local model work runs one job at a time
+across all lanes. Scans and Dark Desk digs use other lanes. A running follow-up
+check holds new drafts. One open draft per story: a second press with the same
+model returns the running job; a different model or scope warns, then stops and
+restarts it. The queue is drained on every enqueue, on startup, and by the
+five-minute **TownReporter Monitors** task. Draft starts past 20 in an hour
+(`HOURLY` in `src/lib/news/ops.ts`) raise a warning with **Run anyway**.
+
 ### Draft selected leads
 
 The Queue can start one atomic batch of one to five eligible leads. Select the

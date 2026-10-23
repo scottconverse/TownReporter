@@ -321,6 +321,31 @@ row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
 
+### Draft many stories at once
+
+You can start as many drafts as you like. Press **Draft with AI** on one Queue
+row, then on the next row, and so on. Or open a story, press **Draft with AI**,
+go back to the Queue, open the next story, and do the same.
+
+- **Leaving the page does not stop a draft.** The draft runs on the server,
+  not in your browser. Come back later and the story is there.
+- **Two drafts write at the same time.** The others wait in line. Each one
+  starts by itself, oldest first, when a draft finishes. A waiting draft shows
+  as queued and says what it is waiting for.
+- **Local model drafts write one at a time**, because they share one computer.
+- **Scans and Dark Desk digs have their own line.** They do not take a draft's
+  place.
+- **A running follow-up check makes new drafts wait** until it finishes.
+- **One draft per story.** If you press **Draft with AI** again on a story that
+  is already drafting with the same model, you get the running draft, not a
+  second one. If you pick a different model, the desk warns you first. If you
+  continue, it stops the running draft and starts a new one.
+- **The line keeps moving after a restart.** When the paper starts again, it
+  picks up drafts that were waiting or stalled. A backup clock (the
+  **TownReporter Monitors** task) also checks the line every five minutes.
+- **After 20 draft starts in one hour, the desk warns** that more may cost more.
+  Press **Run anyway** to start the draft.
+
 ### Draft selected leads
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
@@ -465,7 +490,9 @@ picker.
 
 Choose **Local model**, then the individual model found through LM Studio, Ollama or llama.cpp. An Ollama model ending in `:cloud` runs in Ollama Cloud; the local Ollama service routes the request and the picker labels the model **Ollama Cloud** with its reported context window. A configured `LLM_BASE_URL` is also supported. Availability means the route can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
 
-Stay on the page. If the click dies before the reply comes back, the workbench
+You can stay on the page to watch, or leave it: the draft keeps running on the
+server either way (see [Draft many stories at once](#draft-many-stories-at-once)).
+If you stay and the click dies before the reply comes back, the workbench
 keeps looking until the draft is on the lead, then fills the form. You should
 not need to reload. If a real failure happens, its message survives a reload
 and includes the provider's safe diagnostic detail when available. Fix what it
