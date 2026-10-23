@@ -237,7 +237,15 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * always had.
  */
 function rungGateway(entry: ProviderEntry, resolvedModel?: string | null, pinnedLocal?: LocalModelOverride): LlmConfig | null {
-  const baseUrl = pinnedLocal?.baseUrl ?? providerEndpoint(entry);
+  /*
+    Callers pass the newsroom's "Local model" pick on EVERY call, whatever model
+    the editor chose. A rung that names its own model therefore honors the pin
+    only when the pin IS that model; otherwise it keeps its own server and model.
+    On Oct 22-23 2026 this sent "DeepSeek" drafts to LM Studio's flint.
+  */
+  const rungModel = resolvedModel || providerModel(entry);
+  const pin = entry.picksLoadedLocalModel || pinnedLocal?.id === rungModel ? pinnedLocal : undefined;
+  const baseUrl = pin?.baseUrl ?? providerEndpoint(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
   const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
@@ -248,7 +256,7 @@ function rungGateway(entry: ProviderEntry, resolvedModel?: string | null, pinned
     purpose: no resolved model, no gateway, no call -- which is how "never
     request a model that is not loaded" is enforced rather than remembered.
   */
-  const model = resolvedModel || pinnedLocal?.id || providerModel(entry);
+  const model = entry.picksLoadedLocalModel ? resolvedModel || pinnedLocal?.id || providerModel(entry) : rungModel;
   if (!model) return null;
   return {
     apiKey: apiKey || "not-needed",

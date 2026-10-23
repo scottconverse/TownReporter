@@ -53,6 +53,39 @@ describe("forced runtime snapshots", () => {
     assert.equal(provider.baseUrl,pinned.baseUrl);
     assert.equal(provider.model,pinned.id);
   });
+  it("keeps DeepSeek on its own server when the Local model pick is passed along", async () => {
+    const {resolveProvider}=await import("./ai.ts");
+    const {providerEntry,providerEndpoint,providerModel}=await import("./provider-registry.ts");
+    // Callers pass the newsroom's "Local model" pick on every call (report.ts).
+    // It is not DeepSeek's model, so it must not carry DeepSeek's call.
+    const provider=resolveProvider("deepseek-flash",{baseUrl:"http://127.0.0.1:1234/v1",id:"flint"});
+    assert.equal(provider?.kind,"openai");
+    if (provider?.kind !== "openai") assert.fail("DeepSeek must keep its own compatible transport");
+    const entry=providerEntry("deepseek-flash");
+    if (!entry) assert.fail("deepseek-flash must be in the registry");
+    assert.notEqual(provider.model,"flint");
+    assert.equal(provider.model,providerModel(entry));
+    assert.equal(provider.baseUrl,providerEndpoint(entry));
+  });
+  it("keeps qwen-local on the pinned model even when its env override names another", async () => {
+    const previous = process.env.TOWNREPORTER_QWEN_MODEL;
+    process.env.TOWNREPORTER_QWEN_MODEL = "env-qwen";
+    try {
+      const {resolveProvider}=await import("./ai.ts");
+      // The "Local model" rung picks its model at call time, so a pin it is
+      // given IS the model to call; the env variable only fills the slot when
+      // no pin was resolved.
+      const pinned={baseUrl:"http://127.0.0.1:1234/v1",id:"pinned-qwen"};
+      const provider=resolveProvider("qwen-local",pinned);
+      assert.equal(provider?.kind,"openai");
+      if (provider?.kind !== "openai") assert.fail("qwen-local must resolve to a compatible transport");
+      assert.equal(provider.model,"pinned-qwen");
+      assert.equal(provider.baseUrl,pinned.baseUrl);
+    } finally {
+      if (previous === undefined) delete process.env.TOWNREPORTER_QWEN_MODEL;
+      else process.env.TOWNREPORTER_QWEN_MODEL = previous;
+    }
+  });
   it("rejects a runtime paired with another provider choice", () => {
     assert.equal(parseForcedRuntimeSnapshot({ ...claude, modelChoice: "codex-balanced" }), null);
   });
