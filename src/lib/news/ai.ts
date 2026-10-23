@@ -511,9 +511,17 @@ async function resolveCustomProvider(
  */
 function connectionError(label: string, err: unknown): string {
   const name = err instanceof Error ? err.name : "";
-  return /Timeout|Abort/i.test(name)
-    ? `${label} readiness check timed out.`
-    : `${label} is unreachable. Check that it is running and that this machine is online.`;
+  if (/Timeout|Abort/i.test(name)) return `${label} readiness check timed out.`;
+  // Name the cause: Oct 22-23 2026 drafts said only "unreachable" while the
+  // server answered every probe, and nothing recorded what actually threw.
+  const cause = err instanceof Error ? (err.cause as { code?: unknown; message?: unknown } | undefined) : undefined;
+  const parts = [
+    typeof cause?.code === "string" ? cause.code : "",
+    typeof cause?.message === "string" ? cause.message : "",
+    err instanceof Error ? err.message : "",
+  ].map((s) => s.trim()).filter(Boolean);
+  const detail = [...new Set(parts)].join("; ").slice(0, 160);
+  return `${label} is unreachable. Check that it is running and that this machine is online.${detail ? ` (${detail})` : ""}`;
 }
 
 async function probeOpenAi(
