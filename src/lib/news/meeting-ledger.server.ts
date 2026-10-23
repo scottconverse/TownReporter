@@ -151,16 +151,24 @@ export function parseEditorChecks(raw: unknown): string[] {
   return value.map((item) => String(item ?? "").trim()).filter(Boolean);
 }
 
-/** The check list stored on one draft, scoped to its newsroom. */
+/**
+ * The check list stored on one draft, scoped to its newsroom, plus which writer
+ * put it there: `run_stats->>'writer'` is `report-local-news` on a draft the
+ * news skill wrote, and absent on a meeting draft (D235). The Publish warning
+ * says "The writer" for the former and "The meeting writer" for the latter.
+ */
 export async function loadDraftEditorChecks(
   sql: Sql,
   input: { newsroomId: number; draftId: number },
-): Promise<string[]> {
-  const rows = await sql.query<{ editor_checks: unknown }>(
-    `select editor_checks from drafts where id=$1 and newsroom_id=$2`,
+): Promise<{ checks: string[]; fromNewsWriter: boolean }> {
+  const rows = await sql.query<{ editor_checks: unknown; writer: string | null }>(
+    `select editor_checks, run_stats->>'writer' as writer from drafts where id=$1 and newsroom_id=$2`,
     [input.draftId, input.newsroomId],
   );
-  return parseEditorChecks(rows[0]?.editor_checks);
+  return {
+    checks: parseEditorChecks(rows[0]?.editor_checks),
+    fromNewsWriter: rows[0]?.writer === "report-local-news",
+  };
 }
 
 /**

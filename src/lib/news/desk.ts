@@ -1210,15 +1210,20 @@ export const getLead = createServerFn({ method: "GET" })
       ? staleCitationNotice(meetingPublishEvidence.stale)
       : null;
     /*
-      MS-WIRE W3: what the meeting writer asked a person to check before this
-      draft prints. Editor-only, and the Publish dialog warns over it.
+      MS-WIRE W3: what the writer asked a person to check before this draft
+      prints. Editor-only, and the Publish dialog warns over it. D235: the
+      loader also says which writer left the list, so the sentence names the
+      news skill ("The writer") rather than the meeting writer when that is
+      who wrote it.
     */
-    const meetingEditorChecks = drafts[0]
+    const editorChecksRow = drafts[0]
       ? await (await import("./meeting-ledger.server.ts")).loadDraftEditorChecks(sql, {
           newsroomId: owned(context),
           draftId: Number(drafts[0].id),
         })
-      : [];
+      : { checks: [], fromNewsWriter: false };
+    const meetingEditorChecks = editorChecksRow.checks;
+    const meetingEditorChecksFromNewsWriter = editorChecksRow.fromNewsWriter;
     /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
       panel shows -- the ledger (unread rows first), the checked claims (flagged
@@ -1382,6 +1387,7 @@ export const getLead = createServerFn({ method: "GET" })
       meetingPublishNotice,
       meetingCitationNotice,
       meetingEditorChecks,
+      meetingEditorChecksFromNewsWriter,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -7060,20 +7066,21 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     }
 
     /*
-      MS-WIRE W3: the meeting writer's check list, read from the row inside the
-      fence. Same key and same sentence as the page's own blocker, so a stale
-      tab and a refused press agree, and the acknowledgement the page sends back
+      MS-WIRE W3: the writer's check list, read from the row inside the fence.
+      Same key and same sentence as the page's own blocker -- including D235's
+      "The writer" wording for a news-skill draft -- so a stale tab and a
+      refused press agree, and the acknowledgement the page sends back
       (`meeting-editor-checks`) is the key recorded here.
     */
     const { loadDraftEditorChecks } = await import("./meeting-ledger.server.ts");
-    const editorChecks = await loadDraftEditorChecks(tx, {
+    const { checks: editorChecks, fromNewsWriter } = await loadDraftEditorChecks(tx, {
       newsroomId: owned(context),
       draftId: Number(row.id),
     });
     if (editorChecks.length) {
       warnings.push({
         key: "meeting-editor-checks",
-        sentence: meetingEditorChecksNotice(editorChecks),
+        sentence: meetingEditorChecksNotice(editorChecks, { fromNewsWriter }),
       });
     }
 
