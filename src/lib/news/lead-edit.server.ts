@@ -1,4 +1,5 @@
 import { withTransaction } from "../db.ts";
+import { parseUrlList } from "../paper.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow } from "./types.ts";
 import { editorWarning, type EditorWarning } from "./editor-override.ts";
@@ -158,5 +159,83 @@ export async function updateLeadForEditor(
       `;
     }
     return { ok: true, id: data.id };
+  });
+}
+
+export type LeadSourceAddInput = {
+  leadId: number;
+  /** The captured page's own address (`artifact_versions.url`). */
+  url: string;
+  /** The keys the editor has already approved this press. */
+  override?: string[];
+};
+
+export type LeadSourceAddResult =
+  | { ok: true; id: number; urls: string[]; message?: string }
+  | { ok: false; error: string; warning?: EditorWarning };
+
+/**
+ * "Add to this story" on the Story page's evidence search (D285/D286).
+ *
+ * The same rules as `updateLeadForEditor` above, narrowed to one thing: put a
+ * captured page's address on the lead's source list. A killed or published
+ * lead WARNS (and the editor's second press goes through); a lead in another
+ * newsroom and an address the public-url rules reject are HARD. Drafts are
+ * deliberately untouched -- this press adds a source to the lead, it does not
+ * rewrite the story being written from it.
+ */
+export async function addLeadSourceUrl(
+  context: { userId: string; newsroomId: number },
+  data: LeadSourceAddInput,
+): Promise<LeadSourceAddResult> {
+  const clean = sanitizePublicUrls([data.url]);
+  const url = clean[0];
+  if (!url) {
+    return { ok: false, error: "That web address cannot be added." };
+  }
+
+  // The override audit rides the transaction, so its schema has to exist before
+  // the transaction opens (DDL cannot run inside it).
+  await ensureAuditEventsSchema();
+  return withTransaction(async (sql) => {
+    const rows = await sql<Pick<LeadRow, "id" | "status" | "source_urls">>`
+      select id, status, source_urls from leads
+      where id = ${data.leadId} and newsroom_id = ${context.newsroomId}
+      limit 1 for update
+    `;
+    const lead = rows[0];
+    // HARD: a record that is gone is never overridden.
+    if (!lead) {
+      return { ok: false, error: "Lead not found." };
+    }
+    const killed = lead.status === "killed"
+      ? await editorWarning(
+          { ...context, sql },
+          data.override,
+          "lead-add-source-killed",
+          "This lead was killed. Adding a source keeps it killed.",
+          { kind: "lead", id: data.leadId },
+        )
+      : null;
+    if (killed) return killed;
+    const published = lead.status === "published"
+      ? await editorWarning(
+          { ...context, sql },
+          data.override,
+          "lead-add-source-published",
+          "This lead has a published story. Adding a source changes the lead, while the published story keeps its current text.",
+          { kind: "lead", id: data.leadId },
+        )
+      : null;
+    if (published) return published;
+
+    const existing = parseUrlList(lead.source_urls);
+    const urls = sanitizePublicUrls([...existing, url]);
+    await sql`
+      update leads set source_urls = ${JSON.stringify(urls)},
+             edited_at = now(), edited_by = ${context.userId}
+      where id = ${data.leadId} and newsroom_id = ${context.newsroomId}
+    `;
+    return { ok: true, id: data.leadId, urls };
   });
 }

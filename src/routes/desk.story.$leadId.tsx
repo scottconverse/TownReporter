@@ -28,6 +28,7 @@ import { ActionButton } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { KILL_TOAST_MS, restoreStatus } from "@/components/fast-kill";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
+import { EvidenceSearch } from "@/components/evidence-search";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
@@ -3313,6 +3314,7 @@ function StoryPage() {
             hidden={inspector !== "sources"}
           >
             <h2>Your source material</h2>
+            <EvidenceSearch leadId={id} sources={sources} />
             {sourceAttachmentNote && <p className="meta">{sourceAttachmentNote}</p>}
             <StoryDocumentList leadId={id} />
             {sources.length > 0 ? (
