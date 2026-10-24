@@ -13,6 +13,7 @@ let getPaperConfig: typeof import("./paper-settings.ts").getPaperConfig;
 let rememberCapture: typeof import("./investigate.ts").rememberCapture;
 let reportAndDraft: typeof ReportAndDraft;
 let defaultCapture: typeof import("./report.ts").defaultCapture;
+let defaultIngest: typeof import("./report.ts").defaultIngest;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 
 before(async () => {
@@ -24,7 +25,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ getPaperConfig } = await vite.ssrLoadModule("/src/lib/news/paper-settings.ts"));
   ({ rememberCapture } = await vite.ssrLoadModule("/src/lib/news/investigate.ts"));
-  ({ reportAndDraft, defaultCapture } = await vite.ssrLoadModule("/src/lib/news/report.ts"));
+  ({ reportAndDraft, defaultCapture, defaultIngest } = await vite.ssrLoadModule("/src/lib/news/report.ts"));
   ({ performDraftWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
 });
 
@@ -371,6 +372,69 @@ it("saves a scanned source page as needs-ocr, and a broken one as fetch-failed",
         target,
       ]);
     }
+    await sql.query("delete from newsroom_members where newsroom_id=$1", [newsroomId]);
+    await sql.query("delete from newsrooms where id=$1", [newsroomId]);
+  }
+});
+
+/*
+  G23-R2-ENG-3: the reader's "needs OCR" verdict has to reach the saved copy
+  through `defaultIngest`, not just through a doc a test built by hand.
+
+  The test above starts from a FetchedDoc. In the real run the verdict comes
+  from `ingestDocument`, is copied onto the doc by `defaultIngest`, and only
+  then reaches `defaultCapture`. This drives the whole hand-off with a stubbed
+  reader so a dropped field here fails here.
+*/
+it("carries a reader's needs-ocr verdict from defaultIngest through to the saved copy", async () => {
+  const sql = await getSql();
+  const newsroomId = 99804;
+  const userId = "report-ingest-ocr";
+  const url = "https://records.example.gov/council-packet-scans.pdf";
+  await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict(id) do nothing", [
+    newsroomId,
+    "OCR ingest newsroom",
+  ]);
+  try {
+    const doc = await defaultIngest(url, undefined, {
+      ingestDocument: async () => ({
+        ok: false,
+        status: 200,
+        outcome: "needs-ocr",
+        text: "",
+        title: "Council packet scans",
+        extras: [],
+        contentType: "application/pdf",
+        needsOcr: true,
+        redirectChain: [],
+        extractionMethod: "",
+        pages: [],
+        notices: [],
+        needsOcrReason: "Every page is an image.",
+      }),
+    });
+    assert.equal(doc.needsOcr, true, "defaultIngest dropped the reader's needsOcr verdict");
+    assert.equal(doc.needsOcrReason, "Every page is an image.");
+
+    const saved = await defaultCapture(userId, newsroomId, doc);
+    const [row] = await sql.query<{ fetch_outcome: string }>(
+      "select fetch_outcome from capture_events where id=$1",
+      [saved.capture_event_id],
+    );
+    assert.equal(row?.fetch_outcome, "needs-ocr");
+  } finally {
+    await sql.query("delete from capture_events where newsroom_id=$1 and source_url=$2", [
+      newsroomId,
+      url,
+    ]);
+    await sql.query("delete from artifact_chunks where newsroom_id=$1 and version_id in (select id from artifact_versions where newsroom_id=$1 and url=$2)", [
+      newsroomId,
+      url,
+    ]);
+    await sql.query("delete from artifact_versions where newsroom_id=$1 and url=$2", [
+      newsroomId,
+      url,
+    ]);
     await sql.query("delete from newsroom_members where newsroom_id=$1", [newsroomId]);
     await sql.query("delete from newsrooms where id=$1", [newsroomId]);
   }
