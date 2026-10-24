@@ -305,7 +305,7 @@ try {
     is delayed, and the route is removed the moment the shot is taken.
   */
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: /Good morning/ }).waitFor({ timeout: 45_000 });
+  await page.getByRole("heading", { name: /Good (morning|afternoon|evening)/ }).waitFor({ timeout: 45_000 });
   await page.getByRole("button", { name: /^Start story/ }).first().waitFor({ timeout: 30_000 });
   const hold = async (route) => {
     /*
@@ -341,7 +341,7 @@ try {
   /* ── 2. Today: the optimistic Hold, with the Undo toast ───────────────── */
   await page.waitForTimeout(3_500);
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: /Good morning/ }).waitFor({ timeout: 45_000 });
+  await page.getByRole("heading", { name: /Good (morning|afternoon|evening)/ }).waitFor({ timeout: 45_000 });
   /*
     Hold holds AT ONCE (f91abe06, decision D32: warn, never block -- a warning
     on the way is answered by the toast's own retry, not by a dialog). So the
@@ -448,7 +448,7 @@ try {
 
   /* ── 4. Today: the scan's own card ───────────────────────────────────── */
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: /Good morning/ }).waitFor({ timeout: 45_000 });
+  await page.getByRole("heading", { name: /Good (morning|afternoon|evening)/ }).waitFor({ timeout: 45_000 });
   const scanCard = page.locator(".wire-scan-card .job-card").first();
   await scanCard.waitFor({ timeout: 30_000 });
   const scanWords = await scanCard.innerText();

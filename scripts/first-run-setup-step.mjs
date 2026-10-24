@@ -121,7 +121,7 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
     try {
       await Promise.all([
         page.getByLabel("Paper name", { exact: true }).waitFor({ state: "hidden", timeout: 60_000 }),
-        page.getByRole("heading", { level: 1, name: "Good morning. Here’s today’s paper.", exact: true }).waitFor({ timeout: 60_000 }),
+        page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)\. Here’s today’s paper\.$/ }).waitFor({ timeout: 60_000 }),
       ]);
       break;
     } catch {

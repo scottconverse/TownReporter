@@ -31,7 +31,7 @@ const READER_KEY =
   "townreporter:reader:" + encodeURIComponent(PAPER_NAME) + ":" + encodeURIComponent(PAPER_CITY);
 
 const SURFACES = [
-  { name: "Desk", path: "/desk", kind: "desk", heading: "Good morning." },
+  { name: "Desk", path: "/desk", kind: "desk", heading: "Here’s today’s paper." },
   { name: "Queue", path: "/desk/queue", kind: "desk", heading: "Queue" },
   { name: "Scan", path: "/desk/scan", kind: "desk", heading: "Scan" },
   { name: "Sources", path: "/desk/sources", kind: "desk", heading: "Sources & scan" },
