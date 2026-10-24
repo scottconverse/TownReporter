@@ -37,7 +37,6 @@ const expectedModelNames = [
   "Automatic",
   "Codex Astra 6",
   "Codex Sol 6.1",
-  "Codex Sol 6.1 (balanced)",
   "Codex Luna 6",
   "Gemini 3.8 Flash (Pro plan)",
   "Gemini 3.1 Pro (Pro plan)",
@@ -390,9 +389,9 @@ async function main() {
   // material never depends on a developer's installed providers. Verify that
   // the row preserves the editor's exact explicit selection; the dedicated
   // preflight suite covers missing-provider guidance.
-  await queueModel.selectOption("codex-balanced");
-  if ((await queueModel.inputValue()) !== "codex-balanced") {
-    throw new Error("Queue row did not retain the explicit Codex Sol 6.1 (balanced) selection");
+  await queueModel.selectOption("codex-frontier");
+  if ((await queueModel.inputValue()) !== "codex-frontier") {
+    throw new Error("Queue row did not retain the explicit Codex Sol 6.1 selection");
   }
   if (
     (await row.locator("[aria-describedby]").getAttribute("aria-describedby")) ===
@@ -487,8 +486,8 @@ async function main() {
   if (JSON.stringify(bulkNames) !== JSON.stringify(expectedModelNames)) {
     throw new Error(`the bulk picker does not match the shared model list: ${JSON.stringify(bulkNames)}`);
   }
-  const balancedCodex = bulkOptions.find((option) => option.label.includes("Codex Sol 6.1 (balanced)"));
-  if (!balancedCodex) throw new Error("the bulk picker is missing Codex Sol 6.1 (balanced)");
+  const balancedCodex = bulkOptions.find((option) => option.value === "codex-frontier");
+  if (!balancedCodex) throw new Error("the bulk picker is missing Codex Sol 6.1 (codex-frontier)");
   await bulkWritingModel.selectOption(balancedCodex.value);
   // The header scan picker emits its own "Thinking effort" select and sits
   // earlier in the DOM, so the read is scoped to the bulk strip whose choice
