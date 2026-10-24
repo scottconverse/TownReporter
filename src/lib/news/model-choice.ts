@@ -98,15 +98,42 @@ const AUTOMATIC: ModelChoiceOption = {
   optionDetail: "Recommended ladder",
 };
 
+/**
+ * The row a stored value is shown on (D273).
+ *
+ * The desk used to offer two rows for one model -- "Codex Sol 6.1 (balanced)"
+ * and "Codex Sol 6.1" -- both running gpt-6.1-sol. Two labels for one model
+ * made the picker ask a question the desk cannot answer ("which Sol?"), so
+ * the menu now carries the single "Codex Sol 6.1" row. A job, newsroom or
+ * assignment row written before that still holds `codex-balanced`, and a
+ * native `<select>` whose value is in no option renders EMPTY -- which reads
+ * as "no model chosen". This alias shows such a stored value on the one Sol
+ * row. It is a DISPLAY alias: it never calls `onChange`, so the stored value
+ * changes only when the editor picks.
+ */
+export function pickerRowValue(value: string): string {
+  return value === "codex-balanced" ? "codex-frontier" : value;
+}
+
 export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceOption[] {
   return [
     AUTOMATIC,
-    ...providersFor(surface).map((entry) => ({
-      value: entry.id as StoryModelChoice,
-      label: entry.label,
-      detail: entry.detail,
-      optionDetail: entry.optionDetail,
-    })),
+    ...providersFor(surface)
+      /*
+        D273: one row per model. `codex-balanced` and `codex-frontier` are the
+        same model at the same effort under two labels, so only the frontier
+        row is offered; a stored `codex-balanced` is drawn on it by
+        `pickerRowValue` above. The registry entry stays (Automatic's ladder
+        and every stored row still resolve it), and so does
+        `PICKER_PROVIDER_IDS`, which server-side membership checks read.
+      */
+      .filter((entry) => entry.id !== "codex-balanced")
+      .map((entry) => ({
+        value: entry.id as StoryModelChoice,
+        label: entry.label,
+        detail: entry.detail,
+        optionDetail: entry.optionDetail,
+      })),
   ];
 }
 
@@ -289,16 +316,20 @@ export function effectiveStoryModelChoice(value: unknown): EffectiveStoryModelCh
  */
 export function opinionModelChoice(value: unknown): OpinionModelChoice {
   if (isCustomModelChoice(value)) return value;
-  return OPINION_MODEL_CHOICES.some((choice) => choice.value === value)
-    ? (value as OpinionModelChoice)
+  // A stored `codex-balanced` (D273) loads on the one Codex Sol row, exactly
+  // as the picker shows it; it is the same model and effort either way.
+  const row = typeof value === "string" ? pickerRowValue(value) : value;
+  return OPINION_MODEL_CHOICES.some((choice) => choice.value === row)
+    ? (row as OpinionModelChoice)
     : DEFAULT_OPINION_MODEL;
 }
 
 /** Same narrowing as Opinion's, against the Dark list. */
 export function darkModelChoice(value: unknown): DarkModelChoice {
   if (isCustomModelChoice(value)) return value;
-  return DARK_MODEL_CHOICES.some((choice) => choice.value === value)
-    ? (value as DarkModelChoice)
+  const row = typeof value === "string" ? pickerRowValue(value) : value;
+  return DARK_MODEL_CHOICES.some((choice) => choice.value === row)
+    ? (row as DarkModelChoice)
     : "auto";
 }
 
@@ -317,8 +348,11 @@ export function shouldHydrateDarkModel(
 export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story", connection?: { name: string; modelId: string | null } | null): string {
   if (isCustomModelChoice(value)) return connection ? `${connection.name} (${connection.modelId ?? "no model"})` : "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";
+  // D273: a stored `codex-balanced` now shows on the one Codex Sol row, so it
+  // is named the way that row is named wherever a choice is printed.
+  const row = typeof value === "string" ? pickerRowValue(value) : value;
   for (const surface of [scope, "story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const) {
-    const match = modelChoicesFor(surface).find((choice) => choice.value === value);
+    const match = modelChoicesFor(surface).find((choice) => choice.value === row);
     if (match) return match.label;
   }
   // A rung is in no menu, so the loop above cannot label one -- and "Automatic"
@@ -487,8 +521,10 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (isCustomModelChoice(value))
     return "Prefers this custom API connection. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.";
   const options = modelChoicesFor(scope);
-  const normalized = options.some((choice) => choice.value === value)
-    ? (value as StoryModelChoice)
+  // D273: a stored `codex-balanced` reads the one Codex Sol row's help.
+  const row = typeof value === "string" ? pickerRowValue(value) : value;
+  const normalized = options.some((choice) => choice.value === row)
+    ? (row as StoryModelChoice)
     : scope === "forced"
       ? options[0]?.value
       : "auto";

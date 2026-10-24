@@ -12,6 +12,8 @@ import {
   modelRowFor,
   type AddLeadState,
 } from "./editor-dialog-forms.ts";
+import { availabilityChoice } from "../../lib/news/writer-bar.ts";
+import { automaticLadder } from "../../lib/news/provider-registry.ts";
 
 const named = modelRowFor("story").find((r) => r.value !== "auto");
 
@@ -57,6 +59,24 @@ describe("Add a lead dialog", () => {
     assert.match(selectedCard(render({})), /<b>Research and score it<\/b>/);
     assert.match(selectedCard(render({ then: "as-is" })), /<b>Just file it as-is<\/b>/);
     assert.match(selectedCard(render({ then: "draft" })), /<b>Research and draft a story now<\/b>/);
+  });
+
+  /*
+    Item G23-QA-1, decision D276: an AI choice says why the dialog's model
+    cannot answer, in the choice's own note, and stays selectable and selected.
+  */
+  it("says under each AI choice why the chosen model cannot run, and still selects it", () => {
+    const rungs = automaticLadder().map(availabilityChoice);
+    const allDown = Object.fromEntries(rungs.map((key) => [key, false]));
+    const html = renderToStaticMarkup(
+      createElement(AddLeadBody, { ...base, state: base.state, availability: allDown }),
+    );
+    const reason =
+      "Not ready: none of the models Automatic uses is answering. Open Models to start one or sign in.";
+    assert.ok(html.includes(reason), "the reason prints under the AI choices");
+    assert.equal(html.split(reason).length - 1, 2, "both AI choices carry it, the as-is choice does not");
+    assert.equal((html.match(/aria-checked="true"/g) || []).length, 1, "one choice stays selected");
+    assert.match(selectedCard(html), /<b>Research and score it<\/b>/);
   });
 
   it("refuses a press with nothing to file, and accepts a real tip", () => {

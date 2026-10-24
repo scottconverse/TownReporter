@@ -51,6 +51,22 @@ export function deskLocalModelSentence(choice: {
   return `The desk uses ${id} on ${label}, ${location} for Local model.`;
 }
 
+/**
+ * The next step for a desk with no local model loaded (decision D277).
+ *
+ * "No model is loaded on this computer." is a fact, not a way out. This is the
+ * one short line printed under it: where to load a model, or where to pick one
+ * instead. It is its own pure function so the page can print it as plain words
+ * (the Models page is already the destination) while a caller elsewhere can
+ * link "Models page" to `/desk/models`.
+ */
+export function deskLocalModelNextStep(choice: {
+  override: { baseUrl: string; id: string } | null;
+}): string | null {
+  if (choice.override) return null;
+  return "Next: load a model in LM Studio or Ollama, or pick one on the Models page.";
+}
+
 export function localServerStatus(server: LocalServer): string {
   if (!server.reachable) return "Could not reach";
   const loaded = server.models.find(

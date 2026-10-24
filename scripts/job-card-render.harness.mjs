@@ -74,6 +74,13 @@ const jobCardStateModule = moduleUrl(
   },
 );
 
+/* A plain function with no imports: the card's plain-words helper, transpiled
+   so a data: URL can reach it. */
+const serverAnswerWordsModule = moduleUrl(
+  await readFile(new URL("../src/lib/news/server-answer-words.ts", import.meta.url), "utf8"),
+  "server-answer-words.ts",
+);
+
 const JobCardModule = moduleUrl(
   await readFile(new URL("../src/components/JobCard.tsx", import.meta.url), "utf8"),
   "JobCard.tsx",
@@ -87,6 +94,7 @@ const JobCardModule = moduleUrl(
     "@/components/scoped-actions": jobProgressStub,
     "@tanstack/react-query": reactQueryStub,
     "./job-card-state": jobCardStateModule,
+    "@/lib/news/server-answer-words": serverAnswerWordsModule,
     "@/components/model-picker": inlineModule("export const ModelPicker = () => null;"),
   },
 );

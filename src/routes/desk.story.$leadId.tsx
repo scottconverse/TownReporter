@@ -103,6 +103,7 @@ import {
   uncheckedGateTodos,
   type ReportingNotes,
 } from "@/lib/news/notes";
+import { savedDraftRefusalLine } from "@/lib/news/draft-refusal-line";
 import {
   duplicateKillReason,
   editorActionError,
@@ -133,14 +134,13 @@ import {
   pastRunModelName,
   rememberedStoryModelChoice,
   retiredModelChoiceNote,
+  storyModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import { automaticEffortNote, defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { providerAvailability } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
-import { getModelAssignmentsFn, MODEL_ASSIGNMENTS_QUERY_KEY } from "@/lib/news/model-assignments-settings";
-import { resolveJobModel } from "@/lib/news/model-assignments";
 /*
   The Writer / Effort bar's own lines (unit CW): the readiness dot, the
   last-draft line and the save line under the Story label. Each is derived,
@@ -321,15 +321,6 @@ function StoryPage() {
     scripted publish gets are the same ground, and neither is a decision nobody
     made.
   */
-  const modelAssignments = useQuery({
-    queryKey: MODEL_ASSIGNMENTS_QUERY_KEY,
-    queryFn: () => getModelAssignmentsFn(),
-    staleTime: 30_000,
-  });
-  const headlineAssignment = resolveJobModel({
-    jobKey: "headlines",
-    assignments: modelAssignments.data?.ok ? modelAssignments.data.assignments : [],
-  });
   /*
     TOB-2: the select shows the ground the publish will store. Until the editor
     picks one, that is the place the story's own headline or body names (see
@@ -348,6 +339,41 @@ function StoryPage() {
   const [modelResearchOpen, setModelResearchOpen] = useState(false);
   const modelResearchPanel = useRef<HTMLElement>(null);
   const modelChoiceTouched = useRef(false);
+  /*
+    G23-QA-3 (D275): a pick made on a page with no job row used to live only in
+    page state, so a reload forgot it and the assignment default came back.
+    Every Writer pick now writes `{choice, effort}` to the lead's notes with
+    the existing notes save, and the restore effect below reads it before the
+    job restore. The save is fire-and-forget: a failed write warns in the
+    console and never blocks the pick.
+  */
+  const savedModelPick = useRef(false);
+  const persistModelPick = useCallback(
+    (choice: StoryModelChoice, effort: ModelEffort | null) => {
+      void saveReportingNotes({ data: { leadId: id, modelPick: { choice, effort } } }).catch((error) => {
+        console.warn("The model pick could not be saved; it will last for this page only.", error);
+      });
+    },
+    [id],
+  );
+  /** Change the Writer model exactly as the Redraft picker always has. */
+  const pickWriterModel = useCallback(
+    (choice: StoryModelChoice) => {
+      modelChoiceTouched.current = true;
+      setModelChoice(choice);
+      const effort = defaultModelEffort(choice);
+      setModelEffort(effort);
+      persistModelPick(choice, effort);
+    },
+    [persistModelPick],
+  );
+  const pickWriterEffort = useCallback(
+    (effort: ModelEffort | null) => {
+      setModelEffort(effort);
+      persistModelPick(modelChoice, effort);
+    },
+    [persistModelPick, modelChoice],
+  );
   /*
     F3b: on a fresh install that finished setup with a local model in memory,
     "Draft with AI" opens on Local model instead of sending the literal "auto"
@@ -454,14 +480,12 @@ function StoryPage() {
   */
   const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
   /*
-    DHG-3: the "Suggest headlines" press runs the model its own picker shows.
-    Until the editor picks, that is the "Headline suggestions" job's model from
-    Server -> Models "Who does what" (headlineAssignment); a pick replaces both
-    the model and its effort for this press and the dialog's.
+    TXA-2 (D274): the "Suggest headlines" press and its dialog use the WRITER
+    pick -- the same model and effort the Draft press above sends -- not a
+    second picker of their own. One screen, one model choice: an editor who
+    picked Codex for this story does not have to find and repeat that in a
+    second row beside the headline, and the two presses cannot disagree.
   */
-  const [headlinePick, setHeadlinePick] = useState<{ model: StoryModelChoice; effort: ModelEffort | null } | null>(null);
-  const headlineModel = (headlinePick?.model ?? headlineAssignment.providerId) as StoryModelChoice;
-  const headlineEffort = headlinePick ? headlinePick.effort : headlineAssignment.effort;
   const [headlineNote, setHeadlineNote] = useState("");
 
   const [liveWarning, setLiveWarning] = useState<{
@@ -560,17 +584,29 @@ function StoryPage() {
     refetchOnReconnect: true,
   });
 
+  /*
+    G23-QA-3b: the saved pick outranks the "Who does what" default as well as
+    the last job, and the two hooks below seed from that default whenever they
+    believe nobody has chosen yet. A restored pick is a choice, so both are
+    told to stand aside. Read from the same notes block the restore uses.
+  */
+  const hasSavedPick = Boolean(parseNotes(data?.lead.notes_json).modelPick);
   const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
     jobKey: "story-draft",
     touched: modelChoiceTouched,
     setChoice: setModelChoice,
     setEffort: setModelEffort,
-    preserveCurrent: Boolean(data?.job),
+    preserveCurrent: Boolean(data?.job) || hasSavedPick,
   });
   useFirstRunPickerSeed({
     surface: "story",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current || storyDraftAssignment.hasAssignment || Boolean(data?.job),
+    touched: () =>
+      modelChoiceTouched.current ||
+      savedModelPick.current ||
+      hasSavedPick ||
+      storyDraftAssignment.hasAssignment ||
+      Boolean(data?.job),
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -670,11 +706,19 @@ function StoryPage() {
     return label;
   };
 
+  /*
+    G23-QA-5 (D279): a refusal the desk saved on the lead, for the editor who
+    reloaded and lost the live message. The next Draft press clears it on the
+    server, and this page's own lead refresh then removes the line.
+  */
+  const savedRefusalLine = msg
+    ? null
+    : savedDraftRefusalLine(parseNotes(data?.lead?.notes_json).lastDraftRefusal, paperIdentity.timezone);
   const previousJobError =
     !waiting && !msg && (data?.job?.status === "failed" || data?.job?.status === "cancelled")
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
-  const draftProblem = msg || previousJobError;
+  const draftProblem = msg || savedRefusalLine || previousJobError;
   /*
     DHI-3: a stop is not a failure. `msg` on the live path already says
     "Stopped. No draft was saved."; this flag carries the same fact to the
@@ -933,8 +977,25 @@ function StoryPage() {
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
 
+  /*
+    G23-QA-3 (D275): the editor's last Writer pick, restored ahead of the job
+    restore. A saved pick wins over the last job (the editor chose it after
+    that run) and the assignment default is last. It is marked as an explicit
+    pick so the presses that send `modelChoiceExplicit` keep sending it, and
+    the job restore below steps aside rather than overwrite it.
+  */
   useEffect(() => {
-    if (!data?.job || modelChoiceTouched.current) return;
+    if (modelChoiceTouched.current) return;
+    const pick = parseNotes(data?.lead.notes_json).modelPick;
+    if (!pick) return;
+    const choice = storyModelChoice(pick.choice);
+    savedModelPick.current = true;
+    setModelChoice(choice);
+    setModelEffort(validatedModelEffort(choice, pick.effort));
+  }, [data?.lead.notes_json]);
+
+  useEffect(() => {
+    if (!data?.job || modelChoiceTouched.current || savedModelPick.current) return;
     const remembered = rememberedStoryModelChoice(requestedDraftModelChoice || data.job.model_choice, data.job.model_choice_source);
     setModelChoice(remembered);
     try {
@@ -1028,7 +1089,7 @@ function StoryPage() {
       });
       const pickedArtifactId = typeof input === "object" && input !== null ? input.transcriptArtifactId : undefined;
       const meetingArtifactId = pickedArtifactId ?? selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
-      const modelChoiceExplicit = modelChoiceTouched.current || Boolean(data?.job?.model_choice);
+      const modelChoiceExplicit = modelChoiceTouched.current || savedModelPick.current || Boolean(data?.job?.model_choice);
       return draftLead({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId, override: writerAction.override } });
     },
     onMutate: () => {
@@ -1859,8 +1920,9 @@ function StoryPage() {
         data: {
           leadId: id,
           headline: headline.trim() || undefined,
-          modelChoice: headlineModel,
-          modelEffort: headlineEffort,
+          // TXA-2 (D274): the writer pick, not a second headline-only pick.
+          modelChoice,
+          modelEffort,
         },
       }),
     onSuccess: (res) => {
@@ -1961,7 +2023,7 @@ function StoryPage() {
 
   const reverifyLive = useMutation({
     mutationFn: (override?: string[]) =>
-      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice) } }),
+      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || savedModelPick.current || Boolean(data?.job?.model_choice) } }),
     onSuccess: async (res) => {
       if (res && res.ok === false) {
         if ("warning" in res) {
@@ -1985,7 +2047,7 @@ function StoryPage() {
   });
 
   const rewriteLive = useMutation({
-    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice)}}),
+    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || savedModelPick.current || Boolean(data?.job?.model_choice)}}),
     onSuccess: async res => {
       if (!res.ok) {
         if ("warning" in res) {setLiveWarning({kind: "rewrite", ...res.warning}); return;}
@@ -2613,7 +2675,7 @@ function StoryPage() {
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: storyModelLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
-  const writerAction = writerDraftAction(writerWarningReason);
+  const writerAction = writerDraftAction(writerWarningReason, modelChoice);
   const draftButtonLabel = writerAction.label;
   const readiness = modelChoice !== "auto" && !writerAvailability.data
     ? { label: writerAvailability.isError ? "● Readiness unknown" : "● Checking", tone: "warn" as const }
@@ -3415,13 +3477,9 @@ function StoryPage() {
               <div className="astra-model-research-controls">
                 <ModelPicker
                   value={modelChoice}
-                  onChange={(choice) => {
-                    modelChoiceTouched.current = true;
-                    setModelChoice(choice);
-                    setModelEffort(defaultModelEffort(choice));
-                  }}
+                  onChange={pickWriterModel}
                   effort={modelEffort}
-                  onEffortChange={setModelEffort}
+                  onEffortChange={pickWriterEffort}
                   disabled={waiting || reconcileActive || savePending}
                   meetingWriter={meetingWriterLead}
                   compact
@@ -3680,25 +3738,10 @@ function StoryPage() {
                   field, saved by "Save headline" above.
                 */}
                 {/*
-                  DHG-3 / H06: the headline job has ONE pick. While the Headline
-                  dialog is open it draws its own row from this same state, so
-                  this row steps aside rather than sit behind it as a second
-                  control; it is back, showing the same pick, when the dialog
-                  closes.
+                  TXA-2 (D274): there is no separate "Model for suggestions"
+                  row. The press and the Headline dialog read the Writer pick
+                  (the model row above), so one screen has one model choice.
                 */}
-                {headlineOpen ? null : (
-                  <ModelPicker
-                    scope="story"
-                    label="Model for suggestions"
-                    layout="stacked"
-                    compact
-                    value={headlineModel}
-                    effort={headlineEffort}
-                    onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
-                    onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
-                    disabled={suggest.isPending || waiting}
-                  />
-                )}
                 <button
                   type="button"
                   className="btn"
@@ -3861,7 +3904,7 @@ function StoryPage() {
       </div> : null}
       {draftRunningShown ? <section className="astra-model-research">
         <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
-        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} meetingWriter={meetingWriterLead} compact />
+        <ModelPicker value={modelChoice} onChange={pickWriterModel} effort={modelEffort} onEffortChange={pickWriterEffort} disabled={draft.isPending} meetingWriter={meetingWriterLead} compact />
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
       </section> : null}
       <div className="work-bar astra-story-actions">
@@ -4666,16 +4709,19 @@ function StoryPage() {
       <HeadlineDialog
         leadId={id}
         current={headline}
-        defaultModel={headlineModel}
-        defaultEffort={headlineEffort}
-        model={headlineModel}
-        effort={headlineEffort}
-        modelPicked={headlinePick !== null}
+        defaultModel={modelChoice}
+        defaultEffort={modelEffort}
+        model={modelChoice}
+        effort={modelEffort}
+        /*
+          TXA-2 (D274): the dialog reads and writes the Writer pick. "Picked"
+          means the editor made that pick on this page, on an earlier visit
+          (the saved pick, D275), or a job already recorded it.
+        */
+        modelPicked={modelChoiceTouched.current || savedModelPick.current || Boolean(data?.job?.model_choice)}
         suggestFirst
-        onModelChange={(choice) => setHeadlinePick({ model: choice as StoryModelChoice, effort: defaultModelEffort(choice) })}
-        onEffortChange={(effort) =>
-          setHeadlinePick({ model: headlineModel, effort: (effort as ModelEffort | null) })
-        }
+        onModelChange={(choice) => pickWriterModel(choice as StoryModelChoice)}
+        onEffortChange={(effort) => pickWriterEffort((effort as ModelEffort | null))}
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {
@@ -4701,12 +4747,8 @@ function StoryPage() {
         */
         modelEffort={modelEffort}
         writerStatus={readiness}
-        onModelChange={(choice) => {
-          modelChoiceTouched.current = true;
-          setModelChoice(choice);
-          setModelEffort(defaultModelEffort(choice));
-        }}
-        onEffortChange={setModelEffort}
+        onModelChange={pickWriterModel}
+        onEffortChange={pickWriterEffort}
         busy={waiting || draft.isPending}
         error={redraftOpen ? draftProblem : undefined}
         onStart={(next) => {

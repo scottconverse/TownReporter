@@ -1169,6 +1169,17 @@ export const reportingNotesInput = z.object({
   storyDirection: z.string().max(LIMITS.storyDirection).optional(),
   researchScope: researchScopeValue.optional(),
   todos: z.array(noteTodo).max(LIMITS.noteList).optional(),
+  /**
+   * D275: the Story page's writer pick, saved beside the note fields so it
+   * survives a reload. Bounds match `parseNotes`' own: a choice id and a level
+   * word, never a sentence.
+   */
+  modelPick: z
+    .object({
+      choice: z.string().min(1).max(200),
+      effort: z.string().max(40).nullable(),
+    })
+    .optional(),
 });
 
 /** `desk.ts:2011` pullTodo. */

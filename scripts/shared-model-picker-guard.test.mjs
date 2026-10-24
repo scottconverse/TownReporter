@@ -7,10 +7,16 @@ import { LocalModelSelect, ModelPicker, availabilityStub, registry } from "./mod
 
 const pickerScopes = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"];
 
+/*
+  D273: one row per model. `codex-balanced` and `codex-frontier` are the same
+  model, so no menu draws the balanced row; the registry entry stays for
+  Automatic's ladder and for values stored by older builds.
+*/
 const fullSharedList = [
   ...new Map(
     pickerScopes
       .flatMap((scope) => registry.providersFor(scope))
+      .filter((entry) => entry.id !== "codex-balanced")
       .map((entry) => [entry.id, entry]),
   ).values(),
 ];

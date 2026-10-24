@@ -31,6 +31,8 @@ import {
   type SourcePreview,
 } from "../../lib/news/editor-dialog-logic.ts";
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
+import { providerEntry } from "../../lib/news/provider-registry.ts";
+import { writerUnavailableReason, type ProviderAvailability } from "../../lib/news/writer-bar.ts";
 import {
   SECTION_REQUIRED,
   duplicateNoteAfterSave,
@@ -583,6 +585,14 @@ export type AddLeadBodyProps = {
   note: string | null;
   Choice: ChoiceRender;
   ModelPicker: ModelPickerRender;
+  /**
+   * `providerAvailability()`'s map, or undefined while it is in flight. The
+   * dialog's model is asked the same question the desk's Writer bar asks, so
+   * an AI choice the model cannot serve says why before the editor presses.
+   */
+  availability?: ProviderAvailability;
+  /** The connection behind a `custom:<id>` model, when the shell has it. */
+  customConnection?: { enabled: boolean; modelId: string | null; readinessError?: string } | null;
 };
 
 /**
@@ -592,6 +602,25 @@ export type AddLeadBodyProps = {
 export function AddLeadBody(p: AddLeadBodyProps): ReactNode {
   const s = p.state;
   const set = p.set;
+  /*
+    Item G23-QA-1: the desk's own readiness answer for the model this dialog
+    will use. It is printed under each AI choice's note -- the same note text,
+    same size, same color -- because choosing "Research and score it" is the
+    press that spends the model. The choice stays selectable and stays the
+    default: the desk warns, it does not block.
+  */
+  const modelUnavailable = s.then === "as-is"
+    ? undefined
+    : writerUnavailableReason({
+        choice: s.model,
+        label: providerEntry(s.model)?.label ?? s.model,
+        availability: p.availability,
+        customConnection: p.customConnection ?? null,
+      });
+  const thenItems = ADD_LEAD_THENS.map((t) => ({
+    ...t,
+    note: t.ai && modelUnavailable ? `${t.note}. ${modelUnavailable}` : t.note,
+  }));
   return createElement(
     Fragment,
     null,
@@ -599,7 +628,7 @@ export function AddLeadBody(p: AddLeadBodyProps): ReactNode {
       field("Link or tip", "", textarea(s.paste, "Paste a URL, or describe what you heard", (v) => set({ paste: v }), 90), "paste"),
       field("Why it might matter", "optional", line(s.why, "Optional note for the AI", (v) => set({ why: v })), "why"),
     ]),
-    choiceSet("Then", ADD_LEAD_THENS, s.then, (key) => set({ then: key as AddLeadState["then"] }), p.Choice),
+    choiceSet("Then", thenItems, s.then, (key) => set({ then: key as AddLeadState["then"] }), p.Choice),
     s.then === "as-is"
       ? null
       : modelRow(p.ModelPicker, s.then === "score" ? "scan" : "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Model for this lead"),

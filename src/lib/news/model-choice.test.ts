@@ -9,6 +9,7 @@ import {
   localModelOptionLabel,
   modelChoiceLabel,
   modelChoiceHelp,
+  modelChoicesFor,
   OPINION_MODEL_CHOICES,
   FORCED_MODEL_CHOICES,
   opinionModelChoice,
@@ -16,6 +17,7 @@ import {
   PICKER_OPTION_TEXT_MAX,
   pickerOptionText,
   pickerOptionTitle,
+  pickerRowValue,
   rememberedStoryModelChoice,
   retiredModelChoiceNote,
   STORY_MODEL_CHOICES,
@@ -30,7 +32,6 @@ const STORY_VALUES = [
   "auto",
   "codex-astra",
   "codex-frontier",
-  "codex-balanced",
   "codex-luna",
   "gemini-flash",
   "gemini-pro",
@@ -48,6 +49,13 @@ const STORY_VALUES = [
  */
 const RUNG_VALUES = ["deepseek-flash", "qwen-local"] as const;
 
+/*
+  D273: `codex-balanced` and `codex-frontier` are the same model under two
+  labels. The menu now offers one row; a stored job, newsroom or assignment row
+  written before that still holds `codex-balanced` and must keep loading.
+*/
+const STORED_BALANCED = "codex-balanced" as const;
+
 describe("model choice contract", () => {
   it("offers every named subscription model in the shared Story picker", () => {
     assert.deepEqual(
@@ -56,7 +64,6 @@ describe("model choice contract", () => {
         "Automatic",
         "Codex Astra 6",
         "Codex Sol 6.1",
-        "Codex Sol 6.1 (balanced)",
         "Codex Luna 6",
         "Gemini 3.8 Flash (Pro plan)",
         "Gemini 3.1 Pro (Pro plan)",
@@ -224,12 +231,50 @@ describe("model choice contract", () => {
   });
 
   it("derives the forced list from its registry and offers Automatic first", () => {
+    /*
+      D273: the one Codex Sol row is `codex-frontier`; `codex-balanced` is still
+      a registry entry (Automatic's rung and the stored value old rows hold)
+      but no menu draws it, so it is the one provider the menu list leaves out.
+    */
     assert.deepEqual(
       FORCED_MODEL_CHOICES.slice(1).map((choice) => choice.value),
-      providersFor("forced").map((entry) => entry.id),
+      providersFor("forced")
+        .map((entry) => entry.id)
+        .filter((id) => id !== STORED_BALANCED),
     );
     assert.equal(FORCED_MODEL_CHOICES[0]?.value, "auto");
-    assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Sol 6.1 (balanced)");
+    assert.equal(modelChoiceLabel(STORED_BALANCED, "forced"), "Codex Sol 6.1");
+  });
+
+  /*
+    D273: ONE row per model. Two labels for gpt-6.1-sol asked the editor a
+    question the desk cannot answer, so the "story" menu carries exactly one
+    "Codex Sol 6.1" option and no `(balanced)` second row. The registry entry
+    and `PICKER_PROVIDER_IDS` are unchanged, and a stored `codex-balanced` is
+    shown on that one row by `pickerRowValue` (tested just below).
+  */
+  it("offers one Codex Sol row and no codex-balanced option on the story surface", () => {
+    const sol = modelChoicesFor("story").filter((option) => option.label.startsWith("Codex Sol 6.1"));
+    assert.equal(sol.length, 1, "one Sol row");
+    assert.equal(sol[0].value, "codex-frontier");
+    assert.doesNotMatch(sol[0].label, /\(balanced\)/);
+    assert.ok(
+      !modelChoicesFor("story").some((option) => option.value === STORED_BALANCED),
+      "no menu option carries the old balanced value",
+    );
+  });
+
+  it("shows a stored codex-balanced on the one Codex Sol row without changing other values", () => {
+    assert.equal(pickerRowValue(STORED_BALANCED), "codex-frontier");
+    assert.equal(pickerRowValue("codex-frontier"), "codex-frontier");
+    assert.equal(pickerRowValue("deepseek-flash"), "deepseek-flash");
+    assert.equal(pickerRowValue("auto"), "auto");
+    // The stored value itself still resolves, so an old job keeps running Sol.
+    assert.equal(storyModelChoice(STORED_BALANCED), STORED_BALANCED);
+    assert.equal(opinionModelChoice(STORED_BALANCED), "codex-frontier");
+    assert.equal(modelChoiceLabel(STORED_BALANCED), "Codex Sol 6.1");
+    // A saved Models-page assignment written before D273 stays usable.
+    assert.equal(isOfferedForJob("story-draft", STORED_BALANCED), true);
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
@@ -311,13 +356,14 @@ describe("model choice contract", () => {
     for (const value of [
       "auto",
       "claude-frontier",
-      "codex-balanced",
       "codex-frontier",
       "local-model",
       "deepseek-flash",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
+    // D273: a stored `codex-balanced` loads on the one Codex Sol row.
+    assert.equal(opinionModelChoice(STORED_BALANCED), "codex-frontier");
     for (const invalid of ["local", "zen", "codex", "grok-oauth", undefined, null, {}]) {
       assert.equal(opinionModelChoice(invalid), "auto");
     }

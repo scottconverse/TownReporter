@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { cancelStoryJob, type JobProgressView } from "@/lib/news/job-progress";
 import { jobCardState, useDeskJobs } from "./job-card-state";
+import { plainServerWords } from "@/lib/news/server-answer-words";
 
 /*
   The job card (redesign phase 3).
@@ -140,6 +141,12 @@ export function JobCard({
   const quiet = job.beatAt ? Math.max(0, Math.floor((t - job.beatAt) / 1000)) : 0;
   const stalled = running && quiet >= stallSeconds * (1 + waived);
   const col = state === "done" ? "done" : state === "failed" ? "failed" : stalled ? "stalled" : "running";
+  /*
+    A model server that did not answer is said plainly, and its cause moves to
+    a technical-detail disclosure under the line -- see `plainServerWords`.
+  */
+  const errorWords = state === "failed" && job.error ? plainServerWords(job.error) : null;
+  const noteWords = job.failoverNote ? plainServerWords(job.failoverNote) : null;
 
   return (
     <div className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
@@ -203,13 +210,27 @@ export function JobCard({
 
       <div className="job-card-foot">
         <b className="job-card-now" role="status" aria-live="polite">
-          {state === "failed" ? job.error : state === "done" ? job.doneText : `Now: ${job.step}`}
+          {state === "failed" ? errorWords?.text ?? job.error : state === "done" ? job.doneText : `Now: ${job.step}`}
         </b>
         {running && !stalled ? <span className="job-card-quiet">Last activity {fmt(quiet)} ago</span> : null}
       </div>
 
+      {errorWords?.detail ? (
+        <details className="job-card-detail">
+          <summary>Technical detail</summary>
+          <span>{errorWords.detail}</span>
+        </details>
+      ) : null}
+
       {failoverNote && job.failoverNote ? (
-        <p className="job-card-quiet">Model switch: {job.failoverNote}</p>
+        <p className="job-card-quiet">Model switch: {noteWords?.text ?? job.failoverNote}</p>
+      ) : null}
+
+      {noteWords?.detail ? (
+        <details className="job-card-detail">
+          <summary>Technical detail</summary>
+          <span>{noteWords.detail}</span>
+        </details>
       ) : null}
 
       {job.cancelRequested && running ? (

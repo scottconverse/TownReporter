@@ -51,6 +51,11 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
     { "@/lib/news/job-progress": jobProgress, "@/components/scoped-actions": jobProgress, "@tanstack/react-query": reactQuery,
       "../lib/desk/scan-policy-refresh.ts": new URL("../src/lib/desk/scan-policy-refresh.ts", import.meta.url).href },
   );
+  const serverAnswerWordsUrl = moduleUrl(
+    await readFile(new URL("../src/lib/news/server-answer-words.ts", import.meta.url), "utf8"),
+    "server-answer-words.ts",
+    {},
+  );
   const cardUrl = moduleUrl(
     await readFile(new URL("../src/components/JobCard.tsx", import.meta.url), "utf8"),
     "JobCard.tsx",
@@ -60,6 +65,7 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
       "@/lib/news/job-progress": jobProgress, "@/components/scoped-actions": jobProgress,
       "@tanstack/react-query": reactQuery,
       "./job-card-state": stateUrl,
+      "@/lib/news/server-answer-words": serverAnswerWordsUrl,
       "@/components/model-picker": inline("export const ModelPicker = () => null;"),
     },
   );

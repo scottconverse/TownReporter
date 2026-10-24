@@ -34,7 +34,8 @@ test("the real Story screen names the running writer and the switch reason", asy
     const page=await browser.newPage();
     await page.setContent(document.getElementById("root").innerHTML);
     assert.equal(
-      await page.getByRole("button",{name:"Model & research · Writer: Codex Sol 6.1 (balanced) · picked: Automatic",exact:true}).count(),
+      // D273: a stored `codex-balanced` job now reads on the one Codex Sol row.
+      await page.getByRole("button",{name:"Model & research · Writer: Codex Sol 6.1 · picked: Automatic",exact:true}).count(),
       1,
       "the Writer bar must name the model writing now and the pick",
     );

@@ -81,6 +81,14 @@ export function PublishConfirmation(props: {
   const byKey = new Map<string, PublishBlocker>();
   for (const blocker of props.blockers) byKey.set(blocker.key, blocker);
   for (const warning of props.refusedWarnings ?? []) {
+    /*
+      D278: when the server says the exact same sentence the page already
+      holds, the page's blocker WINS -- it is the one that carries the list
+      (`lead` + `items`). A difference in the sentence means the server's
+      facts are newer, and its words stand as before.
+    */
+    const held = byKey.get(warning.key);
+    if (held && held.sentence === warning.sentence) continue;
     byKey.set(warning.key, {
       key: warning.key,
       kind: "warning",
@@ -93,7 +101,7 @@ export function PublishConfirmation(props: {
 
   /* The warnings to draw, in merged order, with each key drawing exactly once
      (the server's sentence where it spoke last). */
-  const sentences = decision.warnings.map((warning) => warning.sentence);
+  const warnings = decision.warnings;
 
   const phase: ActionPhase = props.publishing ? "working" : "idle";
 
@@ -137,7 +145,7 @@ export function PublishConfirmation(props: {
     createElement("div", { className: "astra-publish-confirm" }, acceptedLine, deskNote),
   ];
 
-  if (sentences.length > 0) {
+  if (warnings.length > 0) {
     body.push(
       createElement(
         "ul",
@@ -146,8 +154,33 @@ export function PublishConfirmation(props: {
           key: "warnings",
           "aria-label": "Warnings you are publishing over",
         },
-        ...sentences.map((sentence, index) =>
-          createElement("li", { className: "astra-publish-warning", key: `w-${index}` }, sentence),
+        ...warnings.map((warning, index) =>
+          createElement(
+            "li",
+            { className: "astra-publish-warning", key: `w-${index}` },
+            warning.items?.length
+              ? [
+                  createElement(Fragment, { key: "lead" }, warning.lead ?? warning.sentence),
+                  createElement(
+                    "ol",
+                    { className: "astra-blocker-items", key: "items" },
+                    ...warning.items.map((item, itemIndex) =>
+                      createElement("li", { key: `i-${itemIndex}` }, item),
+                    ),
+                  ),
+                  /*
+                    D278, line 2: only here, in the dialog, right under the
+                    list -- what pressing anyway actually does. Body text, not
+                    small or muted; editors have old eyes.
+                  */
+                  createElement(
+                    "p",
+                    { key: "anyway" },
+                    "If you publish anyway, the story prints as written, and the desk records that you published over these checks.",
+                  ),
+                ]
+              : warning.sentence,
+          ),
         ),
       ),
     );

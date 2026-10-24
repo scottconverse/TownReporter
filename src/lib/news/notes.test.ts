@@ -479,3 +479,42 @@ describe("selectExcerpt", () => {
     assert.ok(selectExcerpt(long, "packet needle").length <= 1600);
   });
 });
+
+/*
+  G23-QA-3 (D275): the Story page's writer pick lives in the lead's notes, so
+  the two things that must hold are that a real pick survives
+  `packNotes`/`parseNotes` and that a malformed block is DROPPED rather than
+  half-read -- a half-read pick would restore a model and effort the editor
+  never chose.
+*/
+describe("the Story page's saved model pick", () => {
+  it("round-trips a picked choice and effort through packNotes and parseNotes", () => {
+    const notes = { ...parseNotes("{}"), modelPick: { choice: "codex-frontier", effort: "high" } };
+    const reloaded = parseNotes(packNotes(notes));
+    assert.deepEqual(reloaded.modelPick, { choice: "codex-frontier", effort: "high" });
+    // `null` effort is a real state (a model with no levels), not "no pick".
+    assert.deepEqual(
+      parseNotes(packNotes({ ...notes, modelPick: { choice: "deepseek-flash", effort: null } })).modelPick,
+      { choice: "deepseek-flash", effort: null },
+    );
+  });
+
+  it("drops a malformed saved pick instead of restoring half of it", () => {
+    const cases = [
+      { modelPick: { effort: "high" } },
+      { modelPick: { choice: "   ", effort: "high" } },
+      { modelPick: { choice: 42, effort: "high" } },
+      { modelPick: { choice: "codex-frontier", effort: 7 } },
+      { modelPick: "codex-frontier" },
+      { modelPick: ["codex-frontier"] },
+      { modelPick: null },
+    ];
+    for (const raw of cases) {
+      assert.equal(
+        parseNotes(JSON.stringify(raw)).modelPick,
+        undefined,
+        JSON.stringify(raw),
+      );
+    }
+  });
+});

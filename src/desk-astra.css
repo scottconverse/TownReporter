@@ -1499,6 +1499,21 @@
   line-height: 1.35;
   color: var(--fg);
 }
+/* D278: a blocker that is really a list draws its items one per line, at the
+   row's own body size -- never small or muted. */
+.desk-ltr.astra .astra-blocker-items,
+.desk-ltr.astra-modal-layer .astra-blocker-items {
+  margin: 4px 0 0;
+  padding-left: 1.4em;
+  font-size: inherit;
+  line-height: 1.35;
+  color: var(--fg);
+  /* Tailwind's base layer sets `ol { list-style: none; padding: 0 }`. This file
+     is unlayered, so this rule wins, but it has to SAY the marker or the checks
+     draw as plain lines. */
+  list-style: decimal;
+  list-style-position: outside;
+}
 .desk-ltr.astra .astra-blocker-acts {
   grid-column: 2;
   display: flex;
@@ -5415,6 +5430,16 @@
 }
 .desk-ltr.astra .job-card-quiet {
   color: var(--mut);
+}
+
+/* The cause behind "the model server did not answer", opened on demand.
+   Same size and ink as the card's main text: editors have old eyes. */
+.desk-ltr.astra .job-card-detail {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--ink);
+}
+.desk-ltr.astra .job-card-detail summary {
+  cursor: pointer;
 }
 
 .desk-ltr.astra .job-card-stall {

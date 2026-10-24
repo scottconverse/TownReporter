@@ -131,6 +131,9 @@ export type UnreviewedClaimsConfirmation = { count: number; token: string; at: s
  */
 export type UncheckedStoryConfirmation = { token: string; at: string; by: string };
 
+/** A Story-page writer pick kept in the lead's notes (D275). */
+export type ModelPick = { choice: string; effort: string | null };
+
 export type ReportingNotes = {
   news: string;
   why: string;
@@ -141,6 +144,17 @@ export type ReportingNotes = {
   opened: NoteOpened[];
   scratch: string;
   researchScope?: "public" | "supplied";
+  /**
+   * The writer model the editor last picked on the Story page (D275).
+   *
+   * The page's picker used to live in page state only, so a reload with no
+   * job row forgot it and fell back to the assignment default. This is where
+   * it survives: `saveReportingNotes` writes it on every pick, and the page
+   * reads it before the "last job" restore, so a saved pick wins over an old
+   * job. Read explicitly in parseNotes below, field by field like every other
+   * structured note.
+   */
+  modelPick?: ModelPick;
   /** URLs explicitly filed/pasted by the editor, never discovery history. */
   suppliedUrls?: string[];
   /** Explicit editor direction from an authenticated control, never from source text. */
@@ -207,6 +221,14 @@ export type ReportingNotes = {
     excerpt: string;
     captionSha256: string;
   }[];
+  /**
+   * G23-QA-5 (D279): why the last Draft press did not start, kept on the lead
+   * so a refusal survives a reload. The Story page shows it in the same place
+   * as a live refusal; the next Draft press clears it. Named explicitly in
+   * parseNotes below (the parser builds its object field by field), at the END
+   * of the type so a concurrent change to this file merges cleanly.
+   */
+  lastDraftRefusal?: { text: string; at: string };
 };
 
 export function earlierReportingNotes(
@@ -370,16 +392,60 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
         ? { importWarning: o.importWarning.slice(0, 400) }
           : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
+      ...modelPickFromRaw(o),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...topicConfirmationFromRaw(o),
       ...unreviewedClaimsConfirmationFromRaw(o),
       ...uncheckedStoryConfirmationFromRaw(o),
       ...holdFromRaw(o),
       ...meetingFromRaw(o),
+      ...draftRefusalFromRaw(o),
     };
   } catch {
     return base;
   }
+}
+
+/**
+ * The Story page's saved writer pick (D275), read defensively.
+ *
+ * A pick without a choice string says nothing, and an effort that is neither a
+ * short string nor null is not one of the levels the desk sends. Either makes
+ * the whole block malformed: it is dropped rather than half-read, so the page
+ * falls back to the assignment default instead of restoring a pick nobody
+ * made.
+ */
+function modelPickFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "modelPick"> {
+  const raw = o.modelPick;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const r = raw as { choice?: unknown; effort?: unknown };
+  if (typeof r.choice !== "string") return {};
+  const choice = r.choice.trim().slice(0, 200);
+  if (!choice) return {};
+  if (r.effort != null && typeof r.effort !== "string") return {};
+  const effort = typeof r.effort === "string" ? r.effort.trim().slice(0, 40) : null;
+  return { modelPick: { choice, effort: effort || null } };
+}
+
+/**
+ * G23-QA-5 (D279): the last Draft refusal, read defensively.
+ *
+ * A refusal the editor can act on has a sentence and the moment it was given.
+ * Anything malformed is dropped whole rather than half-kept: a line saying
+ * "Draft did not start" with no usable time would be a claim this desk cannot
+ * stand behind.
+ */
+function draftRefusalFromRaw(
+  o: Record<string, unknown>,
+): Pick<ReportingNotes, "lastDraftRefusal"> {
+  const raw = o.lastDraftRefusal;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as { text?: unknown; at?: unknown };
+  if (typeof r.text !== "string" || typeof r.at !== "string") return {};
+  const text = r.text.trim().slice(0, 600);
+  const at = r.at.trim();
+  if (!text || !at || Number.isNaN(Date.parse(at))) return {};
+  return { lastDraftRefusal: { text, at } };
 }
 
 /**
@@ -988,6 +1054,7 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     // Kept for the same reason as the confirmation above: it is the only record
     // of why an editor parked a lead, and a shed reason reads as "never given".
     hold: work.hold,
+    lastDraftRefusal: work.lastDraftRefusal,
     news: work.news,
     why: work.why,
     angle: work.angle,

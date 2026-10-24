@@ -372,6 +372,9 @@ const bodiesUrl = await load("src/components/dialogs/editor-dialog-bodies.ts", {
   "../../lib/news/kill-reasons.ts": killReasonsUrl,
   "../../lib/news/import-review.ts": importReviewUrl,
   "./editor-dialog-forms.ts": formsUrl,
+  /* G23-QA-1: Add a lead asks the desk's readiness rule; this fixture has no map. */
+  "../../lib/news/provider-registry.ts": stub("export const providerEntry = () => undefined;"),
+  "../../lib/news/writer-bar.ts": stub("export const writerUnavailableReason = () => undefined;"),
 });
 const forms = await import(formsUrl);
 assert.equal(
@@ -413,6 +416,11 @@ const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx",
     "export function useEditorSections() { return { data: [], isLoading: false, isError: false, error: null, refetch: () => {} }; }",
   ),
   "@/lib/news/url-guard": urlGuardUrl,
+  /* G23-QA-1: the Add a lead shell now reads the shared readiness query. */
+  "@/lib/news/provider-availability": stub("export const providerAvailability = async () => undefined;"),
+  "@/lib/news/provider-availability-key": stub(
+    'export const PROVIDER_AVAILABILITY_QUERY_KEY = ["provider-availability"];',
+  ),
   "./editor-dialog-bodies": bodiesUrl,
   "./editor-dialog-forms": formsUrl,
 });

@@ -300,7 +300,8 @@ export function jobProgressView(
     title: TITLES[kind] ?? row.kind,
     // Non-story kinds carry no headline, whatever the caller passed: their
     // subject id is a run id, and the query above resolves a headline only for
-    // the two kinds whose subject is a lead.
+    // the two story kinds (a draft's subject is its lead, a reconcile's is the
+    // draft it is checking).
     headline: kind === "draft" || kind === "reconcile" ? headline : null,
     resultHref:
       row.result_href ??
@@ -472,7 +473,35 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
     const rows = await sql<
       DeskJob & { lead_id: number; draft_id: number | null; headline: string | null }
     >`
-      select j.*, j.subject_id as lead_id,
+      select j.*,
+        /*
+          A DRAFT job's subject is a LEAD id; a RECONCILE (evidence-check) job's
+          subject is a DRAFT id (draft-reconcile.server.ts enqueues it that
+          way). Treating the reconcile subject as a lead -- as this query did --
+          put the headline of whatever lead shared that number on the card and
+          linked it to the wrong story. A reconcile job resolves through its
+          draft: the draft's lead, the draft's own id, and the draft's headline
+          (or its lead's when the draft has none yet). A missing draft row gives
+          no lead, no draft and no headline rather than a plausible wrong one.
+        */
+        case
+          when j.kind = 'reconcile' then coalesce(
+            (select d.lead_id from drafts d
+              where d.id = j.subject_id and d.newsroom_id = j.newsroom_id),
+            0
+          )
+          else j.subject_id
+        end as lead_id,
+        case
+          when j.kind = 'reconcile' then
+            (select d.id from drafts d
+              where d.id = j.subject_id and d.newsroom_id = j.newsroom_id)
+          when j.kind = 'draft' then
+            (select d.id from drafts d
+              where d.lead_id = j.subject_id and d.newsroom_id = j.newsroom_id
+              order by d.updated_at desc, d.id desc limit 1)
+          else null
+        end as draft_id,
         /*
           The drafts row first, the lead second, as two INDEPENDENT scalar
           subqueries rather than one nested in the other. A lead whose draft
@@ -482,7 +511,7 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
           headline to show, which is the bug this shape avoids.
         */
         case
-          when j.kind in ('draft', 'reconcile') then coalesce(
+          when j.kind = 'draft' then coalesce(
             (
               select nullif(d.headline, '') from drafts d
               where d.lead_id = j.subject_id and d.newsroom_id = j.newsroom_id
@@ -493,11 +522,20 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
               where l.id = j.subject_id and l.newsroom_id = j.newsroom_id
             )
           )
+          when j.kind = 'reconcile' then coalesce(
+            (
+              select nullif(d.headline, '') from drafts d
+              where d.id = j.subject_id and d.newsroom_id = j.newsroom_id
+            ),
+            (
+              select l.headline from drafts d
+              join leads l on l.id = d.lead_id
+              where d.id = j.subject_id and d.newsroom_id = j.newsroom_id
+                and l.newsroom_id = j.newsroom_id
+            )
+          )
           else null
-        end as headline,
-        (select d.id from drafts d
-          where d.lead_id = j.subject_id and d.newsroom_id = j.newsroom_id
-          order by d.updated_at desc, d.id desc limit 1) as draft_id
+        end as headline
       from desk_jobs j
       where j.newsroom_id = ${newsroomId}
         and j.kind <> 'headlines'
@@ -527,7 +565,13 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
     return rows.map((row) =>
       jobProgressView(
         row,
-        row.kind === "reporting" ? leadByRequest.get(row.subject_id) ?? 0 : row.kind === "draft" || row.kind === "reconcile" ? row.subject_id : 0,
+        row.kind === "reporting"
+          ? leadByRequest.get(row.subject_id) ?? 0
+          : row.kind === "draft" || row.kind === "reconcile"
+            /* Resolved by the query: a draft's subject IS the lead, a
+               reconcile's subject is a draft whose row names the lead. */
+            ? row.lead_id
+            : 0,
         row.kind === "draft" || row.kind === "reconcile" ? row.draft_id : null,
         row.headline,
       ),

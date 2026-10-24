@@ -355,6 +355,49 @@ describe("one reader for every kind", () => {
     await sql`delete from desk_jobs where id = any(${[draftJob.id, scanJob.id]}::int[])`;
     await sql`delete from leads where id = ${leadId}`;
   });
+
+  it("reads an evidence-check job's story through its draft, never a lead with the same number (TVA-1)", async () => {
+    /*
+      A `reconcile` (evidence-check) job's `subject_id` is a DRAFT id --
+      `draft-reconcile.server.ts` enqueues it that way -- while the reader used
+      to read every story kind's subject as a LEAD id. With both rows present
+      the old query picked the lead sharing the number, so the card showed the
+      wrong headline and its link opened the wrong story. The draft's id is
+      fixed and explicit, and the second lead is inserted with that same id, so
+      this test cannot pass by accident on two unrelated sequences.
+    */
+    const sql = await getSql();
+    const DRAFT_ID = 9178011;
+    const leadA = (
+      await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, status)
+        values (${"tva1-reader"}, ${READER_NEWSROOM}, ${"The story the check belongs to"}, ${"why"}, ${"new"})
+        returning id
+      `
+    )[0]!.id;
+    await sql`
+      insert into drafts (id, user_id, lead_id, headline, body, topic, newsroom_id)
+      values (${DRAFT_ID}, ${"tva1-reader"}, ${leadA}, ${"Draft the check is reviewing"},
+        ${"Body."}, ${"council"}, ${READER_NEWSROOM})
+    `;
+    await sql`
+      insert into leads (id, user_id, newsroom_id, headline, why, status)
+      values (${DRAFT_ID}, ${"tva1-reader"}, ${READER_NEWSROOM},
+        ${"A different story with the same number"}, ${"why"}, ${"new"})
+    `;
+    const job = await enqueue("reconcile", READER_NEWSROOM, DRAFT_ID);
+    try {
+      const card = (await readDeskJobs(READER_NEWSROOM)).find((row) => row.id === job.id);
+      assert.ok(card, "the reconcile job has a card");
+      assert.equal(card.leadId, leadA, "the card names the draft's lead");
+      assert.equal(card.headline, "Draft the check is reviewing", "the card shows the draft's headline");
+      assert.equal(card.resultHref, `/desk/story/draft/${DRAFT_ID}`, "the card opens the draft");
+    } finally {
+      await sql`delete from desk_jobs where id = ${job.id}`;
+      await sql`delete from drafts where id = ${DRAFT_ID}`;
+      await sql`delete from leads where id = any(${[leadA, DRAFT_ID]}::int[])`;
+    }
+  });
 });
 
 

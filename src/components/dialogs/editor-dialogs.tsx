@@ -45,6 +45,7 @@ import { openDarkInvestigation, fileLead, writeStoryFromInput } from "@/componen
  * was not shown.
  */
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { ModelPicker as SharedModelPicker } from "@/components/model-picker";
@@ -54,6 +55,9 @@ import { announceToDesk } from "@/components/desk-chrome-utils";
 import { dialogPressProps } from "@/lib/news/dialog-press";
 
 import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
+import { providerAvailability } from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import type { DuplicateWarning } from "@/lib/news/import-review";
 
 import { chooseHeadline, findSources } from "@/components/scoped-actions";
@@ -579,6 +583,23 @@ export type AddLeadDialogProps = {
 export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<AddLeadState>(addLeadInitial, open, press.clear);
+  /*
+    Item G23-QA-1: the same shared availability query every picker reads, so
+    the reason under an AI choice is the picker's and the Writer bar's answer,
+    not a second opinion. `enabled` keeps a closed dialog from asking.
+  */
+  const availability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+    enabled: open,
+  });
 
   /*
     This one does NOT close on success, unlike the rest, and the reason is the
@@ -622,6 +643,10 @@ export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
         note={press.note}
         Choice={Choice}
         ModelPicker={DialogModelPicker}
+        availability={availability.data}
+        customConnection={
+          connections.data?.find((row) => `custom:${row.id}` === state.model) ?? null
+        }
       />
     </Dialog>
   );
@@ -1194,14 +1219,14 @@ export type HeadlineDialogProps = {
   defaultModel?: string;
   defaultEffort?: string | null;
   /**
-   * DHG-3 / H06: the screen's own headline pick, when it has one.
+   * TXA-2 (D274): the screen's Writer pick, when the screen has one.
    *
-   * The story screen draws a "Model for suggestions" row beside its "Suggest
-   * headlines" press and this dialog draws "Model for headline suggestions".
-   * Both are the one headline job, so when the screen hands its state over the
-   * dialog reads and writes THAT state instead of keeping a second copy that
-   * can disagree. Without `onModelChange` the dialog keeps its own pick, as it
-   * always has.
+   * The story screen used to draw its own "Model for suggestions" row beside
+   * this dialog's "Model for headline suggestions" -- two controls for one
+   * press. It now passes the WRITER pick (the same model and effort the Draft
+   * press sends), so the dialog reads and writes that state instead of
+   * keeping a second copy that can disagree. Without `onModelChange` the
+   * dialog keeps its own pick, as it always has.
    */
   model?: string;
   effort?: string | null;

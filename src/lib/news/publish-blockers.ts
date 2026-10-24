@@ -104,6 +104,15 @@ export type PublishBlocker = {
    */
   kind: "warning" | "hard";
   sentence: string;
+  /**
+   * G23-UX-6 (D278): a warning that is really a LIST says so in two parts, so
+   * the dialog and the Checks panel can draw the items as an `<ol>` instead of
+   * one long sentence. `sentence` stays the same string (audit rows, the
+   * server's refusal and the acknowledgement all still read it); `lead` is the
+   * sentence before the items and `items` are the items themselves.
+   */
+  lead?: string;
+  items?: readonly string[];
   action: PublishBlockerAction;
   /**
    * A blocker with two honest answers gets a second press -- a named outlet
@@ -646,12 +655,17 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     the confirm dialog, and "Publish anyway" prints over it.
   */
   if (state.meetingEditorChecks?.length) {
+    const lines = meetingEditorChecksLines(state.meetingEditorChecks, {
+      fromNewsWriter: state.meetingEditorChecksFromNewsWriter,
+    });
     blockers.push({
       key: "meeting-editor-checks",
       kind: "warning",
       sentence: meetingEditorChecksNotice(state.meetingEditorChecks, {
         fromNewsWriter: state.meetingEditorChecksFromNewsWriter,
       }),
+      lead: lines.lead,
+      items: lines.items,
       action: { label: "Review the checks", target: { kind: "evidence-review" } },
     });
   }
@@ -674,13 +688,32 @@ export function meetingEditorChecksNotice(
   checks: readonly string[],
   options: { fromNewsWriter?: boolean } = {},
 ): string {
-  const items = checks.map((check) => String(check ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
-  const count = items.length;
-  const who = options.fromNewsWriter ? "The writer" : "The meeting writer";
-  const lead = `${who} asks you to check ${count} thing${count === 1 ? "" : "s"} before publishing:`;
+  const { lead, items } = meetingEditorChecksLines(checks, options);
   return items.length
     ? `${lead} ${items.map((item, index) => `${index + 1}. ${item}`).join(" ")}`
     : lead;
+}
+
+/**
+ * G23-UX-6 (D278): the same check list in two parts -- the lead sentence and
+ * the items -- so a screen can draw the items as a real `<ol>` instead of one
+ * run-on sentence with "1." and "2." typed into it.
+ *
+ * `meetingEditorChecksNotice` builds its string from THIS, so the sentence the
+ * audit rows, the server's refusal and the acknowledgement key still carry is
+ * unchanged byte for byte.
+ */
+export function meetingEditorChecksLines(
+  checks: readonly string[],
+  options: { fromNewsWriter?: boolean } = {},
+): { lead: string; items: string[] } {
+  const items = checks.map((check) => String(check ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const count = items.length;
+  const who = options.fromNewsWriter ? "The writer" : "The meeting writer";
+  return {
+    lead: `${who} asks you to check ${count} thing${count === 1 ? "" : "s"} before publishing:`,
+    items,
+  };
 }
 
 /**

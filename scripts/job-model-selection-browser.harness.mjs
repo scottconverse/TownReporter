@@ -78,7 +78,15 @@ export async function getModelAssignmentsFn(){window.assignmentReads++;return {o
 export async function saveModelAssignmentsFn({data}){window.assignmentWrites.push(structuredClone(data));window.assignmentRows=structuredClone(data);return {ok:true,assignments:structuredClone(window.assignmentRows)};}
 export function assignmentsFromSave(result){return result.ok?result.assignments:null;}`);
 
-export async function jobModelBrowser({ baselineRef } = {}) {
+export async function jobModelBrowser({ baselineRef, notesJson, assignmentRows } = {}) {
+  // Today's values are the defaults; a test may hand the lead saved notes or
+  // preset the "Who does what" rows before the page mounts.
+  const screenData = notesJson === undefined
+    ? fixture
+    : {
+        ...fixture,
+        lead: { ...fixture.lead, lead: { ...fixture.lead.lead, notes_json: notesJson } },
+      };
   const baselineSources = baselineRef
     ? new Map(
         [storyPath, dialogPath].map((path) => [
@@ -108,6 +116,16 @@ export async function jobModelBrowser({ baselineRef } = {}) {
     "src/lib/news/model-assignment-draft.ts",
     { "./model-assignments.ts": assignments },
   );
+  /*
+    The screen renderer's default `parseNotes` stub answers `{}` for every
+    lead, so the page cannot read a saved writer pick (D275) at all. This
+    harness is about what the Story page does with saved notes, so the real
+    notes module is loaded; only its text-to-assignment helper is stubbed,
+    because that one reaches the writer module.
+  */
+  imports["@/lib/news/notes"] = await moduleUrl("src/lib/news/notes.ts", {
+    "./write-story.ts": stubUrl("export const editorialAssignmentFromText=()=>null;"),
+  });
   imports["@/components/use-job-model-assignment"] = await moduleUrl(
     "src/components/use-job-model-assignment.ts",
     imports,
@@ -197,7 +215,7 @@ export async function jobModelBrowser({ baselineRef } = {}) {
   const moduleIds = { models: compact(models), story: compact(story), today: compact(today) };
   const entry = `import React from ${JSON.stringify(import.meta.resolve("react"))};import {createRoot} from ${JSON.stringify(import.meta.resolve("react-dom/client"))};import {QueryClient,QueryClientProvider} from ${JSON.stringify(import.meta.resolve("@tanstack/react-query"))};
 import {Route as Models} from ${JSON.stringify(moduleIds.models)};import {Route as Story} from ${JSON.stringify(moduleIds.story)};import {Route as Today} from ${JSON.stringify(moduleIds.today)};
-window.screenData=${JSON.stringify(fixture)};window.assignmentRows=[];window.assignmentWrites=[];window.assignmentReads=0;
+window.screenData=${JSON.stringify(screenData)};window.assignmentRows=${JSON.stringify(assignmentRows ?? [])};window.assignmentWrites=[];window.assignmentReads=0;
 const client=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false}}});const root=createRoot(document.getElementById("root"));
 window.mountDoor=name=>{client.removeQueries({queryKey:["model-assignments"]});root.render(React.createElement(QueryClientProvider,{client},React.createElement(({models:Models,story:Story,today:Today})[name].component,{key:name})));};window.mountDoor("models");`;
   const bundle = await rolldown({
