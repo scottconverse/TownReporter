@@ -4748,7 +4748,34 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       `draftStillExpected` above are about, read FOR UPDATE a few lines up.
     */
     const headline = headlineForRedraft(current, reported.headline);
-    const [savedDraft] = await sql<{ id: number }>`
+    /*
+      TUB-2 (D263): a run that wrote a writer checkpoint used to leave TWO rows
+      -- the checkpoint INSERT and this one. When the newest row is still this
+      run's own checkpoint, unchanged since it was written (which
+      `draftStillExpected` above just proved), the final write updates that row
+      in place instead, so one AI run leaves one draft row. Every other case
+      inserts, exactly as before; an editor's own row is never updated.
+    */
+    const ownCheckpoint =
+      checkpointDraftId !== null && current !== null && Number(current.id) === checkpointDraftId;
+    const [savedDraft] = ownCheckpoint
+      ? await sql<{ id: number }>`
+      update drafts set
+        headline = ${storableText(headline.headline)}, dek = ${storableText(reported.dek)},
+        body = ${draftBody}, topic = ${storableText(reported.topic)}, source_urls = ${sourceUrls},
+        integrity_notes = ${notes}, provenance_json = ${provenanceJson},
+        form = ${storableText(reported.form)}, found_note = ${storableText(reported.found_note)},
+        unanswered = ${unansweredJson}, research_json = ${researchJson},
+        model_headline = ${storableText(headline.modelHeadline)},
+        model_topic = ${storableText(reported.topic)}, headline_source = ${headline.source},
+        model_body = ${draftBody},
+        -- Columns the checkpoint never wrote: back to what a fresh INSERT gives them.
+        disclosure_text = '', meeting_notes = null, run_stats = null, editor_checks = '[]'::jsonb,
+        updated_at = now()
+      where id = ${Number(current!.id)} and newsroom_id = ${owned(context)}
+      returning id
+    `
+      : await sql<{ id: number }>`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
       provenance_json, form, found_note, unanswered, research_json,
