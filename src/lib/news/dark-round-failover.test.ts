@@ -171,7 +171,7 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "gemini-flash",
       label: "Gemini 3.8 Flash (Pro plan)",
-      switchedBecause: "Codex Sol 6.1 (balanced) sign-in lapsed",
+      switchedBecause: "Codex Sol 6.1 sign-in lapsed",
     });
     assert.deepEqual(probed, ["gemini-flash"]);
     assert.equal(modelChoiceSet, true);
