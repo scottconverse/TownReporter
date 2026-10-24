@@ -4402,7 +4402,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           again here, before the fallback spends its four model calls.
         */
         newsSkillFallbackError = skillError;
-        const reason = String(skillError).trim().replace(/[.!?]+$/, "");
+        const rawReason = String(skillError).trim();
+        const cliMissing = rawReason.includes("Claude Code CLI not found");
+        if (cliMissing) {
+          console.warn(
+            `[desk] job ${job.id}: the research writer found no Claude Code CLI; ` +
+              `the note says so in plain words. Raw: ${rawReason}`,
+          );
+        }
+        const reason = cliMissing
+          ? "the research tool is not set up on this computer"
+          : rawReason.replace(/[.!?]+$/, "");
         const sentence = `The research writer could not finish (${reason}). The story is being written the usual way, on the same model.`;
         await setStage(job.id, sentence);
         await setFailoverNote(job.id, sentence);

@@ -98,7 +98,6 @@ jobs:
           check run_desk_production_regression '^(scripts/desk-production-regression\.mjs)$'
           check run_scan_refresh_browser '^(scripts/scan-refresh-old-merge-falsification\.mjs|scripts/scan-refresh-runtime-proof\.mjs)$'
           check run_provider_signin '^(scripts/provider-signin-e2e\.mjs)$'
-          check run_failover '^(scripts/failover-e2e\.mjs)$'
           check run_story_quota_failover '^(scripts/story-quota-failover-e2e\.mjs)$'
           check run_custom_api_ui '^(scripts/custom-api-ui-acceptance\.mjs)$'
           check run_dark_picker '^(scripts/dark-picker-e2e\.mjs)$'
@@ -148,6 +147,9 @@ jobs:
           want run_built '^(package(-lock)?\.json$|vite\.config|app\.config|src/(server|entry|router)|ops/|scripts/smoke-built-server\.mjs$|\.github/workflows/ci\.yml$)'
           want run_delete_corrections '(correction|trash|delete|\.github/workflows/ci\.yml$)'
           want run_watchdog '(^ops/|watchdog|^\.github/workflows/ci\.yml$)'
+          # The failover walk proves the model ladder end to end, so it runs when
+          # anything that ladder is built from changes -- not on every push.
+          want run_failover '^(scripts/failover-e2e\.mjs|scripts/fakes/fake-(claude-cli|deepseek-endpoint|codex-cli)\.mjs|src/lib/news/(news-skill-writer\.server|meeting-skill-writer|ai|ai-claude-code\.server|automatic-failover|desk-model-run|forced-runtime\.server)\.ts|src/lib/news/(automatic-failover|daily-scan-automatic-rung|dark-round-failover|desk-model-run|forced-runtime|perform-scan-failover)\.test\.ts|\.github/workflows/ci\.yml)$'
 
   dialog-browser:
     needs: changes

@@ -601,11 +601,30 @@ async function main() {
     to -- instead of pinning the provider's sentence.
   */
   const durable = String(second.job.failover_note ?? "");
-  if (!durable.startsWith(`${DEEPSEEK_LABEL}: `) || !durable.endsWith(`-> ${TERRA_LABEL}`)) {
+  /*
+    On CI there is no Claude CLI, so the research writer falls back FIRST and
+    writes its own sentence into the note (desk.ts, the D234 fallback); the
+    model hop is then appended after it with " → " (setJobFailoverNote ->
+    appendStoryFailoverNote). So the note legitimately starts with the
+    fallback sentence and still ends with the hop.
+  */
+  if (
+    !durable.includes(`${DEEPSEEK_LABEL}: `) ||
+    !durable.endsWith(`-> ${TERRA_LABEL}`) ||
+    !(durable.startsWith(`${DEEPSEEK_LABEL}: `) || durable.startsWith("The research writer could not finish ("))
+  ) {
     throw new Error(
-      `draft 2's failover_note read ${JSON.stringify(durable)}, expected it to start ` +
-        `${JSON.stringify(`${DEEPSEEK_LABEL}: `)} and end ${JSON.stringify(`-> ${TERRA_LABEL}`)} -- ` +
+      `draft 2's failover_note read ${JSON.stringify(durable)}, expected it to carry ` +
+        `${JSON.stringify(`${DEEPSEEK_LABEL}: `)} and end ${JSON.stringify(`-> ${TERRA_LABEL}`)} ` +
+        `(either from the first rung or after the research writer's fallback sentence) -- ` +
         `the durable note did not survive to Done.`,
+    );
+  }
+  // The writer's plain-words fallback (Unit B) is what reaches the saved note.
+  if (durable.includes("npm i -g")) {
+    throw new Error(
+      `draft 2's failover_note read ${JSON.stringify(durable)}, expected the plain fallback ` +
+        `sentence, not the CLI install instructions.`,
     );
   }
   step(`draft 2 hopped to Codex Sol 6.1 (balanced) with the durable note: "${durable}"`);
