@@ -127,7 +127,7 @@ import {
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { usesWholeMeetingWriter } from "./meeting-whole.ts";
-import { claimsAndSourcesUrls } from "./meeting-skill-writer.ts";
+import { claimsAndSourcesUrls, runNotesOpenedUrls } from "./meeting-skill-writer.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
@@ -4175,8 +4175,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     on DeepSeek would leave a receipt naming a model that did not write it --
     and spend model calls -- for copies this code makes with no model at all.
   */
-  const saveSourceCopies = async (urls: readonly string[], jobId: number) => {
-    if (!urls.length) return;
+  const saveSourceCopies = async (
+    urls: readonly string[],
+    jobId: number,
+    options: { savedOnly?: boolean } = {},
+  ): Promise<string[]> => {
+    if (!urls.length) return [];
     const ingest = pickSourceCopyIngest(
       deps.newsSourceCopy,
       owned(context),
@@ -4195,22 +4199,44 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       the same words moving as before.
     */
     let done = 0;
-    await mapLimit([...urls], 3, async (url) => {
-      try {
-        const document = await ingest(url);
-        await capture(job.user_id, document);
-      } catch {
-        // A refused or broken read is still a capture: `capture` writes it as
-        // fetch-failed when the text is empty, which is what the desk shows.
+    // Indexed, not pushed: three reads run at once, and the URLs a caller is
+    // promised back must come in candidate order.
+    const saved: Array<string | null> = new Array(urls.length).fill(null);
+    await mapLimit([...urls], 3, async (url, index) => {
+      if (options.savedOnly) {
+        /*
+          G23-TE-5 (D264): on the run-notes path a URL is only a source if its
+          page was really read. A refused read or an empty page is left out of
+          both the copies and `source_urls` -- there is nothing for the editor
+          to check it against.
+        */
         try {
-          await capture(job.user_id, { url, title: url, text: "", extras: [] });
+          const document = await ingest(url);
+          if (document.text.trim()) {
+            await capture(job.user_id, document);
+            saved[index] = url;
+          }
         } catch {
-          /* A copy that cannot be saved never fails a written draft. */
+          /* An unread or unsavable page is simply not a source here. */
+        }
+      } else {
+        try {
+          const document = await ingest(url);
+          await capture(job.user_id, document);
+        } catch {
+          // A refused or broken read is still a capture: `capture` writes it as
+          // fetch-failed when the text is empty, which is what the desk shows.
+          try {
+            await capture(job.user_id, { url, title: url, text: "", extras: [] });
+          } catch {
+            /* A copy that cannot be saved never fails a written draft. */
+          }
         }
       }
       done += 1;
       await setStage(jobId, `Saving copies of the sources (${done} of ${urls.length})`);
     });
+    return saved.filter((url): url is string => url !== null);
   };
   /*
     B8B item 2: the draft kind had no Cancel check of its own.
@@ -4356,8 +4382,36 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             model: writerRuntime.ok ? writerRuntime.model : "",
             workDir: skill.workDir,
           };
-          const sourceUrls = claimsAndSourcesUrls(skill.claims);
-          await saveSourceCopies(sourceUrls, job.id);
+          /*
+            G23-TE-5 (D264): a run that writes no CLAIMS AND SOURCES block (or
+            a block with no https link) used to leave the editor no copies and
+            no `source_urls`. The records the run notes say it opened are the
+            next best record of what it read, then the URLs the lead already
+            carried. On that path only a page that was really read is saved,
+            and `source_urls` is exactly the copies that were saved -- so a
+            refused or empty page is never called a source.
+          */
+          const claimsUrls = claimsAndSourcesUrls(skill.claims);
+          let sourceUrls = claimsUrls;
+          if (claimsUrls.length) {
+            await saveSourceCopies(claimsUrls, job.id);
+          } else {
+            const candidates: string[] = [];
+            const seen = new Set<string>();
+            for (const url of [
+              ...runNotesOpenedUrls(skill.runNotes),
+              ...parseLeadSourceUrls(lead.source_urls ?? "[]").filter(
+                (url): url is string => typeof url === "string",
+              ),
+            ]) {
+              if (!/^https:\/\//i.test(url) || seen.has(url)) continue;
+              seen.add(url);
+              candidates.push(url);
+            }
+            sourceUrls = candidates.length
+              ? await saveSourceCopies(candidates.slice(0, 40), job.id, { savedOnly: true })
+              : [];
+          }
           /*
             The skill's own body is the draft. NOTHING is appended to it: a
             reader of a news story must see exactly what they see today when

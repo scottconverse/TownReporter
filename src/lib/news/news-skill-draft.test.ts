@@ -93,7 +93,11 @@ const REPORTED = {
  * names one agenda item in its editor notes, which is the case that keeps the
  * one-item meeting path.
  */
-async function fixture(room: number, choice: string, options: { meeting?: boolean } = {}) {
+async function fixture(
+  room: number,
+  choice: string,
+  options: { meeting?: boolean; sourceUrls?: string[] } = {},
+) {
   await ensureJobsSchema();
   const sql = await getSql();
   const user = `news-skill-editor-${room}`;
@@ -136,7 +140,7 @@ async function fixture(room: number, choice: string, options: { meeting?: boolea
     [
       user,
       room,
-      JSON.stringify(SOURCE_URLS),
+      JSON.stringify(options.sourceUrls ?? SOURCE_URLS),
       notesJson,
       options.meeting ? videoId : null,
       meetingArtifactId,
@@ -552,6 +556,176 @@ test("a writer folder that cannot be created is a returned failure, not a thrown
   assert.equal(ran, false, "the agent never starts without a folder");
   assert.equal(result.ok, false);
   assert.match((result as { error: string }).error, /^The writer could not set up its folder: /);
+});
+
+/*
+  G23-TE-5 (D264): a successful run with no CLAIMS AND SOURCES block used to
+  leave the editor with no source copies at all. The run notes say which
+  records the agent opened, and the lead already carries its own URLs, so the
+  desk falls back to those -- but only the pages it really read are saved.
+*/
+
+const NOTES_URLS = [
+  "https://records.example.gov/notes-a",
+  "https://records.example.gov/notes-b",
+  "https://records.example.gov/notes-c",
+];
+const LEAD_ONLY_URL = "https://records.example.gov/lead-only";
+
+const STORY_WITHOUT_CLAIMS = [
+  "Longmont approves the housing plan",
+  "",
+  "The council voted 6-1 Tuesday for the plan.",
+  "",
+  "The City Council approved the housing plan on Tuesday night after a short debate.",
+  "",
+  "EDITOR FILE: NOT FOR PUBLICATION",
+  "",
+  "Check the 6-1 tally against the minutes.",
+].join("\n");
+
+const RUN_NOTES_444 = [
+  "RUN NOTES",
+  "",
+  "Records opened (all fetched and read this session):",
+  `${NOTES_URLS[0]} (supplied article, read in full)`,
+  `${NOTES_URLS[1]} (report page)`,
+  `${NOTES_URLS[2]} (factsheet)`,
+  "",
+  "What could not be obtained and why:",
+  "A packet could not be downloaded.",
+  "Final script result: RESULT: MECHANICAL CHECKS CLEAR.",
+  "Ranking record: not applicable.",
+  "RUN-DONE",
+].join("\n");
+
+/** Runs one URL at a time, in the order the desk asked, so capture order is stable. */
+function oneAtATime<T>(fn: (url: string) => Promise<T>): (url: string) => Promise<T> {
+  let gate: Promise<unknown> = Promise.resolve();
+  return (url) => {
+    const run = gate.then(() => fn(url));
+    gate = run.catch(() => undefined);
+    return run;
+  };
+}
+
+function writer(handed: Array<{ prompt: string; model: string }>, files: { story: string; runNotes?: string }): MeetingSkillWriterRunner {
+  return async (input) => {
+    handed.push({ prompt: input.prompt, model: input.model });
+    writeFileSync(join(input.workDir, "story.txt"), files.story, "utf8");
+    writeFileSync(join(input.workDir, "CHECK-FIRST.txt"), "Check the tally.\n", "utf8");
+    if (files.runNotes !== undefined) writeFileSync(join(input.workDir, "RUN-NOTES.md"), files.runNotes, "utf8");
+    return { ok: true, exitCode: 0, timedOut: false, durationMs: 4242, lastText: "RUN-DONE" };
+  };
+}
+
+test("no claims block: the records opened and the lead's own URLs are copied, and only pages really read", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88620, "deepseek-flash", { sourceUrls: [LEAD_ONLY_URL] });
+    const handed: Array<{ prompt: string; model: string }> = [];
+    const captured: Array<{ url: string; text: string }> = [];
+    const ingest = oneAtATime(async (url: string) => {
+      if (url === NOTES_URLS[1]) throw new Error("The page refused the read.");
+      if (url === NOTES_URLS[2]) return { url, title: "Empty page", text: "   ", extras: [] };
+      return { url, title: "Saved page", text: "Page text", extras: [] };
+    });
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: writer(handed, { story: STORY_WITHOUT_CLAIMS, runNotes: RUN_NOTES_444 }),
+      reportAndDraft: async () => {
+        throw new Error("the four-pass writer must not run when the skill succeeds");
+      },
+      newsSourceCopy: {
+        ingest,
+        capture: async (_userId, doc) => {
+          captured.push({ url: doc.url, text: doc.text });
+          return { version_id: 1, capture_event_id: 2 };
+        },
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.deepEqual(
+      captured,
+      [
+        { url: NOTES_URLS[0], text: "Page text" },
+        { url: LEAD_ONLY_URL, text: "Page text" },
+      ],
+      "the good pages are saved in candidate order; a failed or empty read is not saved",
+    );
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Longmont approves the housing plan", "the draft is saved");
+    assert.deepEqual(JSON.parse(draft.source_urls), [NOTES_URLS[0], LEAD_ONLY_URL]);
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
+test("a claims block still wins: the run notes' other URLs are never copied", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88621, "deepseek-flash", { sourceUrls: [LEAD_ONLY_URL] });
+    const handed: Array<{ prompt: string; model: string }> = [];
+    const captured: string[] = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: writer(handed, { story: STORY, runNotes: RUN_NOTES_444 }),
+      reportAndDraft: async () => {
+        throw new Error("the four-pass writer must not run when the skill succeeds");
+      },
+      newsSourceCopy: {
+        ingest: async (url) => ({ url, title: "Saved page", text: "Page text", extras: [] }),
+        capture: async (_userId, doc) => {
+          captured.push(doc.url);
+          return { version_id: 1, capture_event_id: 2 };
+        },
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.deepEqual(captured, SOURCE_URLS, "only the claims block's URLs are saved");
+    assert.equal(captured.includes(LEAD_ONLY_URL), false, "the lead's URL is not added on the claims path");
+    assert.equal(NOTES_URLS.some((url) => captured.includes(url)), false, "the run notes are ignored");
+    const draft = await readDraft();
+    assert.deepEqual(JSON.parse(draft.source_urls), SOURCE_URLS);
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
+test("no claims block, no run notes and no lead URLs: nothing is fetched and the draft is still saved", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88622, "deepseek-flash", { sourceUrls: [] });
+    const handed: Array<{ prompt: string; model: string }> = [];
+    let fetches = 0;
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      newsWriterRun: writer(handed, { story: STORY_WITHOUT_CLAIMS }),
+      reportAndDraft: async () => {
+        throw new Error("the four-pass writer must not run when the skill succeeds");
+      },
+      newsSourceCopy: {
+        ingest: async (url) => {
+          fetches += 1;
+          return { url, title: "", text: "Page text", extras: [] };
+        },
+        capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+      },
+      setJobStage: async () => undefined,
+      setJobFailoverNote: async () => undefined,
+    });
+
+    assert.equal(fetches, 0, "there is nothing to fetch");
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Longmont approves the housing plan");
+    assert.deepEqual(JSON.parse(draft.source_urls), []);
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
 });
 
 test("an assignment file that cannot be written is a returned failure, not a thrown one", async () => {

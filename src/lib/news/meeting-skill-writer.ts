@@ -315,6 +315,48 @@ export function claimsAndSourcesUrls(body: string, max = 40): string[] {
   return [...seen].slice(0, Math.max(0, max));
 }
 
+/** The lines that end a RUN-NOTES.md "Records opened" list. */
+const RUN_NOTES_END_PREFIXES = [
+  "what i could not",
+  "what could not",
+  "could not",
+  "script result",
+  "final script result",
+  "ranking record",
+];
+
+/**
+ * The https records a run's RUN-NOTES.md says it opened.
+ *
+ * G23-TE-5 (D264): a run that writes no CLAIMS AND SOURCES block still wrote
+ * RUN-NOTES.md, and its "Records opened" part names the pages the agent really
+ * read. That part ends where the notes stop being a list of records -- at the
+ * next heading, or at the "what could not be got", "script result" or
+ * "ranking record" part -- so a URL in the failure notes is never a source.
+ * The real files vary: one uses `## Records opened`, another a plain
+ * `Records opened (...)` line, and one line may carry a parenthetical note
+ * after the URL. Like `claimsAndSourcesUrls`, http links are dropped and the
+ * list is capped so one chatty run cannot fill a column.
+ */
+export function runNotesOpenedUrls(runNotes: string, max = 40): string[] {
+  const lines = String(runNotes ?? "").split(/\r?\n/);
+  const start = lines.findIndex((line) => /records opened/i.test(line));
+  if (start === -1) return [];
+  const seen = new Set<string>();
+  for (const line of lines.slice(start + 1)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#") || trimmed.toUpperCase() === "RUN-DONE") break;
+    const words = trimmed.replace(/^#+\s*/, "").toLowerCase();
+    if (RUN_NOTES_END_PREFIXES.some((prefix) => words.startsWith(prefix))) break;
+    for (const match of line.matchAll(/https?:\/\/[^\s<>()"']+/gi)) {
+      // A link at the end of a sentence arrives with the period on it.
+      const url = match[0].replace(/[.,;:)]+$/, "");
+      if (/^https:\/\//i.test(url)) seen.add(url);
+    }
+  }
+  return [...seen].slice(0, Math.max(0, max));
+}
+
 /** AP's month forms: five abbreviated with a period, five short ones spelled out. */
 const AP_MONTHS = [
   "Jan.", "Feb.", "March", "April", "May", "June",
