@@ -20,6 +20,7 @@
 
 import { FAILOVER_TRAIL_SEPARATOR, isCustomModelChoice, pastRunModelName } from "./model-choice.ts";
 import { clockLabel } from "./follow-up-copy.ts";
+import { automaticLadder } from "./provider-registry.ts";
 
 /** Reasons use the existing availability check, with no extra probes. */
 export type ProviderAvailability = Record<string, boolean> & { reasons?: Record<string, string>; cloudWarnings?: { baseUrl: string; id: string; reason: string }[] };
@@ -52,7 +53,13 @@ export function geminiChipWord(readinessWord: string | undefined, pending: boole
   return "Not ready";
 }
 
-function availabilityChoice(choice: string): string {
+/**
+ * The key a choice is read under in `providerAvailability()`'s map.
+ *
+ * Exported so a test can build Automatic's map from `automaticLadder()`
+ * without hardcoding either the rung ids or this mapping.
+ */
+export function availabilityChoice(choice: string): string {
   return choice.startsWith("gemini-") ? "gemini-flash" : choice;
 }
 
@@ -104,8 +111,12 @@ export function readinessFailureMessage(choice: string, name: string, message: s
   return `${name} is not ready: ${message}`;
 }
 
+/** The one sentence Automatic fails with when none of its rungs is answering. */
+export const AUTOMATIC_UNAVAILABLE_REASON = "Not ready: none of the models Automatic uses is answering. Open Models to start one or sign in.";
+
 export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[0] & { label: string }): string | undefined {
   if (writerIsReady(input)) return undefined;
+  if (input.choice === "auto") return AUTOMATIC_UNAVAILABLE_REASON;
   if (input.choice === "local-model" && input.localModel) {
     const warning = localCloudReadinessReason(input.availability, input.localModel);
     if (warning) return warning;
@@ -123,15 +134,23 @@ export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[
   return readinessFailureMessage(input.choice, input.label, "This provider is not configured on this server.");
 }
 
-/** The editor can proceed after seeing the unavailable writer and fallback warning. */
-export function writerReadinessWarning(reason: string): string {
-  return `${reason} If you draft anyway, the desk will use the next ready writing model.`;
+/**
+ * The editor can proceed after seeing the unavailable writer and fallback warning.
+ *
+ * Every named choice still promises the next ready model. Automatic cannot:
+ * it has no next rung to move to when the whole ladder is down, so it says what
+ * actually happens instead -- each rung is tried again and the draft can fail.
+ */
+export function writerReadinessWarning(reason: string, choice?: string): string {
+  return choice === "auto"
+    ? `${reason} If you draft anyway, the desk tries each one again, and the draft can fail.`
+    : `${reason} If you draft anyway, the desk will use the next ready writing model.`;
 }
 
-export function writerDraftAction(reason?: string) {
+export function writerDraftAction(reason?: string, choice?: string) {
   return {
     label: reason ? "Draft anyway" : "Draft with AI",
-    warning: reason ? writerReadinessWarning(reason) : undefined,
+    warning: reason ? writerReadinessWarning(reason, choice) : undefined,
     override: reason ? ["writer-not-ready"] : undefined,
   };
 }
@@ -143,12 +162,19 @@ export type WriterTone = "ok" | "warn" | "mut";
  * Can the chosen writer run on this server?
  *
  * The same three answers `ModelPicker` gives each option in its menu:
- * Automatic is always usable (it has a ladder and resolves at run time), a
+ * Automatic is ready while at least one rung of its ladder is answering, a
  * custom connection needs to be on and to carry a model, and every other
  * provider is read off `providerAvailability()` -- where "not answered yet"
  * counts as usable, because a slow availability call must not lock the desk.
  * A run that starts anyway is still refused by preflight before it spends
  * anything; the picker's comment on that is at its own `isAvailable`.
+ *
+ * Automatic reads `automaticLadder()` -- the static order, not
+ * `enabledAutomaticLadder()`, which reads server env and is not available to
+ * the client. A rung counts only when the map carries its key and does not
+ * say false: a rung the map does not mention is not evidence that anything can
+ * answer. With no map at all (still loading) Automatic stays ready, like every
+ * other choice.
  */
 export function writerIsReady(input: {
   choice: string;
@@ -158,7 +184,14 @@ export function writerIsReady(input: {
   customConnection: { enabled: boolean; modelId: string | null; readinessError?: string } | null;
   localModel?: { baseUrl: string; id: string } | null;
 }): boolean {
-  if (input.choice === "auto") return true;
+  if (input.choice === "auto") {
+    const availability = input.availability;
+    if (!availability) return true;
+    return automaticLadder().some((id) => {
+      const key = availabilityChoice(id);
+      return key in availability && availability[key] !== false;
+    });
+  }
   if (input.choice === "local-model" && input.localModel) {
     if (localCloudReadinessReason(input.availability, input.localModel)) return false;
     if (input.availability?.reasons?.["local-model"]?.startsWith("Ollama says:")) return true;

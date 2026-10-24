@@ -2666,7 +2666,7 @@ function StoryPage() {
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: storyModelLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
-  const writerAction = writerDraftAction(writerWarningReason);
+  const writerAction = writerDraftAction(writerWarningReason, modelChoice);
   const draftButtonLabel = writerAction.label;
   const readiness = modelChoice !== "auto" && !writerAvailability.data
     ? { label: writerAvailability.isError ? "● Readiness unknown" : "● Checking", tone: "warn" as const }

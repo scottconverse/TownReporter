@@ -35,6 +35,28 @@ describe("the Models page local model box", () => {
     assert.match(html, /not this computer, spends credits/);
     assert.doesNotMatch(html, /<input/);
   });
+  /*
+    Decision D277: the "No model is loaded" sentence gets a next step right
+    under it. This box is the Models page itself, so the line names the page
+    without linking to it.
+  */
+  it("prints one next step under the no-model sentence, without a link on this page", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DeskLocalModelBox, {
+        isOwner: false,
+        choice: { override: null, storedPick: null, notice: null, catalog: { servers: [], defaultModel: null, checkedAt: 0 } },
+        pending: false,
+        onUseLoaded: () => assert.fail("render must not save"),
+      }),
+    );
+    assert.match(html, /No model is loaded on this computer\./);
+    assert.match(html, /Next: load a model in LM Studio or Ollama, or pick one on the Models page\./);
+    assert.ok(
+      html.indexOf("Next: load a model") > html.indexOf("No model is loaded"),
+      "the next step prints under the sentence",
+    );
+    assert.doesNotMatch(html, /href="\/desk\/models"/, "the Models page does not link to itself");
+  });
   it("offers the owner both plain choices without sending a request on render", () => {
     const html = renderToStaticMarkup(
       React.createElement(DeskLocalModelBox, {

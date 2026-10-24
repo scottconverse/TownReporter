@@ -45,6 +45,7 @@ import { openDarkInvestigation, fileLead, writeStoryFromInput } from "@/componen
  * was not shown.
  */
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { ModelPicker as SharedModelPicker } from "@/components/model-picker";
@@ -54,6 +55,9 @@ import { announceToDesk } from "@/components/desk-chrome-utils";
 import { dialogPressProps } from "@/lib/news/dialog-press";
 
 import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
+import { providerAvailability } from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import type { DuplicateWarning } from "@/lib/news/import-review";
 
 import { chooseHeadline, findSources } from "@/components/scoped-actions";
@@ -579,6 +583,23 @@ export type AddLeadDialogProps = {
 export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<AddLeadState>(addLeadInitial, open, press.clear);
+  /*
+    Item G23-QA-1: the same shared availability query every picker reads, so
+    the reason under an AI choice is the picker's and the Writer bar's answer,
+    not a second opinion. `enabled` keeps a closed dialog from asking.
+  */
+  const availability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+    enabled: open,
+  });
 
   /*
     This one does NOT close on success, unlike the rest, and the reason is the
@@ -622,6 +643,10 @@ export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
         note={press.note}
         Choice={Choice}
         ModelPicker={DialogModelPicker}
+        availability={availability.data}
+        customConnection={
+          connections.data?.find((row) => `custom:${row.id}` === state.model) ?? null
+        }
       />
     </Dialog>
   );

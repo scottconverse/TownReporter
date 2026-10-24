@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { appendStoryFailoverNote, failoverNoteSentence } from "./automatic-failover.ts";
 import {
+  availabilityChoice,
   customConnectionStatus,
   draftFallbackAttribution,
   failoverDestinationFromNote,
@@ -26,6 +27,7 @@ import {
   writerUnavailableReason,
 } from "./writer-bar.ts";
 import { pastRunModelName } from "./model-choice.ts";
+import { automaticLadder } from "./provider-registry.ts";
 
 /**
  * The Writer / Effort bar's lines (unit CW, 0.6.81).
@@ -41,18 +43,43 @@ const ready = { enabled: true, modelId: "gpt-5.6-sol" };
 
 describe("writerIsReady", () => {
   /*
-    Automatic always runs: it has a ladder and resolves a provider at run time.
-    The picker treats it the same way, and a run that cannot place itself is
-    refused by preflight before it spends anything rather than here.
+    Decision D276: Automatic is ready while at least one rung of its ladder can
+    answer. The map is built from `automaticLadder()` and `availabilityChoice`
+    so a rung added or reordered in the registry is covered without editing
+    this test. A key the map does not list is not evidence that anything runs.
   */
-  it("counts Automatic as ready whatever the provider map says", () => {
+  it("counts Automatic as ready while one rung of its ladder answers", () => {
+    const rungs = automaticLadder().map(availabilityChoice);
+    const allDown = Object.fromEntries(rungs.map((key) => [key, false]));
     assert.equal(
-      writerIsReady({ choice: "auto", availability: {}, customConnection: null }),
+      writerIsReady({ choice: "auto", availability: allDown, customConnection: null }),
+      false,
+    );
+    assert.equal(
+      writerIsReady({
+        choice: "auto",
+        availability: { ...allDown, [rungs[0]!]: true },
+        customConnection: null,
+      }),
       true,
     );
     assert.equal(
-      writerIsReady({ choice: "auto", availability: { codex: false }, customConnection: null }),
+      writerIsReady({ choice: "auto", availability: { codex: true }, customConnection: null }),
+      false,
+      "a key outside the ladder does not make Automatic ready",
+    );
+    assert.equal(
+      writerIsReady({ choice: "auto", availability: undefined, customConnection: null }),
       true,
+    );
+  });
+
+  it("gives Automatic the reason that says what to do about it", () => {
+    const rungs = automaticLadder().map(availabilityChoice);
+    const allDown = Object.fromEntries(rungs.map((key) => [key, false]));
+    assert.equal(
+      writerUnavailableReason({ choice: "auto", label: "Automatic", availability: allDown, customConnection: null }),
+      "Not ready: none of the models Automatic uses is answering. Open Models to start one or sign in.",
     );
   });
 

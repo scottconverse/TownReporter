@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { USE_LOADED_RECOMMENDED_LABEL, deskLocalModelSentence } from "@/lib/news/desk-local-model";
+import { USE_LOADED_RECOMMENDED_LABEL, deskLocalModelNextStep, deskLocalModelSentence } from "@/lib/news/desk-local-model";
 import type { LocalCatalog } from "@/lib/news/local-models";
 
 const TITLE = "The desk's local model";
@@ -56,6 +56,12 @@ export function DeskLocalModelBox({
   }
 
   const sentence = deskLocalModelSentence({ override: choice.override, catalog: choice.catalog });
+  /*
+    Decision D277: the "no model is loaded" sentence gets a next step. This
+    box is on the Models page itself, so the line is printed without a link to
+    the page the editor is already reading.
+  */
+  const nextStep = deskLocalModelNextStep({ override: choice.override });
 
   return (
     <section
@@ -74,6 +80,7 @@ export function DeskLocalModelBox({
         {TITLE}
       </h3>
       <p style={{ margin: "0 0 12px" }}>{sentence}</p>
+      {nextStep ? <p style={{ margin: "0 0 12px" }}>{nextStep}</p> : null}
       {isOwner ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <label

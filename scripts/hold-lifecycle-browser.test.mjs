@@ -37,6 +37,10 @@ const { HoldLeadDialog } = await import(await moduleUrl("src/components/dialogs/
   "@/lib/news/story-document-text": await moduleUrl("src/lib/news/story-document-text.ts"),
   "@/lib/use-sections": stub("export const useEditorSections=()=>({sections:[]});"),
   "@/lib/news/url-guard": await moduleUrl("src/lib/news/url-guard.ts"),
+  /* G23-QA-1: Add a lead's shell reads the shared readiness query and connections. */
+  "@/lib/news/provider-availability": stub("export const providerAvailability=async()=>undefined;"),
+  "@/lib/news/provider-availability-key": stub('export const PROVIDER_AVAILABILITY_QUERY_KEY=["provider-availability"];'),
+  "@/lib/news/custom-ai-settings": stub("export const getCustomAiConnectionsFn=async()=>[];"),
   "./editor-dialog-bodies": bodies,
   "./editor-dialog-forms": await moduleUrl("src/components/dialogs/editor-dialog-forms.ts"),
 }));

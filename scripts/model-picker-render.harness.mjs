@@ -59,7 +59,12 @@ const followUpCopyUrl = moduleUrl(
 const writerBarUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/writer-bar.ts", import.meta.url), "utf8"),
   "writer-bar.ts",
-  { "./model-choice.ts": choices, "./follow-up-copy.ts": followUpCopyUrl },
+  {
+    "./model-choice.ts": choices,
+    "./follow-up-copy.ts": followUpCopyUrl,
+    /* Decision D276: Automatic's ready rule reads the static ladder. */
+    "./provider-registry.ts": registryUrl,
+  },
 );
 
 /*

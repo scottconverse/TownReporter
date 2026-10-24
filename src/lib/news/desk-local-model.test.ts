@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { deskLocalModelSentence, localServerStatus } from "./desk-local-model.ts";
+import { deskLocalModelNextStep, deskLocalModelSentence, localServerStatus } from "./desk-local-model.ts";
 const model = {
   id: "qwen3.8:27b-q6_K",
   label: "Qwen",
@@ -42,6 +42,20 @@ describe("Models page local choice words", () => {
       }),
       /No model is loaded on this computer/,
     ));
+  /*
+    Decision D277: the "no model is loaded" fact gets one next step, and a
+    desk that already runs a model gets none.
+  */
+  it("offers a next step only when no model is loaded", () => {
+    assert.equal(
+      deskLocalModelNextStep({ override: null }),
+      "Next: load a model in LM Studio or Ollama, or pick one on the Models page.",
+    );
+    assert.equal(
+      deskLocalModelNextStep({ override: { baseUrl: server.baseUrl, id: model.id } }),
+      null,
+    );
+  });
   it("only says Ready when a local model is loaded", () => {
     assert.equal(localServerStatus(server), "Ready");
     assert.equal(

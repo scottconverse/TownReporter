@@ -5,8 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ModelPicker, availabilityStub, registry, choiceModule, writerBar } from "./model-picker-render.harness.mjs";
 
 function render(props = {}) {
-  // A completed readiness response; unknown readiness is exercised separately.
-  availabilityStub.__setAvailability({});
+  /*
+    A completed readiness response; unknown readiness is exercised separately.
+    D276: Automatic is ready when one rung of its ladder answers, so the map
+    names the first rung. Every other choice still reads absent as ready, and
+    Gemini's own readiness word stays unset, exactly as the empty map did.
+  */
+  availabilityStub.__setAvailability({ [registry.automaticLadder()[0]]: true });
   return renderToStaticMarkup(
     createElement(ModelPicker, { value: "auto", onChange() {}, ...props }),
   );

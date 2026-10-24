@@ -35,7 +35,7 @@ import { USE_LOADED_LOCAL_MODEL, isUseLoadedLocalModelPick } from "@/lib/news/mo
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
-import { geminiReadinessWord, writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
+import { geminiReadinessWord, writerIsReady, writerReadinessWarning, writerUnavailableReason } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
@@ -505,10 +505,10 @@ export function ModelPicker(props: Props) {
         ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
         : isCustomModelChoice(shownValue)
           ? selectedUnavailable
-            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            ? writerReadinessWarning(unavailableReason(selected), shownValue)
             : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
           : selectedUnavailable
-            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            ? writerReadinessWarning(unavailableReason(selected), shownValue)
             : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
