@@ -268,10 +268,10 @@ test("the atomic final-draft commit exposes a review-required terminal stage",as
 const goodResult = (body: string) =>
   ({headline:"TUB-2 lead",dek:"",body,topic:"council",source_urls:[],integrity_notes:"",memory_entities:[],form:"news",provenance:[],found_note:"",findings:[],unanswered:[],claims:[],research_memo:{}} as unknown as ReportedDraftResult);
 
-const successDeps = (job: DeskJob, extra: Partial<Parameters<typeof performDraftWork>[1]>) => ({
+const successDeps = (job: DeskJob, extra: Partial<Parameters<typeof performDraftWork>[1]>): Parameters<typeof performDraftWork>[1] => ({
   readStoryDocuments:async()=>"",
   chat:async()=>({ok:true as const,text:"writer result"}),
-  probe:async(choice:never)=>({ok:true,label:modelChoiceLabel(choice),choice:choice as EffectiveProviderChoice}),
+  probe:async(choice)=>({ok:true,label:modelChoiceLabel(choice),choice:choice as EffectiveProviderChoice}),
   setJobStage:async()=>undefined,
   setJobModelChoice:async(_id:number,choice:string)=>{job.model_choice=choice;},
   setJobFailoverNote:async()=>undefined,
