@@ -390,7 +390,12 @@ function ArticlePage() {
                 <span>/</span>
                 <SectionTag topic={article.topic} className="tag">
                   {sectionName}
-                  {isOpinion ? " · Opinion" : ""}
+                  {/*
+                    The opinion section's own name IS "Opinion", so the suffix
+                    printed after it would read "Opinion · Opinion". Print it
+                    only when the section name has not already said it.
+                  */}
+                  {isOpinion && sectionName.trim().toLowerCase() !== "opinion" ? " · Opinion" : ""}
                 </SectionTag>
               </>
             )}

@@ -18,6 +18,19 @@ test("an opinion story's byline says Opinion, not Perspective", () => {
   assert.doesNotMatch(html, /Perspective/, "the old label must be gone");
 });
 
+test("an opinion story's section crumb does not print Opinion twice", () => {
+  /*
+    The crumb prints the section's own name and then the opinion suffix. For
+    the opinion section the name IS "Opinion", and the page read
+    "Opinion · Opinion". Case-insensitive on purpose: the harness has no
+    sections table, so the route falls back to the raw topic ("opinion"),
+    while the product's section row is named "Opinion" -- both are the same
+    word and neither should be said twice.
+  */
+  const html = renderArticle({ topic: "opinion" });
+  assert.doesNotMatch(html, /opinion\s*·\s*opinion/i, "the section label must not repeat itself");
+});
+
 test("a non-opinion story carries no opinion label", () => {
   const html = renderArticle({ topic: "council" });
   assert.doesNotMatch(html, /· Opinion/);
