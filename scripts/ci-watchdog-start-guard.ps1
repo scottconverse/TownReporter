@@ -33,6 +33,11 @@
        the app comes back once the hang is gone
     5. stale markers -- a dead PID and a live PID running something else -- are
        treated as no start, and the unrelated process is not stopped
+    6. a listener that misses ONE probe and answers the second (D283): the miss
+       is logged with the disk queue length, the app is not stopped, and the
+       server is still alive afterwards
+    7. a listener that misses BOTH probes inside the wait (D283): it is repaired
+       as before, and the "app: port=" line carries the disk queue length
 
   -RealDeadline runs the three acceptance scenarios at the real deadline
   (600 s, D267 -- read from Get-TownReporterStartDeadline, never typed here)
@@ -425,6 +430,9 @@ $env:PUBLIC_SITE_URL = "http://127.0.0.1:$appPort/"
 $deadline = 20
 if ($RealDeadline) { Remove-Item Env:\WATCHDOG_START_DEADLINE_SECONDS -ErrorAction SilentlyContinue }
 else { $env:WATCHDOG_START_DEADLINE_SECONDS = "$deadline" }
+# D283: two probes this far apart. Two seconds keeps cases 1-5 at their old
+# timing; the reprobe cases set their own value for the run they need.
+$env:WATCHDOG_REPROBE_SECONDS = '2'
 Set-TestEnv @{ FAKE_START_DELAY_SECONDS = $null; FAKE_START_HANG = $null; STUB_MODE = $null }
 
 try {
@@ -645,6 +653,51 @@ try {
     $after = Read-Marker
     Check 'the stale marker no longer names the unrelated process' { $null -eq $after -or [int]$after.pid -ne $sleeper.Id }
     Check 'the app answered 200 again' { Wait-ForApp 200 60 }
+
+    # --- 6. one missed probe, not a kill (D283) ------------------------------
+    # The world's built server holds the port and answers 503 for 15 s, with no
+    # marker, so nothing but the probe decides. With a 20 s wait the second
+    # probe lands after the stub has turned 200: it must say so and leave the
+    # server alone.
+    Say ''
+    Say '6. a slow answer is probed twice and not killed'
+    Stop-App
+    Remove-Marker
+    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_HANG = $null; STUB_MODE = 'slow503'; WATCHDOG_REPROBE_SECONDS = '20' }
+    $stubPid = Start-Stub (Join-Path $app '.output\server\index.mjs') $appPort 'stub-app-6'
+    Check 'the built server holds the port' { (Wait-ForStub $appPort $stubPid 30) }
+    $run = Invoke-Watchdog 'one missed probe'
+    Check 'the watchdog exited 0' { $run.Code -eq 0 }
+    Check 'it logged one missed probe, with the disk queue length, once' {
+      @(($run.Lines -join "`n") -split "`n" | Where-Object { $_ -match 'probe 1 missed' -and $_ -match 'disk queue=' }).Count -eq 1
+    }
+    Check 'the second probe answered 200 and it stopped nothing' {
+      ($run.Lines -join "`n") -match 'probe 2 answered 200'
+    }
+    Check 'it did not stop the server' { -not ((Get-LogText) -match 'stopping stale PID') }
+    Check 'the server PID is still alive' { [bool](Get-Process -Id $stubPid -ErrorAction SilentlyContinue) }
+    Set-TestEnv @{ WATCHDOG_REPROBE_SECONDS = '2' }
+
+    # --- 7. two missed probes still repair (D283) ----------------------------
+    # Same slow server, but both probes land inside its 15 s of 503: the repair
+    # must run exactly as it did before this change, and its "app: port=" line
+    # must carry the disk queue length.
+    Say ''
+    Say '7. two misses still repair'
+    Stop-App
+    Remove-Marker
+    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_HANG = $null; STUB_MODE = 'slow503'; WATCHDOG_REPROBE_SECONDS = '2' }
+    $stubPid = Start-Stub (Join-Path $app '.output\server\index.mjs') $appPort 'stub-app-7'
+    Check 'the built server holds the port' { (Wait-ForStub $appPort $stubPid 30) }
+    $run = Invoke-Watchdog 'two missed probes'
+    Check 'the watchdog exited 0' { $run.Code -eq 0 }
+    Check 'it logged the first miss' { ($run.Lines -join "`n") -match 'probe 1 missed' }
+    Check 'the app: port= line carries the disk queue length' {
+      ($run.Lines -join "`n") -match 'app: port=.*disk queue='
+    }
+    Check 'it stopped the stale server and repaired' { ($run.Lines -join "`n") -match 'stopping stale PID' }
+    Stop-App
+    Set-TestEnv @{ STUB_MODE = $null }
   }
 } finally {
   # Everything this run can name as its own world's: recorded child PIDs, the
@@ -661,7 +714,7 @@ try {
       Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
     }
   }
-  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_HANG', 'STUB_MODE')) {
+  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'WATCHDOG_REPROBE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_HANG', 'STUB_MODE')) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
   }
   if ($previousLocalAppData) { $env:LOCALAPPDATA = $previousLocalAppData }
