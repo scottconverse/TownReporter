@@ -1491,6 +1491,33 @@
 .desk-ltr .side-item {font-size:calc(0.875rem * var(--ts));margin:5px 0 0;color:var(--fg2)}
 /* Sources on the lead: long agenda/council URLs wrap instead of forcing the 380px aside track wider (no horizontal scroll at 390/762 -- build-notes "Narrow layout" #5). */
 .desk-ltr .side-url {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0;word-break:break-all;overflow-wrap:anywhere}
+/*
+  Evidence search (D285/D286): "Exact words" and "Close in meaning" on the
+  Sources tab. Two lists side by side, stacked under 900px. Every readable
+  word is 1rem (16px) or larger and full contrast in light and dark mode --
+  this is the old-eyes rule, not the muted `.meta` treatment.
+*/
+.desk-ltr .evidence-search {margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.desk-ltr .evidence-search-form {display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.desk-ltr .evidence-search-form label {font-size:1rem;font-weight:700;color:var(--fg)}
+.desk-ltr .evidence-search-form input {flex:1 1 14rem;min-width:10rem;font:inherit;font-size:1rem;padding:6px 8px;border:1px solid var(--fg2);background:var(--bg);color:var(--fg)}
+.desk-ltr .evidence-search .btn {font-size:1rem;color:var(--fg);border-color:var(--fg)}
+.desk-ltr .evidence-error {font-size:1rem;color:var(--fg);font-weight:700;margin:8px 0 0}
+.desk-ltr .evidence-columns {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;margin-top:12px}
+.desk-ltr .evidence-col {min-width:0}
+.desk-ltr .evidence-heading {font-size:1.0625rem;font-weight:700;color:var(--fg);margin:0 0 6px}
+.desk-ltr .evidence-empty {font-size:1rem;color:var(--fg);margin:4px 0 0}
+.desk-ltr .evidence-list {list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.desk-ltr .evidence-row {border:1px solid var(--line);padding:8px 10px;min-width:0}
+.desk-ltr .evidence-title {font-size:1rem;font-weight:700;color:var(--fg);margin:0;overflow-wrap:anywhere}
+.desk-ltr .evidence-meta {font-size:1rem;color:var(--fg);margin:2px 0 0;overflow-wrap:anywhere}
+.desk-ltr .evidence-excerpt {font-size:1rem;color:var(--fg);margin:6px 0 0;overflow-wrap:anywhere}
+.desk-ltr .evidence-actions {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
+.desk-ltr .evidence-on-story {font-size:1rem;color:var(--fg);font-weight:700}
+.desk-ltr .evidence-coverage {font-size:1rem;color:var(--fg);margin:10px 0 0}
+@media (max-width:900px) {
+  .desk-ltr .evidence-columns {grid-template-columns:minmax(0,1fr)}
+}
 .desk-ltr .notes {margin-top:18px;border:1px solid var(--fg);padding:12px 14px 14px}
 .desk-ltr .notes-head {display:flex;align-items:baseline;gap:10px;justify-content:space-between}
 .desk-ltr .chip.dnp {border-color:var(--warn);color:var(--warn)}

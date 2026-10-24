@@ -209,4 +209,47 @@ export function startUnattendedScheduler(): void {
     },
     60 * 60 * 1000,
   ).unref?.();
+
+  /*
+    Evidence search by meaning (D286): give new evidence excerpts a vector, a
+    batch at a time, and once an hour drop vectors whose excerpt no longer
+    exists. First pass three minutes after boot so start-up work (monitors,
+    job reattachment) has the machine to itself. One fill at a time, and a
+    failed load backs off for half an hour instead of retrying every minute.
+    Everything is caught: a background clock never throws into the process.
+  */
+  if (process.env.TOWNREPORTER_MEANING_SEARCH !== "off") {
+    let filling = false;
+    let backoffUntil = 0;
+    const tickEvidenceVectors = async () => {
+      if (filling || Date.now() < backoffUntil) return;
+      filling = true;
+      try {
+        const { fillEvidenceVectorsOnce } = await import("./evidence-vector-fill.server.ts");
+        await fillEvidenceVectorsOnce({ batch: 32 });
+      } catch (err) {
+        backoffUntil = Date.now() + 30 * 60 * 1000;
+        console.error("[townreporter] evidence vector fill failed; waiting 30 minutes:", err);
+      } finally {
+        filling = false;
+      }
+    };
+    const pruneEvidenceVectors = async () => {
+      try {
+        const { pruneEvidenceVectorsOnce } = await import("./evidence-vector-fill.server.ts");
+        await pruneEvidenceVectorsOnce();
+      } catch (err) {
+        console.error("[townreporter] evidence vector prune failed:", err);
+      }
+    };
+    setTimeout(() => {
+      void tickEvidenceVectors();
+    }, 3 * 60 * 1000).unref?.();
+    setInterval(() => {
+      void tickEvidenceVectors();
+    }, 60 * 1000).unref?.();
+    setInterval(() => {
+      void pruneEvidenceVectors();
+    }, 60 * 60 * 1000).unref?.();
+  }
 }

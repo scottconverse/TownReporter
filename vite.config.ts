@@ -288,7 +288,9 @@ export default defineConfig(({ command, isPreview }) => ({
   // loader. Leave that package external to Vite's SSR graph so Nitro/runtime
   // can retain the installed native package instead of parsing the binary as
   // UTF-8. The client-side resolver above supplies a loud inert stub.
-  ssr: { external: ["@napi-rs/canvas"] },
+  // The meaning model (D286) loads native ONNX and image binaries through their
+  // own JS loaders; leave them external to Vite's SSR graph for the same reason.
+  ssr: { external: ["@napi-rs/canvas", "@huggingface/transformers", "onnxruntime-node", "sharp"] },
   plugins: [
     pgliteBootstrapPlugin(),
     schemaWarmupDevPlugin(),
