@@ -930,6 +930,13 @@ export function hostOnly(organization: string): string {
  * title is blank keeps its place under a plain label -- a date with no event
  * named is still a date the reader can check.
  *
+ * Unit TWS-1: a record is normally hung on its own posted day (`document_date`).
+ * When its title names a day of its own -- read against the posted day, the way
+ * a story's words are -- the row takes the first day the title names instead,
+ * so the day label and the words beside it agree. A title that names no day, or
+ * that names the posted day, keeps the posted day; a record with no posted day
+ * still has no row, because there is no day to read the title against.
+ *
  * A story is read twice: its records first, then its own printed words (unit
  * BX2). One calendar day is printed once per story, and one event once for the
  * whole paper (unit CV, item 1). A story whose headline and record both name
@@ -991,13 +998,15 @@ export function collectStoryDates(
   for (const source of sources) {
     for (const record of source.records) {
       // The window's first day is also what a day with no year is read against.
-      take(
-        source,
-        structuredDate(record.document_date, from ?? ""),
-        record.title.trim() || "A record we kept",
-        hostOnly(record.organization),
-        RECORD_RANK,
-      );
+      const postedDay = structuredDate(record.document_date, from ?? "");
+      const title = record.title.trim();
+      // Unit TWS-1: a title that names its own day is hung on that day, so the
+      // label and the words beside it agree ("TUE 25" beside "Begins Aug. 31"
+      // was the finding). A title that names no day, or names the posted day,
+      // keeps the posted day.
+      const named = scanDates(title, postedDay).flatMap((hit) => hit.days);
+      const day = postedDay && !named.includes(postedDay) ? (named[0] ?? postedDay) : postedDay;
+      take(source, day, title || "A record we kept", hostOnly(record.organization), RECORD_RANK);
     }
     // The story's own words, read against its own publish day. The headline is
     // scanned once for the story: it is what rule (a) takes a name from, and
