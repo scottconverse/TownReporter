@@ -398,13 +398,14 @@ test("an editor's Cancel ends a routine edition at the source boundary, before t
 test("every routine source read is wrapped in the ticker that beats while it runs", async () => {
   /*
     The heartbeat half of B8B item 2, stated as the property that can be checked
-    without waiting twelve real seconds: the read runs INSIDE `waitForModel`, so
-    the ticker's own first beat ("Waiting on …") is written before the fetch is
-    awaited, and the job is not stall-eligible while it is in flight.
+    without waiting twelve real seconds: the read runs INSIDE `waitForModel`.
+    While the worker's own step is fresh (under the D268 hold), the ticker only
+    beats, so the worker's own step written before the read stays on the row and
+    `beat_at` keeps the job from looking stalled while the fetch is in flight.
 
     Asserted through the seam the worker already has: `check` is handed no way
-    to report, so the "Waiting on …" line on the job row can only have come from
-    the ticker wrapping it.
+    to report, so the step on the job row can only have come from the worker's
+    own write and the beat only from the ticker wrapping the read.
   */
   const source = await activateFixture();
   await tickRoutineNoticeEditions(runNow);
@@ -444,10 +445,14 @@ test("every routine source read is wrapped in the ticker that beats while it run
       };
     }) as any,
   });
-  assert.match(
-    String(rowInsideRead?.step_text ?? ""),
-    /Waiting on Reading the routine sources/,
-    "the ticker spoke while the read was in flight",
+  // The worker's own step survives the read; the ticker's only write is the
+  // beat. This is the sentence the worker wrote just before the loop
+  // (`progressReporterFor` drops the per-source counted tick inside its
+  // one-second window), so it is the exact text the hold is protecting.
+  assert.equal(
+    rowInsideRead?.step_text,
+    "Reading the routine sources",
+    "the worker's own step stays while the read runs; the ticker only beats (D268)",
   );
   assert.ok(rowInsideRead?.beat_at, "and wrote the beat the stall rule reads");
 });

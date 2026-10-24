@@ -61,6 +61,8 @@ export type MeetingSkillWriterSuccess = {
   durationMs: number;
   /** The agent's own notes, when it wrote them. */
   runNotes: string;
+  /** Tool names and counts from the agent's stream (TXB-2). Never inputs or results. */
+  toolExecutions?: Record<string, number>;
 };
 
 export type MeetingSkillWriterFailure = {
@@ -346,5 +348,6 @@ export async function runMeetingSkillWriter(input: {
     workDir,
     durationMs: result.durationMs,
     runNotes: readOptional(workDir, "RUN-NOTES.md"),
+    ...(result.toolExecutions ? { toolExecutions: result.toolExecutions } : {}),
   };
 }
