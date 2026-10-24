@@ -431,7 +431,6 @@ try {
     "Automatic",
     "Codex Astra 6",
     "Codex Sol 6.1",
-    "Codex Sol 6.1 (balanced)",
     "Codex Luna 6",
     "Gemini 3.8 Flash (Pro plan)",
     "Gemini 3.1 Pro (Pro plan)",
