@@ -1734,12 +1734,14 @@ test(
       only in that world -- and runs the REAL ops\watchdog.ps1 against it with a
       small WATCHDOG_START_DEADLINE_SECONDS.
 
-      It proves the decision branch by branch, then the five scenarios in its
+      It proves the decision branch by branch, then the seven scenarios in its
       own header: a start still starting (nothing stopped, no second start), a
       start already holding the port that answers 503 (server not stopped), a
-      dead app brought back, a hung start stopped by PID and started again, and
-      two stale markers (a dead PID, and a live PID running something else)
-      treated as no start.
+      dead app brought back, a hung start stopped by PID and started again, two
+      stale markers (a dead PID, and a live PID running something else) treated
+      as no start, a listener that misses one probe and answers the second (not
+      killed, D283), and a listener that misses both probes (repaired as before,
+      with the disk queue length in the log).
 
       No assertions on the fixture's text here: the harness's own checks, its
       final line and its exit code are the proof. It is slow on purpose -- the

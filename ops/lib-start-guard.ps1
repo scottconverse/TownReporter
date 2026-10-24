@@ -55,6 +55,22 @@ function Get-TownReporterStartDeadline {
   return [int]$script:TownReporterStartDeadlineSeconds
 }
 
+# How long the watchdog waits between its two app probes (D283). One missed
+# probe is not a dead app: a start that is still coming up, or a machine under
+# disk pressure, answers slowly and recovers on its own -- and killing it
+# mid-start is exactly the bug the deadline above exists to prevent. Thirty
+# seconds is long enough for a stalled read to clear and short enough that a
+# genuinely dead app is still repaired inside the watchdog's five-minute run.
+# WATCHDOG_REPROBE_SECONDS overrides it ONLY in test mode, so a stray value on
+# the live machine cannot turn a real outage into a ten-minute wait.
+$script:TownReporterReprobeSeconds = 30
+
+function Get-TownReporterReprobeSeconds {
+  param([bool]$TestMode = $false)
+  if ($TestMode -and $env:WATCHDOG_REPROBE_SECONDS -match '^\d+$') { return [int]$env:WATCHDOG_REPROBE_SECONDS }
+  return [int]$script:TownReporterReprobeSeconds
+}
+
 # -ProcessId, not -Pid: PowerShell variable names are case-insensitive and $PID
 # is a read-only automatic, so a parameter called $Pid cannot be bound.
 function Write-TownReporterStartMarker {

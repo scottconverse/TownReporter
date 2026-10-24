@@ -130,6 +130,12 @@
                             WATCHDOG_TEST_MODE=1, so a stray value on the live
                             machine cannot shorten the window that protects a
                             real start.
+    WATCHDOG_REPROBE_SECONDS - how long to wait between the two app probes
+                            before any kill (default 30, D283). A listener that
+                            misses one probe is probed again after this wait;
+                            only a second miss repairs. Honored ONLY when
+                            WATCHDOG_TEST_MODE=1, so a stray value on the live
+                            machine cannot stretch a real outage.
     WATCHDOG_STAGE_APP   - checkout whose staged copy this run may start
                             (default: this checkout, same as always). Honored
                             ONLY when WATCHDOG_TEST_MODE=1, so a stray value
@@ -171,6 +177,22 @@ function Test-Port($p) {
   # Postgres binds both address families, so an unfiltered check is fine
   # here -- kept only for the Postgres probes below, never the app's port.
   [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
+}
+
+# D283: the disk queue length at the moment a probe missed, so the log says
+# whether the app was slow or the machine was. Never throws: the counter name
+# is localized (it is not '\PhysicalDisk(_Total)\Current Disk Queue Length' on
+# a non-English Windows) and a watchdog that dies reading a diagnostic has
+# stopped watching the paper. "unknown" is a value the log can carry.
+function Get-TownReporterDiskQueueLength {
+  try {
+    $sample = (Get-Counter '\PhysicalDisk(_Total)\Current Disk Queue Length' -ErrorAction Stop).CounterSamples[0]
+    $value = [double]$sample.CookedValue
+    if ([double]::IsNaN($value) -or [double]::IsInfinity($value)) { return 'unknown' }
+    return [string][int][math]::Round($value, 0, [MidpointRounding]::AwayFromZero)
+  } catch {
+    return 'unknown'
+  }
 }
 
 # --- Promote in progress? Stand down. --------------------------------------
@@ -244,8 +266,45 @@ if ($appPort) {
 }
 $appHealthy = ($appCode -eq 200)
 
+<#
+  D283: one missed probe is not a dead app.
+
+  A start that is still coming up, or a machine under disk pressure, answers
+  slowly or once with 503 and recovers on its own. Repairing on that single
+  miss is the same mistake the start guard fixes -- acting on one sample taken
+  at the worst moment. So a miss WITH a listener is probed again after
+  WATCHDOG_REPROBE_SECONDS, and only a second miss repairs.
+
+  With NO listener there is nothing to wait for: the app is not running, the
+  second probe would add the wait to every recovery, and TEST-003 has 90 s to
+  get the paper back. Repair at once, exactly as before.
+#>
+$appReprobeQueue = ""
+if (-not $appHealthy -and $appPort) {
+  $reprobeSeconds = Get-TownReporterReprobeSeconds -TestMode ($env:WATCHDOG_TEST_MODE -eq '1')
+  $queue1 = Get-TownReporterDiskQueueLength
+  Write-Log "app: probe 1 missed (status=$appCode error='$appError' disk queue=$queue1); probing again in $reprobeSeconds s"
+  if ($reprobeSeconds -gt 0) { Start-Sleep -Seconds $reprobeSeconds }
+  # The same probe as above, deliberately: same URL, same 20 s timeout. A
+  # second probe with different terms would not answer the same question.
+  $appCode = 0
+  $appError = ""
+  try {
+    $appCode = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 20).StatusCode
+  } catch {
+    $appError = $_.Exception.Message
+  }
+  $appHealthy = ($appCode -eq 200)
+  if ($appHealthy) {
+    Write-Log "app: probe 2 answered 200 after $reprobeSeconds s; not stopping anything"
+  } else {
+    $appReprobeQueue = Get-TownReporterDiskQueueLength
+  }
+}
+
 if (-not $appHealthy) {
-  Write-Log "app: port=$appPort status=$appCode error='$appError'"
+  $queueText = if ($appReprobeQueue) { " disk queue=$appReprobeQueue" } else { "" }
+  Write-Log "app: port=$appPort status=$appCode error='$appError'$queueText"
     if (-not $pgUp) {
       Write-Log "app: postgres is down, not starting the app against a dead database"
     } else {
