@@ -1723,6 +1723,53 @@ test(
 
 
 test(
+  "a start that is still starting is not killed, and a hung start is stopped",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The start guard, executed. scripts\ci-watchdog-start-guard.ps1 builds a
+      disposable world in the temp directory -- a checkout holding copies of the
+      real ops\ files, a stub build that answers 200 (or 503 for its first
+      seconds), a stub Postgres listener, and a FAKE start script that lives
+      only in that world -- and runs the REAL ops\watchdog.ps1 against it with a
+      small WATCHDOG_START_DEADLINE_SECONDS.
+
+      It proves the decision branch by branch, then the five scenarios in its
+      own header: a start still starting (nothing stopped, no second start), a
+      start already holding the port that answers 503 (server not stopped), a
+      dead app brought back, a hung start stopped by PID and started again, and
+      two stale markers (a dead PID, and a live PID running something else)
+      treated as no start.
+
+      No assertions on the fixture's text here: the harness's own checks, its
+      final line and its exit code are the proof. It is slow on purpose -- the
+      hung scenario waits out the deadline -- so the timeout is generous.
+    */
+    const fixture = join(ROOT, "scripts", "ci-watchdog-start-guard.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-watchdog-start-guard.ps1 is missing");
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 900_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    // A check failure is the harness's own "  FAIL <name>" line. The watchdog
+    // log it prints legitimately says "FAILED to come up healthy" for the hung
+    // start this test asks for, so a bare /FAIL/ would fail on the right output.
+    assert.doesNotMatch(out, /^\s+FAIL /m, `a start-guard check failed:\n${out}`);
+    assert.match(out, /ci-watchdog-start-guard\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+test(
   "the machine-wide pointer is exercised end to end, in another checkout, off this machine",
   { skip: !onWindows ? "PowerShell only" : false },
   () => {

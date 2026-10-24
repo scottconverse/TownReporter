@@ -112,7 +112,7 @@ $pointerFile = Join-Path $fakeLocal 'TownReporter\staged-copy.json'
 
 function New-Checkout([string]$Path, [string]$Name) {
   New-Item -ItemType Directory -Force -Path (Join-Path $Path 'ops'), (Join-Path $Path 'scripts'), (Join-Path $Path 'logs'), (Join-Path $Path '.output\server') | Out-Null
-  foreach ($file in @('lib-port.ps1', 'lib-ownership.ps1', 'lib-stage.ps1', 'start-stage.ps1', 'watchdog.ps1')) {
+  foreach ($file in @('lib-port.ps1', 'lib-ownership.ps1', 'lib-start-guard.ps1', 'lib-stage.ps1', 'start-stage.ps1', 'watchdog.ps1')) {
     Copy-Item -LiteralPath (Join-Path $root "ops\$file") -Destination (Join-Path $Path "ops\$file")
   }
   foreach ($file in @('with-app-env.mjs', 'test-environment.mjs', 'ci-watchdog-start.ps1')) {
