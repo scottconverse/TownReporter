@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Sql } from "../db.ts";
 import { fileMeetingLead, meetingLeadCopy } from "./meeting-lead.ts";
+import { standingPageStamp } from "./lead-newsworthiness.ts";
 
 /**
  * The bridge from capture to desk. Before this, Section 5 produced aligned items,
@@ -157,7 +158,9 @@ describe("meeting lead", () => {
  *
  * The inputs below are capture-shaped: `title` is the recording's own title and
  * `meetingDate` its publish date, which is exactly what `meeting-capture.ts` hands
- * `fileMeetingLead`; `items` and `votes` are what section 5 returns. The agenda ids
+ * `fileMeetingLead`; `items` and `votes` are what section 5 returns. The real
+ * capture passes a full ISO time (`2026-09-30T06:45:38Z`), not a plain day, and the
+ * headline keeps only its UTC day (TUA-5). The agenda ids
  * and ordinance ids are the ones a real Longmont transcript speaks ("Item 9B2 is
  * ordinance 2026-47", "Item 9 C is ordinance 2026-48", "Item 9D, resolution
  * 2026-43" -- see ./meeting-story-section5.ts).
@@ -242,6 +245,73 @@ describe("a capture lead is titled from what the meeting covered", () => {
     assert.equal(filing.leadId, null);
     assert.match(filing.reason, /names no agenda item and establishes no vote/);
     assert.equal(calls.length, 0, "nothing is written to the queue");
+  });
+});
+
+/**
+ * TUA-5: the live paper carries 17 meeting leads whose headline ends in a raw UTC
+ * time, because `meeting-capture.ts` passes the video's full publish time as
+ * `meetingDate`. The capture stamp is a day, so the headline keeps only the day.
+ */
+describe("the capture stamp is a day, not a raw UTC time (TUA-5)", () => {
+  const liveCase = {
+    title: "Museum Advisory Board Meeting, September 21, 2026",
+    items: [{ item: "6A", title: "Report of the Director" }],
+    establishedVotes: 0,
+    votes: [],
+  };
+
+  it("prints the day from the live capture's full ISO time", () => {
+    const copy = meetingLeadCopy({ ...liveCase, meetingDate: "2026-09-30T06:45:38Z" });
+    assert.ok(copy);
+    assert.equal(
+      copy.headline,
+      "Museum Advisory Board Meeting, September 21, 2026: item 6A Report of the Director (2026-09-30)",
+    );
+  });
+
+  it("drops a fractional-second time too", () => {
+    const copy = meetingLeadCopy({ ...liveCase, meetingDate: "2026-10-15T07:00:22.123Z" });
+    assert.ok(copy);
+    assert.match(copy.headline, /\(2026-10-15\)$/);
+    assert.doesNotMatch(copy.headline, /T07:00/);
+  });
+
+  it("leaves a plain day exactly as it was", () => {
+    const copy = meetingLeadCopy({ ...liveCase, meetingDate: "2026-09-23" });
+    assert.ok(copy);
+    assert.match(copy.headline, /\(2026-09-23\)$/);
+  });
+
+  it("adds no stamp when the capture carries no date", () => {
+    const copy = meetingLeadCopy({ ...liveCase, meetingDate: null });
+    assert.ok(copy);
+    assert.doesNotMatch(copy.headline, /\(\s*\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("leaves a long stem more room, because the day stamp is shorter", () => {
+    const copy = meetingLeadCopy({
+      ...liveCase,
+      title: "City Council Regular Session - September 22, 2026, with a recording title long enough that the headline has to be cut before it ends, and then keeps going for another full clause or two",
+      meetingDate: "2026-09-30T06:45:38Z",
+    });
+    assert.ok(copy);
+    assert.ok(copy.headline.length <= 180, `headline is ${copy.headline.length} characters`);
+    assert.match(copy.headline, /… \(2026-09-30\)$/);
+    const keptStem = copy.headline.length - "… (2026-09-30)".length;
+    const keptWithFullTime = 180 - " (2026-09-30T06:45:38Z)".length - "…".length;
+    assert.equal(keptStem - keptWithFullTime, "T06:45:38Z".length, "the stem is cut later by exactly the time the stamp no longer carries");
+  });
+
+  it("still reads as a transcript-story to R5", () => {
+    const copy = meetingLeadCopy({ ...liveCase, meetingDate: "2026-09-30T06:45:38Z" });
+    assert.ok(copy);
+    assert.equal(standingPageStamp({ headline: copy.headline, source_urls: [] }), null, "a day-stamped capture is a transcript-story");
+    assert.equal(
+      standingPageStamp({ headline: "Museum Advisory Board Meeting, September 21, 2026: item 6A Report of the Director" })?.rule,
+      "R5",
+      "the same headline with no stamp is a bare record",
+    );
   });
 });
 

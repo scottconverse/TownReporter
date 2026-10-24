@@ -44,6 +44,9 @@ before(async () => {
   await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,dek text,body text,topic text,source_urls text default '[]',integrity_notes text,updated_at timestamptz default now(),provenance_json text,form text,found_note text,unanswered text,research_json text)");
   await sql.query("create table if not exists artifact_versions(id serial primary key,user_id text,newsroom_id integer,url text,content_hash text,title text default '',full_text text default '',fetch_status integer,fetch_outcome text,captured_at timestamptz default now())");
   await sql.query("create table if not exists newsroom_sections(newsroom_id integer,key text,name text,position integer,visible boolean,replacement_key text,primary key(newsroom_id,key))");
+  // TVA-2: the publish race needs the printed story, which lives in `articles`.
+  // Migrations already create it; this repeat is only the columns these cases use.
+  await sql.query("create table if not exists articles(id serial primary key,user_id text,newsroom_id integer,lead_id integer,origin_draft_id integer,slug text,headline text,dek text default '',body text,topic text,source_urls text default '[]',status text default 'published',published_at timestamptz default now())");
   const { ensureStoryDocuments } = await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts");
   await ensureStoryDocuments(sql);
 });
@@ -328,6 +331,93 @@ test("a newer draft inserted while the model runs prevents replacement of the st
   assert.equal(rows.length, 2);
   assert.equal(rows[0].body, "Original body");
   assert.equal(rows[1].body, "Newer editor copy");
+});
+
+/*
+  TVA-2 (D266). The desk lets an editor press "Publish anyway" while this check
+  is still running, and says the answer will arrive after printing. These cases
+  press Publish while the model runs and prove the answer DOES arrive: the check
+  completes quietly, the printed story and the draft are untouched, and the job
+  ends with the sentence written for this case -- not a red "already been
+  published" error.
+*/
+async function pressPublish(f: Awaited<ReturnType<typeof fixture>>) {
+  const [article] = await f.sql.query<{ id: number }>(
+    "insert into articles(user_id,newsroom_id,lead_id,origin_draft_id,slug,headline,dek,body,topic,status) values($1,$2,$3,$4,$5,'Original headline','Original dek','Original body','council','published') returning id",
+    [f.userId, f.newsroomId, f.leadId, f.draftId, `story-${f.newsroomId}`],
+  );
+  await f.sql.query("update leads set status='published' where id=$1 and newsroom_id=$2", [f.leadId, f.newsroomId]);
+  return article.id;
+}
+
+// `waitForModel`'s ticker reports "Waiting on ..." without being awaited, so let
+// it land before the stub answers; otherwise that late write can overwrite the
+// job's stage after completion (see the report).
+async function awaitModelStage(f: Awaited<ReturnType<typeof fixture>>) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const [row] = await f.sql.query<{ stage: string | null }>("select stage from desk_jobs where id=$1", [f.job.id]);
+    if (/^Waiting on /.test(row?.stage ?? "")) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("the model wait never reported a stage");
+}
+
+async function assertCheckedAfterPrinting(f: Awaited<ReturnType<typeof fixture>>, articleId: number) {
+  const rows = await draftRows(f);
+  assert.equal(rows.length, 1, "a check that finishes after printing files no draft");
+  assert.deepEqual(rows[0], { id: f.draftId, headline: "Original headline", body: "Original body", integrity_notes: "Prior independent warning" });
+  const [article] = await f.sql.query<{ headline: string; body: string; status: string }>("select headline,body,status from articles where id=$1", [articleId]);
+  assert.deepEqual(article, { headline: "Original headline", body: "Original body", status: "published" });
+  const [lead] = await f.sql.query<{ status: string }>("select status from leads where id=$1", [f.leadId]);
+  assert.equal(lead.status, "published");
+  const [job] = await f.sql.query<{ status: string; stage: string; error: string | null; result_href: string; result_json: string }>(
+    "select status,stage,error,result_href,result_json from desk_jobs where id=$1", [f.job.id]);
+  assert.equal(job.status, "completed");
+  assert.equal(job.error, null);
+  assert.equal(job.stage, "Checked after printing. The printed story did not change.");
+  assert.equal(job.result_href, `/desk/story/${f.leadId}`);
+  const result = JSON.parse(job.result_json);
+  assert.equal(result.publishedBeforeCheck, true);
+  assert.equal(result.articleId, articleId);
+  assert.equal(result.originalDraftId, f.draftId);
+  assert.equal(result.evidenceCheckIncomplete, false);
+  assert.equal(typeof result.evidenceReconciledAt, "string");
+  assert.ok(result.aiEvidenceReview && Array.isArray(result.aiEvidenceReview.rows));
+  assert.equal(typeof result.storyReadiness, "object");
+  return result;
+}
+
+test("a check that finishes after Publish passes and files no draft", async () => {
+  const f = await fixture();
+  await attachExactCapture(f);
+  let articleId = 0;
+  await performDraftReconcileWork(f.job, {
+    stage: async () => {},
+    chat: async () => { await awaitModelStage(f); articleId = await pressPublish(f); return { ok: true, text: reply }; },
+  });
+  const result = await assertCheckedAfterPrinting(f, articleId);
+  assert.equal(result.aiEvidenceReview.rows.length, 0);
+  assert.equal(result.storyReadiness.state, "ready");
+});
+
+test("a check that fails a claim after Publish still records that verdict, without an error", async () => {
+  const f = await fixture();
+  await attachExactCapture(f);
+  const claim = { fact: "The council approved a new parks budget line.", url: f.url, kind: "record" };
+  const response = JSON.stringify({
+    ...JSON.parse(reply),
+    claims: [claim],
+    evidence_judgments: { rows: [{ index: 0, verdict: "Not supported", quote: "SUPPORTED RECORD", sourceUrl: f.url, reason: "The record does not support this." }] },
+  });
+  let articleId = 0;
+  await performDraftReconcileWork(f.job, {
+    stage: async () => {},
+    chat: async () => { await awaitModelStage(f); articleId = await pressPublish(f); return { ok: true, text: response }; },
+  });
+  const result = await assertCheckedAfterPrinting(f, articleId);
+  assert.equal(result.aiEvidenceReview.rows.length, 1);
+  assert.equal(result.aiEvidenceReview.rows[0].verdict, "Not supported");
+  assert.equal(result.storyReadiness.state, "not-ready");
 });
 
 test("evidence removal while the model runs invalidates the reconciliation snapshot", async () => {

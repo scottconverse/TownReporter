@@ -327,6 +327,88 @@ test("the atomic final-draft commit exposes a review-required terminal stage",as
   assert.deepEqual(stored,{status:"completed",stage:"Draft saved — review required"});
 });
 
+/*
+  TUB-2 (D263). A run that wrote a checkpoint and then finished successfully
+  used to leave TWO rows: the checkpoint INSERT and the final INSERT. The
+  Drafts page shows only the newest, so the stale copy was invisible, but the
+  table collected one per run. The final write now updates this run's own
+  checkpoint row in place when it is still the newest row.
+*/
+const goodResult = (body: string) =>
+  ({headline:"TUB-2 lead",dek:"",body,topic:"council",source_urls:[],integrity_notes:"",memory_entities:[],form:"news",provenance:[],found_note:"",findings:[],unanswered:[],claims:[],research_memo:{}} as unknown as ReportedDraftResult);
+
+const successDeps = (job: DeskJob, extra: Partial<Parameters<typeof performDraftWork>[1]>): Parameters<typeof performDraftWork>[1] => ({
+  readStoryDocuments:async()=>"",
+  chat:async()=>({ok:true as const,text:"writer result"}),
+  probe:async(choice)=>({ok:true,label:modelChoiceLabel(choice),choice:choice as EffectiveProviderChoice}),
+  setJobStage:async()=>undefined,
+  setJobModelChoice:async(_id:number,choice:string)=>{job.model_choice=choice;},
+  setJobFailoverNote:async()=>undefined,
+  ...extra,
+});
+
+test("a successful run with a writer checkpoint leaves one draft row, the checkpoint updated in place",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88410,user="tub2-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'TUB-2 room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'TUB-2 lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls) values($1,$2,$3,'Earlier saved draft','','Original saved data','council','[]')",[user,room,lead.id]);
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','public','default','running','Writing','tub2-claim') returning id",[user,room,lead.id]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"tub2-claim"} as DeskJob;
+  await performDraftWork(job,successDeps(job,{reportAndDraft:async(_input,deps)=>{
+    await deps!.onWriterDraft?.({headline:"Checkpoint headline",dek:"",body:"Checkpoint body",topic:"council",source_urls:[],integrity_notes:"Prior warning",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[]});
+    return goodResult("The writer's finished body");
+  }}));
+  const rows=await sql.query<{id:number;body:string;integrity_notes:string;research_json:string;created_at:string;updated_at:string}>("select id,body,integrity_notes,research_json,created_at,updated_at from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
+  assert.equal(rows.length,2,"the seed row plus one row for the run, not one per write");
+  const final=rows[1];
+  assert.equal(final.body,"The writer's finished body","the row holds the finished body, not the checkpoint body");
+  assert.doesNotMatch(final.integrity_notes??"",/Evidence reconciliation not completed/);
+  assert.equal(JSON.parse(final.research_json).writerCheckpoint,undefined);
+  assert.ok(new Date(final.updated_at).getTime()>=new Date(final.created_at).getTime());
+  const [stored]=await sql.query<{result_json:string}>("select result_json from desk_jobs where id=$1",[job.id]);
+  const receipt=JSON.parse(stored.result_json);
+  assert.ok(receipt.checkpointDraftId>0);
+  assert.equal(receipt.draftId,receipt.checkpointDraftId,"one run, one row: the receipt's two ids are the same row");
+  assert.equal(final.id,receipt.checkpointDraftId);
+});
+
+test("an editor save after the checkpoint still wins and the run refuses to overwrite it",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88411,user="tub2-race-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'TUB-2 race room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'TUB-2 race lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','public','default','running','Writing','tub2-race-claim') returning id",[user,room,lead.id]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"tub2-race-claim"} as DeskJob;
+  await assert.rejects(performDraftWork(job,successDeps(job,{reportAndDraft:async(_input,deps)=>{
+    await deps!.onWriterDraft?.({headline:"Checkpoint headline",dek:"",body:"Checkpoint body",topic:"council",source_urls:[],integrity_notes:"",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[]});
+    // The editor opens the checkpoint row and saves her own words on it.
+    await sql.query("update drafts set body='The editor''s rewrite',updated_at=now() where newsroom_id=$1 and lead_id=$2",[room,lead.id]);
+    return goodResult("The writer's finished body");
+  }})),/draft changed/i);
+  const rows=await sql.query<{body:string}>("select body from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].body,"The editor's rewrite","the editor's own save is never overwritten");
+});
+
+test("a successful run with no writer checkpoint inserts one new row",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88412,user="tub2-nocheckpoint-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'TUB-2 no checkpoint room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'TUB-2 no checkpoint lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls) values($1,$2,$3,'Earlier saved draft','','Original saved data','council','[]')",[user,room,lead.id]);
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','public','default','running','Writing','tub2-nocheckpoint-claim') returning id",[user,room,lead.id]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"tub2-nocheckpoint-claim"} as DeskJob;
+  await performDraftWork(job,successDeps(job,{reportAndDraft:async()=>goodResult("The writer's finished body")}));
+  const rows=await sql.query<{id:number;body:string}>("select id,body from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].body,"Original saved data");
+  assert.equal(rows[1].body,"The writer's finished body");
+});
+
 test("the draft receipt records the model the runner reported as actualModelId",async()=>{
   await ensureJobsSchema();
   const sql=await getSql(),room=88407,user="served-model-editor";

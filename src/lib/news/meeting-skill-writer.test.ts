@@ -13,6 +13,7 @@ import {
   meetingStamp,
   parseCheckFirst,
   parseSkillStory,
+  runNotesOpenedUrls,
 } from "./meeting-skill-writer.ts";
 
 /*
@@ -300,5 +301,98 @@ describe("claimsAndSourcesUrls", () => {
       "Source: an old page. http://example.com/not-secure",
     ].join("\n");
     assert.deepEqual(claimsAndSourcesUrls(body), ["https://example.com/record"]);
+  });
+});
+
+describe("runNotesOpenedUrls", () => {
+  it("takes the records opened from the heading form a real run wrote (job-442)", () => {
+    const runNotes = [
+      "# RUN NOTES, job 442",
+      "",
+      "## Records opened",
+      "",
+      "RTD news release, Oct. 13, 2026.",
+      "https://www.rtd-denver.com/community/news/rtd-budget",
+      "",
+      "RTD budget page.",
+      "https://www.rtd-denver.com/budget",
+      "",
+      "Budget book (marked DRAFT), 114 pages.",
+      "https://cdn.rtd-denver.com/files/FY2027_Budget_Book.pdf",
+      "",
+      "## What I could not get, and why",
+      "",
+      "A transcript: https://not-a-record.example.com/transcript",
+    ].join("\n");
+    assert.deepEqual(runNotesOpenedUrls(runNotes), [
+      "https://www.rtd-denver.com/community/news/rtd-budget",
+      "https://www.rtd-denver.com/budget",
+      "https://cdn.rtd-denver.com/files/FY2027_Budget_Book.pdf",
+    ]);
+  });
+
+  it("takes the plain-line form, with a note in parentheses after each URL (job-444)", () => {
+    const runNotes = [
+      "RUN NOTES",
+      "",
+      "Records opened (all fetched and read this session):",
+      "https://coloradosun.com/2026/10/23/heat-pumps/ (supplied article, read in full)",
+      "https://rmi.org/resources/heat-pumps/ (report page, executive summary)",
+      "https://longmontcolorado.gov/news/bundling-up/ (LPC blog, March 17, 2025)",
+      "",
+      "What could not be obtained and why:",
+      "Platte River's site returned a 403.",
+      "Final script result: RESULT: MECHANICAL CHECKS CLEAR.",
+      "Ranking record: not applicable.",
+      "RUN-DONE",
+    ].join("\n");
+    assert.deepEqual(runNotesOpenedUrls(runNotes), [
+      "https://coloradosun.com/2026/10/23/heat-pumps/",
+      "https://rmi.org/resources/heat-pumps/",
+      "https://longmontcolorado.gov/news/bundling-up/",
+    ]);
+  });
+
+  it("never takes a URL from the part about what could not be got", () => {
+    const runNotes = [
+      "Records opened:",
+      "https://example.gov/read-this",
+      "",
+      "Could not get: https://example.gov/blocked-page",
+      "https://example.gov/also-blocked",
+    ].join("\n");
+    assert.deepEqual(runNotesOpenedUrls(runNotes), ["https://example.gov/read-this"]);
+  });
+
+  it("gives nothing when the notes never say records opened", () => {
+    assert.deepEqual(runNotesOpenedUrls("RUN NOTES\nhttps://example.gov/a\nRUN-DONE"), []);
+    assert.deepEqual(runNotesOpenedUrls(""), []);
+  });
+
+  it("strips trailing punctuation, drops http, and keeps each URL once", () => {
+    const runNotes = [
+      "## Records opened",
+      "https://example.gov/one.",
+      "https://example.gov/two;",
+      "https://example.gov/one",
+      "http://example.gov/not-secure",
+      "https://example.gov/three)",
+    ].join("\n");
+    assert.deepEqual(runNotesOpenedUrls(runNotes), [
+      "https://example.gov/one",
+      "https://example.gov/two",
+      "https://example.gov/three",
+    ]);
+  });
+
+  it("caps the list", () => {
+    const runNotes = [
+      "Records opened:",
+      ...Array.from({ length: 45 }, (_, index) => `https://example.gov/page-${index + 1}`),
+    ].join("\n");
+    const urls = runNotesOpenedUrls(runNotes);
+    assert.equal(urls.length, 40);
+    assert.equal(urls[0], "https://example.gov/page-1");
+    assert.equal(urls[39], "https://example.gov/page-40");
   });
 });

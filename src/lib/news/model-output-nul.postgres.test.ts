@@ -256,18 +256,7 @@ it(
     const sql = await db.getSql();
     const fixture = await seedDraftFixture();
 
-    // Before the guard these lines rejected with the Postgres encoding error and
-    // took the whole pass with them. That rejection IS the failure this test
-    // reproduces, so it must not be caught and asserted on separately.
-    await performDraftWork(fixture.job, {
-      setJobStage: async () => {},
-      reportAndDraft: async (_input, deps) => {
-        await deps!.onWriterDraft?.(nulCheckpoint());
-        return nulReport(false);
-      },
-    });
-
-    const rows = await sql.query<{
+    type DraftRow = {
       id: number;
       headline: string;
       dek: string;
@@ -276,32 +265,56 @@ it(
       found_note: string;
       unanswered: string;
       research_json: string;
-    }>(
-      `select id,headline,dek,body,integrity_notes,found_note,unanswered,research_json
-       from drafts where newsroom_id=$1 and lead_id=$2 order by id`,
-      [fixture.room, fixture.leadId],
-    );
-    assert.equal(rows.length, 2, "the checkpoint and the finished draft must both have been filed");
+    };
+    const readDraftRows = () =>
+      sql.query<DraftRow>(
+        `select id,headline,dek,body,integrity_notes,found_note,unanswered,research_json
+         from drafts where newsroom_id=$1 and lead_id=$2 order by id`,
+        [fixture.room, fixture.leadId],
+      );
 
-    const [checkpoint, finished] = rows;
-    assert.equal(checkpoint!.headline, "Checkpoint headline");
-    assert.equal(checkpoint!.dek, "Checkpoint dek");
-    assert.equal(checkpoint!.body, "Checkpoint body text.");
-    assert.match(checkpoint!.integrity_notes, /Checkpoint note/);
-    assert.equal(finished!.headline, "Finished headline");
-    assert.equal(finished!.dek, "Finished dek");
-    assert.equal(finished!.body, "Finished body text.");
-    assert.match(finished!.integrity_notes, /Finished note/);
-    assert.equal(finished!.found_note, "Found note");
+    // Before the guard these lines rejected with the Postgres encoding error and
+    // took the whole pass with them. That rejection IS the failure this test
+    // reproduces, so it must not be caught and asserted on separately.
+    let checkpointId = 0;
+    await performDraftWork(fixture.job, {
+      setJobStage: async () => {},
+      reportAndDraft: async (_input, deps) => {
+        await deps!.onWriterDraft?.(nulCheckpoint());
 
-    for (const [index, row] of rows.entries()) {
-      for (const [column, value] of Object.entries(row)) {
-        assert.equal(
-          carriesNul(value),
-          false,
-          `drafts.${column} of row ${index} must hold no NUL`,
-        );
-      }
+        // The checkpoint is its own row while the writer is still working. One
+        // AI run files one draft, so the final write updates this row rather
+        // than inserting a second one (D263) -- but the checkpoint write still
+        // has to survive a NUL in every field it carries.
+        const checkpointRows = await readDraftRows();
+        assert.equal(checkpointRows.length, 1, "the checkpoint is the run's only draft row");
+        const checkpoint = checkpointRows[0]!;
+        assert.equal(checkpoint.headline, "Checkpoint headline");
+        assert.equal(checkpoint.dek, "Checkpoint dek");
+        assert.equal(checkpoint.body, "Checkpoint body text.");
+        assert.match(checkpoint.integrity_notes, /Checkpoint note/);
+        for (const [column, value] of Object.entries(checkpoint)) {
+          assert.equal(carriesNul(value), false, `drafts.${column} of the checkpoint must hold no NUL`);
+        }
+        checkpointId = checkpoint.id;
+
+        return nulReport(false);
+      },
+    });
+
+    const rows = await readDraftRows();
+    assert.equal(rows.length, 1, "one AI run leaves one draft row (D263)");
+
+    const finished = rows[0]!;
+    assert.equal(finished.id, checkpointId, "the finished write must update the checkpoint row in place");
+    assert.equal(finished.headline, "Finished headline");
+    assert.equal(finished.dek, "Finished dek");
+    assert.equal(finished.body, "Finished body text.");
+    assert.match(finished.integrity_notes, /Finished note/);
+    assert.equal(finished.found_note, "Found note");
+
+    for (const [column, value] of Object.entries(finished)) {
+      assert.equal(carriesNul(value), false, `drafts.${column} of the finished row must hold no NUL`);
     }
   },
 );

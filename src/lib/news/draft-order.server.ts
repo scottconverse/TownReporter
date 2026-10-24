@@ -4,14 +4,17 @@ import type { DraftRow } from "./types.ts";
 import type { DeskJob } from "./jobs.ts";
 type Sql = Awaited<ReturnType<typeof import("../db.ts").getSql>>;
 async function lockLeadForDraft(sql: Sql, newsroomId: number, leadId: number,
-  allowLifecycleOverride = false,
+  allowLifecycleOverride = false, allowPublished = false,
 ) {
   const [lead] = await sql<{id:number;status:string|null}>`
     select id, to_jsonb(leads)->>'status' as status from leads
     where id = ${leadId} and newsroom_id = ${newsroomId} for update
   `;
   if (!lead) throw new Error("Lead not found");
-  if (lead.status === "published") throw new Error("This lead has already been published. Use Published to make a correction.");
+  /* TVA-2 (D266): a background check that arrives after the editor already
+     printed is allowed to lock the published lead so it can record its late
+     answer; every other caller keeps the refusal above. */
+  if (lead.status === "published" && !allowPublished) throw new Error("This lead has already been published. Use Published to make a correction.");
   /*
     PR233: an editor who has EXPLICITLY acknowledged the held/killed warning is
     printing past it on purpose, and the publish path owns that decision (it
@@ -40,6 +43,7 @@ async function withClaimedLeadDraftTransaction<T>(
   leadId: number,
   completeJob: boolean,
   run: (sql: Sql, status: string | null) => Promise<T>,
+  options: { allowPublished?: boolean } = {},
 ): Promise<T> {
   if (!job.claim_token) throw new Error("Draft job has no active claim.");
   return withTransaction(async (sql) => {
@@ -53,13 +57,17 @@ async function withClaimedLeadDraftTransaction<T>(
         and user_id = ${job.user_id} and role in ('owner','editor') for share
     `;
     if (!member) throw new Error("Draft permission was withdrawn before results could be saved.");
-    const lead = await lockLeadForDraft(sql, job.newsroom_id, leadId);
+    const lead = await lockLeadForDraft(sql, job.newsroom_id, leadId, false, options.allowPublished === true);
     const result = await run(sql, lead.status);
     if (!completeJob) return result;
     const [completed] = await sql<{id:number}>`
       update desk_jobs
       set status = 'completed',
           stage = case
+            /* TVA-2 (D266): the editor printed before this check answered. Say
+               so plainly; the story that printed did not change. */
+            when coalesce((result_json::jsonb ->> 'publishedBeforeCheck')::boolean, false)
+              then 'Checked after printing. The printed story did not change.'
             when coalesce((result_json::jsonb -> 'quality' ->> 'reviewRequired')::boolean, false)
               or coalesce((result_json::jsonb ->> 'evidenceCheckIncomplete')::boolean, false)
               or result_json::jsonb -> 'quality' ->> 'citationStatus' = 'review-required'
@@ -88,8 +96,11 @@ export async function withClaimedLeadDraftLock<T>(
   job: Pick<DeskJob,"id"|"newsroom_id"|"user_id"|"claim_token">,
   leadId: number,
   run: (sql: Sql, status: string | null) => Promise<T>,
+  /* TVA-2 (D266): opt-in for a late evidence check; the default still refuses
+     a published lead exactly as before. */
+  options: { allowPublished?: boolean } = {},
 ): Promise<T> {
-  return withClaimedLeadDraftTransaction(job,leadId,true,run);
+  return withClaimedLeadDraftTransaction(job,leadId,true,run,options);
 }
 /**
  * Fence a publish by locking the lead row, then the current draft, in that
