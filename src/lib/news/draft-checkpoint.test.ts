@@ -195,6 +195,75 @@ test("Story retries only the failed writer call and keeps completed research", a
   ]);
 });
 
+/*
+  D269: the Claude CLI road reports "Claude Code error (429): ..." with no
+  model in it. The saved note must still name the rung that failed, or the
+  editor reads a switch away from nobody. The CI failover walk asserts it.
+*/
+test("the saved failover note names the rung a Claude CLI error came from", async () => {
+  await ensureJobsSchema();
+  const sql = await getSql(), room = 88407, user = "hop-label-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Hop label room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor') on conflict do nothing", [user, room]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Hop label lead','Why','council','new','[]','',1,'{}') returning id",
+    [user, room],
+  );
+  const [jobRow] = await sql.query<{ id: number }>(
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,result_json) values($1,$2,'draft',$3,'deepseek-flash','editor','supplied','default','running','Writing','hop-label-claim',$4) returning id",
+    [user, room, lead.id, JSON.stringify({ modelEffort: "low" })],
+  );
+  const job = {
+    id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
+    model_choice: "deepseek-flash", model_choice_source: "editor", research_scope: "supplied",
+    lane: "default", status: "running", stage: "Writing", claim_token: "hop-label-claim",
+    result_json: JSON.stringify({ modelEffort: "low" }),
+  } as DeskJob;
+  const notes: string[] = [];
+  const providerCalls: string[] = [];
+  const claudeCliError =
+    "Claude Code error (429): Rate limit reached for deepseek-v4.1-flash:1017-cloud on tokens per minute (TPM).";
+
+  await performDraftWork(job, {
+    readStoryDocuments: async () => "",
+    // The DeepSeek pick would run the news skill writer; the stub ends without
+    // a story so the four-pass writer (and its chat hop) is the one exercised.
+    newsWriterRun: async () => ({ ok: true, exitCode: 0, timedOut: false, durationMs: 5, lastText: "" }),
+    reportAndDraft: async (_input, deps) => {
+      const written = await deps!.chat?.("writer system", "assembled research packet", 2200);
+      assert.equal(written?.ok, true);
+      return {
+        headline: "Hop label lead", dek: "", body: "The next rung wrote this.", topic: "council",
+        source_urls: [], integrity_notes: "", memory_entities: [], form: "news",
+        provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {},
+      } as unknown as ReportedDraftResult;
+    },
+    chat: async (_system, _user, _tokens, opts) => {
+      providerCalls.push(String(opts?.choice));
+      return providerCalls.length === 1
+        ? { ok: false as const, error: claudeCliError }
+        : { ok: true as const, text: "writer result" };
+    },
+    probe: async (choice) => choice === "deepseek-flash" || choice === "codex-balanced"
+      ? { ok: true, label: modelChoiceLabel(choice), choice: choice as EffectiveProviderChoice }
+      : { ok: false as const, error: "Qwen is not loaded" },
+    setJobStage: async () => undefined,
+    setJobModelRuntime: async () => undefined,
+    setJobFailoverNote: async (_id, note) => { notes.push(note); },
+  });
+
+  assert.equal(providerCalls.length, 2, "one hop to the ready rung");
+  const note = notes.find((n) => n.includes("Claude Code error (429)")) ?? "";
+  assert.ok(
+    note.includes(`${modelChoiceLabel("deepseek-flash")}: Claude Code error (429)`),
+    `the note must name the rung the error came from, got: ${note}`,
+  );
+  assert.ok(
+    note.endsWith(`-> ${modelChoiceLabel("codex-balanced")}`),
+    `the note must name the next rung, got: ${note}`,
+  );
+});
+
 test("a later writer checkpoint cannot supersede an intervening editor draft",async()=>{
   await ensureJobsSchema();
   const sql=await getSql(),room=88402,user="checkpoint-race-editor";

@@ -3919,7 +3919,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const nextEffort = modelEffort(nextChoice, activeReportSnapshot.modelEffort);
       await setModelRuntime(job.id, nextChoice, nextEffort);
       await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-      await setFailoverNote(job.id, providerError ? `${providerError} -> ${nextLabel}` : failoverNoteSentence(nextLabel, previousLabel, reason));
+      // D269: the Claude CLI road's error does not name the model that failed, so prefix the rung's label here.
+      const providerDetail = providerError && !providerError.startsWith(previousLabel) ? `${previousLabel}: ${providerError}` : providerError;
+      await setFailoverNote(job.id, providerDetail ? `${providerDetail} -> ${nextLabel}` : failoverNoteSentence(nextLabel, previousLabel, reason));
       job.model_choice = nextChoice;
       job.result_json = JSON.stringify({
         modelEffort: nextEffort,

@@ -109,6 +109,14 @@
  * Nothing here holds or needs a credential: the desk's rung gateway sends
  * `Authorization: Bearer not-needed` only when an api key is set, and this
  * fake ignores headers entirely.
+ *
+ * ANTHROPIC ROAD (phase0b). When a Claude CLI is installed, the desk reaches
+ * this same rung through its own relay in Anthropic Messages shape:
+ * `POST .../v1/messages` (src/lib/news/deepseek-relay.server.ts:58 forwards
+ * `<baseUrl without /v1>/v1/messages`). That route below answers with the SAME
+ * mode logic, the SAME classify() on the user text, and the SAME log entries as
+ * `/chat/completions`, so a CLI walk counts research and write calls the same
+ * way an HTTP walk does. Streaming (`"stream": true`) answers as Anthropic SSE.
  */
 import { createServer } from "node:http";
 
@@ -307,7 +315,11 @@ function ocrPageText(page) {
   );
 }
 
-function payload(klass, prompt = "") {
+/**
+ * The text this fake answers a class with, shared by both transports so the
+ * OpenAI and Anthropic roads cannot drift apart.
+ */
+function answerText(klass, prompt = "") {
   const echoedWrite = ECHO_EVIDENCE
     ? {
         ...READY_WRITE,
@@ -333,6 +345,21 @@ function payload(klass, prompt = "") {
       : echoedWrite;
   const body =
     klass === "research" ? READY_RESEARCH : klass === "scan" ? scanAnswer(prompt) : claimed;
+  return klass === "ocr"
+    ? ocrPageText(Number(prompt) || 1)
+    : klass === "correction"
+      ? // Plain text, not JSON: the correction writer is asked for a
+        // note it can put in the editor's box, and reads the answer
+        // back with parseCorrectionWording, which refuses JSON.
+        correctionAnswer(prompt)
+      : klass === "research" || klass === "write" || klass === "scan"
+        ? JSON.stringify(body)
+        : klass === "document" && ECHO_EVIDENCE
+          ? echoedNotes(prompt)
+          : "ok";
+}
+
+function payload(klass, prompt = "") {
   return JSON.stringify({
     id: "fake-deepseek-1",
     object: "chat.completion",
@@ -340,28 +367,80 @@ function payload(klass, prompt = "") {
     choices: [
       {
         index: 0,
-        message: {
-          role: "assistant",
-          content:
-            klass === "ocr"
-              ? ocrPageText(Number(prompt) || 1)
-              : klass === "correction"
-                ? // Plain text, not JSON: the correction writer is asked for a
-                  // note it can put in the editor's box, and reads the answer
-                  // back with parseCorrectionWording, which refuses JSON.
-                  correctionAnswer(prompt)
-                : klass === "research" || klass === "write" || klass === "scan"
-                  ? JSON.stringify(body)
-                  : klass === "document" && ECHO_EVIDENCE
-                    ? echoedNotes(prompt)
-                    : "ok",
-        },
+        message: { role: "assistant", content: answerText(klass, prompt) },
         finish_reason: "stop",
       },
     ],
     usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
   });
 }
+
+/**
+ * Anthropic Messages shape, the format the CLI's relay forwards. The same text
+ * as `answerText`, wrapped the way `/v1/messages` answers.
+ */
+function anthropicMessage(text) {
+  return {
+    id: "msg_fake_deepseek_1",
+    type: "message",
+    role: "assistant",
+    model: MODEL,
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 10 },
+  };
+}
+
+/** The Anthropic error envelope, with the HTTP status the caller must send. */
+function anthropicError(type, message) {
+  return { type: "error", error: { type, message } };
+}
+
+/**
+ * The user text of an Anthropic Messages request. The CLI sends its prompt as
+ * a string (or as text blocks); the system prompt travels in a separate
+ * `system` field, exactly as on the real API, so classify() still sees only
+ * what the desk put in the user turn.
+ */
+function anthropicUserText(parsed) {
+  const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
+  const user = [...messages].reverse().find((message) => message?.role === "user");
+  const content = user?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content))
+    return content
+      .filter((block) => block?.type === "text" && typeof block.text === "string")
+      .map((block) => block.text)
+      .join("\n");
+  return "";
+}
+
+/** One Anthropic SSE answer: message_start through message_stop. */
+function sendAnthropicStream(res, text) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  const events = [
+    [
+      "message_start",
+      {
+        type: "message_start",
+        message: { ...anthropicMessage(""), content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 0 } },
+      },
+    ],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }],
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 10 } }],
+    ["message_stop", { type: "message_stop" }],
+  ];
+  for (const [name, event] of events) res.write(`event: ${name}\ndata: ${JSON.stringify(event)}\n\n`);
+  res.end();
+}
+
 
 function send(res, status, body, { json = true } = {}) {
   const text = json ? JSON.stringify(body) : body;
@@ -519,6 +598,49 @@ const server = createServer(async (req, res) => {
       ...(PROBES.length ? { probes: probeHits(user) } : {}),
     });
     return send(res, 200, JSON.parse(payload(klass, user)));
+  }
+
+  /*
+    The Anthropic road (phase0b): the desk's own relay forwards the CLI's
+    `POST /v1/messages` here. Same classify(), same modeFor(), same log
+    entries as /chat/completions, so a walk counts research and write calls
+    the same way whichever road the desk took. `stream: true` (the agent run's
+    shape) answers as Anthropic SSE.
+  */
+  if (path.endsWith("/v1/messages") && req.method === "POST") {
+    const raw = await readBody(req);
+    let parsed = {};
+    try {
+      parsed = JSON.parse(raw || "{}");
+    } catch {
+      parsed = {};
+    }
+    const user = anthropicUserText(parsed);
+    const klass = classify(user);
+    const wantsStream = parsed.stream === true;
+    const applied = modeFor(klass);
+    if (DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+    if (applied === "probe-5xx") {
+      log({ path, method: req.method, class: klass, mode: applied, status: 503 });
+      return send(res, 503, anthropicError("api_error", "The server is overloaded."));
+    }
+    if (applied === "quota") {
+      log({ path, method: req.method, class: klass, mode: applied, status: 429 });
+      return send(
+        res,
+        429,
+        anthropicError("rate_limit_error", `Rate limit reached for ${MODEL} on tokens per minute (TPM).`),
+      );
+    }
+    if (applied === "unreadable-json") {
+      log({ path, method: req.method, class: klass, mode: applied, status: 200 });
+      return wantsStream
+        ? sendAnthropicStream(res, UNREADABLE)
+        : send(res, 200, anthropicMessage(UNREADABLE));
+    }
+    log({ path, method: req.method, class: klass, mode: applied, status: 200 });
+    const text = answerText(klass, user);
+    return wantsStream ? sendAnthropicStream(res, text) : send(res, 200, anthropicMessage(text));
   }
 
   log({ path, method: req.method, class: "other", mode, status: 404 });
