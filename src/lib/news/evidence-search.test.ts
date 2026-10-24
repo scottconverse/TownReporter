@@ -174,6 +174,69 @@ describe("searchEvidence: exact words", () => {
   });
 });
 
+describe("searchEvidence: broken text", () => {
+  // D288: a piece is broken when 2% or more of its characters are control
+  // bytes or U+FFFD. Broken pieces are hidden from both lists and from the
+  // coverage count.
+  const brokenPiece = "Budget recovery " + "\u0003".repeat(10) + "plan";
+
+  it("hides a broken piece from both lists and the count", async () => {
+    const v = await capture("https://example.com/broken", "Broken", "2026-10-01T10:00:00Z");
+    const clean = "Budget recovery plan for the water fund";
+    await chunk(v, brokenPiece);
+    await chunk(v, clean);
+    // Both have vectors; the meaning list must still refuse the broken one.
+    // Scores kept below the later tests' own pieces so this file's ordering
+    // assertions stay about those pieces.
+    await insertVector(brokenPiece, vec(0.4, 0.6));
+    await insertVector(clean, vec(0.5, 0.5));
+    setEmbedderForTests(fakeEmbedder({ recovery: vec(1, 0) }));
+
+    const result = await searchEvidence({ newsroomId: NEWSROOM }, "recovery");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.exact.map((row) => row.excerptStart), [clean]);
+    // The clean piece is already on the exact list, so the meaning list must
+    // have nothing left -- and never the broken piece.
+    assert.ok(result.meaning.every((row) => row.excerptStart !== brokenPiece));
+
+    // `total` is every distinct non-blank excerpt in this newsroom that is not
+    // broken, computed here independently of the SQL under test.
+    const sql = await getSql();
+    const stored = await sql<{ excerpt: string }>`
+      select distinct excerpt from artifact_chunks
+      where newsroom_id = ${NEWSROOM} and excerpt <> ''
+    `;
+    // Broken = C0 controls except tab/newline/form feed/return, or U+FFFD.
+    const isBrokenChar = (ch: string): boolean => {
+      const code = ch.codePointAt(0) ?? 0;
+      return (
+        (code >= 0x01 && code <= 0x08) ||
+        code === 0x0b ||
+        (code >= 0x0e && code <= 0x1f) ||
+        code === 0xfffd
+      );
+    };
+    const expectedTotal = stored.filter((row) => {
+      const count = [...row.excerpt].filter(isBrokenChar).length;
+      return count < 0.02 * row.excerpt.length;
+    }).length;
+    assert.equal(result.meaningStatus.total, expectedTotal);
+  });
+
+  it("does not treat tabs, newlines or a form feed as broken", async () => {
+    const v = await capture("https://example.com/white", "White", "2026-10-01T10:00:00Z");
+    const clean = "First line of form feed\twith a tab\nand a newline\r\nand a form feed\fend";
+    await chunk(v, clean);
+    setEmbedderForTests(fakeEmbedder({ "form feed": vec(1, 0) }));
+
+    const result = await searchEvidence({ newsroomId: NEWSROOM }, "form feed");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.exact.map((row) => row.excerptStart), [clean]);
+  });
+});
+
 describe("searchEvidence: close in meaning", () => {
   it("puts the nearest piece first, at most five, and never repeats an exact hit", async () => {
     const v = await capture("https://example.com/city", "City internet", "2026-10-01T10:00:00Z");

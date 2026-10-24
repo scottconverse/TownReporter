@@ -32,6 +32,7 @@ export async function fillEvidenceVectorsOnce(
       select distinct on (md5(c.excerpt)) md5(c.excerpt) as md5, c.excerpt
       from artifact_chunks c
       where c.excerpt <> ''
+        and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
         and not exists (
           select 1 from evidence_vectors ev where ev.excerpt_md5 = md5(c.excerpt)
         )
@@ -66,7 +67,9 @@ export async function pruneEvidenceVectorsOnce(): Promise<number> {
     delete from evidence_vectors ev
     where not exists (
       select 1 from artifact_chunks c
-      where c.excerpt <> '' and md5(c.excerpt) = ev.excerpt_md5
+      where c.excerpt <> ''
+        and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
+        and md5(c.excerpt) = ev.excerpt_md5
     )
     returning excerpt_md5
   `;

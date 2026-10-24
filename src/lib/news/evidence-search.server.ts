@@ -134,6 +134,7 @@ async function exactRows(newsroomId: number, q: string): Promise<EvidenceRow[]> 
       join artifact_versions v on v.id = c.version_id
       where c.newsroom_id = ${newsroomId}
         and c.excerpt <> ''
+        and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
         and c.excerpt ilike ${pattern} escape '\\'
       order by md5(c.excerpt), v.captured_at desc, c.id desc
     ) t
@@ -153,10 +154,12 @@ async function coverage(
       (select count(distinct md5(c.excerpt))::int
          from artifact_chunks c
          join evidence_vectors ev on ev.excerpt_md5 = md5(c.excerpt)
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> '') as covered,
+        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
+          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as covered,
       (select count(distinct md5(c.excerpt))::int
          from artifact_chunks c
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> '') as total
+        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
+          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as total
   `;
   return { covered: row?.covered ?? 0, total: row?.total ?? 0 };
 }
@@ -209,6 +212,7 @@ async function meaningRows(
       join artifact_versions v on v.id = c.version_id
       where c.newsroom_id = ${newsroomId}
         and c.excerpt <> ''
+        and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
         and md5(c.excerpt) = any(${md5s}::text[])
       order by md5(c.excerpt), v.captured_at desc, c.id desc
     ) t

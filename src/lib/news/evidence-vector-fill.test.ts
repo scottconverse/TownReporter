@@ -1,11 +1,16 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { getSql } from "../db.ts";
 import {
   fillEvidenceVectorsOnce,
   pruneEvidenceVectorsOnce,
 } from "./evidence-vector-fill.server.ts";
-import { setEmbedderForTests, EVIDENCE_DIMS } from "./evidence-embed.server.ts";
+import {
+  setEmbedderForTests,
+  vectorToBytes,
+  EVIDENCE_DIMS,
+} from "./evidence-embed.server.ts";
 import { clearEvidenceVectorCache } from "./evidence-search.server.ts";
 
 /**
@@ -106,5 +111,50 @@ describe("pruneEvidenceVectorsOnce", () => {
       select count(*)::int as n from evidence_vectors
     `;
     assert.equal(left!.n, before[0]!.n - 1);
+  });
+});
+
+describe("broken text", () => {
+  // D288: broken pieces never get a vector, and the hourly prune removes one
+  // that was filled before this rule existed.
+  const brokenPiece = "Budget recovery " + "\u0003".repeat(10) + "plan";
+  const clean = "A clean passage about the budget recovery";
+  const md5 = (text: string) => createHash("md5").update(text, "utf8").digest("hex");
+
+  it("skips a broken piece when filling and prunes a hand-inserted vector for one", async () => {
+    const v = await version();
+    await chunk(v, brokenPiece);
+    await chunk(v, clean);
+    setEmbedderForTests(fakeEmbedder());
+
+    assert.equal(await fillEvidenceVectorsOnce({ batch: 32 }), 1);
+    const sql = await getSql();
+    const both = [md5(clean), md5(brokenPiece)];
+    const filled = await sql<{ excerpt_md5: string }>`
+      select excerpt_md5 from evidence_vectors
+      where excerpt_md5 = any(${both}::text[])
+      order by excerpt_md5
+    `;
+    assert.deepEqual(
+      filled.map((row) => row.excerpt_md5),
+      [md5(clean)],
+      "only the clean piece gets a vector",
+    );
+
+    // What the old fill left behind: a vector for the broken piece.
+    const vector = new Float32Array(EVIDENCE_DIMS);
+    vector[0] = 1;
+    await sql`
+      insert into evidence_vectors (excerpt_md5, model, dims, vector)
+      values (${md5(brokenPiece)}, 'fake', ${EVIDENCE_DIMS}, ${vectorToBytes(vector)})
+    `;
+
+    assert.equal(await pruneEvidenceVectorsOnce(), 1);
+    const left = await sql<{ excerpt_md5: string }>`
+      select excerpt_md5 from evidence_vectors
+      where excerpt_md5 = any(${both}::text[])
+      order by excerpt_md5
+    `;
+    assert.deepEqual(left.map((row) => row.excerpt_md5), [md5(clean)]);
   });
 });
