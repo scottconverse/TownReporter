@@ -99,7 +99,7 @@ $previousLocalAppData = $env:LOCALAPPDATA
 $env:LOCALAPPDATA = $fakeLocalAppData
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'ops'), (Join-Path $app 'scripts'), (Join-Path $app 'logs'), (Join-Path $app '.output\server') | Out-Null
 
-foreach ($name in @('lib-port.ps1', 'lib-ownership.ps1', 'lib-stage.ps1', 'start-stage.ps1', 'watchdog.ps1')) {
+foreach ($name in @('lib-port.ps1', 'lib-ownership.ps1', 'lib-start-guard.ps1', 'lib-stage.ps1', 'start-stage.ps1', 'watchdog.ps1')) {
   Copy-Item -LiteralPath (Join-Path $root "ops\$name") -Destination (Join-Path $app "ops\$name")
 }
 foreach ($name in @('with-app-env.mjs', 'test-environment.mjs', 'ci-watchdog-start.ps1')) {

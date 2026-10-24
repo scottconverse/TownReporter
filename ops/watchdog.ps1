@@ -41,6 +41,17 @@
     with the app still down) it starts the start script detached, as before.
   * Then it waits for a real 200: 45 seconds on the script path, five minutes on
     the task path, because the task does its own DB wait and migrate retries.
+  * Before any of that, the START GUARD (ops\lib-start-guard.ps1) answers "is a
+    start already in progress?" -- from the marker the last repair wrote when it
+    launched a start script, and from the logon task still reporting 267009.
+    The port-owner sweep used to run first, so a slow start that already held
+    the port was killed and started over every five minutes. Under the deadline
+    (600 s, two watchdog runs, D267: covers the worst good cold-boot start of
+    about 520 s -- Postgres port wait, first query wait, migrate retries and
+    the server start) the start is left alone: nothing is
+    stopped, nothing is started, and the log says so. Over it, the start is
+    hung: the marker's PID is stopped by PID, or the task is stopped and run
+    again -- the repair then goes on as usual.
   * No max tries. The watchdog runs every five minutes and each run is
     independent; a repair that needs to happen three times to stick will happen
     three times. What it will NOT do is fire again during the grace window.
@@ -111,7 +122,14 @@
                             .env-derived port from lib-port.ps1, same as always)
     WATCHDOG_PG_PORT     - port Postgres is checked/repaired on (default: 5433)
     WATCHDOG_START_SCRIPT - script used to (re)start the app (default:
-                            start-townreporter.ps1, same as always)
+                            start-townreporter.ps1, same as always). Resolved
+                            to a full path against this checkout, because the
+                            start guard compares it with a process command line.
+    WATCHDOG_START_DEADLINE_SECONDS - how long a start may run before it is
+                            called hung (default 600, D267). Honored ONLY when
+                            WATCHDOG_TEST_MODE=1, so a stray value on the live
+                            machine cannot shorten the window that protects a
+                            real start.
     WATCHDOG_STAGE_APP   - checkout whose staged copy this run may start
                             (default: this checkout, same as always). Honored
                             ONLY when WATCHDOG_TEST_MODE=1, so a stray value
@@ -123,13 +141,20 @@
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
 . (Join-Path $PSScriptRoot "lib-ownership.ps1")
+. (Join-Path $PSScriptRoot "lib-start-guard.ps1")
 Assert-TownReporterLegacyOwnership -Watchdog
 $ErrorActionPreference = "Stop"
 if ($env:WATCHDOG_APP_PORT) { $port = $env:WATCHDOG_APP_PORT }
 $pgPort = if ($env:WATCHDOG_PG_PORT) { $env:WATCHDOG_PG_PORT } else { "5433" }
 if ($OwnedPgPort) { $pgPort = [string]$OwnedPgPort }
-$startScript = if ($env:WATCHDOG_START_SCRIPT) { $env:WATCHDOG_START_SCRIPT } else { Join-Path $PSScriptRoot "start-townreporter.ps1" }
 $app = Split-Path -Parent $PSScriptRoot
+$startScript = if ($env:WATCHDOG_START_SCRIPT) { $env:WATCHDOG_START_SCRIPT } else { Join-Path $PSScriptRoot "start-townreporter.ps1" }
+# A FULL path, always. The start marker and the process check both compare it
+# against a command line, and the test seam is a relative path
+# ('scripts/ci-watchdog-start.ps1'); a relative value would never match the
+# absolute path Windows reports for the process that is running it.
+if (-not [IO.Path]::IsPathRooted($startScript)) { $startScript = Join-Path $app $startScript }
+$startScript = [IO.Path]::GetFullPath($startScript)
 $logDir = Join-Path $app "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir "watchdog.log"
@@ -221,188 +246,285 @@ $appHealthy = ($appCode -eq 200)
 
 if (-not $appHealthy) {
   Write-Log "app: port=$appPort status=$appCode error='$appError'"
-  if (-not $pgUp) {
-    Write-Log "app: postgres is down, not starting the app against a dead database"
-  } else {
-    # Clear a process holding THIS port but not serving, or the start script
-    # no-ops on its own port check.
-    #
-    # Scoped to the port, not to every matching command line. The sweep used
-    # to enumerate all node.exe whose command line contained
-    # ".output/server/index.mjs" and kill every one -- which is every install
-    # of this app on the machine, not just the one being repaired. On the
-    # operator's box, where the live paper and a development copy run side by
-    # side, an unhealthy app on one port would have taken the healthy one on
-    # the other down with it, and pointing the WATCHDOG_APP_PORT seam at a
-    # test instance would have killed the live paper outright.
-    #
-    # Both parts of the check still matter: the owner of the port, AND that
-    # it is this app -- never an image-name match, because other node.exe
-    # processes on this machine belong to other software.
-    # Log an IPv6-only listener separately from a real (IPv4-family) holder:
-    # it is a different program on a different address family and does not
-    # block this app from starting, so it is neither stopped nor reported as
-    # "held by PID X" the way a real collision is.
-    $bindableOwners = Get-TownReporterPortOwner $port
-    $otherListeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-      Where-Object { $bindableOwners -notcontains $_.OwningProcess })
-    if ($bindableOwners.Count -eq 0 -and $otherListeners.Count -gt 0) {
-      $o = $otherListeners[0]
-      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($o.OwningProcess)" -ErrorAction SilentlyContinue
-      $name = if ($p) { $p.Name } else { "unknown" }
-      Write-Log "app: port $port has an IPv6-only listener PID $($o.OwningProcess) ($name) from another program; it does not block the paper"
-    }
-    foreach ($owner in $bindableOwners) {
-      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
-      if (-not $p) { continue }
-      # Ask the shared predicate, which normalizes slashes. The inline pattern
-      # that used to be here -- -notlike "*.output/server/index.mjs*" -- tested
-      # forward slashes against a command line Windows reports with backslashes,
-      # so it failed for this app's OWN server and took the "not touching it"
-      # branch below on 2026-09-26 while the paper was stalled (PID 35156).
-      if (-not (Test-TownReporterBuiltServerProcess -Process $p)) {
-        Write-Log "app: port $port is held by PID $owner ($($p.Name)), which is not this app -- not touching it"
-        continue
-      }
-      if ($env:WATCHDOG_TEST_MODE -ne '1' -and -not (Test-TownReporterServerProcess -Process $p -App $app)) { throw 'Port owner is not this exact checkout; refusing repair.' }
-      Write-Log "app: stopping stale PID $owner on port $port"
-      Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
-    }
+    if (-not $pgUp) {
+      Write-Log "app: postgres is down, not starting the app against a dead database"
+    } else {
+      # Clear a process holding THIS port but not serving, or the start script
+      # no-ops on its own port check.
+      #
+      # Scoped to the port, not to every matching command line. The sweep used
+      # to enumerate all node.exe whose command line contained
+      # ".output/server/index.mjs" and kill every one -- which is every install
+      # of this app on the machine, not just the one being repaired. On the
+      # operator's box, where the live paper and a development copy run side by
+      # side, an unhealthy app on one port would have taken the healthy one on
+      # the other down with it, and pointing the WATCHDOG_APP_PORT seam at a
+      # test instance would have killed the live paper outright.
+      #
+      # Both parts of the check still matter: the owner of the port, AND that
+      # it is this app -- never an image-name match, because other node.exe
+      # processes on this machine belong to other software.
+      # Log an IPv6-only listener separately from a real (IPv4-family) holder:
+      # it is a different program on a different address family and does not
+      # block this app from starting, so it is neither stopped nor reported as
+      # "held by PID X" the way a real collision is.
     <#
-      Before repairing, ask whether the logon task is still working -- and if
-      it is the thing that FAILED, run that task rather than a second copy of
-      its script.
+      Do not kill a start that is still starting.
 
-      This is the 2026-09-25 boot. The logon task ran at 20:01, died inside
-      migrate (see ops\lib-migrate.ps1 for why), and left the site on 502. This
-      watchdog noticed on its next run and did the only thing it knew: started
-      start-townreporter.ps1 again, detached, and watched it 45 seconds later.
-      That script died at exactly the same line, so the repair failed the same
-      way every five minutes for as long as nobody looked, and the log read
-      "FAILED to come up healthy" with no hint that the start path itself was
-      the fault. Two things were missing: a reason to wait, and a repair that
-      reports the task's own result.
+      The sweep below stops whatever built server holds the app's port, and a
+      start that is still working holds that port well before it answers 200.
+      The order used to be the bug: the sweep ran first, and "is a start
+      already in progress?" was asked afterwards, so a slow start was killed
+      and started over every five minutes for as long as it stayed slow.
 
-      The wait: a cold boot spends a minute or more in Postgres crash recovery
-      and three migrate attempts. Repairing a start that is already in progress
-      is how a good boot gets trampled, so for three minutes after the task last
-      ran this run leaves its start alone and says so.
+      The decision is ops\lib-start-guard.ps1's, from two sources: the marker
+      this file writes when it launches a start script (logs\watchdog-start.json
+      -- the start script's PID, when it began, and its full path; believed
+      only while that PID is alive and its command line still names that exact
+      script), and the logon task still reporting 267009. Under the deadline
+      the start is in progress; over it, it is hung. This run only acts:
 
-      The repair: the registered task, not a detached copy of its script. The
-      task is the ownership-checked entry point the logon and the operator both
-      use, Assert-TownReporterTaskOwnership proves it points at THIS checkout,
-      and running it makes its own LastTaskResult the receipt for this repair.
-      Never both -- one path or the other.
+        in-progress - say so, stop nothing, start nothing, skip this repair.
+        hung, marker - stop that start by PID (just checked alive and still
+                       that script), then repair as usual.
+        hung, task   - stop the task and run it again below, never a detached
+                       copy of its script.
+        none         - delete a stale marker if there is one, then as before.
 
-      Test mode never reaches here: the seam points the app port at a
-      disposable instance, and the real task starts the real paper.
+      In test mode the real TownReporter task is ignored here on purpose: the
+      seam points the app port at a disposable instance and the real task
+      starts the real paper. Only the marker counts.
     #>
+    $testMode = ($env:WATCHDOG_TEST_MODE -eq '1')
+    $startDeadline = Get-TownReporterStartDeadline -TestMode $testMode
+    $startMarker = Read-TownReporterStartMarker -App $app
+    $startMarkerProcess = $null
+    if ($startMarker) {
+      $startMarkerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($startMarker.Pid)" -ErrorAction SilentlyContinue
+    }
     $startTaskName = 'TownReporter'
-    $startInfo = Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue
-    # Never run at all is not a failure: LastTaskResult for a task that has not
-    # run yet is 0x41303 (267009), which would otherwise read as a fault and put
-    # a machine whose paper was started by hand into the grace branch forever.
-    $startHasRun = [bool]($startInfo -and $startInfo.LastRunTime -and $startInfo.LastRunTime.Year -gt 1900)
-    # 267009 is SCHED_S_TASK_RUNNING, not a fault: the task is STILL RUNNING.
-    # The reboot test of 2026-09-25 caught the watchdog asking about a start
-    # that was in the middle of Postgres recovery, reading 267009, calling it
-    # failed and logging a repair it had not needed. Both 267009 cases -- a task
-    # that has never run, and a task running right now -- mean "the start is
-    # somewhere else"; neither is this run's to repair. Kept as a separate
-    # variable rather than folded into the check below so the log can say which
-    # of the two it saw.
-    $startRunning = [bool]($startHasRun -and $startInfo.LastTaskResult -eq 267009)
-    $startFailed = [bool]($startHasRun -and $startInfo.LastTaskResult -ne 0 -and -not $startRunning)
-    $startAge = -1
-    if ($startHasRun) { $startAge = [int]((Get-Date) - $startInfo.LastRunTime).TotalSeconds }
-    $runTheTask = ($startFailed -and $startAge -ge 180 -and $env:WATCHDOG_TEST_MODE -ne '1')
+    $startGuardInfo = Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue
+    $startGuardResult = if ($startGuardInfo) { $startGuardInfo.LastTaskResult } else { $null }
+    $startGuardRunAt = if ($startGuardInfo) { $startGuardInfo.LastRunTime } else { $null }
+    $startState = Get-TownReporterStartState -Marker $startMarker -MarkerProcess $startMarkerProcess `
+      -ExpectedScript $startScript -TaskLastTaskResult $startGuardResult `
+      -TaskLastRunTime $startGuardRunAt -Deadline $startDeadline -TestMode $testMode
+    # Set when a hung START was stopped above: this run must then run the task.
+    $startGuardForceTask = $false
 
-    # Five minutes, not forty-five seconds, on the task path: that task has its
-    # own DB wait (up to three minutes) and three migrate attempts to get
-    # through, and calling it failed while it is still working is how the
-    # watchdog would log a FAILED that never happened. The scheduled task skips
-    # a run while one is active, so waiting here delays the next run rather than
-    # stacking one on top of it.
-    $verifySeconds = if ($runTheTask) { 300 } else { 45 }
-
-    # Did this run actually try to start anything? The two repair paths below
-    # do; the two wait-only paths (267009 still running, and the boot grace)
-    # deliberately do not. It decides the failure line further down, which on
-    # 2026-09-25 said "FAILED to come up healthy ... within 45s of starting it"
-    # about a run that had started nothing at all.
-    $startAttempted = $false
-
-    if ($runTheTask) {
-      Write-Log "app: the $startTaskName task last exited $($startInfo.LastTaskResult) $startAge second(s) ago; running the task itself"
-      $startAttempted = $true
-      try {
-        Assert-TownReporterTaskOwnership $startTaskName 'start-townreporter.ps1'
-        Start-ScheduledTask -TaskName $startTaskName
-      } catch {
-        Write-Log "app: running the $startTaskName task failed: $($_.Exception.Message)"
-      }
-    } elseif ($startRunning) {
-      # 267009. The task is in progress right now -- a cold boot spends a minute
-      # or more in Postgres recovery and three migrate attempts. Nothing to
-      # repair and nothing to report as broken; the next run will ask again.
-      Write-Log "app: the $startTaskName task has been running for $startAge second(s); start still running (waiting for the database)"
-    } elseif ($startFailed) {
-      Write-Log "app: the $startTaskName task failed $startAge second(s) ago; inside the three-minute boot grace, leaving its start alone"
-    } else {
-      <#
-        Launch the start script as a DETACHED process, not with `&`.
-
-        Called inline, the server it spawns inherits this script's console
-        handles, so the watchdog never returns -- it sits holding the pipe for as
-        long as the app runs. The scheduled task is set to skip a new run while
-        one is active, so a single hung run silently ends the watching. Found by
-        killing the app and watching the repair itself hang for seven minutes.
-
-        Detached, the watchdog only polls the port and exits.
-      #>
-      $startAttempted = $true
-      try {
-        $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
-        $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
-        Start-Process -FilePath $exe `
-          -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
-                        "-File", $startScript `
-          -WindowStyle Hidden
-      } catch {
-        Write-Log "app: start failed: $($_.Exception.Message)"
-      }
-    }
-
-    <#
-      Verify the app actually answers on 127.0.0.1, not just that a socket is
-      listening: a listener with no page behind it, or one on the wrong address
-      family, is not a repair. Explicit FAILED on the way out either way -- a
-      silent "did not repair" reads the same as no check at all, which is
-      exactly how this app's port check went blind to an IPv6-only foreign
-      listener before.
-    #>
-    $repairedOk = $false
-    for ($i = 0; $i -lt $verifySeconds; $i++) {
-      if (Test-TownReporterPort $port) {
+    if ($startState.State -eq 'hung') {
+      if ($startState.Source -eq 'marker') {
+        Write-Log "app: the start recorded in the marker (PID $($startMarker.Pid)) has been running $($startState.AgeSeconds) s of $startDeadline s; stopping that start"
+        Stop-Process -Id ([int]$startMarker.Pid) -Force -ErrorAction SilentlyContinue
+        Remove-TownReporterStartMarker -App $app
+      } else {
+        Write-Log "app: the $startTaskName task's start has been running $($startState.AgeSeconds) s of $startDeadline s; stopping the task and running it again"
         try {
-          $code = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).StatusCode
-          if ($code -eq 200) { $repairedOk = $true; break }
-        } catch { }
+          Assert-TownReporterTaskOwnership $startTaskName 'start-townreporter.ps1'
+          Stop-ScheduledTask -TaskName $startTaskName
+          # Task Scheduler refuses a start while the stop is still landing.
+          for ($i = 0; $i -lt 30; $i++) {
+            $taskState = (Get-ScheduledTask -TaskName $startTaskName -ErrorAction SilentlyContinue).State
+            if ($taskState -ne 'Running') { break }
+            Start-Sleep -Seconds 1
+          }
+          $startGuardForceTask = $true
+        } catch {
+          Write-Log "app: could not stop the hung $startTaskName task: $($_.Exception.Message)"
+        }
       }
-      Start-Sleep -Seconds 1
+    } elseif ($startState.State -eq 'none') {
+      # A marker naming a dead PID, a reused PID or another script is not a
+      # start. Delete it, so the next run does not have to ask again.
+      Remove-TownReporterStartMarker -App $app
     }
-    if ($repairedOk) {
-      $repaired += "app"
-    } elseif ($startAttempted) {
-      Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within ${verifySeconds}s of starting it"
-      if ($runTheTask) { Write-Log "app: the $startTaskName task is what was run; its own log is townreporter.log and its result is $((Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue).LastTaskResult)" }
+
+    if ($startState.State -eq 'in-progress') {
+      $where = if ($startState.Source -eq 'marker') { "marker, PID $($startState.MarkerPid), " } else { "task, " }
+      Write-Log "app: a start is still running ($where$($startState.AgeSeconds) s of $startDeadline s); not stopping anything"
     } else {
-      # Nothing was started, on purpose, so there is no repair to call failed.
-      # Say which of the two waits this was: the wording is the whole point of
-      # the fix, because "FAILED" here was a lie on the 2026-09-25 reboot test.
-      $whyWait = if ($startRunning) { 'start still running (waiting for the database)' }
-        else { "the $startTaskName task failed $startAge second(s) ago and this run is inside the three-minute boot grace" }
-      Write-Log "app: not answering yet, and no repair was attempted -- $whyWait"
+      $bindableOwners = Get-TownReporterPortOwner $port
+      $otherListeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $bindableOwners -notcontains $_.OwningProcess })
+      if ($bindableOwners.Count -eq 0 -and $otherListeners.Count -gt 0) {
+        $o = $otherListeners[0]
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($o.OwningProcess)" -ErrorAction SilentlyContinue
+        $name = if ($p) { $p.Name } else { "unknown" }
+        Write-Log "app: port $port has an IPv6-only listener PID $($o.OwningProcess) ($name) from another program; it does not block the paper"
+      }
+      foreach ($owner in $bindableOwners) {
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+        if (-not $p) { continue }
+        # Ask the shared predicate, which normalizes slashes. The inline pattern
+        # that used to be here -- -notlike "*.output/server/index.mjs*" -- tested
+        # forward slashes against a command line Windows reports with backslashes,
+        # so it failed for this app's OWN server and took the "not touching it"
+        # branch below on 2026-09-26 while the paper was stalled (PID 35156).
+        if (-not (Test-TownReporterBuiltServerProcess -Process $p)) {
+          Write-Log "app: port $port is held by PID $owner ($($p.Name)), which is not this app -- not touching it"
+          continue
+        }
+        if ($env:WATCHDOG_TEST_MODE -ne '1' -and -not (Test-TownReporterServerProcess -Process $p -App $app)) { throw 'Port owner is not this exact checkout; refusing repair.' }
+        Write-Log "app: stopping stale PID $owner on port $port"
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+      }
+      <#
+        Before repairing, ask whether the logon task is still working -- and if
+        it is the thing that FAILED, run that task rather than a second copy of
+        its script.
+
+        This is the 2026-09-25 boot. The logon task ran at 20:01, died inside
+        migrate (see ops\lib-migrate.ps1 for why), and left the site on 502. This
+        watchdog noticed on its next run and did the only thing it knew: started
+        start-townreporter.ps1 again, detached, and watched it 45 seconds later.
+        That script died at exactly the same line, so the repair failed the same
+        way every five minutes for as long as nobody looked, and the log read
+        "FAILED to come up healthy" with no hint that the start path itself was
+        the fault. Two things were missing: a reason to wait, and a repair that
+        reports the task's own result.
+
+        The wait: a cold boot spends a minute or more in Postgres crash recovery
+        and three migrate attempts. Repairing a start that is already in progress
+        is how a good boot gets trampled, so for three minutes after the task last
+        ran this run leaves its start alone and says so.
+
+        The repair: the registered task, not a detached copy of its script. The
+        task is the ownership-checked entry point the logon and the operator both
+        use, Assert-TownReporterTaskOwnership proves it points at THIS checkout,
+        and running it makes its own LastTaskResult the receipt for this repair.
+        Never both -- one path or the other.
+
+        Test mode never reaches here: the seam points the app port at a
+        disposable instance, and the real task starts the real paper.
+      #>
+      # $startTaskName is set above, by the start guard.
+      $startInfo = Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue
+      # Never run at all is not a failure: LastTaskResult for a task that has not
+      # run yet is 0x41303 (267009), which would otherwise read as a fault and put
+      # a machine whose paper was started by hand into the grace branch forever.
+      $startHasRun = [bool]($startInfo -and $startInfo.LastRunTime -and $startInfo.LastRunTime.Year -gt 1900)
+      # 267009 is SCHED_S_TASK_RUNNING, not a fault: the task is STILL RUNNING.
+      # The reboot test of 2026-09-25 caught the watchdog asking about a start
+      # that was in the middle of Postgres recovery, reading 267009, calling it
+      # failed and logging a repair it had not needed. Both 267009 cases -- a task
+      # that has never run, and a task running right now -- mean "the start is
+      # somewhere else"; neither is this run's to repair. Kept as a separate
+      # variable rather than folded into the check below so the log can say which
+      # of the two it saw.
+      $startRunning = [bool]($startHasRun -and $startInfo.LastTaskResult -eq 267009)
+      $startFailed = [bool]($startHasRun -and $startInfo.LastTaskResult -ne 0 -and -not $startRunning)
+      $startAge = -1
+      if ($startHasRun) { $startAge = [int]((Get-Date) - $startInfo.LastRunTime).TotalSeconds }
+      $runTheTask = ($startFailed -and $startAge -ge 180 -and $env:WATCHDOG_TEST_MODE -ne '1')
+      if ($startGuardForceTask) {
+        # The start guard stopped a HUNG task above. This run must run the task
+        # itself -- not a detached copy of its script -- and the 267009 the task
+        # reported before it was stopped must not put this run into either
+        # wait-only branch below. Refreshed, so the log quotes the result the
+        # stop just left instead of the stale one.
+        $startInfo = Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue
+        $startRunning = $false
+        $startFailed = $true
+        $startAge = 0
+        $runTheTask = $true
+      }
+
+      # Five minutes, not forty-five seconds, on the task path: that task has its
+      # own DB wait (up to three minutes) and three migrate attempts to get
+      # through, and calling it failed while it is still working is how the
+      # watchdog would log a FAILED that never happened. The scheduled task skips
+      # a run while one is active, so waiting here delays the next run rather than
+      # stacking one on top of it.
+      $verifySeconds = if ($runTheTask) { 300 } else { 45 }
+
+      # Did this run actually try to start anything? The two repair paths below
+      # do; the two wait-only paths (267009 still running, and the boot grace)
+      # deliberately do not. It decides the failure line further down, which on
+      # 2026-09-25 said "FAILED to come up healthy ... within 45s of starting it"
+      # about a run that had started nothing at all.
+      $startAttempted = $false
+
+      if ($runTheTask) {
+        Write-Log "app: the $startTaskName task last exited $($startInfo.LastTaskResult) $startAge second(s) ago; running the task itself"
+        $startAttempted = $true
+        try {
+          Assert-TownReporterTaskOwnership $startTaskName 'start-townreporter.ps1'
+          Start-ScheduledTask -TaskName $startTaskName
+        } catch {
+          Write-Log "app: running the $startTaskName task failed: $($_.Exception.Message)"
+        }
+      } elseif ($startRunning) {
+        # 267009. The task is in progress right now -- a cold boot spends a minute
+        # or more in Postgres recovery and three migrate attempts. Nothing to
+        # repair and nothing to report as broken; the next run will ask again.
+        Write-Log "app: the $startTaskName task has been running for $startAge second(s); start still running (waiting for the database)"
+      } elseif ($startFailed) {
+        Write-Log "app: the $startTaskName task failed $startAge second(s) ago; inside the three-minute boot grace, leaving its start alone"
+      } else {
+        <#
+          Launch the start script as a DETACHED process, not with `&`.
+
+          Called inline, the server it spawns inherits this script's console
+          handles, so the watchdog never returns -- it sits holding the pipe for as
+          long as the app runs. The scheduled task is set to skip a new run while
+          one is active, so a single hung run silently ends the watching. Found by
+          killing the app and watching the repair itself hang for seven minutes.
+
+          Detached, the watchdog only polls the port and exits.
+        #>
+        $startAttempted = $true
+        try {
+          $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
+          $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
+          # -PassThru, so the marker below can name the process that runs the
+          # start script: the next run believes a start is in progress only
+          # while that exact PID is alive and still running that script.
+          # -ErrorAction Stop so a failed launch reaches the catch instead of
+          # leaving a marker for a process that never existed.
+          $startProcess = Start-Process -FilePath $exe `
+            -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
+                          "-File", "`"$startScript`"" `
+            -WindowStyle Hidden -PassThru -ErrorAction Stop
+          Write-TownReporterStartMarker -App $app -ProcessId $startProcess.Id -Script $startScript
+        } catch {
+          Write-Log "app: start failed: $($_.Exception.Message)"
+        }
+      }
+
+      <#
+        Verify the app actually answers on 127.0.0.1, not just that a socket is
+        listening: a listener with no page behind it, or one on the wrong address
+        family, is not a repair. Explicit FAILED on the way out either way -- a
+        silent "did not repair" reads the same as no check at all, which is
+        exactly how this app's port check went blind to an IPv6-only foreign
+        listener before.
+      #>
+      $repairedOk = $false
+      for ($i = 0; $i -lt $verifySeconds; $i++) {
+        if (Test-TownReporterPort $port) {
+          try {
+            $code = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).StatusCode
+            if ($code -eq 200) { $repairedOk = $true; break }
+          } catch { }
+        }
+        Start-Sleep -Seconds 1
+      }
+      if ($repairedOk) {
+        # A real 200 is the end of the start, whichever path ran it: the next
+        # run should not have to ask about a marker for this one.
+        Remove-TownReporterStartMarker -App $app
+        $repaired += "app"
+      } elseif ($startAttempted) {
+        Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within ${verifySeconds}s of starting it"
+        if ($runTheTask) { Write-Log "app: the $startTaskName task is what was run; its own log is townreporter.log and its result is $((Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue).LastTaskResult)" }
+      } else {
+        # Nothing was started, on purpose, so there is no repair to call failed.
+        # Say which of the two waits this was: the wording is the whole point of
+        # the fix, because "FAILED" here was a lie on the 2026-09-25 reboot test.
+        $whyWait = if ($startRunning) { 'start still running (waiting for the database)' }
+          else { "the $startTaskName task failed $startAge second(s) ago and this run is inside the three-minute boot grace" }
+        Write-Log "app: not answering yet, and no repair was attempted -- $whyWait"
+      }
     }
   }
 }
