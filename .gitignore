@@ -87,3 +87,6 @@ meeting-captions/
 .townreporter/reporting/
 # Temporary patch input created by local coding workers.
 .tmp-patch/
+
+# Throwaway cache for the one-time meaning-model smoke check (D286).
+/.smoke-data/
