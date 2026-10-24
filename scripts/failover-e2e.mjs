@@ -79,6 +79,28 @@
  * alternative, setting TOWNREPORTER_QWEN_MODEL to a model the server does not
  * have, pins the rung to that model instead, which skips with "not loaded";
  * the walk asserts whichever sentence its own configuration produces.
+ *
+ * RUN (2): THE SAME WALK WITH A CLAUDE CLI (FAILOVER_WITH_CLAUDE_CLI=1).
+ * The CI runner has no Claude CLI, so the walk above proves the HTTP road to
+ * rung 1. A live paper does have one, and then DeepSeek takes a different road:
+ * `claudeCodeChat` / `claudeCodeAgentRun` (src/lib/news/ai-claude-code.server.ts)
+ * start the CLI against a per-call relay route
+ * (src/lib/news/deepseek-relay.server.ts) that forwards `POST /v1/messages` in
+ * Anthropic Messages shape. Run (2) starts the app with
+ * `CLAUDE_CLI_PATH=scripts/fakes/fake-deepseek-relay-cli.mjs` and sets this
+ * variable. Everything the walk proves is the same ladder, reached by the other
+ * road: draft 1 is unchanged (rung 1 is down at preflight, so no CLI is
+ * involved); draft 2's preflight still pins DeepSeek, and now the news skill
+ * writer (D234) runs first as a CLI agent, hits the fake's 429 through the
+ * relay, and the desk falls back to the four-pass writer on the same pick --
+ * whose research (unreadable twice) and write (429) also travel the relay. The
+ * 429 on the write hops to Codex Sol 6.1 (balanced) exactly as in run (1). The
+ * walk therefore expects the fallback sentence at the start of the durable
+ * note, TWO write-shaped 429s (the skill agent, then the fallback's write
+ * pass), the same two unreadable research calls, and NO `/chat/completions`
+ * draft traffic: every draft call must arrive on `/v1/messages`. See desk.ts
+ * :4306-4418 (skill first, returned failure falls back on the same pick) and
+ * report.ts:1609 / :1825 (research retried once; write failure is the hop).
  */
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -127,6 +149,15 @@ const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
  *     nothing loaded it is skipped in the brief's own words.
  */
 const PINNED_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "").trim();
+
+/**
+ * RUN (2): the app was started with a Claude CLI that goes through the desk's
+ * DeepSeek relay. Off by default, so CI and every existing run keep the
+ * no-CLI expectations byte for byte.
+ */
+const WITH_CLAUDE_CLI = process.env.FAILOVER_WITH_CLAUDE_CLI === "1";
+/** The stand-in CLI run (2) requires the app to have been started with. */
+const RELAY_CLI = "scripts/fakes/fake-deepseek-relay-cli.mjs";
 const LOCAL_SKIP = PINNED_MODEL
   ? `${LOCAL_LABEL} skipped: not loaded`
   : `${LOCAL_LABEL} skipped: nothing loaded in LM Studio`;
@@ -287,6 +318,17 @@ function preconditions() {
   }
   if (process.env.FAKE_CODEX_SIGNED_IN !== "1") {
     problems.push("FAKE_CODEX_SIGNED_IN=1 is required, or rung 3 is not ready and nothing hops.");
+  }
+  if (WITH_CLAUDE_CLI) {
+    const cli = (process.env.CLAUDE_CLI_PATH || "").trim().replace(/\\/g, "/");
+    if (!cli.endsWith(RELAY_CLI)) {
+      problems.push(
+        `FAILOVER_WITH_CLAUDE_CLI=1 requires the app to be started with ` +
+          `CLAUDE_CLI_PATH=${RELAY_CLI} (the fake CLI that speaks to the desk's own DeepSeek ` +
+          `relay); got ${JSON.stringify(process.env.CLAUDE_CLI_PATH ?? null)}. Any other CLI, ` +
+          `or none, walks a different road than this mode asserts.`,
+      );
+    }
   }
   for (const off of ["TOWNREPORTER_DEEPSEEK", "TOWNREPORTER_QWEN", "TOWNREPORTER_CODEX"]) {
     if (process.env[off] === "0") problems.push(`${off}=0 switches that rung off.`);
@@ -608,11 +650,20 @@ async function main() {
     appendStoryFailoverNote). So the note legitimately starts with the
     fallback sentence and still ends with the hop.
   */
-  if (
-    !durable.includes(`${DEEPSEEK_LABEL}: `) ||
-    !durable.endsWith(`-> ${TERRA_LABEL}`) ||
-    !(durable.startsWith(`${DEEPSEEK_LABEL}: `) || durable.startsWith("The research writer could not finish ("))
-  ) {
+  /*
+    The note's first sentence differs by road, and only there:
+      run (1), no CLI -- the skill writer cannot start, so the fallback
+                       sentence (desk.ts:4416) comes first, then the hop;
+      run (2), CLI    -- the skill writer RUNS and fails on the fake's 429, so
+                       the SAME fallback sentence comes first, then the hop.
+    Either way the hop sentence appended by the 429 (desk.ts:3838) must name
+    rung 1 and end at Codex Sol 6.1 (balanced).
+  */
+  const notePrefixOk = WITH_CLAUDE_CLI
+    ? durable.startsWith("The research writer could not finish (")
+    : durable.startsWith(`${DEEPSEEK_LABEL}: `) ||
+      durable.startsWith("The research writer could not finish (");
+  if (!notePrefixOk || !durable.includes(`${DEEPSEEK_LABEL}: `) || !durable.endsWith(`-> ${TERRA_LABEL}`)) {
     throw new Error(
       `draft 2's failover_note read ${JSON.stringify(durable)}, expected it to carry ` +
         `${JSON.stringify(`${DEEPSEEK_LABEL}: `)} and end ${JSON.stringify(`-> ${TERRA_LABEL}`)} ` +
@@ -638,19 +689,46 @@ async function main() {
   const quota = afterSecond.requests.filter(
     (entry) => entry.class === "write" && entry.status === 429,
   );
+  /*
+    RUN (2): both draft calls must arrive on the CLI road. The relay forwards
+    `POST /v1/messages` (deepseek-relay.server.ts:58, 85); nothing on this
+    draft should reach `/chat/completions` (the HTTP road run (1) proves), and
+    there must be TWO write-shaped 429s rather than one: the news skill
+    writer's agent run first (desk.ts:4320, class "write" because the
+    assignment text carries no "Lead: " marker), then the four-pass writer's
+    fallback write pass (report.ts:1825).
+  */
+  const draftCalls = afterSecond.requests.filter((entry) =>
+    ["research", "write", "document", "scan", "correction"].includes(entry.class),
+  );
+  if (WITH_CLAUDE_CLI) {
+    const offRoad = draftCalls.filter((entry) => !String(entry.path).endsWith("/v1/messages"));
+    if (offRoad.length) {
+      throw new Error(
+        `run (2) is the CLI road, but ${offRoad.length} draft call(s) arrived off it: ` +
+          `${JSON.stringify(offRoad)} -- expected every draft call on /v1/messages.`,
+      );
+    }
+  }
   if (research.length !== 2 || research.some((entry) => entry.mode !== "unreadable-json")) {
     throw new Error(
       `expected exactly 2 unreadable research answers (the same rung re-asked once by ` +
         `readableReplyOrRetry); got ${JSON.stringify(research)}`,
     );
   }
-  if (!quota.length) {
+  // Run (1)'s check stays exactly as it was (at least one); run (2) is the one
+  // that knows the count, because it can name both callers.
+  if (WITH_CLAUDE_CLI ? quota.length !== 2 : !quota.length) {
     throw new Error(
-      `rung 1 never returned a 429 to the write pass: ${JSON.stringify(afterSecond.requests)}`,
+      WITH_CLAUDE_CLI
+        ? `expected exactly 2 write-shaped 429s on the CLI road (the skill writer's agent run, ` +
+            `then the fallback write pass); got ${quota.length}: ${JSON.stringify(afterSecond.requests)}`
+        : `rung 1 never returned a 429 to the write pass: ${JSON.stringify(afterSecond.requests)}`,
     );
   }
   step(
-    `rung 1 answered the research pass twice with unreadable JSON (${research.length} calls) and the write pass with ${quota.length} quota failure(s)`,
+    `rung 1 answered the research pass twice with unreadable JSON (${research.length} calls) and ` +
+      `${WITH_CLAUDE_CLI ? "the CLI road" : "the write pass"} with ${quota.length} quota failure(s)`,
   );
 
   // --- the landed draft is really there, on the page -----------------------

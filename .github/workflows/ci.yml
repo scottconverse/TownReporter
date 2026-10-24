@@ -149,7 +149,7 @@ jobs:
           want run_watchdog '(^ops/|watchdog|^\.github/workflows/ci\.yml$)'
           # The failover walk proves the model ladder end to end, so it runs when
           # anything that ladder is built from changes -- not on every push.
-          want run_failover '^(scripts/failover-e2e\.mjs|scripts/fakes/fake-(claude-cli|deepseek-endpoint|codex-cli)\.mjs|src/lib/news/(news-skill-writer\.server|meeting-skill-writer|ai|ai-claude-code\.server|automatic-failover|desk-model-run|forced-runtime\.server)\.ts|src/lib/news/(automatic-failover|daily-scan-automatic-rung|dark-round-failover|desk-model-run|forced-runtime|perform-scan-failover)\.test\.ts|\.github/workflows/ci\.yml)$'
+          want run_failover '^(scripts/failover-e2e\.mjs|scripts/fakes/fake-(claude-cli|deepseek-endpoint|deepseek-relay-cli|codex-cli)\.mjs|src/lib/news/(news-skill-writer\.server|meeting-skill-writer|ai|ai-claude-code\.server|automatic-failover|desk-model-run|forced-runtime\.server)\.ts|src/lib/news/(automatic-failover|daily-scan-automatic-rung|dark-round-failover|desk-model-run|forced-runtime|perform-scan-failover)\.test\.ts|\.github/workflows/ci\.yml)$'
 
   dialog-browser:
     needs: changes
@@ -843,7 +843,7 @@ jobs:
     if: needs.changes.outputs.run_failover == 'true'
     name: Automatic's ladder skips a dead rung and fails over on quota, in a browser
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -878,6 +878,52 @@ jobs:
           # By PID, never by name -- see the same comment in the
           # provider-signin job above for why a bare `kill "$DEV_PID"` is not
           # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+      # Guards Automatic's hop on the road the live paper actually uses: live has
+      # a Claude CLI, so a DeepSeek call travels the desk's relay. Nightly and on
+      # changes to its own files only -- never on every push.
+      - name: The same walk on the Claude CLI road (DeepSeek through the relay)
+        env:
+          BETTER_AUTH_SECRET: ci-failover-secret-not-for-production
+          PORT: "3317"
+          HOST: 127.0.0.1
+          FAILOVER_BASE_URL: http://127.0.0.1:3317
+          TOWNREPORTER_DEEPSEEK_BASE_URL: http://127.0.0.1:3318/v1
+          CLAUDE_CLI_PATH: scripts/fakes/fake-deepseek-relay-cli.mjs
+          CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
+          FAKE_CODEX_SIGNED_IN: "1"
+          FAKE_CODEX_VALID_DRAFT: "1"
+          FAKE_CODEX_DELAY_MS: "1500"
+          FAILOVER_WITH_CLAUDE_CLI: "1"
+        run: |
+          # The step above uses this same fixed port 3317 and a bare kill only sends a signal, so wait for its app to be gone before starting ours.
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3317/ || break
+            sleep 1
+          done
+          if curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3317/; then
+            echo "port 3317 is still in use by the first walk's app"
+            exit 1
+          fi
+          npm start > /tmp/failover-cli.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/failover-cli.log; exit 1;
+          }
+          node scripts/failover-e2e.mjs
+          # By PID, never by name -- see the comment in the step above.
           kill_tree() {
             local pid="$1"
             local child
