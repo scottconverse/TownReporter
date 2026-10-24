@@ -128,7 +128,7 @@ import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft
 import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { usesWholeMeetingWriter } from "./meeting-whole.ts";
 import { claimsAndSourcesUrls, runNotesOpenedUrls } from "./meeting-skill-writer.ts";
-import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
+import { draftSourceInputs } from "./draft-input.ts";
 import { saveReportingNotesForNewsroom } from "./reporting-notes-save.server.ts";
 import {
   addSourceInput,
