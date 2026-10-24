@@ -1194,14 +1194,14 @@ export type HeadlineDialogProps = {
   defaultModel?: string;
   defaultEffort?: string | null;
   /**
-   * DHG-3 / H06: the screen's own headline pick, when it has one.
+   * TXA-2 (D274): the screen's Writer pick, when the screen has one.
    *
-   * The story screen draws a "Model for suggestions" row beside its "Suggest
-   * headlines" press and this dialog draws "Model for headline suggestions".
-   * Both are the one headline job, so when the screen hands its state over the
-   * dialog reads and writes THAT state instead of keeping a second copy that
-   * can disagree. Without `onModelChange` the dialog keeps its own pick, as it
-   * always has.
+   * The story screen used to draw its own "Model for suggestions" row beside
+   * this dialog's "Model for headline suggestions" -- two controls for one
+   * press. It now passes the WRITER pick (the same model and effort the Draft
+   * press sends), so the dialog reads and writes that state instead of
+   * keeping a second copy that can disagree. Without `onModelChange` the
+   * dialog keeps its own pick, as it always has.
    */
   model?: string;
   effort?: string | null;

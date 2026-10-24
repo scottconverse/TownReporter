@@ -764,7 +764,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
 
-  for (const choice of ["codex-astra", "codex-frontier", "codex-balanced", "codex-luna"] as const) {
+  for (const choice of ["codex-astra", "codex-frontier", "codex-luna"] as const) {
     it(`sends the exact ${choice} choice to the Codex pair`, async () => {
       const orchestrateEditorial = await loadEditorialOrchestrator();
       const events: string[] = [];
@@ -783,6 +783,29 @@ describe("Opinion routes the exact selected cloud model", () => {
       assert.deepEqual(events, ["voice:locate", "codex", "file"]);
     });
   }
+
+  /*
+    D273: the picker offers ONE Codex Sol row. A stored `codex-balanced`
+    choice -- written before that row was the only one -- still runs the same
+    model and effort, under the one row's id.
+  */
+  it("runs a stored codex-balanced choice on the one Codex Sol row", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runCodexPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "codex-frontier");
+      events.push("codex");
+      return { ok: true, text: DELIVERED };
+    };
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "codex-balanced" },
+      runtime,
+    );
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
+    if (result.ok) assert.equal(result.modelChoice, "codex-frontier");
+    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+  });
 
   for (const choice of [
     "claude-fable",

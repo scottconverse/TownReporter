@@ -128,7 +128,8 @@ import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft
 import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { usesWholeMeetingWriter } from "./meeting-whole.ts";
 import { claimsAndSourcesUrls } from "./meeting-skill-writer.ts";
-import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
+import { draftSourceInputs } from "./draft-input.ts";
+import { saveReportingNotesForNewsroom } from "./reporting-notes-save.server.ts";
 import {
   addSourceInput,
   artifactIdInput,
@@ -200,7 +201,6 @@ import {
 import { webSearch } from "./search-web";
 import { absenceClaims } from "./absence-gate";
 import {
-  applyTodoPatch,
   clipTodoText,
   editorNoteLines,
   keepHumanTodos,
@@ -5384,46 +5384,18 @@ export const importFinishedStories = createServerFn({ method: "POST" })
     );
   });
 
+/*
+  D275: the notes write lives in ./reporting-notes-save.server.ts so the
+  database test can call it with PGlite (desk.ts's `@/lib/...` imports do not
+  resolve under plain `node --test`). The handler below is its only production
+  caller and passes the same row lock and field rules it always did.
+*/
 export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => reportingNotesInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureDeskDraftMemoSchema();
-    return withTransaction(async (sql) => {
-      /*
-        Pull writes excerpts in the background. Lock the same lead row before
-        applying an editor note change so neither full notes_json update can
-        erase the other after reading an older copy.
-      */
-      const rows = await sql<{ notes_json: string | null }>`
-        select notes_json from leads
-        where id = ${data.leadId} and newsroom_id = ${owned(context)}
-        for update
-      `;
-      if (!rows[0]) return { ok: false as const, error: "Lead not found" };
-      const notes = applyTodoPatch(parseNotes(rows[0].notes_json), {
-        todos: data.todos,
-        toggle: data.toggle,
-        add: data.add,
-        scratch: data.scratch,
-      });
-      if (data.researchScope === "supplied" || data.researchScope === "public")
-        notes.researchScope = data.researchScope;
-      if (typeof data.storyDirection === "string") {
-        const direction = data.storyDirection.trim().slice(0, 1000);
-        notes.editorialAssignment = direction ? { origin: "story-workspace", text: direction } : undefined;
-      }
-      if (typeof data.scratch === "string")
-        notes.suppliedUrls = sanitizePublicUrls([
-          ...(notes.suppliedUrls ?? []),
-          ...suppliedUrlsFromText(data.scratch),
-        ]).slice(0, 8);
-      const json = packNotes(notes);
-      await sql`
-        update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
-      `;
-      return { ok: true as const, notes };
-    });
+    return withTransaction((sql) => saveReportingNotesForNewsroom(sql, owned(context), data));
   });
 
 /*

@@ -77,3 +77,38 @@ function assertSavedStoryAssignment(doors) {
 test("real Models save flows into the real Story and Today New story pickers", async (t) => {
   assertSavedStoryAssignment(await saveAndReadDoors(t, process.env.FM1_UI_BASELINE_REF));
 });
+
+test("a saved Story pick outranks the Who-does-what default on a lead with no job", async (t) => {
+  // The saved pick is NOT the assignment, so a picker showing `deepseek-flash`
+  // can only be the assignment hook overwriting the restored pick.
+  const fixture = await jobModelBrowser({
+    notesJson: JSON.stringify({ modelPick: { choice: "codex-luna", effort: null } }),
+    assignmentRows: [{ jobKey: "story-draft", rank: 0, providerId: "deepseek-flash", effort: null }],
+  });
+  t.after(() => fixture.close());
+  const { page, errors } = fixture;
+  const readsBefore = await page.evaluate(() => window.assignmentReads);
+  await page.evaluate(() => window.mountDoor("story"));
+  await page
+    .getByRole("button", { name: /Model & research/ })
+    .waitFor({ timeout: 5000 })
+    .catch(async () =>
+      assert.fail(JSON.stringify({ errors, body: await page.locator("body").innerText() })),
+    );
+  await page.getByRole("button", { name: /Model & research/ }).click();
+  const storyPicker = page
+    .locator("#story-model-research")
+    .getByLabel("Writing model", { exact: true });
+  await storyPicker
+    .waitFor({ timeout: 5000 })
+    .catch(async () =>
+      assert.fail(JSON.stringify({ errors, body: await page.locator("body").innerText() })),
+    );
+  // Wait for this page's own assignment read, then let its production effects settle.
+  await page.waitForFunction((before) => window.assignmentReads > before, readsBefore);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal(await storyPicker.inputValue(), "codex-luna");
+  assert.deepEqual(errors, [], "isolated production routes rendered without browser errors");
+});

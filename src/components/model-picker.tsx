@@ -8,6 +8,7 @@ import {
   modelChoiceHelp,
   pickerOptionText,
   pickerOptionTitle,
+  pickerRowValue,
   retiredModelChoiceNote,
   type DarkModelChoice,
   type ModelChoiceOption,
@@ -412,7 +413,14 @@ export function ModelPicker(props: Props) {
       ? options.some((option) => option.value === "auto")
         ? "auto"
         : (options[0]?.value ?? "auto")
-      : props.value;
+      : /*
+          D273: `codex-balanced` and `codex-frontier` are one model under two
+          labels, and the menu now offers only the frontier row. A stored
+          `codex-balanced` would otherwise leave the select EMPTY. This is a
+          display alias only -- it never calls `onChange`, so the stored value
+          changes when the editor picks, not when the row is drawn.
+        */
+        (pickerRowValue(props.value) as typeof props.value);
   const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();

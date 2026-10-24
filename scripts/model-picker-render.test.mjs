@@ -212,9 +212,17 @@ test("every story picker exposes keyboard-native setup help and real operator li
 */
 test("the Story picker offers Automatic plus exactly the registry's story providers", () => {
   const html = render();
+  /*
+    D273: one row per model. `codex-balanced` and `codex-frontier` are the same
+    model, so the menu draws only the one "Codex Sol 6.1" row; the registry
+    entry stays for Automatic's ladder and for stored values.
+  */
   const expected = [
     "Automatic",
-    ...registry.providersFor("story").map((e) => e.label),
+    ...registry
+      .providersFor("story")
+      .filter((e) => e.id !== "codex-balanced")
+      .map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
@@ -227,9 +235,13 @@ test("the Dark Desk picker offers the registry's dark providers, and says it dig
   // 0.6.2: Dark Desk was the one surface with no picker at all. Its label
   // differs from Story's on purpose -- the model there digs, it does not write.
   const html = render({ scope: "dark" });
+  // D273: one Codex Sol row, as on every surface.
   const expected = [
     "Automatic",
-    ...registry.providersFor("dark").map((e) => e.label),
+    ...registry
+      .providersFor("dark")
+      .filter((e) => e.id !== "codex-balanced")
+      .map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
@@ -237,16 +249,20 @@ test("the Dark Desk picker offers the registry's dark providers, and says it dig
   assert.match(html, /unfinished stage moves to the next provider/);
 });
 
-test("the Opinion picker offers the registry's opinion providers, including Codex Sol 6.1 (balanced) and Sol", () => {
+test("the Opinion picker offers the registry's opinion providers with one Codex Sol row", () => {
   const html = render({ scope: "opinion" });
+  // D273: one row per model; the balanced label is gone from every menu.
   const expected = [
     "Automatic",
-    ...registry.providersFor("opinion").map((e) => e.label),
+    ...registry
+      .providersFor("opinion")
+      .filter((e) => e.id !== "codex-balanced")
+      .map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
-  assert.ok(rendered.includes("Codex Sol 6.1 (balanced)"), "Opinion must offer Codex Sol 6.1 (balanced)");
   assert.ok(rendered.includes("Codex Sol 6.1"), "Opinion must offer Codex Sol 6.1");
+  assert.equal(rendered.filter((label) => label.startsWith("Codex Sol 6.1")).length, 1, "one Sol row, not two");
   assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
 });
 

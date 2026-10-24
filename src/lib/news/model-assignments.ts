@@ -38,6 +38,7 @@ import { looksLikeContentRefusal } from "./automatic-failover.ts";
 import {
   isCustomModelChoice,
   modelChoicesFor,
+  pickerRowValue,
   type CustomModelChoice,
   type ModelChoiceOption,
 } from "./model-choice.ts";
@@ -186,7 +187,15 @@ export function isOfferedForJob(jobKey: string, providerId: string): boolean {
   const job = modelJob(jobKey);
   if (!job) return false;
   if (isCustomModelChoice(providerId)) return true;
-  return jobModelOptions(jobKey).some((option) => option.value === providerId);
+  /*
+    D273: the menu carries one Codex Sol row. A saved assignment written before
+    that still holds `codex-balanced` -- the same model and effort as
+    `codex-frontier` -- so membership is checked on the row it is shown on.
+    The stored value itself is not rewritten: the assignment keeps naming what
+    it named, and the run resolves the registry entry behind it.
+  */
+  const row = pickerRowValue(providerId);
+  return jobModelOptions(jobKey).some((option) => option.value === row);
 }
 
 /**

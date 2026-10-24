@@ -100,12 +100,13 @@ test("DHE1-2: the page-watch picker is named for its own job, not Digging model,
   }
 });
 
-// DHG-3 / H06: the Story page's "Suggest headlines" press runs AI, so it has the
-// shared picker (full list plus effort). It starts on the "Headline suggestions"
-// job's model from Server -> Models "Who does what", and the picker shows the
-// model the press will run.
-test("DHG-3: Suggest headlines has the shared headline picker, set to the headline job's model", async () => {
-  availabilityStub.__setAvailability(Object.fromEntries(["codex-luna", "auto", "local-model"].map((id) => [id, true])));
+// TXA-2 (D274): the Story page has ONE model choice. The "Suggest headlines"
+// press runs the Writer pick -- the same model the Draft press sends -- so the
+// old second row ("Model for suggestions") is gone. Two pickers for one screen
+// let the two presses disagree, and an editor who picked a model for the story
+// had to find and repeat that pick beside the headline.
+test("TXA-2: Suggest headlines has no second picker and starts on the Writer pick", async () => {
+  availabilityStub.__setAvailability(Object.fromEntries(["local-model", "auto"].map((id) => [id, true])));
   globalThis.screenData = {
     lead: {
       lead: { id: 22, headline: "Fixture story", topic: "council", status: "new", summary: "Fixture", url: "https://example.org" },
@@ -114,26 +115,23 @@ test("DHG-3: Suggest headlines has the shared headline picker, set to the headli
   };
   globalThis.pickerDoorState = { modelResearchOpen: true, modelChoice: "local-model" };
   try {
-    const module = await import(
-      await doorModule("src/routes/desk.story.$leadId.tsx", [], {
-        resolveJobModel: `({jobKey})=>({providerId:jobKey==="headlines"?"codex-luna":"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
-      }),
-    );
+    const module = await import(await doorModule("src/routes/desk.story.$leadId.tsx", []));
     const html = renderToStaticMarkup(createElement(module.Route.component));
     const doc = parseHTML(html).document;
     assert.ok(html.includes("Suggest headlines"), "the Suggest headlines press is still on the Story page");
-    const headline = [...doc.querySelectorAll('[data-model-picker="shared"]')].find(
-      (picker) => picker.querySelector("label")?.textContent.trim() === "Model for suggestions",
-    );
-    assert.ok(headline, "Suggest headlines has its own shared model picker, named Model for suggestions");
     assert.equal(
-      headline.querySelector("option[selected]")?.getAttribute("value"),
-      "codex-luna",
-      "the picker shows the Headline suggestions job's model, which is the model the press runs",
+      [...doc.querySelectorAll('[data-model-picker="shared"]')].filter(
+        (picker) => picker.querySelector("label")?.textContent.trim() === "Model for suggestions",
+      ).length,
+      0,
+      "no Model for suggestions picker: the press uses the Writer pick above",
     );
-    assert.ok(
-      [...headline.querySelectorAll("label")].some((label) => label.textContent.trim() === "Thinking effort"),
-      "the headline picker carries the effort control too",
+    const writer = [...doc.querySelectorAll('[data-model-picker="shared"]')][0];
+    assert.ok(writer, "the Writer picker is still on the page");
+    assert.equal(
+      writer.querySelector("option[selected]")?.getAttribute("value"),
+      "local-model",
+      "the one picker shows the Writer pick, which is the model the press runs",
     );
   } finally {
     delete globalThis.pickerDoorState;
