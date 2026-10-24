@@ -8,6 +8,7 @@ import type { DeskJob } from "./jobs.ts";
 import type { MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts";
 import { pickSourceCopyIngest, type ReportedDraftResult } from "./desk-model-run.ts";
 import type { IngestOptions } from "./ingest.ts";
+import { CLAUDE_CLI_MISSING } from "./ai-claude-code.server.ts";
 
 /*
   D234: the report-local-news skill writes NORMAL news leads, not only meetings.
@@ -372,6 +373,59 @@ test("a failed skill run falls back to the four-pass writer on the same pick, an
       writer: "standard",
       researchWriterError: "The writer finished without a story.",
     });
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
+});
+
+test("a missing Claude Code CLI is explained in plain words, without install instructions", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const { job, readDraft } = await fixture(88615, "deepseek-flash");
+    const stages: string[] = [];
+    const notes: string[] = [];
+    const reportCalls: Array<{ modelChoice: string }> = [];
+    await performDraftWork(job, {
+      readStoryDocuments: async () => "",
+      // The runner's own failure for a machine with no CLI: no story.txt, and
+      // the raw `CLAUDE_CLI_MISSING` sentence as its error.
+      newsWriterRun: async () => ({
+        ok: false,
+        exitCode: 1,
+        timedOut: false,
+        durationMs: 5,
+        lastText: "",
+        error: CLAUDE_CLI_MISSING,
+      }),
+      reportAndDraft: async (input) => {
+        reportCalls.push({ modelChoice: String(input.modelChoice) });
+        return REPORTED;
+      },
+      setJobStage: async (_id, stage) => {
+        stages.push(stage);
+      },
+      setJobFailoverNote: async (_id, note) => {
+        notes.push(note);
+      },
+    });
+
+    const sentence =
+      "The research writer could not finish (the research tool is not set up on this computer). The story is being written the usual way, on the same model.";
+    assert.deepEqual(reportCalls, [{ modelChoice: "deepseek-flash" }], "the same pick writes the fallback");
+    assert.ok(stages.includes(sentence), `stage line: ${stages.join(" | ")}`);
+    assert.ok(notes.includes(sentence), `failover note: ${notes.join(" | ")}`);
+    for (const text of [...stages, ...notes]) {
+      assert.ok(!text.includes("npm i -g"), `install instructions reached the editor: ${text}`);
+      assert.ok(!text.includes("CLAUDE_CLI_PATH"), `the env hint reached the editor: ${text}`);
+    }
+    const draft = await readDraft();
+    assert.equal(draft.headline, "Standard writer headline");
+    // The raw error still rides in the run's own stats for the operator.
+    assert.match(
+      String(draft.run_stats?.researchWriterError),
+      /Claude Code CLI not found/,
+      "the raw CLI text is kept for the operator",
+    );
   } finally {
     delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
   }

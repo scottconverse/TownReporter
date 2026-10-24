@@ -171,6 +171,38 @@ describe("claudeCliCandidates", () => {
     }
   });
 
+  it("checks the native install before the %APPDATA%\\npm hand copy (D209)", () => {
+    /*
+      An old hand copy in %APPDATA%\npm won this lookup on the live paper. The
+      native installer's own location must be looked at first; the %APPDATA%
+      copy stays as a fallback, never as the leading candidate.
+    */
+    const profile = join(tmpdir(), "tr-claude-order-profile");
+    const appData = join(tmpdir(), "tr-claude-order-appdata");
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: undefined,
+      APPDATA: appData,
+      HOME: undefined,
+      USERPROFILE: profile,
+    });
+    try {
+      const candidates = claudeCliCandidates();
+      const native = candidates.indexOf(nativeInstallUnder(profile));
+      const handCopy = candidates.indexOf(
+        `${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`,
+      );
+      assert.ok(native >= 0, `the native install is not offered: ${candidates.join(" | ")}`);
+      assert.ok(handCopy >= 0, `the %APPDATA% copy is not offered: ${candidates.join(" | ")}`);
+      assert.ok(
+        native < handCopy,
+        `the native install (${native}) must come before the %APPDATA% copy (${handCopy}): ` +
+          candidates.join(" | "),
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("names the npm install under the profile when APPDATA is unset (a boot-started server)", () => {
     const profile = join(tmpdir(), "tr-profile-no-appdata");
     const restore = withEnv({ APPDATA: undefined, CLAUDE_CLI_PATH: undefined, HOME: undefined, USERPROFILE: profile });

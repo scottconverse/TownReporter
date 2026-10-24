@@ -162,9 +162,11 @@ export function claudeCliCandidates(): string[] {
   const appData = cliAppDataDir();
   const home = process.env.HOME || process.env.USERPROFILE;
   const out: string[] = [];
-  if (appData) {
-    out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
-  }
+  /*
+    D209: an old hand copy in %APPDATA%\npm won this lookup on the live paper.
+    The native installer's own location is checked first, then the npm global
+    prefix, and the %APPDATA% copy comes after both -- it must never lead.
+  */
   if (home) {
     // Anthropic's native installer puts the binary here.
     if (IS_WINDOWS) out.push(`${home}\\.local\\bin\\claude.exe`);
@@ -176,6 +178,9 @@ export function claudeCliCandidates(): string[] {
         ? `${cachedNpmGlobalPrefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`
         : `${cachedNpmGlobalPrefix}/lib/node_modules/@anthropic-ai/claude-code/bin/claude`,
     );
+  }
+  if (appData) {
+    out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
   }
   out.push(...claudeOnPath());
   if (home) {

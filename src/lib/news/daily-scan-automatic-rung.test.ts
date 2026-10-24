@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
@@ -45,7 +46,7 @@ let validateForcedRuntime: typeof import("./forced-runtime.server.ts").validateF
 const RUNG_ONE_ID = "deepseek-flash";
 /** Rung 3 of `automaticLadder()`, the one after Qwen (off in this file). */
 const RUNG_THREE_ID = "codex-balanced";
-const RUNG_ONE_MODEL = "deepseek-v4.1-flash:cloud";
+const RUNG_ONE_MODEL = "deepseek-v4.1-flash:1017-cloud";
 /** The one model id the stub lists; the readiness probe matches it exactly. */
 const SOURCE_URL = "https://example.test/agenda";
 const SOURCE_TEXT =
@@ -53,6 +54,8 @@ const SOURCE_TEXT =
 
 let fake: ChildProcess | undefined;
 let fakeBaseUrl = "";
+/** The machine's own value, put back when the file finishes. */
+let previousClaudeCliPath: string | undefined;
 
 /** Start the stub on an OS-chosen port and read the port back off its own line. */
 async function startFake(): Promise<string> {
@@ -99,6 +102,19 @@ async function setScanMode(mode: string | null): Promise<void> {
 before(async () => {
   fakeBaseUrl = await startFake();
   /*
+    Seal the test from a real Claude Code CLI on this machine. ai.ts sends
+    DeepSeek Flash through the CLI whenever `findClaudeCli()` finds one, and
+    only a missing CLI reaches the HTTP endpoint this test's request log
+    watches. `claudeCliCandidates()` returns ONLY `CLAUDE_CLI_PATH` when it is
+    set, so pointing it at a path that cannot exist makes "not found" certain.
+  */
+  previousClaudeCliPath = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = join(
+    tmpdir(),
+    `tr-no-claude-cli-${process.pid}-${Date.now().toString(36)}`,
+    "claude.exe",
+  );
+  /*
     Arranged so the ladder is exactly two rungs this test controls: rung 1 is
     the stub, Qwen is switched off (its own rung would be reached on a machine
     with LM Studio running and would answer for real), and the Codex rung runs
@@ -137,10 +153,19 @@ before(async () => {
   ({ performScanWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
   ({ runDailyScanWork } = await vite.ssrLoadModule("/src/lib/news/daily-scan.server.ts"));
   ({ validateForcedRuntime } = await vite.ssrLoadModule("/src/lib/news/forced-runtime.server.ts"));
+  /*
+    Clear the memoized lookup on the SAME module instance the app code is
+    handed: the app modules above are loaded through this vite server, so
+    loading the CLI module the same way reaches the one they import.
+  */
+  const cli = await vite.ssrLoadModule("/src/lib/news/ai-claude-code.server.ts");
+  cli.resetClaudeCliCache();
   await getPglite();
 });
 after(async () => {
   fake?.kill();
+  if (previousClaudeCliPath === undefined) delete process.env.CLAUDE_CLI_PATH;
+  else process.env.CLAUDE_CLI_PATH = previousClaudeCliPath;
   await vite.close();
 });
 
