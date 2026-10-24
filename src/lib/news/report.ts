@@ -1081,6 +1081,9 @@ async function hydrateCaptures(
 export async function defaultIngest(
   url: string,
   ocrOptions?: IngestOptions,
+  // G23-R2-ENG-3: a seam so a test can prove the reader's needsOcr verdict
+  // survives this hand-off to the saved copy, without network or OCR.
+  deps: { ingestDocument?: typeof ingestDocument } = {},
 ): Promise<FetchedDoc> {
   try {
     const { isNewsletterUrl, retainedNewsletterDocument } = await import("./newsletter-scan.server.ts");
@@ -1091,7 +1094,7 @@ export async function defaultIngest(
       return { url, title: stored?.title ?? "Newsletter", text: stored?.text ?? "", extras: [],
         extraction_method: stored?.extractionMethod ?? "newsletter" };
     }
-    const got = await ingestDocument(url, ocrOptions);
+    const got = await (deps.ingestDocument ?? ingestDocument)(url, ocrOptions);
     return {
       url,
       title: got.title || describeSourceUrl(url).title,
