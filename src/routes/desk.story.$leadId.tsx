@@ -103,6 +103,7 @@ import {
   uncheckedGateTodos,
   type ReportingNotes,
 } from "@/lib/news/notes";
+import { savedDraftRefusalLine } from "@/lib/news/draft-refusal-line";
 import {
   duplicateKillReason,
   editorActionError,
@@ -705,11 +706,19 @@ function StoryPage() {
     return label;
   };
 
+  /*
+    G23-QA-5 (D279): a refusal the desk saved on the lead, for the editor who
+    reloaded and lost the live message. The next Draft press clears it on the
+    server, and this page's own lead refresh then removes the line.
+  */
+  const savedRefusalLine = msg
+    ? null
+    : savedDraftRefusalLine(parseNotes(data?.lead?.notes_json).lastDraftRefusal, paperIdentity.timezone);
   const previousJobError =
     !waiting && !msg && (data?.job?.status === "failed" || data?.job?.status === "cancelled")
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
-  const draftProblem = msg || previousJobError;
+  const draftProblem = msg || savedRefusalLine || previousJobError;
   /*
     DHI-3: a stop is not a failure. `msg` on the live path already says
     "Stopped. No draft was saved."; this flag carries the same fact to the

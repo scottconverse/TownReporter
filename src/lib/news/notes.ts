@@ -221,6 +221,14 @@ export type ReportingNotes = {
     excerpt: string;
     captionSha256: string;
   }[];
+  /**
+   * G23-QA-5 (D279): why the last Draft press did not start, kept on the lead
+   * so a refusal survives a reload. The Story page shows it in the same place
+   * as a live refusal; the next Draft press clears it. Named explicitly in
+   * parseNotes below (the parser builds its object field by field), at the END
+   * of the type so a concurrent change to this file merges cleanly.
+   */
+  lastDraftRefusal?: { text: string; at: string };
 };
 
 export function earlierReportingNotes(
@@ -391,6 +399,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       ...uncheckedStoryConfirmationFromRaw(o),
       ...holdFromRaw(o),
       ...meetingFromRaw(o),
+      ...draftRefusalFromRaw(o),
     };
   } catch {
     return base;
@@ -416,6 +425,27 @@ function modelPickFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "mod
   if (r.effort != null && typeof r.effort !== "string") return {};
   const effort = typeof r.effort === "string" ? r.effort.trim().slice(0, 40) : null;
   return { modelPick: { choice, effort: effort || null } };
+}
+
+/**
+ * G23-QA-5 (D279): the last Draft refusal, read defensively.
+ *
+ * A refusal the editor can act on has a sentence and the moment it was given.
+ * Anything malformed is dropped whole rather than half-kept: a line saying
+ * "Draft did not start" with no usable time would be a claim this desk cannot
+ * stand behind.
+ */
+function draftRefusalFromRaw(
+  o: Record<string, unknown>,
+): Pick<ReportingNotes, "lastDraftRefusal"> {
+  const raw = o.lastDraftRefusal;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as { text?: unknown; at?: unknown };
+  if (typeof r.text !== "string" || typeof r.at !== "string") return {};
+  const text = r.text.trim().slice(0, 600);
+  const at = r.at.trim();
+  if (!text || !at || Number.isNaN(Date.parse(at))) return {};
+  return { lastDraftRefusal: { text, at } };
 }
 
 /**
@@ -1024,6 +1054,7 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     // Kept for the same reason as the confirmation above: it is the only record
     // of why an editor parked a lead, and a shed reason reads as "never given".
     hold: work.hold,
+    lastDraftRefusal: work.lastDraftRefusal,
     news: work.news,
     why: work.why,
     angle: work.angle,

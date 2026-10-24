@@ -121,6 +121,7 @@ import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-regist
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { wireScanLine } from "@/lib/news/scan-wire-line";
+import { deskGreeting } from "@/lib/news/desk-greeting";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
@@ -1208,7 +1209,7 @@ function DeskHome() {
 
   return (
     <DeskShell
-      title={booting ? "Loading today’s desk…" : "Good morning. Here’s today’s paper."}
+      title={booting ? "Loading today’s desk…" : deskGreeting(nowMs, timezone)}
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
       actions={
         /*

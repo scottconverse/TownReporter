@@ -4970,6 +4970,26 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   });
 });
 
+/**
+ * G23-QA-5 (D279): keep the last Draft refusal on the lead, so it survives a
+ * reload. `null` clears it (the press is being tried again).
+ *
+ * The note is a convenience: a failed write is warned about and swallowed, so
+ * it can never change what the Draft press answers.
+ */
+async function noteDraftRefusal(
+  newsroomId: number,
+  leadId: number,
+  refusal: { text: string; at: string } | null,
+): Promise<void> {
+  try {
+    const { saveDraftRefusalNote } = await import("./draft-refusal-note.server.ts");
+    await withTransaction((tx) => saveDraftRefusalNote(tx, newsroomId, leadId, refusal));
+  } catch (error) {
+    console.warn("[desk] could not record the draft refusal on the lead's notes", error);
+  }
+}
+
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => draftLeadInput.parse(input))
@@ -4980,8 +5000,12 @@ export const draftLead = createServerFn({ method: "POST" })
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
     const { commitStoryDraftForAuthenticatedEditor } =
       await import("./model-request-commit.server.ts");
-    return commitStoryDraftForAuthenticatedEditor({
-      context: { userId: context.userId, newsroomId: owned(context) },
+    const newsroomId = owned(context);
+    // This press is the retry: any refusal already on the lead is about the
+    // press before this one, so it goes before anything can refuse this one.
+    await noteDraftRefusal(newsroomId, leadId, null);
+    const result = await commitStoryDraftForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId },
       leadId,
       modelChoice,
       modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
@@ -4990,6 +5014,15 @@ export const draftLead = createServerFn({ method: "POST" })
       meetingArtifactId: typeof data === "number" ? undefined : data.meetingArtifactId,
       override: typeof data === "number" ? undefined : data.override,
     });
+    // A refusal with a `kind` is the one the Story page can act on; it is the
+    // same sentence the live page showed, kept for the editor who reloads.
+    if (!result.ok && "kind" in result && result.kind) {
+      await noteDraftRefusal(newsroomId, leadId, {
+        text: result.error,
+        at: new Date().toISOString(),
+      });
+    }
+    return result;
   });
 
 /*
@@ -5039,8 +5072,12 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const modelChoice = storyModelChoice(data.modelChoice);
     const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
-    return commitStoryDraftForAuthenticatedEditor({
-      context: { userId: context.userId, newsroomId: owned(context) },
+    const newsroomId = owned(context);
+    // G23-QA-5 (D279): one Draft path, one rule -- the previous refusal goes
+    // before the press, and this press's own refusal is kept if it is refused.
+    await noteDraftRefusal(newsroomId, data.leadId, null);
+    const result = await commitStoryDraftForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId },
       leadId: data.leadId,
       modelChoice,
       modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
@@ -5050,6 +5087,13 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
       reuseLedger: true,
       override: data.override,
     });
+    if (!result.ok && "kind" in result && result.kind) {
+      await noteDraftRefusal(newsroomId, data.leadId, {
+        text: result.error,
+        at: new Date().toISOString(),
+      });
+    }
+    return result;
   });
 
 /*

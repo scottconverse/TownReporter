@@ -64,7 +64,27 @@ export function BeforeYouCanPublish(props: {
       createElement("span", { className: "astra-blocker-chip" },
         blocker.kind === "warning" ? "Warning" : "Blocks Publish",
       ),
-      createElement("span", { className: "astra-blocker-what" }, blocker.sentence),
+      /*
+        D278: a blocker that carries a list draws the lead and the items as a
+        real `<ol>` -- body size, the same as every other warning row, one item
+        per line. Everything else draws its sentence as before.
+      */
+      createElement(
+        "span",
+        { className: "astra-blocker-what" },
+        blocker.items?.length
+          ? [
+              createElement(Fragment, { key: "lead" }, blocker.lead ?? blocker.sentence),
+              createElement(
+                "ol",
+                { className: "astra-blocker-items", key: "items" },
+                ...blocker.items.map((item, index) =>
+                  createElement("li", { key: `i-${index}` }, item),
+                ),
+              ),
+            ]
+          : blocker.sentence,
+      ),
       createElement(
         "span",
         { className: "astra-blocker-acts" },
