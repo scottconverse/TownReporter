@@ -131,7 +131,11 @@ export function meetingLeadCopy(input: {
 }): { headline: string; why: string } | null {
   const subject = meetingLeadSubject(input);
   if (!subject) return null;
-  const when = input.meetingDate ? ` (${input.meetingDate})` : "";
+  // TUA-5: the capture passes the video's full publish time; the stamp is its day.
+  const stampDay = input.meetingDate && /^\d{4}-\d{2}-\d{2}T/.test(input.meetingDate)
+    ? input.meetingDate.slice(0, 10)
+    : input.meetingDate;
+  const when = stampDay ? ` (${stampDay})` : "";
   /*
     The meeting itself stays in the headline in front of the item: the desk needs
     to know which session this is before it needs to know which item. The
