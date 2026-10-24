@@ -245,7 +245,19 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       },
     ),
   };
-  await withClaimedLeadDraftLock(job, draft.lead_id, async (tx ) => {
+  await withClaimedLeadDraftLock(job, draft.lead_id, async (tx, lockedStatus ) => {
+    /*
+      TVA-2 (D266): the editor pressed "Publish anyway" while this check was
+      running, exactly as the warning promised they could. The story has already
+      printed, so there is no draft left to replace: record the late answer on
+      the job and let it complete quietly, with the sentence that says the
+      printed story did not change.
+    */
+    if (lockedStatus === "published") {
+      const [article] = await tx<{id:number}>`select id from articles where newsroom_id=${job.newsroom_id} and lead_id=${draft.lead_id} order by id desc limit 1`;
+      await tx`update desk_jobs set result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify(sanitizeJsonLeaves({ publishedBeforeCheck: true, articleId: article?.id ?? null, originalDraftId: draft.id, aiEvidenceReview, storyReadiness: aiEvidenceReadiness(aiEvidenceReview), evidenceReconciledAt: new Date().toISOString(), evidenceCheckIncomplete: false }))}::jsonb)::text, result_href=${`/desk/story/${draft.lead_id}`} where id=${job.id} and claim_token=${job.claim_token}`;
+      return;
+    }
     const [current] = await tx<DraftRow>`select * from drafts where lead_id=${draft.lead_id} and newsroom_id=${job.newsroom_id} order by updated_at desc,id desc limit 1 for update`;
     if (!current || current.id !== draft.id || String(current.updated_at) !== snapshotUpdated || evidenceReviewToken(current) !== snapshotToken) throw new Error("The draft or its evidence changed while reconciliation was running. The saved draft was preserved.",
       );
@@ -431,7 +443,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     // (0099) so a completed reconcile row is never briefly linkless. It points
     // at the draft this run SAVED, not the one it read.
     await tx`update desk_jobs set result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify({ originalDraftId: draft.id, newDraftId: saved.id, evidenceCheckIncomplete: false })}::jsonb)::text, result_href=${`/desk/story/draft/${saved.id}`} where id=${job.id} and claim_token=${job.claim_token}`;
-  });
+  }, { allowPublished: true });
 }
 
 export async function requestDraftReconciliation(
