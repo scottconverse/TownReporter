@@ -468,9 +468,18 @@ test("source copies are saved three at a time, not one at a time", async () => {
 
     assert.ok(peak > 1, `the copies were saved one at a time (highest at once: ${peak})`);
     assert.ok(peak <= 3, `more than three copies ran at once (highest at once: ${peak})`);
-    // The stage line keeps the words it had: finished count of the total.
+    // D268: the chip row moves to the draft stage before the skill writer runs.
+    assert.equal(
+      stages[0],
+      "Writing the draft",
+      "the chip row moves to Writing the draft before the skill writer runs (D268)",
+    );
+    // The stage line keeps the words it had: finished count of the total, on the
+    // save stages only -- the draft stage above rides in the same list.
     assert.deepEqual(
-      [...stages].sort(),
+      stages
+        .filter((stage) => stage.startsWith("Saving copies of the sources"))
+        .sort(),
       sixUrls.map((_, index) => `Saving copies of the sources (${index + 1} of 6)`).sort(),
     );
   } finally {

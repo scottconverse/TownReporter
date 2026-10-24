@@ -4316,6 +4316,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             pick and never a substitute: a Claude pick runs as itself, and a
             DeepSeek pick runs through the desk's DeepSeek relay.
           */
+          // D268: the agent opens the sources, looks for records and plans inside its own run, so the chip row moves here.
+          await setStage(job.id, "Writing the draft");
           const { runNewsSkillWriter } = await import("./news-skill-writer.server.ts");
           skill = await runNewsSkillWriter({
             sql,
@@ -4355,6 +4357,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             skillVersion: skill.skillVersion,
             model: writerRuntime.ok ? writerRuntime.model : "",
             workDir: skill.workDir,
+            ...(skill.toolExecutions ? { toolExecutions: skill.toolExecutions } : {}),
           };
           const sourceUrls = claimsAndSourcesUrls(skill.claims);
           await saveSourceCopies(sourceUrls, job.id);
@@ -4425,6 +4428,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         below. A failed run is the job's plain failure -- no model is swapped
         in behind the editor's back.
       */
+      // D268: the agent opens the sources, looks for records and plans inside its own run, so the chip row moves here.
+      await setStage(job.id, "Writing the draft");
       const { runMeetingSkillWriter } = await import("./meeting-skill-writer.server.ts");
       const skill = await runMeetingSkillWriter({
         sql,
@@ -4475,6 +4480,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         skillVersion: skill.skillVersion,
         model: writerRuntime.model,
         workDir: skill.workDir,
+        ...(skill.toolExecutions ? { toolExecutions: skill.toolExecutions } : {}),
         ...(substitutedFrom ? { requestedModel: substitutedFrom } : {}),
       };
       /*

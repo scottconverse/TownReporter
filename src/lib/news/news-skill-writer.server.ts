@@ -202,5 +202,6 @@ export async function runNewsSkillWriter(input: {
     workDir,
     durationMs: result.durationMs,
     runNotes: readOptional(workDir, "RUN-NOTES.md"),
+    ...(result.toolExecutions ? { toolExecutions: result.toolExecutions } : {}),
   };
 }

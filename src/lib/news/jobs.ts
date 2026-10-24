@@ -1649,6 +1649,39 @@ export async function reportProgress(
     step?: string | null;
   },
 ): Promise<void> {
+  await writeProgress(jobId, progress, true);
+}
+
+/*
+  D268: the time each job's step was last written by the WORKER itself (its
+  agent's own words, a stage arrival, a failover note) -- never by the
+  `waitForModel` ticker. The ticker reads it so a model call cannot bury the
+  agent's own line under "Waiting on ..." every twelve seconds; see `say()`
+  below. Module-level because a job lives in one process for its run.
+*/
+const lastOwnStepAt = new Map<number, number>();
+
+/**
+ * How long the worker's own step is left on the card before the ticker may
+ * replace it. One number, exported so the test names the rule instead of
+ * copying 30_000.
+ */
+export const WAIT_STEP_HOLD_MS = 30_000;
+
+/**
+ * The write both `reportProgress` and the ticker use. `ownStep` is true only for
+ * a caller that is the worker itself, so the ticker's "Waiting on ..." sentence
+ * never makes its own step look fresh.
+ */
+async function writeProgress(
+  jobId: number,
+  progress: {
+    stageIndex?: number | null;
+    pct?: number | null;
+    step?: string | null;
+  },
+  ownStep: boolean,
+): Promise<void> {
   await ensureJobsSchema();
   const sql = await getSql();
   const hasIndex = progress.stageIndex !== undefined;
@@ -1667,6 +1700,14 @@ export async function reportProgress(
         beat_at = now()
     where id = ${jobId}
   `;
+  /*
+    A step with words in it is the worker saying what it is doing; `{}` (the
+    ticker's beat-only write) is not a step at all. Both the map's readers and
+    its writer live in this file.
+  */
+  if (ownStep && progress.step !== undefined && progress.step !== null) {
+    lastOwnStepAt.set(jobId, Date.now());
+  }
 }
 
 /**
@@ -1747,7 +1788,13 @@ export function jobProgressStalled(
 
 /**
  * Run one model call that may outlast the stall window, while telling the desk
- * it is still going: "Waiting on Codex Sol · 42s", once a tick.
+ * it is still going, once a tick. What it says depends on who spoke last
+ * (D268): when the worker wrote a step of its own less than
+ * `WAIT_STEP_HOLD_MS` ago, the tick is a beat only (`{}`) and that step stays
+ * on the card -- an agent that is reading a source must not be buried under
+ * "Waiting on ...". Otherwise it says "Waiting on Codex Sol", with no elapsed
+ * seconds, because the count kept overwriting the agent's own line and the
+ * card's clock already shows the wait.
  *
  * THIS IS THE OTHER HALF OF THE `beat_at` CONTRACT. A call that is not wrapped
  * here is a call during which the worker says nothing, so a slow model and a
@@ -1766,8 +1813,9 @@ export function jobProgressStalled(
  * finish and its result discarded, which is what "stop cleanly at the next
  * boundary" means for a boundary that is inside an await.
  *
- * `now`, `report` and `cancelPoll` are injection seams: the tests drive a fake
- * clock instead of waiting 12 real seconds, and assert on the reported steps.
+ * `now`, `report`, `cancelPoll` and `lastStepAt` are injection seams: the tests
+ * drive a fake clock instead of waiting 12 real seconds, and assert on the
+ * reported steps.
  */
 export async function waitForModel<T>(opts: {
   jobId: number;
@@ -1785,13 +1833,21 @@ export async function waitForModel<T>(opts: {
   now?: () => number;
   report?: typeof reportProgress;
   cancelPoll?: (jobId: number) => Promise<boolean>;
+  /**
+   * When this job's step was last written by the worker itself. Defaults to the
+   * module's own record; only the tests pass it.
+   */
+  lastStepAt?: (jobId: number) => number | undefined;
 }): Promise<T> {
   const tick = opts.tickMs ?? JOB_TICK_MS;
   const now = opts.now ?? (() => Date.now());
-  const report = opts.report ?? reportProgress;
+  // The ticker's own writes go through the non-owning writer, so its "Waiting
+  // on ..." sentence never counts as a step the worker wrote.
+  const report: typeof reportProgress = opts.report ??
+    ((jobId, progress) => writeProgress(jobId, progress, false));
+  const lastStepAt = opts.lastStepAt ?? ((jobId: number) => lastOwnStepAt.get(jobId));
   const cancelPoll = opts.cancelPoll ?? jobCancelRequested;
   const labelNow = () => (typeof opts.label === "function" ? opts.label() : opts.label);
-  const startedAt = now();
   let cancelled = false;
   let rejectCancel: (err: JobCancelledError) => void = () => undefined;
   const cancelSignal = new Promise<never>((_, reject) => {
@@ -1801,8 +1857,12 @@ export async function waitForModel<T>(opts: {
   // rejection loose once the ticker stops.
   void cancelSignal.catch(() => undefined);
   const say = () => {
-    const seconds = Math.max(0, Math.floor((now() - startedAt) / 1000));
-    void report(opts.jobId, { step: `Waiting on ${labelNow()} · ${seconds}s` }).catch(
+    const at = lastStepAt(opts.jobId);
+    const fresh = at !== undefined && now() - at < WAIT_STEP_HOLD_MS;
+    // A fresh step of the worker's own gets a beat and nothing else: `{}` still
+    // bumps `beat_at` (so the card is never called stalled) and leaves
+    // `step_text` alone.
+    void report(opts.jobId, fresh ? {} : { step: `Waiting on ${labelNow()}` }).catch(
       () => undefined,
     );
   };
@@ -1829,6 +1889,9 @@ export async function waitForModel<T>(opts: {
     return await Promise.race([run, cancelSignal]);
   } finally {
     clearInterval(timer);
+    // The run is over, so the wait is over too; nothing should read this job's
+    // stale step time into the next call it makes.
+    lastOwnStepAt.delete(opts.jobId);
     if (cancelled) {
       /*
         The abandoned call will still settle, usually by rejecting -- a provider

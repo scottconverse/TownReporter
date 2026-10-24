@@ -614,7 +614,31 @@ export type ClaudeAgentRunResult = {
   durationMs: number;
   /** The agent's final message, when the CLI reported one. */
   lastText?: string;
+  /**
+   * How many times the agent used each tool, by name: `{ Bash: 12, WebFetch: 3 }`.
+   * Names and counts only (TXB-2) -- never an input or a result, which can hold
+   * whole files and page text.
+   */
+  toolExecutions?: Record<string, number>;
 };
+
+/** Every tool name a stream event asks for, in the order they appear. */
+function toolUseNames(event: unknown): string[] {
+  if (!event || typeof event !== "object") return [];
+  const record = event as { type?: unknown; message?: { content?: unknown } };
+  if (record.type !== "assistant") return [];
+  const content = record.message?.content;
+  if (!Array.isArray(content)) return [];
+  const names: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const item = block as { type?: unknown; name?: unknown };
+    if (item.type === "tool_use" && typeof item.name === "string" && item.name) {
+      names.push(item.name);
+    }
+  }
+  return names;
+}
 
 /**
  * The one line of a stream event that a job can show as its current step.
@@ -689,9 +713,18 @@ export async function claudeCodeAgentRun(opts: {
   onEvent?: (text: string) => void;
 }): Promise<ClaudeAgentRunResult> {
   const startedAt = Date.now();
-  const done = (result: Omit<ClaudeAgentRunResult, "durationMs">): ClaudeAgentRunResult => ({
+  /*
+    TXB-2: the agent's tool calls, counted by name as the stream goes by. The
+    receipt has always said "one model call" and nothing about what the agent
+    actually did; this is the one fact the stream carries cheaply.
+  */
+  const toolExecutions: Record<string, number> = {};
+  const done = (result: Omit<ClaudeAgentRunResult, "durationMs" | "toolExecutions">): ClaudeAgentRunResult => ({
     ...result,
     durationMs: Date.now() - startedAt,
+    ...(Object.keys(toolExecutions).length
+      ? { toolExecutions: { ...toolExecutions } }
+      : {}),
   });
 
   if (!opts.deepSeek && opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
@@ -787,6 +820,9 @@ export async function claudeCodeAgentRun(opts: {
       if (event.type === "result" && typeof event.result === "string") {
         lastText = event.result;
         return;
+      }
+      for (const name of toolUseNames(event)) {
+        toolExecutions[name] = (toolExecutions[name] ?? 0) + 1;
       }
       const step = agentStepFromEvent(event);
       if (!step) return;

@@ -157,6 +157,11 @@ export type RunStats = {
   /** The picker choice, when the run used a different model than the editor picked. */
   requestedModel?: string;
   workDir?: string;
+  /**
+   * What the agent did, by tool name and count (TXB-2): `{ Bash: 12 }`. Names
+   * and counts only -- never an input or a result.
+   */
+  toolExecutions?: Record<string, number>;
 };
 
 export const COLD_LEAD_CHARS = 40_000;

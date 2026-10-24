@@ -29,7 +29,29 @@ const emit = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
 
-if (process.env.FAKE_AGENT_MODE === "sleep") {
+if (process.env.FAKE_AGENT_MODE === "tools") {
+  // TXB-2: a named-tool stream. Two Bash calls and one WebFetch, with a tool
+  // RESULT in between that must not be counted as anything.
+  emit({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "Bash", id: "b1", input: { command: "curl -s https://example.gov/packet" } }] },
+  });
+  emit({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "Bash", id: "b2", input: { command: "pdftotext packet.pdf" } }] },
+  });
+  emit({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "b2", content: "SECRET FILE BODY" }] },
+  });
+  emit({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "WebFetch", id: "w1", input: { url: "https://example.gov" } }] },
+  });
+  writeFileSync("story.txt", "Headline\\n\\nDek\\n\\nBody\\n");
+  emit({ type: "result", subtype: "success", is_error: false, result: "RUN-DONE" });
+  process.exit(0);
+} else if (process.env.FAKE_AGENT_MODE === "sleep") {
   writeFileSync("pid.txt", String(process.pid));
   setInterval(() => {}, 1000);
 } else {
@@ -124,6 +146,33 @@ describe("claudeCodeAgentRun", () => {
       // The step is the agent's own description, and a tool result is not one.
       assert.deepEqual(steps, ["Fetching the council packet", "Wrote story.txt"]);
     } finally {
+      restore();
+    }
+  });
+
+  it("counts the agent's tool calls by name, never their contents (TXB-2)", async () => {
+    const { bin, workDir } = fakeCli("agent-tools");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(workDir, { recursive: true });
+    const restore = withEnv(bin);
+    const before = process.env.FAKE_AGENT_MODE;
+    process.env.FAKE_AGENT_MODE = "tools";
+    try {
+      const result = await claudeCodeAgentRun({
+        workDir,
+        prompt: "Cover the meeting.",
+        model: "claude-opus-5-5",
+        timeoutMs: 20_000,
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.toolExecutions, { Bash: 2, WebFetch: 1 });
+      // Names and counts only: no command, URL or result text rides along.
+      const receipt = JSON.stringify(result.toolExecutions);
+      assert.equal(receipt.includes("curl"), false);
+      assert.equal(receipt.includes("SECRET"), false);
+    } finally {
+      if (before === undefined) delete process.env.FAKE_AGENT_MODE;
+      else process.env.FAKE_AGENT_MODE = before;
       restore();
     }
   });
