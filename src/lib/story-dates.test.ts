@@ -1138,6 +1138,75 @@ describe("one row per event (unit CV, item 1)", () => {
   FA11 (Oct 11 walk): the front page's This week printed "Residents Get Until
   to Weigh In on the Rest" -- the date cut out from after "Until".
 */
+/*
+  TWS-1 (Oct 24 walk): the public "Dates in this story" box printed "TUE 25"
+  beside "Construction Begins Aug. 31 on Group 2 Railroad Quiet Zone
+  Improvements". The row hung on the day the record was posted, not the day the
+  record's own title names. Decision D260 = A: a title that names a day gets
+  that day; a title that names none, or names the posted day, keeps the posted
+  day.
+*/
+describe("record title names its own day (TWS-1)", () => {
+  const posted = (title: string, document_date: string): StoryDateSource =>
+    ({
+      slug: "quiet-zone",
+      section: "council",
+      records: [{ title, organization: "longmontcolorado.gov", document_date }],
+    }) as StoryDateSource;
+
+  it("hangs the finding's row on Aug. 31, the day its title names", () => {
+    const title = "Construction Begins Aug. 31 on Group 2 Railroad Quiet Zone Improvements";
+    const items = collectStoryDates([posted(title, "2026-08-25")]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-08-31", title]],
+    );
+    assert.deepEqual(
+      storyDateRows(items).map((row) => [row.dow, row.day, row.what]),
+      [["Mon", "31", title]],
+    );
+  });
+
+  it("keeps the posted day when the title names no day", () => {
+    const items = collectStoryDates([posted("Group 2 Railroad Quiet Zone Staff Report", "2026-08-25")]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-08-25", "Group 2 Railroad Quiet Zone Staff Report"]],
+    );
+  });
+
+  it("keeps the posted day when the title names that same day", () => {
+    const items = collectStoryDates([posted("Quiet Zone Hearing Set For Aug. 25", "2026-08-25")]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-08-25", "Quiet Zone Hearing Set For Aug. 25"]],
+    );
+  });
+
+  it("still gives no row for a record with no posted day", () => {
+    const items = collectStoryDates([posted("Construction Begins Aug. 31 on Group 2", "")]);
+    assert.deepEqual(items, []);
+  });
+
+  it("applies the window to the day the title names", () => {
+    // [Aug 24, Aug 31) excludes the 31st; one more day includes it.
+    assert.deepEqual(
+      collectStoryDates([posted("Construction Begins Aug. 31 on Group 2", "2026-08-25")], {
+        from: "2026-08-24",
+        days: 7,
+      }),
+      [],
+    );
+    assert.deepEqual(
+      collectStoryDates([posted("Construction Begins Aug. 31 on Group 2", "2026-08-25")], {
+        from: "2026-08-24",
+        days: 8,
+      }).map((i) => i.date),
+      ["2026-08-31"],
+    );
+  });
+});
+
 describe("FA11: a date that is the object of 'until' stays in the line", () => {
   it("does not leave 'Until' hanging", () => {
     const items = collectStoryDates([{
