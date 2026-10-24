@@ -62,6 +62,7 @@ import {
   testCloudUsageWarnings,
 } from "@/lib/news/provider-availability";
 import { modelReadiness, type ReadinessFacts } from "@/lib/news/model-readiness";
+import { plainServerWords } from "@/lib/news/server-answer-words";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import {
   deleteCustomAiConnectionFn,
@@ -822,7 +823,9 @@ function JobRow({
             help={readinessFacts.reason ?? jobStatusHelp(facts)}
             /* Name the resolved default without making it a readiness state. */
             below={
-              readinessFacts.reason ?? (kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined)
+              readinessFacts.reason
+                ? plainServerWords(readinessFacts.reason).text
+                : kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined
             }
           />
         </div>

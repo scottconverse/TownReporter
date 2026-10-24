@@ -362,6 +362,18 @@ describe("lastDraftInHand: the draft in hand keeps its model after a save messag
       "You picked Codex Sol. Gemini Flash wrote this draft because Codex Sol returned an empty draft.",
     );
   });
+  it("never says the Automatic pick timed out: the note names the model that did", () => {
+    const sentence = draftFallbackAttribution({
+      pickedModel: "Automatic",
+      writerModel: "Codex Sol 6.1 (balanced)",
+      failoverNote: "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash 1017 timed out.",
+    });
+    assert.equal(
+      sentence,
+      "You picked Automatic. Codex Sol 6.1 (balanced) wrote this draft because DeepSeek v4.1 Flash 1017 timed out.",
+    );
+    assert.doesNotMatch(sentence ?? "", /Automatic timed out/);
+  });
 });
 
 /*

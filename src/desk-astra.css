@@ -5417,6 +5417,16 @@
   color: var(--mut);
 }
 
+/* The cause behind "the model server did not answer", opened on demand.
+   Same size and ink as the card's main text: editors have old eyes. */
+.desk-ltr.astra .job-card-detail {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--ink);
+}
+.desk-ltr.astra .job-card-detail summary {
+  cursor: pointer;
+}
+
 .desk-ltr.astra .job-card-stall {
   display: flex;
   flex-direction: column;

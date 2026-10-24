@@ -163,6 +163,23 @@ test("a failed job leads with the model's own reason, not a stack trace", () => 
   assert.doesNotMatch(html, /Now: Writing the draft/);
 });
 
+test("a failed job whose model server did not answer says so plainly, with the cause behind a disclosure", () => {
+  const html = render({
+    job: job({
+      status: "failed",
+      endedAt: NOW,
+      error:
+        "Local model is unreachable. Check that it is running and that this machine is online. (ECONNREFUSED; connect ECONNREFUSED 127.0.0.1:1299)",
+    }),
+  });
+  assert.match(html, /Local model: the model server did not answer\. Check that it is running and that this machine is online\./);
+  // The host and port are a technical detail, not the sentence the editor reads first.
+  const [head, disclosure] = html.split(/<details class="job-card-detail">/);
+  assert.ok(disclosure, "expected a technical-detail disclosure");
+  assert.doesNotMatch(head, /127\.0\.0\.1:1299/);
+  assert.match(disclosure, /127\.0\.0\.1:1299/);
+});
+
 test("a cancelled job shows the editor's own reason with Retry beside it", () => {
   const html = render({
     job: job({ status: "failed", endedAt: NOW, error: "Cancelled by the editor" }),

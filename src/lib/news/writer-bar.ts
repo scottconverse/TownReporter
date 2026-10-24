@@ -209,6 +209,16 @@ export function draftFallbackAttribution(input: {
   const picked = input.pickedModel.trim();
   const writer = input.writerModel.trim();
   if (!picked || !writer || picked === writer || !input.failoverNote) return undefined;
+  /*
+    "Automatic" is a choice, not a model: it cannot have timed out. The note
+    already names the model that did and why, so the sentence repeats that.
+  */
+  if (picked === "Automatic") {
+    const reason = switchReasonFromNote(input.failoverNote);
+    return reason
+      ? `You picked Automatic. ${writer} wrote this draft because ${reason}.`
+      : `You picked Automatic. ${writer} wrote this draft.`;
+  }
   const match = /timed out|sign-in lapsed|reached its usage limit|usage limit|was unavailable|reply was cut off|sent a reply the desk could not read|could not read|returned an empty draft/i.exec(input.failoverNote);
   if (!match) return undefined;
   const reason = /timed out/i.test(match[0])
