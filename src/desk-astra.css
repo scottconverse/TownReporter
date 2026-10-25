@@ -8310,6 +8310,9 @@
 /* The card. Sonner positions and animates the <li>; everything visible is here. */
 .desk-ltr .desk-toaster [data-sonner-toast] {
   display: flex;
+  /* A long sentence plus a button plus the dismiss press wraps onto a second
+     line instead of squeezing the sentence into a sliver. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -8328,8 +8331,8 @@
 
 /* The message, and the space it is allowed to take before the buttons. */
 .desk-ltr .desk-toaster [data-title] {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 16em;
+  min-width: min(16em, 100%);
   font-size: calc(14px * var(--ts));
   font-weight: 600;
   color: inherit;

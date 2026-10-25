@@ -5,7 +5,7 @@
   THE SHAPE OF A RUN. One folder per draft, under the newsroom's meeting storage
   root:
 
-      <root>/meeting-runs/newsroom-<newsroomId>/job-<jobId>/
+      <root>/meeting-runs/newsroom-<newsroomId>/job-<jobId>-<timestamp>/
           SKILL.md          the agent's only instructions, copied in
           scripts/audit.py  the audit the skill tells it to run, copied in
           transcript.txt    the whole meeting, one line per caption
@@ -16,6 +16,13 @@
 
   The folder is KEPT after the run -- it is the evidence for the story, and the
   editor may need to see the transcript the writer actually read.
+
+  EVERY RUN GETS A NEW FOLDER (D205). The name carries the time the run began,
+  so a database restore that hands out job ids again can never land a new run
+  in an old run's folder, where a stale story.txt or audit-final.txt would be
+  read as this run's. Older folders named job-<jobId> are left alone and stay
+  readable: the run's `workDir` is recorded with the draft, and everything that
+  reads a run later reads that recorded path, never a rebuilt one.
 
   WHY THE FOLDER IS BUILT HERE AND NOT BY THE AGENT. Everything the run depends
   on is placed before the agent starts, so a failure is always attributable: if
@@ -213,6 +220,27 @@ function readOptional(workDir: string, name: string): string {
 }
 
 /**
+ * Makes this run's own empty folder: job-<jobId>-<UTC timestamp to the
+ * millisecond>. The last directory is created without `recursive`, so an
+ * existing folder is an error and the name gets a counter instead of the run
+ * quietly sharing it.
+ */
+export function createFreshRunDir(parent: string, jobId: number | string, now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:.]/g, "");
+  mkdirSync(parent, { recursive: true });
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const dir = join(parent, `job-${jobId}-${stamp}${attempt === 0 ? "" : `-${attempt}`}`);
+    try {
+      mkdirSync(dir);
+      return dir;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`Could not make a new meeting-run folder for job ${jobId} under ${parent}.`);
+}
+
+/**
  * One run of the writer.
  *
  * `run` is the agent call. It is a parameter rather than a direct call so the
@@ -234,6 +262,8 @@ export async function runMeetingSkillWriter(input: {
   run?: MeetingSkillWriterRunner;
   /** Injected for tests: today's date as the desk would say it. */
   today?: string;
+  /** Injected for tests: the moment the run begins, which names its folder. */
+  now?: Date;
   /** Injected for tests: this meeting's packet document URL. */
   packetUrlForMeeting?: MeetingPacketLookup;
   env?: Record<string, string | undefined>;
@@ -247,7 +277,11 @@ export async function runMeetingSkillWriter(input: {
   }
 
   const root = await meetingRunRoot(input.sql, input.newsroomId, input.env ?? process.env);
-  const workDir = join(root, "meeting-runs", `newsroom-${input.newsroomId}`, `job-${input.jobId}`);
+  const workDir = createFreshRunDir(
+    join(root, "meeting-runs", `newsroom-${input.newsroomId}`),
+    input.jobId,
+    input.now,
+  );
   mkdirSync(join(workDir, "scripts"), { recursive: true });
   // The skill is copied in, never linked: the agent must not be able to edit the
   // shipped copy, and the run must stay readable after the app is rebuilt.

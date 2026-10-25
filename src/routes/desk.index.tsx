@@ -22,7 +22,7 @@ import {
   DraftStateChip,
 } from "@/components/draft-item-boundary";
 import { Busy, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
-import { useNowMs } from "@/components/desk-jobs";
+import { jobHeadline, useNowMs } from "@/components/desk-jobs";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import type { JobProgressView } from "@/lib/news/job-progress";
 import {
@@ -1408,6 +1408,7 @@ function DeskHome() {
                 <DeskJobCard
                   key={job.id}
                   job={job}
+                  title={jobHeadline(job)}
                   compact={job.kind !== "dark"}
                   cancelLabel={job.kind === "dark" ? "Stop" : "Cancel"}
                   viewLabel={open?.label}

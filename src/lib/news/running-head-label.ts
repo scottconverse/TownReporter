@@ -20,3 +20,17 @@ export function runningHeadLabel(jobs: readonly CountableJob[]): string {
   const queued = jobs.filter((job) => job.status === "queued").length;
   return `Running · ${jobs.length - queued}${queued ? ` · ${queued} queued` : ""}`;
 }
+
+/**
+ * Which jobs the nav's Running box draws as rows on this screen.
+ *
+ * Today ("/desk") already draws every open job as its own "Running now" card,
+ * with the story name, "Open your story" and Cancel. The box beside it drew the
+ * same job a second time, so one draft showed as two rows. On Today the box keeps
+ * its "Running · N" heading (a link to Today) and leaves the rows to the page;
+ * everywhere else it is the only place the job is drawn, so it keeps them.
+ */
+export function runningBoxRows<T>(pathname: string, jobs: readonly T[]): T[] {
+  if (pathname.replace(/\/+$/, "") === "/desk") return [];
+  return jobs.slice(0, 3);
+}
