@@ -248,6 +248,14 @@ describe("searchEvidence: close in meaning", () => {
     await chunk(v, nearest);
     await chunk(v, second);
     await chunk(v, exactPiece);
+    // Three more real neighbours, so the five kept rows are all above the
+    // meaning floor rather than filled with unrelated zero-score rows.
+    const third = "Fiber buildout adds two thousand homes";
+    const fourth = "Broadband committee meets on rates";
+    const fifth = "Residents ask about internet outages";
+    await chunk(v, third);
+    await chunk(v, fourth);
+    await chunk(v, fifth);
     for (let i = 0; i < 6; i += 1) {
       await chunk(v, `Unrelated piece number ${i} about sewer rates`);
     }
@@ -255,6 +263,9 @@ describe("searchEvidence: close in meaning", () => {
     await insertVector(nearest, vec(0.9, 0.1));
     await insertVector(second, vec(0.8, 0.2));
     await insertVector(exactPiece, vec(0.95, 0.05));
+    await insertVector(third, vec(0.7, 0.3));
+    await insertVector(fourth, vec(0.6, 0.4));
+    await insertVector(fifth, vec(0.55, 0.45));
     for (let i = 0; i < 6; i += 1) {
       await insertVector(`Unrelated piece number ${i} about sewer rates`, vec(0, 1));
     }
@@ -316,6 +327,82 @@ describe("searchEvidence: close in meaning", () => {
     assert.ok(result.meaningStatus.total >= 2);
     assert.ok(result.meaningStatus.covered >= 1);
     assert.ok(result.meaningStatus.covered <= result.meaningStatus.total);
+  });
+
+  it("never lets another newsroom crowd out this newsroom's matches", async () => {
+    // S1: 60 higher-scored pieces from the other paper would fill every
+    // candidate slot if the ranking ran before the newsroom filter.
+    const theirs = await capture(
+      "https://example.com/other-room",
+      "Other room",
+      "2026-10-01T10:00:00Z",
+      OTHER_ROOM,
+    );
+    for (let i = 0; i < 60; i += 1) {
+      const excerpt = `Other room piece ${i} about the river`;
+      await chunk(theirs, excerpt, OTHER_ROOM, i);
+      await insertVector(excerpt, vec(0, 0, 1));
+    }
+    const mine = await capture("https://example.com/own-room", "Own room", "2026-10-01T10:00:00Z");
+    const ownExcerpt = "Own newsroom match about river levels";
+    await chunk(mine, ownExcerpt);
+    await insertVector(ownExcerpt, vec(0, 0, 0.7));
+    setEmbedderForTests(fakeEmbedder({ streamflow: vec(0, 0, 1) }));
+
+    const result = await searchEvidence({ newsroomId: NEWSROOM }, "streamflow");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.meaning.length, 1);
+    assert.equal(result.meaning[0]!.excerptStart, ownExcerpt);
+  });
+
+  it("hides weak matches below the meaning floor", async () => {
+    const v = await capture("https://example.com/floor", "Floor", "2026-10-01T10:00:00Z");
+    const real = "Flood recovery effort continues downtown";
+    await chunk(v, real);
+    await insertVector(real, vec(0, 0, 0, 0, 0, 1));
+
+    // A nonsense query points at an axis no stored piece shares: every score
+    // is 0, which is not "close in meaning".
+    setEmbedderForTests(fakeEmbedder({ "zqxjvwk nohitword": vec(0, 0, 0, 0, 0, 0, 1) }));
+    const nonsense = await searchEvidence({ newsroomId: NEWSROOM }, "zqxjvwk nohitword");
+    assert.equal(nonsense.ok, true);
+    if (!nonsense.ok) return;
+    assert.deepEqual(nonsense.meaning, []);
+
+    // A real query still shows its match.
+    setEmbedderForTests(fakeEmbedder({ inundation: vec(0, 0, 0, 0, 0, 1) }));
+    const realQuery = await searchEvidence({ newsroomId: NEWSROOM }, "inundation");
+    assert.equal(realQuery.ok, true);
+    if (!realQuery.ok) return;
+    assert.ok(realQuery.meaning.some((row) => row.excerptStart === real));
+  });
+
+  it("serves the coverage counts from cache, and refresh clears them", async () => {
+    const v = await capture("https://example.com/coverage-cache", "Cache", "2026-10-01T10:00:00Z");
+    await chunk(v, "Cached coverage piece one");
+    setEmbedderForTests(fakeEmbedder({ "coverage cache": vec(0, 0, 1) }));
+
+    const before = await searchEvidence({ newsroomId: NEWSROOM }, "coverage cache");
+    assert.equal(before.ok, true);
+    if (!before.ok) return;
+
+    // A new piece arrives, but the fill clock has not cleared the cache yet.
+    await chunk(v, "Cached coverage piece two");
+    const started = performance.now();
+    const repeat = await searchEvidence({ newsroomId: NEWSROOM }, "coverage cache");
+    const elapsed = performance.now() - started;
+    assert.equal(repeat.ok, true);
+    if (!repeat.ok) return;
+    assert.equal(repeat.meaningStatus.total, before.meaningStatus.total, "cached, not recounted");
+    assert.ok(elapsed < 100, `repeat search took ${elapsed.toFixed(1)}ms`);
+
+    // Clearing is what the fill clock does every minute: the count catches up.
+    clearEvidenceVectorCache();
+    const refreshed = await searchEvidence({ newsroomId: NEWSROOM }, "coverage cache");
+    assert.equal(refreshed.ok, true);
+    if (!refreshed.ok) return;
+    assert.equal(refreshed.meaningStatus.total, before.meaningStatus.total + 1);
   });
 
   it("keeps the exact list when the meaning model throws", async () => {

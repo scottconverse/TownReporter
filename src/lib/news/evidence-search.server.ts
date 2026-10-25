@@ -22,9 +22,11 @@ import {
  *                  makes a takedown (excerpt blanked) or a legal removal
  *                  (chunk rows deleted) drop out of the next search.
  *
- * The vectors are loaded once per process and reloaded after five minutes;
- * the fill and prune paths clear the cache so a freshly embedded piece is
- * visible on the very next search.
+ * Each newsroom's vectors are loaded once and reloaded after five minutes, so
+ * another paper's pieces never take up this paper's candidate slots; the fill
+ * and prune paths clear the cache so a freshly embedded piece is visible on
+ * the very next search. The coverage counts are kept for a minute on the same
+ * signal.
  */
 
 export type EvidenceRow = {
@@ -60,6 +62,17 @@ const EXACT_LIMIT = 30;
 const MEANING_CANDIDATES = 60;
 const MEANING_LIMIT = 5;
 const VECTOR_CACHE_MS = 5 * 60 * 1000;
+/**
+ * Below this cosine score a piece is not "close in meaning" at all, it is just
+ * the least-unrelated row in the archive. Chosen from a measurement over all
+ * 22,223 readable excerpts in newsroom 1 with the app's own MiniLM embedder:
+ * the nonsense query from the walk ("zqxjvwk nohitword") topped out at 0.401,
+ * and the weakest real query's best row was 0.493, so 0.45 hides nonsense
+ * with room on both sides and keeps at least three rows for every real query.
+ */
+export const MEANING_MIN_SCORE = 0.45;
+/** The coverage line may be up to a minute stale; the fill clock runs each minute. */
+const COVERAGE_CACHE_MS = 60 * 1000;
 
 type ChunkRow = {
   md5: string;
@@ -72,28 +85,43 @@ type ChunkRow = {
 };
 
 type VectorCache = { loadedAt: number; vectors: Map<string, Float32Array> };
-let vectorCache: VectorCache | null = null;
+type CoverageCounts = { covered: number; total: number };
+const vectorCache = new Map<number, VectorCache>();
+const coverageCache = new Map<number, { loadedAt: number; counts: CoverageCounts }>();
 
 /** Tests, the fill clock and the prune clock call this after writing. */
 export function clearEvidenceVectorCache(): void {
-  vectorCache = null;
+  vectorCache.clear();
+  coverageCache.clear();
 }
 
-/** Every stored vector, at most once per five minutes. */
-async function loadVectors(): Promise<Map<string, Float32Array>> {
-  if (vectorCache && Date.now() - vectorCache.loadedAt < VECTOR_CACHE_MS) {
-    return vectorCache.vectors;
+/**
+ * The vectors this newsroom may rank, at most once per five minutes: only
+ * pieces it still holds, and only readable ones. Loading the whole table and
+ * filtering after the top-60 cut let another paper's pieces crowd this paper's
+ * own matches out of the list (D-report, S1).
+ */
+async function loadVectors(newsroomId: number): Promise<Map<string, Float32Array>> {
+  const cached = vectorCache.get(newsroomId);
+  if (cached && Date.now() - cached.loadedAt < VECTOR_CACHE_MS) {
+    return cached.vectors;
   }
   const sql = await getSql();
   const rows = await sql<{ excerpt_md5: string; vector: unknown }>`
-    select excerpt_md5, vector from evidence_vectors
+    select distinct on (md5(c.excerpt)) md5(c.excerpt) as excerpt_md5, ev.vector
+    from artifact_chunks c
+    join evidence_vectors ev on ev.excerpt_md5 = md5(c.excerpt)
+    where c.newsroom_id = ${newsroomId}
+      and c.excerpt <> ''
+      and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
+    order by md5(c.excerpt)
   `;
   const vectors = new Map<string, Float32Array>();
   for (const row of rows) {
     const vector = bytesToVector(row.vector);
     if (vector.length === EVIDENCE_DIMS) vectors.set(row.excerpt_md5, vector);
   }
-  vectorCache = { loadedAt: Date.now(), vectors };
+  vectorCache.set(newsroomId, { loadedAt: Date.now(), vectors });
   return vectors;
 }
 
@@ -144,10 +172,16 @@ async function exactRows(newsroomId: number, q: string): Promise<EvidenceRow[]> 
   return rows.map((row) => toRow(row));
 }
 
-/** How much of this newsroom's evidence has a vector so far. */
-async function coverage(
-  newsroomId: number,
-): Promise<{ covered: number; total: number }> {
+/**
+ * How much of this newsroom's evidence has a vector so far. The two counts scan
+ * the chunk table, so the answer is kept for a minute: an editor searching
+ * again pays nothing, and the fill clock clears it whenever it writes.
+ */
+async function coverage(newsroomId: number): Promise<CoverageCounts> {
+  const cached = coverageCache.get(newsroomId);
+  if (cached && Date.now() - cached.loadedAt < COVERAGE_CACHE_MS) {
+    return cached.counts;
+  }
   const sql = await getSql();
   const [row] = await sql<{ covered: number; total: number }>`
     select
@@ -161,7 +195,9 @@ async function coverage(
         where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
           and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as total
   `;
-  return { covered: row?.covered ?? 0, total: row?.total ?? 0 };
+  const counts = { covered: row?.covered ?? 0, total: row?.total ?? 0 };
+  coverageCache.set(newsroomId, { loadedAt: Date.now(), counts });
+  return counts;
 }
 
 /** The meaning list, or the reason it could not be drawn. */
@@ -181,7 +217,7 @@ async function meaningRows(
 
   let vectors: Map<string, Float32Array>;
   try {
-    vectors = await loadVectors();
+    vectors = await loadVectors(newsroomId);
   } catch (err) {
     return { rows: [], error: shortReason(err) };
   }
@@ -189,7 +225,9 @@ async function meaningRows(
   const scored: { md5: string; score: number }[] = [];
   for (const [md5, vector] of vectors) {
     if (exactMd5s.has(md5)) continue;
-    scored.push({ md5, score: dotProduct(queryVector, vector) });
+    const score = dotProduct(queryVector, vector);
+    if (score < MEANING_MIN_SCORE) continue;
+    scored.push({ md5, score });
   }
   scored.sort((a, b) => b.score - a.score);
   const candidates = scored.slice(0, MEANING_CANDIDATES);
