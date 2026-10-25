@@ -23,7 +23,7 @@ function canonicalWindowsPath(path) {
   return win32Path.normalize(win32Path.join(realpathSync.native(probe), ...tail));
 }
 
-function configFieldsResolveAtTarget(config, target, oldRoots) {
+function configFieldsResolveAtTarget(config, target, oldRoots, exeName = "redlib.exe") {
   try {
     const installRoot = canonicalWindowsPath(config.installRoot);
     const targetRoot = canonicalWindowsPath(target);
@@ -41,7 +41,7 @@ function configFieldsResolveAtTarget(config, target, oldRoots) {
 
     return win32Path.normalize(installRoot).toLowerCase() === win32Path.normalize(targetRoot).toLowerCase()
       && existsSync(config.executable)
-      && relativeExecutable === "redlib.exe"
+      && relativeExecutable === exeName.toLowerCase()
       && relativeLog === "redlib.log"
       && note !== null
       && win32Path.normalize(note).toLowerCase() === win32Path.normalize(installRoot).toLowerCase()
@@ -875,6 +875,13 @@ test(
   () => {
     const script = join(OPS, "redlib-relocate.ps1");
     const base = mkdtempSync(join(tmpdir(), "redlib-relocate-edge-"));
+    // The script refuses to replace an install whose executable name matches a
+    // running process it cannot inspect (a service in session 0 hides its image
+    // path). A machine that runs the real Redlib has such a process named
+    // "redlib", which turned every replace here into that refusal instead of
+    // the copy failure under test. Fixture executables get a name no real
+    // process has, so the result no longer depends on what else is running.
+    const exeName = `redlib-fixture-${process.pid}.exe`;
     const noEnv = join(base, "absent.env");
     const run = (args, extraEnv = {}) => {
       try {
@@ -936,7 +943,7 @@ test(
       mkdirSync(root, { recursive: true });
       const config = {
         installRoot: root,
-        executable: join(root, "redlib.exe"),
+        executable: join(root, exeName),
         baseUrl: "http://127.0.0.1:65533",
         logPath: join(root, "redlib.log"),
         notes: [`built at ${root}`, "unrelated"],
@@ -944,7 +951,7 @@ test(
         ...overrides,
       };
       writeFileSync(join(root, "install.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
-      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, exeName), "stub, never run\n", "utf8");
       writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
     };
     const envLine = (out) => out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
@@ -969,7 +976,7 @@ test(
       const aliasConfig = existsSync(join(aliasTarget, "install.json"))
         ? JSON.parse(readFileSync(join(aliasTarget, "install.json"), "utf8"))
         : {};
-      const aliasFieldsCorrect = configFieldsResolveAtTarget(aliasConfig, aliasTarget, [aliasSource]);
+      const aliasFieldsCorrect = configFieldsResolveAtTarget(aliasConfig, aliasTarget, [aliasSource], exeName);
 
       const autoAliasSource = join(shortBase, "auto-from");
       const autoLongSource = join(base, "auto-from");
@@ -981,7 +988,7 @@ test(
       const autoConfig = existsSync(join(autoTarget, "install.json"))
         ? JSON.parse(readFileSync(join(autoTarget, "install.json"), "utf8"))
         : {};
-      const autoFieldsCorrect = configFieldsResolveAtTarget(autoConfig, autoTarget, [autoAliasSource, autoLongSource]);
+      const autoFieldsCorrect = configFieldsResolveAtTarget(autoConfig, autoTarget, [autoAliasSource, autoLongSource], exeName);
 
       const fixtureLocalAppData = join(base, "fixture-localappdata");
       const sandboxSource = join(fixtureLocalAppData, "Packages", "FakePackage", "LocalCache", "Local", "RedditSearch", "Redlib");
@@ -989,7 +996,7 @@ test(
       const sandboxTarget = join(base, "sandbox-to");
       plant(sandboxSource, {
         installRoot: logicalRoot,
-        executable: join(logicalRoot, "redlib.exe"),
+        executable: join(logicalRoot, exeName),
         logPath: join(logicalRoot, "redlib.log"),
         notes: [`built at ${logicalRoot}`, "unrelated"],
       });
@@ -1004,14 +1011,14 @@ test(
           === win32Path.normalize(realpathSync.native(sandboxTarget)).toLowerCase();
       const sandboxLogicalMappingCorrect = sandboxRun.code === 0
         && sandboxPrintedTargetCorrect
-        && configFieldsResolveAtTarget(sandboxConfig, sandboxTarget, [sandboxSource, logicalRoot])
+        && configFieldsResolveAtTarget(sandboxConfig, sandboxTarget, [sandboxSource, logicalRoot], exeName)
         && sourceBytes(sandboxSource).equals(sandboxBytes);
 
       const ordinarySource = join(base, "ordinary-source");
       const ordinaryTarget = join(base, "ordinary-target");
       plant(ordinarySource, {
         installRoot: logicalRoot,
-        executable: join(logicalRoot, "redlib.exe"),
+        executable: join(logicalRoot, exeName),
         logPath: join(logicalRoot, "redlib.log"),
       });
       const ordinaryBytes = sourceBytes(ordinarySource);
@@ -1060,7 +1067,7 @@ test(
       const samePlaceSafe = sameRun.code === 0
         && Boolean(envLine(sameRun.out))
         && sourceBytes(sameSource).equals(sameBytes)
-        && readdirSync(sameSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+        && readdirSync(sameSource).sort().join(",") === `config.toml,install.json,${exeName}`;
 
       const liveTargetSource = join(base, "live-target-source");
       const liveTarget = join(base, "live-target");
@@ -1129,10 +1136,10 @@ test(
       };
       plant(liveTargetSource);
       plant(liveTarget);
-      copyFileSync(powershellExe, join(liveTarget, "redlib.exe"));
+      copyFileSync(powershellExe, join(liveTarget, exeName));
       const liveTargetInstallBefore = readFileSync(join(liveTarget, "install.json"));
-      const liveTargetExecutableBefore = readFileSync(join(liveTarget, "redlib.exe"));
-      const liveTargetExe = join(liveTarget, "redlib.exe");
+      const liveTargetExecutableBefore = readFileSync(join(liveTarget, exeName));
+      const liveTargetExe = join(liveTarget, exeName);
       const liveTargetPid = startLongLivedProcess(liveTargetExe);
       writeFileSync(join(liveTarget, "redlib.pid"), String(liveTargetPid), "utf8");
       let liveTargetRun;
@@ -1149,7 +1156,7 @@ test(
         processStillRunning: liveTargetProcessSurvived,
         installMetadataPreserved: existsSync(join(liveTarget, "install.json"))
           && readFileSync(join(liveTarget, "install.json")).equals(liveTargetInstallBefore),
-        executablePreserved: readFileSync(join(liveTarget, "redlib.exe")).equals(liveTargetExecutableBefore),
+        executablePreserved: readFileSync(join(liveTarget, exeName)).equals(liveTargetExecutableBefore),
         pidFilePreserved: existsSync(join(liveTarget, "redlib.pid"))
           && readFileSync(join(liveTarget, "redlib.pid"), "utf8") === String(liveTargetPid),
       };
@@ -1157,10 +1164,10 @@ test(
       const stalePidTarget = join(base, "stale-pid-target");
       plant(stalePidTargetSource);
       plant(stalePidTarget);
-      copyFileSync(powershellExe, join(stalePidTarget, "redlib.exe"));
+      copyFileSync(powershellExe, join(stalePidTarget, exeName));
       const stalePidTargetInstallBefore = readFileSync(join(stalePidTarget, "install.json"));
-      const stalePidTargetExecutableBefore = readFileSync(join(stalePidTarget, "redlib.exe"));
-      const stalePidTargetExe = join(stalePidTarget, "redlib.exe");
+      const stalePidTargetExecutableBefore = readFileSync(join(stalePidTarget, exeName));
+      const stalePidTargetExe = join(stalePidTarget, exeName);
       const stalePidTargetProcess = startLongLivedProcess(stalePidTargetExe);
       writeFileSync(join(stalePidTarget, "redlib.pid"), "2147483647", "utf8");
       let stalePidTargetRun;
@@ -1187,7 +1194,7 @@ test(
       plant(rollbackTarget);
       writeFileSync(join(rollbackTarget, "redlib.pid"), "2147483647", "utf8");
       const rollbackTargetInstallBefore = readFileSync(join(rollbackTarget, "install.json"));
-      const rollbackTargetExecutableBefore = readFileSync(join(rollbackTarget, "redlib.exe"));
+      const rollbackTargetExecutableBefore = readFileSync(join(rollbackTarget, exeName));
       const rollbackTargetConfigBefore = readFileSync(join(rollbackTarget, "config.toml"));
       const sourceLockPid = startSourceFileLock(join(rollbackSource, "config.toml"));
       let rollbackRun;
@@ -1199,7 +1206,7 @@ test(
       const rollbackTargetRestored = rollbackRun.code === 1
         && /previous destination files were restored/i.test(rollbackRun.out)
         && readFileSync(join(rollbackTarget, "install.json")).equals(rollbackTargetInstallBefore)
-        && readFileSync(join(rollbackTarget, "redlib.exe")).equals(rollbackTargetExecutableBefore)
+        && readFileSync(join(rollbackTarget, exeName)).equals(rollbackTargetExecutableBefore)
         && readFileSync(join(rollbackTarget, "config.toml")).equals(rollbackTargetConfigBefore)
         && readFileSync(join(rollbackTarget, "redlib.pid"), "utf8") === "2147483647";
 
@@ -1208,7 +1215,7 @@ test(
       plant(lockedTargetSource);
       plant(lockedTarget);
       const lockedTargetInstallBefore = readFileSync(join(lockedTarget, "install.json"));
-      const lockedTargetExecutableBefore = readFileSync(join(lockedTarget, "redlib.exe"));
+      const lockedTargetExecutableBefore = readFileSync(join(lockedTarget, exeName));
       const lockedTargetConfigBefore = readFileSync(join(lockedTarget, "config.toml"));
       const targetLockPid = startSourceFileLock(join(lockedTarget, "config.toml"));
       let lockedTargetRun;
@@ -1220,7 +1227,7 @@ test(
       const lockedTargetRefused = lockedTargetRun.code === 1
         && /cannot be safely replaced right now/i.test(lockedTargetRun.out)
         && readFileSync(join(lockedTarget, "install.json")).equals(lockedTargetInstallBefore)
-        && readFileSync(join(lockedTarget, "redlib.exe")).equals(lockedTargetExecutableBefore)
+        && readFileSync(join(lockedTarget, exeName)).equals(lockedTargetExecutableBefore)
         && readFileSync(join(lockedTarget, "config.toml")).equals(lockedTargetConfigBefore);
 
       const unresolvedSource = join(base, "unresolved-identity-source");
@@ -1280,7 +1287,7 @@ test(
         && !existsSync(nestedTarget)
         && !envLine(nestedRun.out)
         && sourceBytes(nestedSource).equals(nestedBytes)
-        && readdirSync(nestedSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+        && readdirSync(nestedSource).sort().join(",") === `config.toml,install.json,${exeName}`;
 
       const ancestorTarget = join(base, "ancestor-target");
       const ancestorSource = join(ancestorTarget, "source");
@@ -1291,7 +1298,7 @@ test(
       const ancestorParentEntriesBefore = readdirSync(ancestorTarget).sort();
       const ancestorParentConfigBefore = readFileSync(join(ancestorTarget, "config.toml"));
       const ancestorParentInstallBefore = sourceBytes(ancestorTarget);
-      const ancestorParentExeBefore = readFileSync(join(ancestorTarget, "redlib.exe"));
+      const ancestorParentExeBefore = readFileSync(join(ancestorTarget, exeName));
       const ancestorSourceBytes = sourceBytes(ancestorSource);
       const ancestorRun = run(["-From", ancestorSource, "-To", ancestorTarget, "-Force", "-EnvFile", noEnv]);
       const ancestorTargetEvidence = {
@@ -1300,7 +1307,7 @@ test(
         parentEntriesPreserved: readdirSync(ancestorTarget).sort().join(",") === ancestorParentEntriesBefore.join(","),
         parentConfigPreserved: readFileSync(join(ancestorTarget, "config.toml")).equals(ancestorParentConfigBefore),
         parentInstallPreserved: sourceBytes(ancestorTarget).equals(ancestorParentInstallBefore),
-        parentExecutablePreserved: readFileSync(join(ancestorTarget, "redlib.exe")).equals(ancestorParentExeBefore),
+        parentExecutablePreserved: readFileSync(join(ancestorTarget, exeName)).equals(ancestorParentExeBefore),
         sourceInstallPreserved: sourceBytes(ancestorSource).equals(ancestorSourceBytes),
       };
 
@@ -1325,7 +1332,7 @@ test(
       const hardlinkExternal = join(base, "hardlink-external.txt");
       const hardlinkNestedExternal = join(base, "hardlink-nested-external.txt");
       plant(hardlinkSource);
-      writeFileSync(join(hardlinkSource, "redlib.exe"), "SOURCE-EXE-CONTENT", "utf8");
+      writeFileSync(join(hardlinkSource, exeName), "SOURCE-EXE-CONTENT", "utf8");
       writeFileSync(join(hardlinkSource, "config.toml"), "SOURCE-CONFIG-CONTENT", "utf8");
       mkdirSync(join(hardlinkSource, "assets", "nested"), { recursive: true });
       writeFileSync(join(hardlinkSource, "assets", "nested", "payload.txt"), "SOURCE-NESTED-CONTENT", "utf8");
@@ -1338,19 +1345,19 @@ test(
       writeFileSync(hardlinkNestedExternal, "EXTERNAL-NESTED-KEEP-CONTENT", "utf8");
       linkSync(hardlinkExternal, join(hardlinkTarget, "config.toml"));
       linkSync(hardlinkNestedExternal, join(hardlinkTarget, "assets", "nested", "payload.txt"));
-      const hardlinkSourceExeBefore = readFileSync(join(hardlinkSource, "redlib.exe"));
+      const hardlinkSourceExeBefore = readFileSync(join(hardlinkSource, exeName));
       const hardlinkSourceConfigBefore = readFileSync(join(hardlinkSource, "config.toml"));
       const hardlinkExternalBefore = readFileSync(hardlinkExternal);
       const hardlinkNestedExternalBefore = readFileSync(hardlinkNestedExternal);
       const hardlinkRun = run(["-From", hardlinkSource, "-To", hardlinkTarget, "-Force", "-EnvFile", noEnv]);
       const hardlinkEvidence = {
         exit: hardlinkRun.code,
-        sourceExecutablePreserved: readFileSync(join(hardlinkSource, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        sourceExecutablePreserved: readFileSync(join(hardlinkSource, exeName)).equals(hardlinkSourceExeBefore),
         sourceConfigPreserved: readFileSync(join(hardlinkSource, "config.toml")).equals(hardlinkSourceConfigBefore),
         externalHardlinkTargetPreserved: readFileSync(hardlinkExternal).equals(hardlinkExternalBefore),
         nestedExternalHardlinkTargetPreserved: readFileSync(hardlinkNestedExternal).equals(hardlinkNestedExternalBefore),
-        copiedExecutableCorrect: existsSync(join(hardlinkTarget, "redlib.exe"))
-          && readFileSync(join(hardlinkTarget, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        copiedExecutableCorrect: existsSync(join(hardlinkTarget, exeName))
+          && readFileSync(join(hardlinkTarget, exeName)).equals(hardlinkSourceExeBefore),
         copiedConfigCorrect: readFileSync(join(hardlinkTarget, "config.toml")).equals(hardlinkSourceConfigBefore),
         copiedNestedFileCorrect: readFileSync(join(hardlinkTarget, "assets", "nested", "payload.txt")).equals(Buffer.from("SOURCE-NESTED-CONTENT", "utf8")),
         targetOnlyEntriesPreserved: readFileSync(join(hardlinkTarget, "keep.txt"), "utf8") === "KEEP-TARGET-ONLY"
@@ -1361,10 +1368,10 @@ test(
       const unownedTarget = join(base, "unowned-target");
       plant(unownedSource);
       mkdirSync(unownedTarget);
-      writeFileSync(join(unownedTarget, "redlib.exe"), "UNOWNED-EXE-MUST-SURVIVE", "utf8");
+      writeFileSync(join(unownedTarget, exeName), "UNOWNED-EXE-MUST-SURVIVE", "utf8");
       writeFileSync(join(unownedTarget, "operator-data.txt"), "UNOWNED-DATA-MUST-SURVIVE", "utf8");
       const unownedEntriesBefore = readdirSync(unownedTarget).sort();
-      const unownedExeBefore = readFileSync(join(unownedTarget, "redlib.exe"));
+      const unownedExeBefore = readFileSync(join(unownedTarget, exeName));
       const unownedDataBefore = readFileSync(join(unownedTarget, "operator-data.txt"));
       const unownedRun = run(["-From", unownedSource, "-To", unownedTarget, "-Force", "-EnvFile", noEnv]);
       const unownedTargetRefused = unownedRun.code === 1
@@ -1372,7 +1379,7 @@ test(
         && !envLine(unownedRun.out)
         && !existsSync(join(unownedTarget, "install.json"))
         && readdirSync(unownedTarget).sort().join(",") === unownedEntriesBefore.join(",")
-        && readFileSync(join(unownedTarget, "redlib.exe")).equals(unownedExeBefore)
+        && readFileSync(join(unownedTarget, exeName)).equals(unownedExeBefore)
         && readFileSync(join(unownedTarget, "operator-data.txt")).equals(unownedDataBefore);
 
       const shapeSource = join(base, "shape-source");

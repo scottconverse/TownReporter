@@ -157,6 +157,11 @@ if ($env:FAKE_START_HANG -eq "1") { while ($true) { Start-Sleep -Seconds 1 } }
 $delay = 0
 if ($env:FAKE_START_DELAY_SECONDS -match "^\d+$") { $delay = [int]$env:FAKE_START_DELAY_SECONDS }
 if ($delay -gt 0) { Start-Sleep -Seconds $delay }
+# FAKE_START_RELEASE_FILE: stay "still starting" until the test creates this
+# file (or 120 s pass), so a slow machine cannot make the start finish early.
+if ($env:FAKE_START_RELEASE_FILE) {
+  for ($i = 0; $i -lt 120 -and -not (Test-Path -LiteralPath $env:FAKE_START_RELEASE_FILE); $i++) { Start-Sleep -Seconds 1 }
+}
 $node = (Get-Command node -ErrorAction Stop).Source
 Start-Process -FilePath $node `
   -ArgumentList ".output/server/index.mjs" `
@@ -535,7 +540,13 @@ try {
     Say '1. a slow start, inside the deadline'
     Stop-App
     Remove-Marker
-    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '10'; FAKE_START_HANG = $null; STUB_MODE = $null }
+    # No clock in this case: the fake start holds until the test releases it, and
+    # the deadline is wide, so a busy machine cannot end the start early or push
+    # it past the deadline. The behavior checked is unchanged.
+    $releaseFile = Join-Path $world 'release-start-1'
+    Remove-Item -LiteralPath $releaseFile -ErrorAction SilentlyContinue
+    $case1Deadline = 120
+    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_RELEASE_FILE = $releaseFile; WATCHDOG_START_DEADLINE_SECONDS = "$case1Deadline"; FAKE_START_HANG = $null; STUB_MODE = $null }
     Check 'nothing is listening before the run' { (Get-AppListenerPid) -eq 0 }
     $bg = Start-WatchdogBackground 'launch'
     $marker = Wait-ForMarker 20
@@ -548,15 +559,17 @@ try {
     $run = Invoke-Watchdog 'still starting'
     Check 'the watchdog exited 0' { $run.Code -eq 0 }
     Check 'it said a start is still running, with the marker, the PID and the deadline' {
-      ($run.Lines -join "`n") -match "a start is still running \(marker, PID $startPid, \d+ s of $deadline s\); not stopping anything"
+      ($run.Lines -join "`n") -match "a start is still running \(marker, PID $startPid, \d+ s of $case1Deadline s\); not stopping anything"
     }
     Check 'it stopped nothing' { -not ((Get-LogText) -match 'stopping stale PID') }
     $starts = @(Get-FakeStartProcesses)
     Check "it started nothing -- exactly one start process (found $($starts.Count))" { $starts.Count -eq 1 }
     Check 'the start process is still alive' { $startPid -gt 0 -and [bool](Get-Process -Id $startPid -ErrorAction SilentlyContinue) }
+    New-Item -ItemType File -Force -Path $releaseFile | Out-Null
     Check 'the app answered 200' { Wait-ForApp 200 90 }
     Check 'the background run finished' { Wait-ForWatchdogExit $bg 120 }
     Check 'the marker is gone once the app answered' { Wait-ForMarkerGone 20 }
+    Set-TestEnv @{ FAKE_START_RELEASE_FILE = $null; WATCHDOG_START_DEADLINE_SECONDS = "$deadline" }
 
     # --- 2. a start that already holds the port ------------------------------
     Say ''
@@ -714,7 +727,7 @@ try {
       Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
     }
   }
-  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'WATCHDOG_REPROBE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_HANG', 'STUB_MODE')) {
+  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'WATCHDOG_REPROBE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_RELEASE_FILE', 'FAKE_START_HANG', 'STUB_MODE')) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
   }
   if ($previousLocalAppData) { $env:LOCALAPPDATA = $previousLocalAppData }

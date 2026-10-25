@@ -1,8 +1,8 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
@@ -138,7 +138,9 @@ describe("runMeetingSkillWriter", () => {
     assert.deepEqual(stages, ["Wrote story.txt"]);
 
     // The folder is the newsroom's meeting storage root, one per job.
-    assert.equal(result.workDir, join(storageRoot, "meeting-runs", `newsroom-${NEWSROOM}`, "job-7"));
+    const runsParentDir = join(storageRoot, "meeting-runs", `newsroom-${NEWSROOM}`);
+    assert.equal(dirname(result.workDir), runsParentDir);
+    assert.match(basename(result.workDir), /^job-7-\d{8}T\d{9}Z$/);
     // The agent's instructions travelled with the run.
     assert.equal(readFileSync(join(result.workDir, "SKILL.md"), "utf8").length, 117_849);
     assert.match(readFileSync(join(result.workDir, "scripts", "audit.py"), "utf8"), /^#!\/usr\/bin\/env python3/);
@@ -191,6 +193,52 @@ describe("runMeetingSkillWriter", () => {
     if (!result.ok) return;
     assert.equal(result.body.includes("[meeting packet]("), true);
     assert.equal(result.body.includes("council packet"), false);
+  });
+
+  it("gives every run a new folder, so a reused job id never reads an old run's files (D205)", async () => {
+    const sql = await getSql();
+    const sameMoment = new Date("2026-10-24T19:00:00.123Z");
+    const runsParent = join(storageRoot, "meeting-runs", `newsroom-${NEWSROOM}`);
+    // A folder in the old layout, left by an earlier build: it must stay as it is.
+    const legacy = join(runsParent, "job-9");
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, "story.txt"), "LEGACY STORY", "utf8");
+
+    const first = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 9,
+      now: sameMoment,
+      packetUrlForMeeting: async () => PACKET_URL,
+      run: writingRunner({ "story.txt": PROOF_STORY, "RUN-NOTES.md": "FIRST RUN" }),
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    // A database restore hands out job 9 again, even in the same millisecond.
+    // The writer produces nothing this time: if the folder were reused, the
+    // first run's story.txt would be read back as this run's story.
+    const second = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 9,
+      now: sameMoment,
+      run: writingRunner({}),
+    });
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.equal(second.error, "The writer finished without a story.");
+    assert.ok(second.workDir);
+    assert.notEqual(second.workDir, first.workDir);
+    assert.notEqual(second.workDir, legacy);
+    assert.equal(existsSync(join(second.workDir!, "story.txt")), false);
+
+    // The earlier folders are untouched and still readable by their recorded path.
+    assert.match(readFileSync(join(first.workDir, "story.txt"), "utf8"), /transit center/);
+    assert.match(readFileSync(join(first.workDir, "RUN-NOTES.md"), "utf8"), /FIRST RUN/);
+    assert.equal(readFileSync(join(legacy, "story.txt"), "utf8"), "LEGACY STORY");
   });
 
   it("fails with a plain sentence when the writer writes no story", async () => {
