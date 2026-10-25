@@ -235,6 +235,31 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
                   {" "}· <a href={article.href}>{article.headline}</a>
                 </span>
               ))}
+              {run.summary.needsReview ? (
+                <div className="mt-2 text-base" aria-label="Why they need review">
+                  <p>
+                    <b>Why {run.summary.needsReview === 1 ? "it needs" : "they need"} review:</b>
+                  </p>
+                  {run.summary.reviewReasons.length ? (
+                    <ul className="list-disc pl-5">
+                      {run.summary.reviewReasons.map((reason, index) => (
+                        <li key={`${index}:${reason.why}`} className="py-0.5">
+                          {reason.label ? <b>{reason.label}</b> : null}
+                          {reason.label ? " — " : null}
+                          {reason.why}
+                          {reason.count > 1 ? ` (${reason.count} items)` : null}
+                          {reason.source ? ` · from ${reason.source}` : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>
+                      This run did not save its reasons. Open{" "}
+                      <a href="#routine-notice-checks">Review source checks</a> to see each item.
+                    </p>
+                  )}
+                </div>
+              ) : null}
               {run.notices.length ? (
                 <ul className="mt-2 list-disc pl-5" aria-label="Eligible notice outcomes">
                   {run.notices.map((notice) => (

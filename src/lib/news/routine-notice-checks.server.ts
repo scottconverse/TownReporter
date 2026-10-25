@@ -10,6 +10,7 @@ import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import {
   extractJsonLdEvents,
   extractPrimeGovMeeting,
+  refusalLabel,
   type RoutineExtractionResult,
 } from "./routine-notice-extract.ts";
 import {
@@ -122,14 +123,18 @@ function prepareLongmontLibraryCategory(
       card.date === start.date &&
       card.start === start.minutes &&
       (!end || (card.end != null && card.end === end.minutes));
-    return matches
-      ? result
-      : {
-          status: "refused" as const,
-          code: "structurally-invalid" as const,
-          locator: card?.locator ?? `${result.locator}.visible-card`,
-          validation: result.validation,
-        };
+    if (matches) return result;
+    const label = refusalLabel({
+      name: notice.normalizedFields.program ?? notice.normalizedFields.title,
+      startDate: notice.normalizedFields.start,
+    });
+    return {
+      status: "refused" as const,
+      code: "structurally-invalid" as const,
+      locator: card?.locator ?? `${result.locator}.visible-card`,
+      validation: result.validation,
+      ...(label ? { label } : {}),
+    };
   });
 }
 
@@ -426,14 +431,91 @@ async function contentFingerprint(notice: StructurallyValidRoutineNotice) {
   );
 }
 
+const VALIDATION_FIELD_WHY: Record<string, string> = {
+  location: "the source gives no place",
+  venue: "the source gives no place",
+  start: "the source gives no start date or time",
+  end: "its end time does not make sense",
+  program: "the source gives no name",
+  title: "the source gives no name",
+  timezone: "its time zone is not clear",
+  eventStatus: "its status is not one we know",
+  cancellation: "its cancellation note is not one we know",
+  registrationUrl: "it needs sign-up but gives no sign-up link",
+};
+const VALIDATION_CODE_WHY: Record<string, string> = {
+  "ambiguous-timezone": "its time zone is not clear",
+  "unsupported-recurrence": "it repeats in a way we do not list",
+  "unsupported-format": "it is a kind of notice we do not list",
+  "unsupported-field": "it has extra details we do not list",
+  "outside-routine-contract": "it has a long description, not just logistics",
+  "conflicting-identity": "the source names it two different ways",
+};
+
+/** Plain words for why one item from a source page was not printed. */
+export function routineRefusalWhy(result: {
+  code: string;
+  locator: string;
+  validation?: RoutineExtractionResult["validation"];
+}): string {
+  if (result.code === "structurally-invalid") {
+    if (result.validation?.valid === true)
+      return "the page does not show it at that date and time (often a past event)";
+    if (result.locator.endsWith(".eventStatus")) return "its status is blank";
+    if (result.locator.endsWith(".organizer.name")) return "a different organizer is named";
+    const reason = result.validation?.valid === false ? result.validation.reasons[0] : undefined;
+    if (reason) {
+      const field = reason.field?.split("|")[0] ?? "";
+      if (reason.code === "missing-required-field" && VALIDATION_FIELD_WHY[field]) {
+        return VALIDATION_FIELD_WHY[field]!;
+      }
+      if (VALIDATION_CODE_WHY[reason.code]) return VALIDATION_CODE_WHY[reason.code]!;
+      if (field && VALIDATION_FIELD_WHY[field]) return VALIDATION_FIELD_WHY[field]!;
+      if (reason.code === "missing-required-field") return `the source leaves out ${field || "a needed detail"}`;
+      return `the source gives a ${field || "detail"} we cannot read`;
+    }
+    return "its details do not fit a routine notice";
+  }
+  switch (result.code) {
+    case "missing-stable-identity":
+      return "it has no link or ID we can track";
+    case "unsupported-event-type":
+      return "it is a kind of event we do not list";
+    case "malformed-json":
+      return "the event data on the page is broken";
+    case "content-too-large":
+    case "script-too-large":
+    case "script-limit-exceeded":
+    case "node-limit-exceeded":
+    case "traversal-limit-exceeded":
+      return "the page is too large to read in full";
+    case "missing-owner-context":
+      return "the source settings are missing a needed detail";
+    case "capture-failed":
+      return "the source page could not be read";
+    default:
+      return "it did not pass the source check";
+  }
+}
+
 function refusalSummary(results: RoutineExtractionResult[]) {
-  const grouped = new Map<string, { code: string; locator: string; count: number }>();
+  const grouped = new Map<
+    string,
+    { code: string; locator: string; count: number; label?: string; why: string }
+  >();
   for (const result of results) {
     if (result.status !== "refused") continue;
     const key = `${result.code}\u0000${result.locator}`;
     const prior = grouped.get(key);
     if (prior) prior.count += 1;
-    else grouped.set(key, { code: result.code, locator: result.locator, count: 1 });
+    else
+      grouped.set(key, {
+        code: result.code,
+        locator: result.locator,
+        count: 1,
+        ...(result.label ? { label: result.label } : {}),
+        why: routineRefusalWhy(result),
+      });
   }
   return [...grouped.values()].slice(0, 100);
 }
@@ -581,7 +663,14 @@ export async function checkRoutineNoticeSourceForOwner(
           capture.versionId,
           ADAPTER_KEY,
           ADAPTER_VERSION,
-          JSON.stringify([{ code: "capture-failed", locator: "document", count: 1 }]),
+          JSON.stringify([
+            {
+              code: "capture-failed",
+              locator: "document",
+              count: 1,
+              why: routineRefusalWhy({ code: "capture-failed", locator: "document" }),
+            },
+          ]),
           actor.userId,
         ],
       );
@@ -964,11 +1053,21 @@ async function loadCheck(
   }
   const refusals = (() => {
     try {
-      return JSON.parse(row.refusal_summary_json) as Array<{
+      const parsed = JSON.parse(row.refusal_summary_json) as Array<{
         code: string;
         locator: string;
         count: number;
+        label?: string;
+        why?: string;
       }>;
+      // Checks saved before the reasons were stored still get plain words from their code.
+      return Array.isArray(parsed)
+        ? parsed.map((refusal) =>
+            refusal && typeof refusal === "object" && typeof refusal.why !== "string"
+              ? { ...refusal, why: routineRefusalWhy({ code: String(refusal.code), locator: String(refusal.locator ?? "") }) }
+              : refusal,
+          )
+        : parsed;
     } catch {
       return [{ code: "invalid-receipt", locator: "check", count: 1 }];
     }

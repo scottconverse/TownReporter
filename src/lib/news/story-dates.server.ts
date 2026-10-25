@@ -4,6 +4,7 @@ import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
 import {
   addDays,
   collectStoryDates,
+  routineLineParts,
   type StoryDateItem,
   type StoryDateSource,
 } from "../story-dates.ts";
@@ -100,6 +101,44 @@ function recordsOf(raw: string | null): ProvenanceItem[] {
   }
 }
 
+/**
+ * G24-R2-2: the dated lines a routine edition printed, read from the run that
+ * last wrote the story. A story that is not a routine edition, or a database
+ * with no routine tables, gives no lines, and the panel reads as before.
+ */
+async function routineLines(slug: string): Promise<NonNullable<StoryDateSource["lines"]>> {
+  const sql = await getSql();
+  let rows: { channel: string; summary_json: string | null }[] = [];
+  try {
+    rows = await sql<{ channel: string; summary_json: string | null }>`
+      select p.channel, r.summary_json from routine_notice_publications p
+      join articles a on a.id=p.article_id and a.newsroom_id=p.newsroom_id
+      join routine_notice_runs r on r.id=p.run_id and r.newsroom_id=p.newsroom_id
+      where a.newsroom_id=${DEFAULT_NEWSROOM_ID} and a.slug=${slug} and a.status='published'
+      limit 1`;
+  } catch {
+    return [];
+  }
+  const row = rows[0];
+  if (!row) return [];
+  let notices: unknown;
+  try {
+    notices = JSON.parse(row.summary_json ?? "{}")?.notices;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(notices)) return [];
+  return notices.flatMap((notice) => {
+    if (!notice || typeof notice !== "object") return [];
+    const n = notice as Record<string, unknown>;
+    if (n.status !== "published" || n.channel !== row.channel) return [];
+    const date = typeof n.occurrenceDate === "string" ? n.occurrenceDate.slice(0, 10) : "";
+    const line = typeof n.line === "string" ? n.line : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !line.trim()) return [];
+    return [{ date, ...routineLineParts(line) }];
+  });
+}
+
 async function readSources(slug: string | null): Promise<{
   sources: StoryDateSource[];
   today: string;
@@ -127,9 +166,11 @@ async function readSources(slug: string | null): Promise<{
           select slug, topic, headline, dek, published_at, provenance_json from articles
           where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published' and slug=${slug}
           limit 1`;
+  const lines = slug === null || !rows[0] ? [] : await routineLines(rows[0].slug);
   return {
     today,
     sources: rows.map((row) => ({
+      ...(lines.length ? { lines } : {}),
       slug: row.slug,
       section: row.topic ?? "",
       headline: row.headline ?? "",

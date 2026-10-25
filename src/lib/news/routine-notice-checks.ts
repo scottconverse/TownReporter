@@ -44,7 +44,8 @@ export type RoutineNoticeCheckGroup = {
   } | null;
   state: RoutineNoticeCheckState;
   counts: { parsed: number; refused: number; conflicts: number };
-  refusals: Array<{ code: string; locator: string; count: number }>;
+  /** `label` names the item (title and start); `why` says in plain words why it was not printed. */
+  refusals: Array<{ code: string; locator: string; count: number; label?: string; why?: string }>;
   candidates: RoutineNoticeCandidateView[];
   newerCaptureAvailable: boolean;
   policy: { revision: number; paused: boolean; approvalValid: boolean };

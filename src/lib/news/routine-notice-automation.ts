@@ -48,6 +48,8 @@ export type RoutineNoticeAutomation = {
       deferred: number;
       eligible: number;
       error: string | null;
+      /** Why the run's items need review, in plain words. Empty for runs saved before this was kept. */
+      reviewReasons: Array<{ why: string; count: number; label?: string; source?: string }>;
     };
     createdAt: string;
     articles: Array<{ channel: RoutineEditionChannel; headline: string; href: string }>;
@@ -84,6 +86,26 @@ class InputError extends Error {
 }
 const text = (v: unknown, max: number) =>
   typeof v === "string" && v.trim() && v.length <= max ? v.trim() : null;
+/** The run's saved review reasons, kept only when they are well formed. */
+function routineReviewReasons(
+  value: unknown,
+): Array<{ why: string; count: number; label?: string; source?: string }> {
+  if (!Array.isArray(value)) return [];
+  const short = (text: unknown) =>
+    typeof text === "string" && text.trim() ? text.trim().slice(0, 300) : undefined;
+  return value
+    .slice(0, 50)
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      const why = short(row.why);
+      const count = Number(row.count);
+      if (!why || !Number.isFinite(count) || count <= 0) return [];
+      const label = short(row.label);
+      const source = short(row.source);
+      return [{ why, count: Math.floor(count), ...(label ? { label } : {}), ...(source ? { source } : {}) }];
+    });
+}
 function routineRunOutcomes(value: unknown): RoutineNoticeRunOutcome[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw): RoutineNoticeRunOutcome[] => {
@@ -302,6 +324,7 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
         deferred: Number(summary.deferred) || 0,
         eligible: Number(summary.eligible) || 0,
         error: typeof summary.error === "string" ? summary.error : null,
+        reviewReasons: routineReviewReasons(summary.reviewReasons),
       },
       createdAt: String(row.created_at),
       notices: routineRunOutcomes(summary.notices),

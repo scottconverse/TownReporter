@@ -334,6 +334,13 @@ function CheckGroup({
           <ul className="mt-2 space-y-2">
             {group.refusals.map((refusal) => (
               <li key={`${refusal.code}:${refusal.locator}`}>
+                {refusal.label || refusal.why ? (
+                  <p>
+                    {refusal.label ? <b>{refusal.label}</b> : null}
+                    {refusal.label && refusal.why ? " — " : null}
+                    {refusal.why}
+                  </p>
+                ) : null}
                 <span className="font-medium">{refusal.code}</span> · {refusal.count} ·{" "}
                 {refusal.locator}
               </li>

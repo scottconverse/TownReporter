@@ -141,7 +141,32 @@ export type StoryDateSource = {
    * publish day is unknown contributes no worded dates rather than a guess.
    */
   published_on?: string;
+  /**
+   * G24-R2-2: the dated lines a routine edition printed ("Storytime" on
+   * Oct. 25, "2:00 PM at Longmont Public Library"). Each line is its own row,
+   * and more than one line may share a day.
+   */
+  lines?: { date: string; what: string; note?: string }[];
 };
+
+/**
+ * One printed routine-edition line, split into its name and its time and place.
+ *
+ * `"Kids' Class: Oct 25, 2026 at 2:00 PM at Longmont Public Library"` gives
+ * `{ what: "Kids' Class", note: "2:00 PM at Longmont Public Library" }`. The
+ * split is at the last ": " that comes right before a month-name date, so a name
+ * that has its own colon stays whole. A line with no such date stays whole too.
+ */
+export function routineLineParts(line: string): { what: string; note?: string } {
+  const text = line.replace(/\s+/g, " ").trim();
+  const match =
+    /^(.*): ((?:applications close )?)(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{1,2}, \d{4}(?: at )?(.*)$/.exec(
+      text,
+    );
+  if (!match || !match[1]!.trim()) return { what: text };
+  const note = `${match[2] ?? ""}${match[3] ?? ""}`.trim();
+  return note ? { what: match[1]!.trim(), note } : { what: match[1]!.trim() };
+}
 
 /** One dated record, on the day it bears. */
 export type StoryDateItem = {
@@ -947,7 +972,11 @@ export function hostOnly(organization: string): string {
  * the row that stays.
  */
 
-/** How specific a row is: a record the newsroom kept, then a story's words. */
+/**
+ * How specific a row is: a line a routine edition printed, a record the
+ * newsroom kept, then a story's words.
+ */
+const LINE_RANK = 3;
 const RECORD_RANK = 2;
 const WORDED_RANK = 1;
 
@@ -982,20 +1011,26 @@ export function collectStoryDates(
     if (from && date < from) return;
     if (to && date >= to) return;
     const day = heldDays.get(`${source.slug}|${date}`);
-    if (day && day.rank >= rank && !displaced.has(day.at)) return;
-    const event = heldEvents.get(`${date}|${eventKey(what)}`);
+    // Printed lines may share a day with each other; any other row may not.
+    const lineBesideLine = rank === LINE_RANK && day?.rank === LINE_RANK;
+    if (day && day.rank >= rank && !displaced.has(day.at) && !lineBesideLine) return;
+    const key = `${date}|${eventKey(rank === LINE_RANK ? `${what} ${note}` : what)}`;
+    const event = heldEvents.get(key);
     if (event && event.rank >= rank && !displaced.has(event.at)) return;
     const at = items.length;
     const item: StoryDateItem = { date, what };
     if (note) item.note = note;
     if (source.slug) item.slug = source.slug;
     items.push(item);
-    if (day) displaced.add(day.at);
+    if (day && !lineBesideLine) displaced.add(day.at);
     if (event) displaced.add(event.at);
     heldDays.set(`${source.slug}|${date}`, { at, rank });
-    heldEvents.set(`${date}|${eventKey(what)}`, { at, rank });
+    heldEvents.set(key, { at, rank });
   };
   for (const source of sources) {
+    for (const line of source.lines ?? []) {
+      take(source, line.date, line.what.trim(), (line.note ?? "").trim(), LINE_RANK);
+    }
     for (const record of source.records) {
       // The window's first day is also what a day with no year is read against.
       const postedDay = structuredDate(record.document_date, from ?? "");

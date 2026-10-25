@@ -177,23 +177,45 @@ function logisticsLine(n: StructurallyValidRoutineNotice, newsroomTimezone: stri
       return `${plainField(f.title)}: ${when(f.start)}${f.venue ? ` at ${plainField(f.venue)}` : ""}`;
   }
 }
+/** Plain words for why a notice went to an editor instead of the paper. */
+export const ROUTINE_REVIEW_WHY = {
+  highRisk: "it uses a word an editor must check (for example lawsuit, crime or emergency)",
+  sourceText: "its text has a web address or is very long",
+  status: "it is cancelled or its status changed",
+} as const;
+/** A short name for a notice an editor is asked to look at: its title and start. */
+export function routineNoticeLabel(n: StructurallyValidRoutineNotice, timezone = "UTC") {
+  const f = n.normalizedFields;
+  const name = plainField(f.program ?? f.title ?? f.service ?? f.branch ?? "");
+  const value = f.deadline ?? f.start ?? f.serviceDate ?? f.effectiveDate;
+  const when = value ? displayWhen(value, timezone, f.timezone) : "";
+  return [name, when].filter(Boolean).join(", ").slice(0, 200);
+}
 export function eligibleRoutineNotices(
   notices: StructurallyValidRoutineNotice[],
   localDate: string,
   timezone = "UTC",
-): { eligible: EligibleRoutineNotice[]; review: StructurallyValidRoutineNotice[] } {
+): {
+  eligible: EligibleRoutineNotice[];
+  review: StructurallyValidRoutineNotice[];
+  /** One plain-words reason per `review` entry, in the same order. */
+  reviewWhy: string[];
+} {
   const [fri, sun] = weekendRange(localDate);
   const eligible: EligibleRoutineNotice[] = [],
-    review: StructurallyValidRoutineNotice[] = [];
+    review: StructurallyValidRoutineNotice[] = [],
+    reviewWhy: string[] = [];
   for (const notice of notices) {
     const line = logisticsLine(notice, timezone);
     if (HIGH_RISK.test(line)) {
       review.push(notice);
+      reviewWhy.push(ROUTINE_REVIEW_WHY.highRisk);
       continue;
     }
     const f = notice.normalizedFields;
     if (needsEditorForSourceText(f)) {
       review.push(notice);
+      reviewWhy.push(ROUTINE_REVIEW_WHY.sourceText);
       continue;
     }
     if (
@@ -201,6 +223,7 @@ export function eligibleRoutineNotices(
       (f.eventStatus && f.eventStatus !== "scheduled" && !/(?:^|\/)EventScheduled$/.test(f.eventStatus))
     ) {
       review.push(notice);
+      reviewWhy.push(ROUTINE_REVIEW_WHY.status);
       continue;
     }
     const when = occurrenceDate(f, timezone);
@@ -221,7 +244,17 @@ export function eligibleRoutineNotices(
     for (const channel of channels)
       eligible.push({ channel, notice, occurrenceDate: when, line, sourceUrl: notice.provenance.sourceUrl });
   }
-  return { eligible, review };
+  return { eligible, review, reviewWhy };
+}
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const AP_MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+/** "2026-10-25" -> "Sunday, Oct. 25": the date the way a reader says it. */
+export function readerDate(localDate: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  if (!match) return localDate;
+  const instant = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(instant.valueOf())) return localDate;
+  return `${WEEKDAYS[instant.getUTCDay()]}, ${AP_MONTHS[instant.getUTCMonth()]} ${instant.getUTCDate()}`;
 }
 function fnv(value: string) {
   let h = 2166136261;
@@ -252,7 +285,7 @@ export function planRoutineEditions(
       {
         channel,
         localDate,
-        headline: `${labels[channel]} — ${localDate}`,
+        headline: `${labels[channel]} — ${readerDate(localDate)}`,
         body,
         sourceUrls,
         fingerprint: fnv(`${channel}\n${localDate}\n${body}`),

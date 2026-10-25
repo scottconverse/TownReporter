@@ -13,10 +13,12 @@ import { ensureRoutineNoticeAutomationSchema } from "./routine-notice-automation
 import {
   assertRoutineNoticeCheckStillBound,
   checkRoutineNoticeSourceForOwner,
+  routineRefusalWhy,
 } from "./routine-notice-checks.server.ts";
 import {
   eligibleRoutineNotices,
   planRoutineEditions,
+  routineNoticeLabel,
   type EligibleRoutineNotice,
 } from "./routine-notice-editions.ts";
 import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
@@ -24,6 +26,21 @@ import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { sha256 } from "./fetch-url.ts";
 
 type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
+type RoutineReviewReason = { why: string; count: number; label?: string; source?: string };
+
+const CHANNEL_NAMES = {
+  today: "Today in town",
+  weekend: "This weekend",
+  deadlines: "Deadlines approaching",
+} as const;
+/** How many reasons one run keeps; the rest fold into one row so the counts still add up. */
+const MAX_REVIEW_REASONS = 20;
+function capReviewReasons(reasons: RoutineReviewReason[]): RoutineReviewReason[] {
+  if (reasons.length <= MAX_REVIEW_REASONS) return reasons.map((reason) => ({ ...reason }));
+  const kept = reasons.slice(0, MAX_REVIEW_REASONS - 1).map((reason) => ({ ...reason }));
+  const rest = reasons.slice(MAX_REVIEW_REASONS - 1).reduce((n, reason) => n + reason.count, 0);
+  return [...kept, { why: "other items (open Review source checks to see them)", count: rest }];
+}
 
 function routineNoticeOutcomeKey(item: EligibleRoutineNotice) {
   return `${item.channel}:${item.notice.provenance.externalId ?? item.notice.fingerprintMaterial}`;
@@ -469,6 +486,54 @@ export async function performRoutineNoticeWorkWith(
         (group.state === "refused" && group.counts.refused === 0) ? 1 : 0),
       0,
     );
+  /*
+    G24-R2-1: the run card said "4 need review" and never said why. Every place
+    that adds to `needsReview` also adds a plain-words reason here, so the
+    reasons' counts add up to the number the card prints.
+  */
+  const reviewReasons: RoutineReviewReason[] = [];
+  const addReason = (why: string, count: number, label?: string, source?: string) => {
+    if (count <= 0) return;
+    const prior = reviewReasons.find(
+      (reason) => reason.why === why && reason.label === label && reason.source === source,
+    );
+    if (prior) prior.count += count;
+    else
+      reviewReasons.push({
+        why,
+        count,
+        ...(label ? { label } : {}),
+        ...(source ? { source } : {}),
+      });
+  };
+  planned.review.forEach((notice, index) =>
+    addReason(
+      planned.reviewWhy[index] ?? "it needs an editor's look",
+      1,
+      routineNoticeLabel(notice, run.timezone) || undefined,
+      groups.find((group) => group.source.id === notice.provenance.sourceId)?.source.title || undefined,
+    ),
+  );
+  for (const group of groups) {
+    const source = group.source.title || group.source.url;
+    let listed = 0;
+    for (const refusal of group.refusals) {
+      listed += refusal.count;
+      addReason(
+        refusal.why ?? routineRefusalWhy({ code: refusal.code, locator: refusal.locator }),
+        refusal.count,
+        refusal.label,
+        source,
+      );
+    }
+    addReason("more items did not pass the source check", group.counts.refused - listed, undefined, source);
+    addReason("the source lists the same event two different ways", group.counts.conflicts, undefined, source);
+    if (group.state === "capture-failed") addReason("the source page could not be read", 1, undefined, source);
+    if (group.state === "evidence-unavailable")
+      addReason("the saved copy of the source page is missing", 1, undefined, source);
+    if (group.state === "refused" && group.counts.refused === 0)
+      addReason("the source page had no notices we could read", 1, undefined, source);
+  }
   const summary = (published: number, corrected: number) => ({
     published,
     corrected,
@@ -476,6 +541,7 @@ export async function performRoutineNoticeWorkWith(
     eligible: allEligible.length,
     deferred: [...noticeStatuses.values()].filter((status) => status === "deferred").length,
     notices: noticeRows(),
+    reviewReasons: capReviewReasons(reviewReasons),
   });
   await sql.query(
     "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
@@ -542,8 +608,13 @@ export async function performRoutineNoticeWorkWith(
       ).map((publication) => [publication.channel, publication]),
     );
     for (const channel of ["today", "weekend", "deadlines"] as const) {
-      if (existingByChannel.has(channel) && !plans.some((plan) => plan.channel === channel))
+      if (existingByChannel.has(channel) && !plans.some((plan) => plan.channel === channel)) {
         needsReview += 1;
+        addReason(
+          `"${CHANNEL_NAMES[channel]}" was already printed today, and this check found nothing new for it`,
+          1,
+        );
+      }
     }
     const markChannel = (channel: string, status: RoutineNoticeOutcomeStatus) => {
       for (const item of selectedEligible)
@@ -556,6 +627,10 @@ export async function performRoutineNoticeWorkWith(
       );
       if (!section?.visible) {
         needsReview += 1;
+        addReason(
+          `the section for "${CHANNEL_NAMES[plan.channel]}" is hidden on the paper, so it was not printed`,
+          1,
+        );
         markChannel(plan.channel, "in-review");
         continue;
       }
@@ -578,6 +653,10 @@ export async function performRoutineNoticeWorkWith(
           (await sha256(article.body)) !== existing.article_body_hash
         ) {
           needsReview += 1;
+          addReason(
+            `today's "${CHANNEL_NAMES[plan.channel]}" story was changed or taken down by an editor, so it was not updated`,
+            1,
+          );
           continue;
         }
         await tx.query(

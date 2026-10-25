@@ -36,7 +36,22 @@ export type RoutineExtractionResult =
       code: RoutineExtractionRefusalCode;
       locator: string;
       validation?: RoutineNoticeValidation;
+      /** A short name for the refused item (its title and start), when the source gave one. */
+      label?: string;
     };
+
+/** The refused event's own name and start, cut short, so an editor can find it. */
+export function refusalLabel(row: Record<string, unknown>) {
+  const name = typeof row.name === "string" ? row.name.replace(/\s+/g, " ").trim() : "";
+  const start = typeof row.startDate === "string" ? row.startDate.trim() : "";
+  return [name, start].filter(Boolean).join(", ").slice(0, 200);
+}
+
+function labelled(result: RoutineExtractionResult, row: Record<string, unknown>): RoutineExtractionResult {
+  if (result.status !== "refused") return result;
+  const label = refusalLabel(row);
+  return label ? { ...result, label } : result;
+}
 
 type PrimeGovContext = {
   provenance: BaseProvenance;
@@ -333,20 +348,20 @@ export function extractJsonLdEvents(
       const types = eventTypes(node.row["@type"]);
       if (!types.some((type) => supportedEventTypes.has(type))) {
         if (types.some((type) => /(?:^|[/#:])[^/#:]*Event$/.test(type))) {
-          results.push(refused("unsupported-event-type", `${node.locator}['@type']`));
+          results.push(labelled(refused("unsupported-event-type", `${node.locator}['@type']`), node.row));
         }
         continue;
       }
       const externalId = text(node.row["@id"]) ?? text(node.row.url);
       if (!externalId) {
-        results.push(refused("missing-stable-identity", node.locator));
+        results.push(labelled(refused("missing-stable-identity", node.locator), node.row));
         continue;
       }
       if (
         Object.prototype.hasOwnProperty.call(node.row, "eventStatus") &&
         !text(node.row.eventStatus)
       ) {
-        results.push(refused("structurally-invalid", `${node.locator}.eventStatus`));
+        results.push(labelled(refused("structurally-invalid", `${node.locator}.eventStatus`), node.row));
         continue;
       }
       const structuredIssuer = text(record(node.row.organizer)?.name);
@@ -355,7 +370,7 @@ export function extractJsonLdEvents(
         context.ownerIssuer &&
         structuredIssuer !== context.ownerIssuer.value
       ) {
-        results.push(refused("structurally-invalid", `${node.locator}.organizer.name`));
+        results.push(labelled(refused("structurally-invalid", `${node.locator}.organizer.name`), node.row));
         continue;
       }
       const validation = validateRoutineNotice(
@@ -364,7 +379,7 @@ export function extractJsonLdEvents(
       results.push(
         validation.valid
           ? { status: "parsed", locator: node.locator, validation }
-          : refused("structurally-invalid", node.locator, validation),
+          : labelled(refused("structurally-invalid", node.locator, validation), node.row),
       );
     }
     if (collected.limit) {
