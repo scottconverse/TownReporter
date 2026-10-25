@@ -125,6 +125,19 @@ export const DESK_TOAST_LIFT = 96;
   `--desk-nav-w` plus a gutter rather than a number because the sidebar is
   230px, 206px under 1200px and 0px on a phone, where the nav is off-canvas.
 */
+/**
+ * How wide a toast may be on a desktop frame, in px (sonner's own is 356).
+ *
+ * A warning that carries a button ("Add to this story anyway") has a sentence, a
+ * long button word and the dismiss press on one row; at 356px the sentence got
+ * what was left, about 60px, and read as a squeezed column. The card is capped
+ * by the frame (`deskToasterWidth`) and, below sonner's 600px phone rule, sonner
+ * fills the frame itself.
+ */
+export const DESK_TOASTER_WIDTH = 560;
+export function deskToasterWidth(): string {
+  return `min(${DESK_TOASTER_WIDTH}px, calc(100vw - var(--desk-nav-w, 0px) - 32px))`;
+}
 export const DESK_TOASTER_POSITION = "bottom-left" as const;
 /**
  * On a phone the stack is anchored to the TOP, not the bottom.

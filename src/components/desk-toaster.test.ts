@@ -8,6 +8,8 @@ import {
   DESK_TOASTER_POSITION,
   deskStackPosition,
   DESK_TOAST_LIFT,
+  DESK_TOASTER_WIDTH,
+  deskToasterWidth,
 } from "./desk-toast.ts";
 
 /**
@@ -119,5 +121,17 @@ describe("what a toast is allowed to cover", () => {
   it("takes them back for the two things an editor presses", () => {
     assert.match(block(".desk-ltr .desk-toaster [data-button]"), /pointer-events:\s*auto/);
     assert.match(block(".desk-ltr .desk-toaster [data-close-button]"), /pointer-events:\s*auto/);
+  });
+});
+
+describe("a warning with a button reads at normal width", () => {
+  it("is wider than sonner's 356px default and capped by the frame", () => {
+    assert.ok(DESK_TOASTER_WIDTH >= 480, `the toast is ${DESK_TOASTER_WIDTH}px, too narrow for a sentence beside a button`);
+    assert.match(deskToasterWidth(), /^min\(\d+px, calc\(100vw/);
+  });
+
+  it("lets the card wrap and keeps the sentence a readable column", () => {
+    assert.match(block(".desk-ltr .desk-toaster [data-sonner-toast]"), /flex-wrap:\s*wrap/);
+    assert.match(block(".desk-ltr .desk-toaster [data-title]"), /min-width:\s*min\(16em/);
   });
 });

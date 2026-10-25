@@ -55,6 +55,7 @@ import {
   DESK_TOASTER_MOBILE_OFFSET,
   DESK_TOASTER_OFFSET,
   DESK_TOASTER_PHONE_QUERY,
+  deskToasterWidth,
   deskStackPosition,
   DESK_TOAST_HOST_ATTR,
   DESK_TOAST_OK_MS,
@@ -105,7 +106,7 @@ export function DeskToaster() {
           loading: null,
           close: "✕",
         }}
-        style={{ zIndex: 55 }}
+        style={{ zIndex: 55, ["--width" as string]: deskToasterWidth() }}
         toastOptions={{
           /*
             `unstyled` is a per-toast option in sonner 2, not a Toaster prop,

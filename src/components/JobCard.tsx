@@ -53,7 +53,8 @@ export function JobCard({
   compact?: boolean;
   /**
    * What to call this job HERE, when the card's own title is not the most
-   * useful one. The rail's Running box is the only caller: it has three rows of
+   * useful one. The rail's Running box and Today's "Running now" cards are the
+   * callers (Today's card is the one row the box leaves to the page): the box has three rows of
    * about 190px each and a story job's `title` is the kind's name ("Drafting
    * story"), which is the same for every draft. It passes the story's headline
    * instead -- see `jobHeadline`.

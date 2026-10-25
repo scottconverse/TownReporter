@@ -32,7 +32,7 @@ import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
-import { runningHeadLabel } from "@/lib/news/running-head-label";
+import { runningBoxRows, runningHeadLabel } from "@/lib/news/running-head-label";
 
 const users = new WeakMap<Document, { count: number; dispose: () => void }>();
 
@@ -455,7 +455,7 @@ export function DeskShell({
           three tabs.
         */}
         <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
-        <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
+        <RunningBox jobs={running} pathname={pathname} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
           the drawn nav is brand, running work, the section list and the
@@ -709,9 +709,11 @@ export function DeskShell({
  */
 function RunningBox({
   jobs,
+  pathname,
   onNavigate,
 }: {
   jobs: JobProgressView[];
+  pathname: string;
   onNavigate: () => void;
 }) {
   if (!jobs.length) return null;
@@ -720,7 +722,7 @@ function RunningBox({
       <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
         <span className="astra-running-dot" aria-hidden /> {runningHeadLabel(jobs)}
       </Link>
-      {jobs.slice(0, 3).map((job) => (
+      {runningBoxRows(pathname, jobs).map((job) => (
         <div className="astra-running-job" key={job.id}>
           {/*
             ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).
