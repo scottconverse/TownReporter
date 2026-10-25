@@ -168,6 +168,15 @@ export const DESK_TOASTER_MOBILE_OFFSET = {
   right: 16,
 };
 
+/**
+ * The width of the card stack (D3). Sonner's own default is 356px, and at that
+ * width the killed-lead warning's action ("Add to this story anyway") took most
+ * of the card, so its sentence wrapped a few letters to a line. 440px leaves
+ * the sentence room; on a phone the 16px gutters win. `desk-astra.css` lets the
+ * card wrap under the sentence when it still does not fit.
+ */
+export const DESK_TOASTER_WIDTH = "min(440px, calc(100vw - 32px))";
+
 /** Which edge the stack hangs from, decided by the frame it is drawn in. */
 export function deskStackPosition(phone: boolean): "bottom-left" | "top-left" {
   return phone ? DESK_TOASTER_PHONE_POSITION : DESK_TOASTER_POSITION;

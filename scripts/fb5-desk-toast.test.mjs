@@ -276,6 +276,37 @@ test("the mounted stack is bottom-left, lifted clear of the bottom bars", async 
 });
 
 /*
+  D3: the killed-lead warning is squeezed. Its sentence and its action ("Add to
+  this story anyway") share one card, and sonner's default 356px card left the
+  sentence a few letters wide. The stack's width is what the card is laid out
+  in, so the mounted stack has to be wide enough for the sentence to sit on a
+  line of its own; the wrap that takes over when it still is not is CSS, which
+  linkedom cannot lay out (see the note at the top of this file).
+*/
+test("the warning's stack is wide enough for its sentence beside its action", async () => {
+  await withDesk(async (scope) => {
+    await React.act(async () => {
+      deskToast("This lead was killed. Adding a source keeps it killed.", {
+        tone: "warn",
+        duration: Infinity,
+        action: { label: "Add to this story anyway", run() {} },
+      });
+    });
+    await flush();
+    scope.redraw();
+    const stack = scope.container.querySelector("[data-sonner-toaster]");
+    assert.ok(stack, "sonner built no positioned host");
+    const style = stack.getAttribute("style") ?? "";
+    const width = /--width:\s*min\((\d+)px/.exec(style) ?? /--width:\s*(\d+)px/.exec(style);
+    assert.ok(width, `no width on the stack: ${style}`);
+    assert.ok(
+      Number(width[1]) >= 420,
+      `the stack is ${width[1]}px wide, which squeezes the killed-lead sentence beside its action`,
+    );
+  });
+});
+
+/*
   The phone half. The edge is sonner's `data-y-position`, and that attribute
   comes from the `position` prop, so it is the prop that has to change -- an
   earlier cut moved the box with a `≤700px` stylesheet rule and left the
