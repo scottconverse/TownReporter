@@ -49,12 +49,13 @@
  */
 import { Toaster } from "sonner";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import {
   DESK_TOASTER_MOBILE_OFFSET,
   DESK_TOASTER_OFFSET,
   DESK_TOASTER_PHONE_QUERY,
+  DESK_TOASTER_WIDTH,
   deskStackPosition,
   DESK_TOAST_HOST_ATTR,
   DESK_TOAST_OK_MS,
@@ -105,7 +106,7 @@ export function DeskToaster() {
           loading: null,
           close: "✕",
         }}
-        style={{ zIndex: 55 }}
+        style={{ zIndex: 55, "--width": DESK_TOASTER_WIDTH } as CSSProperties}
         toastOptions={{
           /*
             `unstyled` is a per-toast option in sonner 2, not a Toaster prop,

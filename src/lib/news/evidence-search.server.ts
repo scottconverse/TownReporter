@@ -60,6 +60,16 @@ const EXACT_LIMIT = 30;
 const MEANING_CANDIDATES = 60;
 const MEANING_LIMIT = 5;
 const VECTOR_CACHE_MS = 5 * 60 * 1000;
+/** Pieces and coverage counts per newsroom: fresh within about a minute. */
+const PIECES_CACHE_MS = 30 * 1000;
+/**
+ * S2. A query has no meaning matches unless this newsroom's closest piece
+ * reaches this cosine score. Measured Oct 24 on all 22,223 readable excerpts of
+ * newsroom 1 (Xenova/all-MiniLM-L6-v2): the closest piece for the 12 nonsense
+ * strings is at most 0.4232 ("vybrunt xoxo tlk"); the closest for the 26 real
+ * queries is at least 0.4934 ("school board"). 0.46 sits between them.
+ */
+export const MEANING_MIN_SCORE = 0.46;
 
 type ChunkRow = {
   md5: string;
@@ -74,9 +84,19 @@ type ChunkRow = {
 type VectorCache = { loadedAt: number; vectors: Map<string, Float32Array> };
 let vectorCache: VectorCache | null = null;
 
+/** The live, readable pieces of one newsroom, and how many have a vector. */
+type LivePieces = {
+  loadedAt: number;
+  md5s: Set<string>;
+  covered: number;
+  total: number;
+};
+const piecesCache = new Map<number, LivePieces>();
+
 /** Tests, the fill clock and the prune clock call this after writing. */
 export function clearEvidenceVectorCache(): void {
   vectorCache = null;
+  piecesCache.clear();
 }
 
 /** Every stored vector, at most once per five minutes. */
@@ -144,24 +164,35 @@ async function exactRows(newsroomId: number, q: string): Promise<EvidenceRow[]> 
   return rows.map((row) => toRow(row));
 }
 
-/** How much of this newsroom's evidence has a vector so far. */
-async function coverage(
-  newsroomId: number,
-): Promise<{ covered: number; total: number }> {
+/**
+ * This newsroom's live, readable pieces (one per distinct excerpt) and how many
+ * of them have a vector. One query, kept for `PIECES_CACHE_MS`; the fill and
+ * prune paths clear it, and a takedown is still dropped by the live row query.
+ */
+async function livePieces(newsroomId: number): Promise<LivePieces> {
+  const cached = piecesCache.get(newsroomId);
+  if (cached && Date.now() - cached.loadedAt < PIECES_CACHE_MS) return cached;
+  const loadedAt = Date.now();
   const sql = await getSql();
-  const [row] = await sql<{ covered: number; total: number }>`
-    select
-      (select count(distinct md5(c.excerpt))::int
-         from artifact_chunks c
-         join evidence_vectors ev on ev.excerpt_md5 = md5(c.excerpt)
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
-          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as covered,
-      (select count(distinct md5(c.excerpt))::int
-         from artifact_chunks c
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
-          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as total
+  const rows = await sql<{ md5: string; has_vector: boolean }>`
+    select m.md5, (ev.excerpt_md5 is not null) as has_vector
+    from (
+      select distinct md5(c.excerpt) as md5
+      from artifact_chunks c
+      where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
+        and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
+    ) m
+    left join evidence_vectors ev on ev.excerpt_md5 = m.md5
   `;
-  return { covered: row?.covered ?? 0, total: row?.total ?? 0 };
+  const md5s = new Set<string>();
+  let covered = 0;
+  for (const row of rows) {
+    md5s.add(row.md5);
+    if (row.has_vector) covered += 1;
+  }
+  const pieces: LivePieces = { loadedAt, md5s, covered, total: md5s.size };
+  piecesCache.set(newsroomId, pieces);
+  return pieces;
 }
 
 /** The meaning list, or the reason it could not be drawn. */
@@ -169,6 +200,7 @@ async function meaningRows(
   newsroomId: number,
   q: string,
   exactMd5s: Set<string>,
+  pieces: LivePieces,
 ): Promise<{ rows: EvidenceRow[]; error?: string }> {
   let queryVector: Float32Array;
   try {
@@ -186,11 +218,20 @@ async function meaningRows(
     return { rows: [], error: shortReason(err) };
   }
 
+  // Rank only this newsroom's live, readable pieces, so another paper's
+  // pieces can never fill the candidate list and push this one out (S1).
   const scored: { md5: string; score: number }[] = [];
-  for (const [md5, vector] of vectors) {
+  let closest = Number.NEGATIVE_INFINITY;
+  for (const md5 of pieces.md5s) {
+    const vector = vectors.get(md5);
+    if (!vector) continue;
+    const score = dotProduct(queryVector, vector);
+    if (score > closest) closest = score;
     if (exactMd5s.has(md5)) continue;
-    scored.push({ md5, score: dotProduct(queryVector, vector) });
+    scored.push({ md5, score });
   }
+  // Nonsense has no close piece in the newsroom, so it gets no meaning list (S2).
+  if (closest < MEANING_MIN_SCORE) return { rows: [] };
   scored.sort((a, b) => b.score - a.score);
   const candidates = scored.slice(0, MEANING_CANDIDATES);
   if (candidates.length === 0) return { rows: [] };
@@ -240,17 +281,17 @@ export async function searchEvidence(
     return { ok: false, error: EVIDENCE_QUERY_EMPTY };
   }
 
-  const [exact, counts] = await Promise.all([
+  const [exact, pieces] = await Promise.all([
     exactRows(context.newsroomId, q),
-    coverage(context.newsroomId),
+    livePieces(context.newsroomId),
   ]);
   const exactMd5s = new Set(exact.map((row) => row.md5));
-  const meaning = await meaningRows(context.newsroomId, q, exactMd5s);
+  const meaning = await meaningRows(context.newsroomId, q, exactMd5s, pieces);
 
   const meaningStatus: EvidenceMeaningStatus = {
     ready: !meaning.error,
-    covered: counts.covered,
-    total: counts.total,
+    covered: pieces.covered,
+    total: pieces.total,
   };
   if (meaning.error) meaningStatus.reason = meaning.error;
 

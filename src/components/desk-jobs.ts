@@ -47,3 +47,18 @@ export function useNowMs(active: boolean): number {
 export function jobHeadline(job: Pick<JobProgressView, "headline" | "title">): string {
   return job.headline?.trim() || job.title;
 }
+
+/**
+ * The rows the nav's Running box draws on this page (D1, "Running · 1" with two rows).
+ *
+ * Today (`/desk`) draws every open job itself, in its "Running now" section,
+ * from the same query and the same first three, with the story's name and both
+ * presses ("Open your story", "Cancel"). The box drew the same job again above
+ * it with only Cancel, so one job showed as two rows on one screen. On Today
+ * the box keeps its count line and draws no rows. Every other page keeps the
+ * box's rows, at most three.
+ */
+export function navRunningRows<T>(jobs: readonly T[], pathname: string): T[] {
+  if (pathname.replace(/\/+$/, "") === "/desk") return [];
+  return jobs.slice(0, 3);
+}

@@ -869,10 +869,32 @@ test(
   },
 );
 
+// Every process named redlib on this computer, by id. redlib-relocate.ps1 finds
+// processes by NAME across the whole machine, and refuses a destination while one
+// of them cannot be inspected (image state "unverified"). This is what a live
+// Redlib reader on the machine does to every scenario below.
+function redlibProcessIds() {
+  const out = execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", "(Get-Process -Name redlib -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) -join ','"],
+    { encoding: "utf8" },
+  ).trim();
+  return out ? out.split(",").map(Number) : [];
+}
+
 test(
   "redlib-relocate.ps1 resolves path aliases, rejects unsafe targets, and fails closed on stale metadata",
   { skip: !onWindows ? "PowerShell only" : false },
-  () => {
+  (t) => {
+    // The scenarios below need no other redlib process on the machine. CI has none.
+    // On a computer with a Redlib reader running, the script refuses every
+    // destination before the copy, lock and rollback logic runs, so the test
+    // says so and skips rather than reporting that refusal as a failure.
+    const foreignRedlib = redlibProcessIds();
+    if (foreignRedlib.length > 0) {
+      t.skip(`a process named redlib (PID ${foreignRedlib.join(", ")}) is running on this computer; redlib-relocate.ps1 refuses every destination while it cannot inspect that process, so these scenarios cannot run here`);
+      return;
+    }
     const script = join(OPS, "redlib-relocate.ps1");
     const base = mkdtempSync(join(tmpdir(), "redlib-relocate-edge-"));
     const noEnv = join(base, "absent.env");

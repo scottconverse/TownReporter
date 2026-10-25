@@ -2,7 +2,7 @@ import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
@@ -137,8 +137,9 @@ describe("runMeetingSkillWriter", () => {
     assert.match(result.runNotes, /RUN-DONE/);
     assert.deepEqual(stages, ["Wrote story.txt"]);
 
-    // The folder is the newsroom's meeting storage root, one per job.
-    assert.equal(result.workDir, join(storageRoot, "meeting-runs", `newsroom-${NEWSROOM}`, "job-7"));
+    // The folder is new for this run, under the newsroom's meeting storage root.
+    assert.equal(dirname(result.workDir), join(storageRoot, "meeting-runs", `newsroom-${NEWSROOM}`));
+    assert.match(basename(result.workDir), /^job-7-/);
     // The agent's instructions travelled with the run.
     assert.equal(readFileSync(join(result.workDir, "SKILL.md"), "utf8").length, 117_849);
     assert.match(readFileSync(join(result.workDir, "scripts", "audit.py"), "utf8"), /^#!\/usr\/bin\/env python3/);
@@ -174,6 +175,41 @@ describe("runMeetingSkillWriter", () => {
       true,
     );
     assert.equal(result.body.includes("primegov"), false);
+  });
+
+  it("gives a reused job id a new folder, and never reads the older run's files (D205)", async () => {
+    const sql = await getSql();
+    const first = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 12,
+      packetUrlForMeeting: async () => PACKET_URL,
+      run: writingRunner({
+        "story.txt": PROOF_STORY,
+        "CHECK-FIRST.txt": "Check the mural square footage.\n",
+        "RUN-NOTES.md": "first run\n",
+      }),
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    // The same job id again, as after a database restore that reuses ids. This
+    // writer writes nothing, so anything it reads must come from its own folder.
+    const second = await runMeetingSkillWriter({
+      ...BASE,
+      sql,
+      artifactId,
+      jobId: 12,
+      packetUrlForMeeting: async () => PACKET_URL,
+      run: writingRunner({}),
+    });
+    assert.notEqual(second.workDir, first.workDir);
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.equal(second.error, "The writer finished without a story.");
+    // The first run's folder is kept exactly as it was.
+    assert.equal(readFileSync(join(first.workDir, "story.txt"), "utf8"), PROOF_STORY);
   });
 
   it("says meeting packet for a body that is not the council", async () => {

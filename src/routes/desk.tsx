@@ -10,6 +10,8 @@ import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { type PaperIdentity } from "@/lib/paper-identity";
 import { PaperProvider } from "@/lib/paper-context";
 import { getPaperConfigForEditor, type PaperConfig } from "@/lib/news/paper-settings";
+import { countDraftsDesk } from "@/lib/news/desk";
+import { holdsFirstPaint } from "@/lib/desk/first-paint";
 
 export const Route = createFileRoute("/desk")({
   component: DeskGate,
@@ -110,6 +112,19 @@ function DeskGate() {
     enabled: Boolean(user),
     retry: false,
   });
+  /*
+    D2: the nav's Drafts count, read here beside the two reads above so the shell
+    mounts with it. Same key and function as the shell's own read (desk-chrome.tsx),
+    so the shell finds it in the cache and does not wait for it. `retry: false`:
+    a count that fails must not hold the desk on its opening screen -- see
+    `holdsFirstPaint`.
+  */
+  const drafts = useQuery({
+    queryKey: ["drafts-desk", "count"],
+    queryFn: () => countDraftsDesk(),
+    enabled: Boolean(user),
+    retry: false,
+  });
 
   useEffect(() => {
     if (user) return;
@@ -182,6 +197,15 @@ function DeskGate() {
             />
           </div>
         </div>
+      );
+    }
+    if (holdsFirstPaint(drafts)) {
+      return (
+        <ScreenPending
+          title="Opening the desk"
+          kicker="Editor desk"
+          hint="Checking this newsroom…"
+        />
       );
     }
     return (

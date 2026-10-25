@@ -25,7 +25,7 @@ import { WarningConsentHost } from "@/components/warning-consent-host";
 import { deskWarningConsent } from "@/components/editor-warning-consent";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
-import { jobHeadline } from "@/components/desk-jobs";
+import { jobHeadline, navRunningRows } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
 import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
@@ -455,7 +455,7 @@ export function DeskShell({
           three tabs.
         */}
         <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
-        <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
+        <RunningBox jobs={running} pathname={pathname} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
           the drawn nav is brand, running work, the section list and the
@@ -709,9 +709,11 @@ export function DeskShell({
  */
 function RunningBox({
   jobs,
+  pathname,
   onNavigate,
 }: {
   jobs: JobProgressView[];
+  pathname: string;
   onNavigate: () => void;
 }) {
   if (!jobs.length) return null;
@@ -720,7 +722,12 @@ function RunningBox({
       <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
         <span className="astra-running-dot" aria-hidden /> {runningHeadLabel(jobs)}
       </Link>
-      {jobs.slice(0, 3).map((job) => (
+      {/*
+        D1: on Today the page's own "Running now" section draws these jobs with
+        the story's name and both presses, so the box draws no rows there --
+        see `navRunningRows`.
+      */}
+      {navRunningRows(jobs, pathname).map((job) => (
         <div className="astra-running-job" key={job.id}>
           {/*
             ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).

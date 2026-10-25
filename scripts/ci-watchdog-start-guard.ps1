@@ -119,11 +119,16 @@ $pgPort = Get-FreePort
 
 @'
 import http from "node:http";
+import { existsSync } from "node:fs";
 const port = Number(process.env.PORT);
 const mode = process.env.STUB_MODE || "";
+const gate = process.env.STUB_GATE || "";
 const started = Date.now();
+// STUB_GATE: 503 until the test creates that file, so no timing decides it.
+// Without it, the stub answers 503 for its first 15 seconds.
 http.createServer((q, r) => {
-  if (mode === "slow503" && Date.now() - started < 15000) {
+  const held = gate ? !existsSync(gate) : Date.now() - started < 15000;
+  if (mode === "slow503" && held) {
     r.writeHead(503, { "content-type": "text/plain" });
     r.end("not answering yet\n");
     return;
@@ -157,6 +162,11 @@ if ($env:FAKE_START_HANG -eq "1") { while ($true) { Start-Sleep -Seconds 1 } }
 $delay = 0
 if ($env:FAKE_START_DELAY_SECONDS -match "^\d+$") { $delay = [int]$env:FAKE_START_DELAY_SECONDS }
 if ($delay -gt 0) { Start-Sleep -Seconds $delay }
+# FAKE_START_GATE: hold here until the test creates that file (bounded), so a
+# start that is still starting stays in progress for as long as the test needs.
+if ($env:FAKE_START_GATE) {
+  for ($g = 0; $g -lt 180 -and -not (Test-Path -LiteralPath $env:FAKE_START_GATE); $g++) { Start-Sleep -Seconds 1 }
+}
 $node = (Get-Command node -ErrorAction Stop).Source
 Start-Process -FilePath $node `
   -ArgumentList ".output/server/index.mjs" `
@@ -428,12 +438,20 @@ $env:WATCHDOG_START_SCRIPT = 'scripts/ci-watchdog-start.ps1'
 $env:WATCHDOG_STAGE_APP = $app
 $env:PUBLIC_SITE_URL = "http://127.0.0.1:$appPort/"
 $deadline = 20
+# Cases 1 and 2 hold a start that is still starting for as long as the test
+# needs, so their deadline is raised: a busy machine must not age that start
+# into "hung" while the checks run. Case 4 goes back to $deadline.
+$slowDeadline = 120
+# The gate files: a held start (case 1) and a held 503 stub (case 2) run until the
+# test creates these, instead of for a fixed number of seconds.
+$gate1 = Join-Path $world 'release-case1.flag'
+$gate2 = Join-Path $world 'release-case2.flag'
 if ($RealDeadline) { Remove-Item Env:\WATCHDOG_START_DEADLINE_SECONDS -ErrorAction SilentlyContinue }
 else { $env:WATCHDOG_START_DEADLINE_SECONDS = "$deadline" }
 # D283: two probes this far apart. Two seconds keeps cases 1-5 at their old
 # timing; the reprobe cases set their own value for the run they need.
 $env:WATCHDOG_REPROBE_SECONDS = '2'
-Set-TestEnv @{ FAKE_START_DELAY_SECONDS = $null; FAKE_START_HANG = $null; STUB_MODE = $null }
+Set-TestEnv @{ FAKE_START_DELAY_SECONDS = $null; FAKE_START_HANG = $null; STUB_MODE = $null; FAKE_START_GATE = $null; STUB_GATE = $null }
 
 try {
   if (-not (Wait-ForStub $pgPort $stubPgPid 30)) {
@@ -535,7 +553,9 @@ try {
     Say '1. a slow start, inside the deadline'
     Stop-App
     Remove-Marker
-    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '10'; FAKE_START_HANG = $null; STUB_MODE = $null }
+    # The start is held by $gate1, not by a fixed delay: it stays in progress
+    # until the checks below have run and the test releases it.
+    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_HANG = $null; STUB_MODE = $null; FAKE_START_GATE = $gate1; WATCHDOG_START_DEADLINE_SECONDS = "$slowDeadline" }
     Check 'nothing is listening before the run' { (Get-AppListenerPid) -eq 0 }
     $bg = Start-WatchdogBackground 'launch'
     $marker = Wait-ForMarker 20
@@ -548,12 +568,14 @@ try {
     $run = Invoke-Watchdog 'still starting'
     Check 'the watchdog exited 0' { $run.Code -eq 0 }
     Check 'it said a start is still running, with the marker, the PID and the deadline' {
-      ($run.Lines -join "`n") -match "a start is still running \(marker, PID $startPid, \d+ s of $deadline s\); not stopping anything"
+      ($run.Lines -join "`n") -match "a start is still running \(marker, PID $startPid, \d+ s of $slowDeadline s\); not stopping anything"
     }
-    Check 'it stopped nothing' { -not ((Get-LogText) -match 'stopping stale PID') }
+    Check 'it stopped nothing' { -not (($run.Lines -join "`n") -match 'stopping stale PID') }
     $starts = @(Get-FakeStartProcesses)
     Check "it started nothing -- exactly one start process (found $($starts.Count))" { $starts.Count -eq 1 }
     Check 'the start process is still alive' { $startPid -gt 0 -and [bool](Get-Process -Id $startPid -ErrorAction SilentlyContinue) }
+    # Every check above ran while the start was held. Let it finish now.
+    Set-Content -LiteralPath $gate1 -Value 'release' -Encoding ASCII
     Check 'the app answered 200' { Wait-ForApp 200 90 }
     Check 'the background run finished' { Wait-ForWatchdogExit $bg 120 }
     Check 'the marker is gone once the app answered' { Wait-ForMarkerGone 20 }
@@ -563,7 +585,9 @@ try {
     Say '2. a start that already holds the port and is not answering yet'
     Stop-App
     Remove-Marker
-    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_HANG = $null; STUB_MODE = 'slow503' }
+    # The stub answers 503 until $gate2 exists, so both probes of the run below see
+    # 503 however long the machine takes. The test releases it after the checks.
+    Set-TestEnv @{ FAKE_START_DELAY_SECONDS = '0'; FAKE_START_HANG = $null; FAKE_START_GATE = $null; STUB_MODE = 'slow503'; STUB_GATE = $gate2 }
     Check 'nothing is listening before the run' { (Get-AppListenerPid) -eq 0 }
     $bg = Start-WatchdogBackground 'launch onto a 503'
     $serverPid = Wait-ForAppListener 30
@@ -573,11 +597,15 @@ try {
     $run = Invoke-Watchdog 'still starting, port held'
     Check 'the watchdog exited 0' { $run.Code -eq 0 }
     Check 'it saw the start still running' { ($run.Lines -join "`n") -match 'a start is still running \(marker' }
-    Check 'it did not stop the server' { -not ((Get-LogText) -match 'stopping stale PID') }
+    Check 'it did not stop the server' { -not (($run.Lines -join "`n") -match 'stopping stale PID') }
     Check 'the server PID is still alive after both runs' { [bool](Get-Process -Id $serverPid -ErrorAction SilentlyContinue) }
+    # Both runs are checked. Answer 200 now, so the background launch finishes.
+    Set-Content -LiteralPath $gate2 -Value 'release' -Encoding ASCII
     Check 'the background run finished' { Wait-ForWatchdogExit $bg 120 }
     Check 'the server PID is still alive after the first run finished too' { [bool](Get-Process -Id $serverPid -ErrorAction SilentlyContinue) }
     Stop-App
+    # Case 4 goes back to the short deadline, and the 503 stub is no longer held.
+    Set-TestEnv @{ STUB_GATE = $null; WATCHDOG_START_DEADLINE_SECONDS = "$deadline" }
 
     # --- 3. a dead app with no marker ----------------------------------------
     Say ''
@@ -674,7 +702,7 @@ try {
     Check 'the second probe answered 200 and it stopped nothing' {
       ($run.Lines -join "`n") -match 'probe 2 answered 200'
     }
-    Check 'it did not stop the server' { -not ((Get-LogText) -match 'stopping stale PID') }
+    Check 'it did not stop the server' { -not (($run.Lines -join "`n") -match 'stopping stale PID') }
     Check 'the server PID is still alive' { [bool](Get-Process -Id $stubPid -ErrorAction SilentlyContinue) }
     Set-TestEnv @{ WATCHDOG_REPROBE_SECONDS = '2' }
 
@@ -714,7 +742,7 @@ try {
       Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
     }
   }
-  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'WATCHDOG_REPROBE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_HANG', 'STUB_MODE')) {
+  foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL', 'WATCHDOG_START_DEADLINE_SECONDS', 'WATCHDOG_REPROBE_SECONDS', 'FAKE_START_DELAY_SECONDS', 'FAKE_START_HANG', 'FAKE_START_GATE', 'STUB_MODE', 'STUB_GATE')) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
   }
   if ($previousLocalAppData) { $env:LOCALAPPDATA = $previousLocalAppData }
