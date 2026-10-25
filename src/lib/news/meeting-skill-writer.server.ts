@@ -2,10 +2,10 @@
   Run the council-meeting writer: Scott's report-local-news skill, worked by an
   agent in its own folder -- SERVER ONLY (`.server.ts`).
 
-  THE SHAPE OF A RUN. One folder per draft, under the newsroom's meeting storage
-  root:
+  THE SHAPE OF A RUN. One new folder per run, under the newsroom's meeting storage
+  root (the suffix is random, so a reused job id never reuses a folder):
 
-      <root>/meeting-runs/newsroom-<newsroomId>/job-<jobId>/
+      <root>/meeting-runs/newsroom-<newsroomId>/job-<jobId>-<random>/
           SKILL.md          the agent's only instructions, copied in
           scripts/audit.py  the audit the skill tells it to run, copied in
           transcript.txt    the whole meeting, one line per caption
@@ -21,7 +21,7 @@
   on is placed before the agent starts, so a failure is always attributable: if
   `story.txt` is missing afterwards, nothing in the run's inputs was missing.
 */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
 import {
@@ -247,7 +247,13 @@ export async function runMeetingSkillWriter(input: {
   }
 
   const root = await meetingRunRoot(input.sql, input.newsroomId, input.env ?? process.env);
-  const workDir = join(root, "meeting-runs", `newsroom-${input.newsroomId}`, `job-${input.jobId}`);
+  // D205: every run gets a folder of its own. A database restore can hand out a
+  // job id that an older run already used, and reusing that folder would read
+  // the older run's story.txt, CHECK-FIRST.txt and RUN-NOTES.md as this run's
+  // output. mkdtemp makes a new, empty folder and never one that already exists.
+  const runsRoot = join(root, "meeting-runs", `newsroom-${input.newsroomId}`);
+  mkdirSync(runsRoot, { recursive: true });
+  const workDir = mkdtempSync(join(runsRoot, `job-${input.jobId}-`));
   mkdirSync(join(workDir, "scripts"), { recursive: true });
   // The skill is copied in, never linked: the agent must not be able to edit the
   // shipped copy, and the run must stay readable after the app is rebuilt.
