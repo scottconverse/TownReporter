@@ -896,6 +896,12 @@ const { Chip } = await import(
         Chip() never reads it; the specifier only has to resolve.
       */
       "@/lib/desk/queue-count-refresh": await sharedModuleUrl("src/lib/desk/queue-count-refresh.ts"),
+      /*
+        D2 (Oct 24 2026) made desk-chrome.tsx take the nav Drafts count's key
+        from @/components/drafts-count. Its only import is a type, so the real
+        module loads through the shared URL; Chip() never reads it.
+      */
+      "@/components/drafts-count": await sharedModuleUrl("src/components/drafts-count.ts"),
       "@/lib/news/jobs": inlineModule(
         "export const jobStages = () => []; export function queuedJobWaitReason() { throw new Error('lead-badge fixture: jobs.ts not loaded'); } export function requestJobCancel() { throw new Error('lead-badge fixture: jobs.ts not loaded'); }",
       ),

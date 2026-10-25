@@ -338,6 +338,16 @@ const { DeskShell } = await import(
         await readFile(new URL("../src/lib/desk/queue-count-refresh.ts", import.meta.url), "utf8"),
         "queue-count-refresh.ts",
       ),
+      /*
+        D2 (Oct 24 2026) made desk-chrome.tsx take the nav Drafts count's query
+        key from @/components/drafts-count. Its only import is a type, erased by
+        the transpile, so the REAL file loads and the specifier has to resolve
+        for the shell to load at all.
+      */
+      "@/components/drafts-count": moduleUrl(
+        await readFile(new URL("../src/components/drafts-count.ts", import.meta.url), "utf8"),
+        "drafts-count.ts",
+      ),
       "@/lib/appearance-context": appearanceContextStub,
       "./shortcut-sheet": moduleUrl(
         await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),

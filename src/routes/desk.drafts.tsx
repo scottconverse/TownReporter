@@ -3,8 +3,8 @@ import {
   DraftItemBoundary,
   DraftStateChip,
 } from "@/components/draft-item-boundary";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
@@ -20,6 +20,7 @@ import {
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
 import { draftItemLabel } from "@/lib/news/draft-item";
+import { draftPillCount, shareDraftsCountWithNav } from "@/components/drafts-count";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -120,6 +121,15 @@ function DraftsPage() {
     read 25 the moment a page appeared.
   */
   const counts = query.data?.counts;
+  /*
+    D2: the side nav shows this same count. Hand it over as soon as the list has
+    counted, so the nav cannot sit on a number of its own that disagrees with
+    "All" for a moment after a reload -- see `drafts-count.ts`.
+  */
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    shareDraftsCountWithNav(queryClient, counts?.all);
+  }, [queryClient, counts?.all]);
   const anyRunning = rows.some(
     (row) => row?.job_status === "running" || row?.job_status === "queued",
   );
@@ -201,7 +211,8 @@ function DraftsPage() {
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
           >
-            {f.label} · {counts?.[f.key] ?? 0}
+            {f.label}
+            {draftPillCount(counts, f.key) != null ? ` · ${draftPillCount(counts, f.key)}` : ""}
           </button>
         ))}
       </div>

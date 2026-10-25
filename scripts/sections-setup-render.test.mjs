@@ -321,6 +321,16 @@ const DESK_CHROME_IMPORTS = {
     await readFile(new URL("../src/lib/news/running-head-label.ts", import.meta.url), "utf8"),
     "running-head-label.ts",
   ),
+  /*
+    D2 (Oct 24 2026) made desk-chrome.tsx take the nav Drafts count's key from
+    @/components/drafts-count. Its only import is a type, erased by the
+    transpile, so the REAL file loads and the specifier has to resolve for the
+    shell to load at all.
+  */
+  "@/components/drafts-count": moduleUrl(
+    await readFile(new URL("../src/components/drafts-count.ts", import.meta.url), "utf8"),
+    "drafts-count.ts",
+  ),
   "@/lib/appearance-context": appearanceContextStub,
   "./shortcut-sheet": moduleUrl(
     await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),

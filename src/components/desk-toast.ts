@@ -125,6 +125,26 @@ export const DESK_TOAST_LIFT = 96;
   `--desk-nav-w` plus a gutter rather than a number because the sidebar is
   230px, 206px under 1200px and 0px on a phone, where the nav is off-canvas.
 */
+/**
+ * How wide a toast may be on a desktop frame, in px (sonner's own is 356).
+ *
+ * D3 (Oct 24): a warning that carries a button -- "This lead was killed. Adding
+ * a source keeps it killed." with "Add to this story anyway" -- put the
+ * sentence, the button word and the dismiss press on one row inside 356px, and
+ * the sentence got what was left: a squeezed column an editor with old eyes has
+ * to work at. The card is widened here, and `desk-astra.css` lets its contents
+ * wrap, so the sentence keeps a readable measure and the button drops to its own
+ * line when it must.
+ *
+ * Still capped by the frame: on a narrow window the card gives way to the
+ * viewport (less the nav column and a gutter) rather than running off it. Below
+ * sonner's 600px rule the stack fills the frame itself, so this ceiling does not
+ * apply there.
+ */
+export const DESK_TOASTER_WIDTH = 560;
+export function deskToasterWidth(): string {
+  return `min(${DESK_TOASTER_WIDTH}px, calc(100vw - var(--desk-nav-w, 0px) - 32px))`;
+}
 export const DESK_TOASTER_POSITION = "bottom-left" as const;
 /**
  * On a phone the stack is anchored to the TOP, not the bottom.

@@ -30,9 +30,10 @@ import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
 import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
+import { DRAFTS_NAV_COUNT_KEY } from "@/components/drafts-count";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
-import { runningHeadLabel } from "@/lib/news/running-head-label";
+import { runningBoxRows, runningHeadLabel } from "@/lib/news/running-head-label";
 
 const users = new WeakMap<Document, { count: number; dispose: () => void }>();
 
@@ -324,13 +325,14 @@ export function DeskShell({
     them (review D2): the shell only needs the number, and the count is taken
     over the same rows /desk/drafts lists.
 
-    The key is `["drafts-desk", "count"]`, not the bare `["drafts-desk"]` Today
+    The key is `DRAFTS_NAV_COUNT_KEY` (`["drafts-desk", "count"]`, see
+    `drafts-count.ts`), not the bare `["drafts-desk"]` Today
     reads the whole list under (desk.index.tsx): one cache entry cannot hold a
     number on one screen and an array of rows on another, and the nav would
     render that array. The shared `["drafts-desk"]` PREFIX keeps every
     invalidation reaching this read.
   */
-  const drafts = useQuery({ queryKey: ["drafts-desk", "count"], queryFn: () => countDraftsDesk() });
+  const drafts = useQuery({ queryKey: DRAFTS_NAV_COUNT_KEY, queryFn: () => countDraftsDesk() });
   const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
   const followUps = useQuery({
     queryKey: ["follow-ups", "all"],
@@ -455,7 +457,7 @@ export function DeskShell({
           three tabs.
         */}
         <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
-        <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
+        <RunningBox jobs={running} pathname={pathname} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
           the drawn nav is brand, running work, the section list and the
@@ -709,9 +711,11 @@ export function DeskShell({
  */
 function RunningBox({
   jobs,
+  pathname,
   onNavigate,
 }: {
   jobs: JobProgressView[];
+  pathname: string;
   onNavigate: () => void;
 }) {
   if (!jobs.length) return null;
@@ -720,7 +724,7 @@ function RunningBox({
       <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
         <span className="astra-running-dot" aria-hidden /> {runningHeadLabel(jobs)}
       </Link>
-      {jobs.slice(0, 3).map((job) => (
+      {runningBoxRows(pathname, jobs).map((job) => (
         <div className="astra-running-job" key={job.id}>
           {/*
             ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).

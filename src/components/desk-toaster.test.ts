@@ -6,7 +6,9 @@ import {
   DESK_TOASTER_OFFSET,
   DESK_TOASTER_PHONE_QUERY,
   DESK_TOASTER_POSITION,
+  DESK_TOASTER_WIDTH,
   deskStackPosition,
+  deskToasterWidth,
   DESK_TOAST_LIFT,
 } from "./desk-toast.ts";
 
@@ -107,6 +109,39 @@ describe("where the toast stack sits", () => {
       that decides whether a toast covers the publish bar.
     */
     assert.doesNotMatch(CSS, /--desk-toast-lift/, "the stylesheet has a second copy of the lift");
+  });
+});
+
+describe("a toast is wide enough to read (D3)", () => {
+  it("is wider than sonner's 356px default and still fits the frame", () => {
+    /*
+      The killed-lead warning carries a sentence AND a long button word ("Add to
+      this story anyway") plus the dismiss press. At sonner's 356px the sentence
+      was squeezed into a sliver. 480px is the floor below which the sentence and
+      that button cannot both be readable; the cap keeps the card on a narrow
+      desktop window (viewport less the nav column and a gutter).
+    */
+    assert.ok(
+      DESK_TOASTER_WIDTH >= 480,
+      `the toast card (${DESK_TOASTER_WIDTH}px) is too narrow for a sentence beside a long button`,
+    );
+    const width = deskToasterWidth();
+    assert.match(width, /^min\(\d+px,/, "the width is capped by the frame, not fixed");
+    assert.match(width, /100vw/, "a narrow window must not push the card off the screen");
+    assert.match(width, /var\(--desk-nav-w/, "the cap clears the nav column, like the left offset does");
+  });
+
+  it("lets the card's contents wrap instead of squeezing the message", () => {
+    const card = block(".desk-ltr .desk-toaster [data-sonner-toast]");
+    assert.match(card, /flex-wrap:\s*wrap/, "the button cannot drop to its own line");
+    const title = block(".desk-ltr .desk-toaster [data-title]");
+    /*
+      `flex: 1` with `min-width: 0` is what allowed the title to be squeezed to
+      nothing. A basis in `em` is a measure in the toast's own text size, so the
+      sentence keeps room and the button wraps when the card cannot hold both.
+    */
+    assert.doesNotMatch(title, /min-width:\s*0\s*;/, "the title can still be squeezed to nothing");
+    assert.match(title, /flex:\s*1 1 [\d.]+em/, "the title has no readable minimum measure");
   });
 });
 

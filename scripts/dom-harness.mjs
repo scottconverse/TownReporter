@@ -373,6 +373,15 @@ sharedHelperUrls["./sentence-stop.ts"] = await moduleUrl("src/lib/news/sentence-
 sharedHelperUrls["@/lib/news/running-head-label"] = await moduleUrl("src/lib/news/running-head-label.ts");
 
 /*
+  `@/components/drafts-count` -- D2 (Oct 24 2026) made `desk-chrome.tsx` read the
+  nav count's query key from this module, so the shell and the Drafts screen
+  cannot drift (the screen writes the list's own count into that entry). It has
+  no runtime imports (`QueryClient` is a type), so the REAL file is loaded, like
+  `running-head-label.ts` above.
+*/
+sharedHelperUrls["@/components/drafts-count"] = await moduleUrl("src/components/drafts-count.ts");
+
+/*
   `lead-match.ts` -- B02 (Oct 13 2026) made the real `desk-copy.ts` import
   `explainPairMatch` and `sharesTightName` as VALUES, in addition to
   `distinguishingOverlap`. A fixture that still stubbed `./lead-match.ts` with
