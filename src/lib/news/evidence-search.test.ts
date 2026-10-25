@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { getSql } from "../db.ts";
@@ -332,5 +332,99 @@ describe("searchEvidence: close in meaning", () => {
     assert.equal(result.meaning.length, 0);
     assert.equal(result.meaningStatus.ready, false);
     assert.match(result.meaningStatus.reason ?? "", /model could not load/);
+  });
+});
+
+describe("searchEvidence: the caller's pieces only", () => {
+  it("ranks this newsroom's pieces even when another paper's pieces score higher", async () => {
+    const ROOM = 813;
+    const other = await capture("https://example.com/other-paper", "Other paper", "2026-10-01T10:00:00Z", OTHER_ROOM);
+    // Seventy pieces from the other paper, all closer to the query than ours.
+    // The old candidate cut (the top 60 across every paper) keeps only these.
+    for (let i = 0; i < 70; i += 1) {
+      const text = `Other paper report ${i} on the flood barrier`;
+      await chunk(other, text, OTHER_ROOM, i);
+      await insertVector(text, vec(1, 0));
+    }
+    const mine = await capture("https://example.com/ours", "Ours", "2026-10-01T10:00:00Z", ROOM);
+    const ours = "Harbor levee repair bids opened Monday";
+    await chunk(mine, ours, ROOM, 0);
+    await insertVector(ours, vec(0.9, 0.1));
+    setEmbedderForTests(fakeEmbedder({ "flood gates": vec(1, 0) }));
+
+    const result = await searchEvidence({ newsroomId: ROOM }, "flood gates");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.exact, []);
+    assert.deepEqual(result.meaning.map((row) => row.excerptStart), [ours]);
+  });
+});
+
+describe("searchEvidence: weak meaning matches are hidden", () => {
+  it("shows no meaning rows for nonsense, and still shows a real match", async () => {
+    const ROOM = 814;
+    const v = await capture("https://example.com/weak", "Weak", "2026-10-01T10:00:00Z", ROOM);
+    const parking = "Parking meter schedule for the depot lot";
+    const sidewalk = "Annual report on sidewalk maintenance";
+    const water = "Water rates rise for homes in the north district";
+    await chunk(v, parking, ROOM, 0);
+    await chunk(v, sidewalk, ROOM, 1);
+    await chunk(v, water, ROOM, 2);
+    // Nonsense scores 0.30 and 0.27 on the first two (weak, below the floor) and
+    // 0 on the third. Only two vectors from earlier tests score higher, so
+    // without a floor both weak pieces make the top-60 cut and reach the list.
+    await insertVector(parking, vec(0, 0, 1));
+    await insertVector(sidewalk, vec(0, 0, 0.9));
+    await insertVector(water, vec(0, 0, 0, 1));
+    setEmbedderForTests(
+      fakeEmbedder({
+        "zqxjvwk nohitword": vec(0.2, 0, 0.3),
+        "utility bills": vec(0, 0, 0, 1),
+      }),
+    );
+
+    const nonsense = await searchEvidence({ newsroomId: ROOM }, "zqxjvwk nohitword");
+    assert.equal(nonsense.ok, true);
+    if (!nonsense.ok) return;
+    assert.deepEqual(nonsense.exact, []);
+    assert.deepEqual(nonsense.meaning, [], "weak matches below the floor are hidden");
+    assert.equal(nonsense.meaningStatus.ready, true);
+
+    const real = await searchEvidence({ newsroomId: ROOM }, "utility bills");
+    assert.equal(real.ok, true);
+    if (!real.ok) return;
+    assert.ok(real.meaning.length >= 1, "a real query still gets its meaning list");
+    assert.equal(real.meaning[0]!.excerptStart, water, "the closest piece comes first");
+  });
+});
+
+describe("searchEvidence: coverage line", () => {
+  it("reuses the count on repeat use and shows new pieces within about a minute", async () => {
+    const ROOM = 815;
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    try {
+      const v = await capture("https://example.com/cover", "Cover", "2026-10-01T10:00:00Z", ROOM);
+      await chunk(v, "Coverage piece one for the budget", ROOM, 0);
+      setEmbedderForTests(fakeEmbedder({ budget: vec(1) }));
+      const first = await searchEvidence({ newsroomId: ROOM }, "budget");
+      assert.equal(first.ok, true);
+      if (!first.ok) return;
+      assert.equal(first.meaningStatus.total, 1);
+
+      await chunk(v, "Coverage piece two for the budget", ROOM, 1);
+      mock.timers.tick(10_000);
+      const repeat = await searchEvidence({ newsroomId: ROOM }, "budget");
+      assert.equal(repeat.ok, true);
+      if (!repeat.ok) return;
+      assert.equal(repeat.meaningStatus.total, 1, "a repeat search within seconds reuses the count");
+
+      mock.timers.tick(60_000);
+      const later = await searchEvidence({ newsroomId: ROOM }, "budget");
+      assert.equal(later.ok, true);
+      if (!later.ok) return;
+      assert.equal(later.meaningStatus.total, 2, "a minute later the count is true again");
+    } finally {
+      mock.timers.reset();
+    }
   });
 });
