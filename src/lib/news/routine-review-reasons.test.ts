@@ -6,7 +6,7 @@ import {
   readerDate,
   routineNoticeLabel,
 } from "./routine-notice-editions.ts";
-import { extractJsonLdEvents } from "./routine-notice-extract.ts";
+import { extractJsonLdEvents, refusalLabel } from "./routine-notice-extract.ts";
 import { routineRefusalWhy } from "./routine-notice-checks.server.ts";
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { collectStoryDates, routineLineParts, storyDateRows } from "../story-dates.ts";
@@ -91,6 +91,19 @@ test("a refused source item keeps its name, and the reason is in plain words", (
     /does not show it at that date and time/,
   );
   assert.equal(routineRefusalWhy({ code: "missing-stable-identity", locator: "x" }), "it has no link or ID we can track");
+});
+
+test("a refused item's name gives its start the way an editor reads it", () => {
+  assert.equal(
+    refusalLabel({ name: "Toddler Storytime", startDate: "2026-10-27T10:00:00-06:00" }),
+    "Toddler Storytime, Oct 27, 2026 at 10:00 AM",
+  );
+  assert.equal(
+    refusalLabel({ name: "Teen Night", startDate: "2026-10-30T18:30:00-06:00" }),
+    "Teen Night, Oct 30, 2026 at 6:30 PM",
+  );
+  assert.equal(refusalLabel({ name: "Book Sale", startDate: "2026-11-02" }), "Book Sale, Nov 2, 2026");
+  assert.equal(refusalLabel({ name: "Open Mic", startDate: "next Friday" }), "Open Mic, next Friday");
 });
 
 test("a routine story's box lists each printed line, not just the headline day", () => {

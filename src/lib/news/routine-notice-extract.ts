@@ -43,8 +43,25 @@ export type RoutineExtractionResult =
 /** The refused event's own name and start, cut short, so an editor can find it. */
 export function refusalLabel(row: Record<string, unknown>) {
   const name = typeof row.name === "string" ? row.name.replace(/\s+/g, " ").trim() : "";
-  const start = typeof row.startDate === "string" ? row.startDate.trim() : "";
+  const start = typeof row.startDate === "string" ? readerStart(row.startDate.trim()) : "";
   return [name, start].filter(Boolean).join(", ").slice(0, 200);
+}
+
+const LABEL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * A source start like "2026-10-27T10:00:00-06:00" as an editor reads it:
+ * "Oct 27, 2026 at 10:00 AM". The clock time is the one the source wrote, so
+ * no timezone math is needed. Anything else is shown as the source wrote it.
+ */
+function readerStart(value: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(value);
+  const month = m ? LABEL_MONTHS[Number(m[2]) - 1] : undefined;
+  if (!m || !month) return value;
+  const day = `${month} ${Number(m[3])}, ${m[1]}`;
+  if (m[4] === undefined) return day;
+  const hour = Number(m[4]);
+  return `${day} at ${hour % 12 || 12}:${m[5]} ${hour < 12 ? "AM" : "PM"}`;
 }
 
 function labelled(result: RoutineExtractionResult, row: Record<string, unknown>): RoutineExtractionResult {
