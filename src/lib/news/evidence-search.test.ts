@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { getSql } from "../db.ts";
@@ -86,6 +86,7 @@ function fakeEmbedder(map: Record<string, Float32Array>) {
 }
 
 afterEach(() => {
+  mock.restoreAll();
   setEmbedderForTests(null);
   clearEvidenceVectorCache();
 });
@@ -256,7 +257,7 @@ describe("searchEvidence: close in meaning", () => {
     await insertVector(second, vec(0.8, 0.2));
     await insertVector(exactPiece, vec(0.95, 0.05));
     for (let i = 0; i < 6; i += 1) {
-      await insertVector(`Unrelated piece number ${i} about sewer rates`, vec(0, 1));
+      await insertVector(`Unrelated piece number ${i} about sewer rates`, vec(0.6, 0.4));
     }
     setEmbedderForTests(fakeEmbedder({ [queryText]: vec(1, 0) }));
 
@@ -316,6 +317,83 @@ describe("searchEvidence: close in meaning", () => {
     assert.ok(result.meaningStatus.total >= 2);
     assert.ok(result.meaningStatus.covered >= 1);
     assert.ok(result.meaningStatus.covered <= result.meaningStatus.total);
+  });
+
+  it("ranks only this newsroom's pieces, so another paper cannot fill the list", async () => {
+    const mine = await capture("https://example.com/mine", "Mine", "2026-10-01T10:00:00Z");
+    const theirs = await capture(
+      "https://example.com/theirs",
+      "Theirs",
+      "2026-10-01T10:00:00Z",
+      OTHER_ROOM,
+    );
+    const myPiece = "Our own paper's piece about the culvert";
+    await chunk(mine, myPiece);
+    await insertVector(myPiece, vec(0, 0, 0.8, 0, 0, 0, 0.6));
+    for (let i = 0; i < 70; i += 1) {
+      const text = `Other paper piece ${i} about the culvert`;
+      await chunk(theirs, text, OTHER_ROOM);
+      await insertVector(text, vec(0, 0, 1));
+    }
+    setEmbedderForTests(fakeEmbedder({ "culvert probe": vec(0, 0, 1) }));
+
+    const result = await searchEvidence({ newsroomId: NEWSROOM }, "culvert probe");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.meaning.map((row) => row.excerptStart),
+      [myPiece],
+    );
+  });
+
+  it("shows no weak matches: nonsense gets an empty list, a real match stays", async () => {
+    const v = await capture("https://example.com/floor", "Floor", "2026-10-01T10:00:00Z");
+    const related = "Snow removal crews plowed the arterial streets";
+    const weak = "Annual report of the parks committee";
+    await chunk(v, related);
+    await chunk(v, weak);
+    await insertVector(related, vec(0, 0, 0, 0.9, 0.1));
+    await insertVector(weak, vec(0, 0, 0, 0.05, 0.99));
+    setEmbedderForTests(
+      fakeEmbedder({ "plow streets": vec(0, 0, 0, 1), "zqxjvwk nohitword": vec(0, 0, 0, 0, 0, 1) }),
+    );
+
+    const real = await searchEvidence({ newsroomId: NEWSROOM }, "plow streets");
+    assert.equal(real.ok, true);
+    if (!real.ok) return;
+    assert.deepEqual(
+      real.meaning.map((row) => row.excerptStart),
+      [related],
+      "the close piece shows; the barely related one does not",
+    );
+
+    const nonsense = await searchEvidence({ newsroomId: NEWSROOM }, "zqxjvwk nohitword");
+    assert.equal(nonsense.ok, true);
+    if (!nonsense.ok) return;
+    assert.equal(nonsense.meaning.length, 0);
+    assert.equal(nonsense.meaningStatus.ready, true);
+  });
+
+  it("serves the coverage counts from memory and refreshes them within a minute", async () => {
+    const v = await capture("https://example.com/cov", "Cov", "2026-10-01T10:00:00Z", 813);
+    await chunk(v, "Coverage piece one", 813);
+    setEmbedderForTests(fakeEmbedder({ cov: vec(1, 0) }));
+
+    const first = await searchEvidence({ newsroomId: 813 }, "cov");
+    assert.equal(first.ok && first.meaningStatus.total, 1);
+
+    await chunk(v, "Coverage piece two", 813, 1);
+    const repeat = await searchEvidence({ newsroomId: 813 }, "cov");
+    assert.equal(
+      repeat.ok && repeat.meaningStatus.total,
+      1,
+      "a repeat search inside the minute does not recount the archive",
+    );
+
+    const realNow = Date.now();
+    mock.method(Date, "now", () => realNow + 61_000);
+    const later = await searchEvidence({ newsroomId: 813 }, "cov");
+    assert.equal(later.ok && later.meaningStatus.total, 2, "after a minute the count is current");
   });
 
   it("keeps the exact list when the meaning model throws", async () => {

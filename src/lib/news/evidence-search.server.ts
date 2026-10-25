@@ -22,9 +22,11 @@ import {
  *                  makes a takedown (excerpt blanked) or a legal removal
  *                  (chunk rows deleted) drop out of the next search.
  *
- * The vectors are loaded once per process and reloaded after five minutes;
- * the fill and prune paths clear the cache so a freshly embedded piece is
- * visible on the very next search.
+ * One newsroom's vectors (and its covered/total counts) are loaded together,
+ * once a minute at most, so ranking only ever sees the caller's own pieces and
+ * the coverage line costs nothing on a repeat search. The fill and prune paths
+ * clear the cache so a freshly embedded piece is visible on the very next
+ * search.
  */
 
 export type EvidenceRow = {
@@ -59,7 +61,13 @@ export const EVIDENCE_QUERY_EMPTY = "Type a few words to search.";
 const EXACT_LIMIT = 30;
 const MEANING_CANDIDATES = 60;
 const MEANING_LIMIT = 5;
-const VECTOR_CACHE_MS = 5 * 60 * 1000;
+const VECTOR_CACHE_MS = 60 * 1000;
+/**
+ * Below this similarity a piece is not "close in meaning" and is not shown.
+ * Measured with the real MiniLM model on 6,000 evidence pieces: real queries
+ * top out at 0.41-0.58, gibberish queries at 0.24-0.35.
+ */
+export const MEANING_MIN_SCORE = 0.38;
 
 type ChunkRow = {
   md5: string;
@@ -71,30 +79,49 @@ type ChunkRow = {
   excerpt_start: string;
 };
 
-type VectorCache = { loadedAt: number; vectors: Map<string, Float32Array> };
-let vectorCache: VectorCache | null = null;
+type NewsroomVectors = {
+  loadedAt: number;
+  vectors: Map<string, Float32Array>;
+  covered: number;
+  total: number;
+};
+const vectorCache = new Map<number, NewsroomVectors>();
 
 /** Tests, the fill clock and the prune clock call this after writing. */
 export function clearEvidenceVectorCache(): void {
-  vectorCache = null;
+  vectorCache.clear();
 }
 
-/** Every stored vector, at most once per five minutes. */
-async function loadVectors(): Promise<Map<string, Float32Array>> {
-  if (vectorCache && Date.now() - vectorCache.loadedAt < VECTOR_CACHE_MS) {
-    return vectorCache.vectors;
-  }
+/**
+ * This newsroom's live evidence pieces and the vectors that match them, at most
+ * once a minute per newsroom. `total` counts distinct live, readable excerpts;
+ * `covered` is how many of them have a vector.
+ */
+async function loadNewsroomVectors(newsroomId: number): Promise<NewsroomVectors> {
+  const cached = vectorCache.get(newsroomId);
+  if (cached && Date.now() - cached.loadedAt < VECTOR_CACHE_MS) return cached;
   const sql = await getSql();
-  const rows = await sql<{ excerpt_md5: string; vector: unknown }>`
-    select excerpt_md5, vector from evidence_vectors
+  const rows = await sql<{ md5: string; vector: unknown }>`
+    select m.md5, ev.vector
+      from (
+        select distinct md5(c.excerpt) as md5
+          from artifact_chunks c
+         where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
+           and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
+      ) m
+      left join evidence_vectors ev on ev.excerpt_md5 = m.md5
   `;
   const vectors = new Map<string, Float32Array>();
+  let covered = 0;
   for (const row of rows) {
+    if (row.vector == null) continue;
+    covered += 1;
     const vector = bytesToVector(row.vector);
-    if (vector.length === EVIDENCE_DIMS) vectors.set(row.excerpt_md5, vector);
+    if (vector.length === EVIDENCE_DIMS) vectors.set(row.md5, vector);
   }
-  vectorCache = { loadedAt: Date.now(), vectors };
-  return vectors;
+  const entry = { loadedAt: Date.now(), vectors, covered, total: rows.length };
+  vectorCache.set(newsroomId, entry);
+  return entry;
 }
 
 /** Escape the three characters LIKE treats specially, for `escape '\'`. */
@@ -144,31 +171,12 @@ async function exactRows(newsroomId: number, q: string): Promise<EvidenceRow[]> 
   return rows.map((row) => toRow(row));
 }
 
-/** How much of this newsroom's evidence has a vector so far. */
-async function coverage(
-  newsroomId: number,
-): Promise<{ covered: number; total: number }> {
-  const sql = await getSql();
-  const [row] = await sql<{ covered: number; total: number }>`
-    select
-      (select count(distinct md5(c.excerpt))::int
-         from artifact_chunks c
-         join evidence_vectors ev on ev.excerpt_md5 = md5(c.excerpt)
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
-          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as covered,
-      (select count(distinct md5(c.excerpt))::int
-         from artifact_chunks c
-        where c.newsroom_id = ${newsroomId} and c.excerpt <> ''
-          and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)) as total
-  `;
-  return { covered: row?.covered ?? 0, total: row?.total ?? 0 };
-}
-
 /** The meaning list, or the reason it could not be drawn. */
 async function meaningRows(
   newsroomId: number,
   q: string,
   exactMd5s: Set<string>,
+  vectors: Map<string, Float32Array>,
 ): Promise<{ rows: EvidenceRow[]; error?: string }> {
   let queryVector: Float32Array;
   try {
@@ -179,17 +187,11 @@ async function meaningRows(
     return { rows: [], error: shortReason(err) };
   }
 
-  let vectors: Map<string, Float32Array>;
-  try {
-    vectors = await loadVectors();
-  } catch (err) {
-    return { rows: [], error: shortReason(err) };
-  }
-
   const scored: { md5: string; score: number }[] = [];
   for (const [md5, vector] of vectors) {
     if (exactMd5s.has(md5)) continue;
-    scored.push({ md5, score: dotProduct(queryVector, vector) });
+    const score = dotProduct(queryVector, vector);
+    if (score >= MEANING_MIN_SCORE) scored.push({ md5, score });
   }
   scored.sort((a, b) => b.score - a.score);
   const candidates = scored.slice(0, MEANING_CANDIDATES);
@@ -240,12 +242,18 @@ export async function searchEvidence(
     return { ok: false, error: EVIDENCE_QUERY_EMPTY };
   }
 
-  const [exact, counts] = await Promise.all([
+  const [exact, loaded] = await Promise.all([
     exactRows(context.newsroomId, q),
-    coverage(context.newsroomId),
+    loadNewsroomVectors(context.newsroomId).then(
+      (entry) => ({ entry, error: undefined as string | undefined }),
+      (err: unknown) => ({ entry: null, error: shortReason(err) }),
+    ),
   ]);
   const exactMd5s = new Set(exact.map((row) => row.md5));
-  const meaning = await meaningRows(context.newsroomId, q, exactMd5s);
+  const counts = loaded.entry ?? { covered: 0, total: 0 };
+  const meaning = loaded.entry
+    ? await meaningRows(context.newsroomId, q, exactMd5s, loaded.entry.vectors)
+    : { rows: [] as EvidenceRow[], error: loaded.error };
 
   const meaningStatus: EvidenceMeaningStatus = {
     ready: !meaning.error,
