@@ -21,7 +21,7 @@ import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { libreOfficeKindForName, type LibreOfficeKind } from "./story-document-text.ts";
@@ -82,7 +82,9 @@ export function findSoffice(): string | null {
     candidates.push("/usr/bin/soffice", "/usr/local/bin/soffice", "/opt/libreoffice/program/soffice");
   }
   for (const candidate of candidates) if (exists(candidate)) return candidate;
-  for (const dir of (env.PATH ?? env.Path ?? "").split(delimiter)) {
+  // Split PATH by the platform being searched, not by the machine running this
+  // code, so a Windows PATH like "C:\tools" is not cut at its drive colon.
+  for (const dir of (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":")) {
     if (!dir) continue;
     const candidate = join(dir, exe);
     if (exists(candidate)) return candidate;
