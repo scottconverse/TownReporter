@@ -63,6 +63,7 @@ import { providerAvailability, PROVIDER_AVAILABILITY_QUERY_KEY, localModelCatalo
 import { getProviderStatuses } from "@/lib/news/provider-login";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
+import { libreOfficeStatusFn } from "@/lib/news/libreoffice-api";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
 
 export const Route = createFileRoute("/desk/ops")({
@@ -526,6 +527,7 @@ function OpsPage() {
   const isOwner = me.data?.role === "owner";
   const bodies = useCardBodies(isOwner);
   const darkRuns = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
+  const libreOffice = useQuery({ queryKey: ["libreoffice-status"], queryFn: () => libreOfficeStatusFn() });
 
   useEffect(() => {
     const key = signin ? "writing-models" : cardForHash(hash);
@@ -570,6 +572,23 @@ function OpsPage() {
       </div>
       <p className="lede">
         Check this machine's models, health and setup.
+      </p>
+      <p className="lede" data-testid="libreoffice-line">
+        {libreOffice.isSuccess
+          ? libreOffice.data.found
+            ? "LibreOffice: found"
+            : "LibreOffice: not found"
+          : "LibreOffice: checking…"}
+        {libreOffice.isSuccess && !libreOffice.data.found ? (
+          <>
+            {" "}
+            (Excel and PowerPoint files are skipped without it.{" "}
+            <a href="https://www.libreoffice.org/download/" target="_blank" rel="noreferrer">
+              Install LibreOffice
+            </a>
+            )
+          </>
+        ) : null}
       </p>
       {/*
         Cards flow left to right in the drawn order, with each row top-aligned.

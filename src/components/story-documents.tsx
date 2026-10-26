@@ -12,6 +12,7 @@ import {
   DOCUMENT_FILE_LIMIT,
 } from "@/lib/news/story-document-text";
 import { Notice } from "@/components/states";
+import { retryLibreOfficeDocumentFn } from "@/lib/news/libreoffice-api";
 export type StoryUpload = { id: string; filename: string; size: number };
 /**
  * The plain notice the editor gets when a redraft ran on a partly read
@@ -169,7 +170,7 @@ export function StoryDocumentUpload({
           aria-label="Attach documents"
           type="file"
           multiple
-          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt,.md,.markdown,.csv,.tsv,.srt,.vtt,.json,.log"
+          accept=".pdf,.doc,.docx,.xlsx,.xls,.ods,.pptx,.ppt,.odp,.odt,.png,.jpg,.jpeg,.webp,.txt,.md,.markdown,.csv,.tsv,.srt,.vtt,.json,.log"
           disabled={disabled || busy}
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
@@ -178,7 +179,7 @@ export function StoryDocumentUpload({
           }}
         />
         <p className="document-formats">
-          PDF · Word · Markdown · Text · Images · CSV · Transcripts
+          PDF · Word · Excel · PowerPoint · LibreOffice · Markdown · Text · Images · CSV · Transcripts
         </p>
         <p className="document-limits">Up to 20 files · 100 MB each · OCR included</p>
       </div>
@@ -228,11 +229,24 @@ export function StoryDocumentUpload({
 }
 export function StoryDocumentList({ leadId }: { leadId: number }) {
   const [error, setError] = useState("");
+  const [retrying, setRetrying] = useState("");
   const query = useQuery({
     queryKey: ["story-documents", leadId],
     queryFn: () => listStoryDocuments({ data: { leadId } }),
     refetchInterval: 5000,
   });
+  async function tryAgain(id: string) {
+    setRetrying(id);
+    setError("");
+    try {
+      await retryLibreOfficeDocumentFn({ data: { id } });
+      await query.refetch();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRetrying("");
+    }
+  }
   async function download(id: string, extracted = false) {
     try {
       const doc = await downloadStoryDocument({ data: { id, extracted } });
@@ -262,6 +276,26 @@ export function StoryDocumentList({ leadId }: { leadId: number }) {
           <b>{d.filename}</b> · {d.status}
           {d.total_parts > 0 ? ` · ${d.read_parts}/${d.total_parts} parts read` : ""}
           <p>{d.detail}</p>
+          {d.status === "failed" &&
+            /^(LibreOffice could not read|Install LibreOffice)/.test(d.detail) && (
+              <p>
+                {d.detail.startsWith("Install LibreOffice") && (
+                  <>
+                    <a href="https://www.libreoffice.org/download/" target="_blank" rel="noreferrer">
+                      Get LibreOffice (libreoffice.org/download)
+                    </a>{" "}
+                  </>
+                )}
+                <button
+                  className="btn small"
+                  type="button"
+                  disabled={retrying === d.id}
+                  onClick={() => void tryAgain(d.id)}
+                >
+                  {retrying === d.id ? "Trying again…" : "Try again"}
+                </button>
+              </p>
+            )}
           <button className="btn small" type="button" onClick={() => void download(d.id)}>
             Download original
           </button>

@@ -11,6 +11,7 @@ import { FetchResponseRefusal, limitFor, readBodyCapped, refusedPageHtml } from 
 import { mustNotRetryImmediately, retryAfterFromHeaders } from "./fetch-politeness.ts";
 import { HostGate, type FetchSchedule } from "./host-gate.ts";
 import type { RenderedPage } from "./render-fetch.ts";
+import { libreOfficeKindForMime, libreOfficeKindForName } from "./story-document-text.ts";
 import {
   BLOCKED_AFTER_RENDER_MESSAGE,
   isPrivatePage,
@@ -886,6 +887,57 @@ async function ingestDocumentRaw(
         pages: pdf.pages,
         rawBytes: buf,
       });
+    }
+
+    /*
+      Excel, PowerPoint and LibreOffice files are read through LibreOffice
+      (libreoffice.server.ts). Before this branch a fetched Office file was
+      refused as "Unsupported content type". A file LibreOffice cannot read
+      comes back as a warning with the original bytes, never as a thrown error.
+    */
+    const officeKind =
+      libreOfficeKindForMime(ctype) ??
+      (/^(?:application\/(?:octet-stream|zip|x-zip-compressed|vnd\.ms-office))?$/.test(ctype.split(";", 1)[0]!.trim())
+        ? libreOfficeKindForName(path)
+        : null);
+    if (officeKind && typeof window === "undefined") {
+      const fileName = decodeURIComponent(url.pathname.split("/").pop() || "document");
+      const { readWithLibreOffice, libreOfficeSkipMessage, LibreOfficeError } = await import(
+        "./libreoffice.server.ts"
+      );
+      try {
+        const read = await readWithLibreOffice(buf, fileName, officeKind);
+        return empty({
+          ok: true,
+          status,
+          outcome: "fetched",
+          text: `${read.unit === "sheets" ? "SPREADSHEET" : read.unit === "slides" ? "SLIDES" : "DOCUMENT"} ${url.toString()}
+${read.note}
+
+${read.text}`.slice(0, ARCHIVE_TEXT_CAP),
+          title: fileName,
+          contentType: ctype,
+          redirectChain: tracked.chain,
+          extractionMethod: `libreoffice:${read.unit}:${read.count}`,
+          pages: [],
+          rawBytes: buf,
+        });
+      } catch (error) {
+        return empty({
+          ok: false,
+          status,
+          outcome: "parse-failed",
+          text: libreOfficeSkipMessage(fileName, error),
+          title: fileName,
+          contentType: ctype,
+          redirectChain: tracked.chain,
+          extractionMethod:
+            error instanceof LibreOfficeError && error.code === "missing"
+              ? "libreoffice-missing"
+              : "libreoffice-failed",
+          rawBytes: buf,
+        });
+      }
     }
 
     const body = new TextDecoder("utf-8", { fatal: false }).decode(buf);

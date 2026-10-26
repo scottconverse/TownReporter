@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { resolveFetch, setFetchImplForTests } from "./fetch-url.ts";
 import { BODY_LIMIT } from "./body-limit.ts";
 import { ingestDocument } from "./ingest.ts";
+import { readFileSync } from "node:fs";
+import { findSoffice, libreOfficeDeps } from "./libreoffice.server.ts";
 
 afterEach(() => setFetchImplForTests(null));
 
@@ -158,4 +160,35 @@ test("ingestion preserves every redirect on header and streamed refusals", async
       "https://1.1.1.1/final",
     ]);
   }
+});
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const sheetBytes = () =>
+  new Uint8Array(readFileSync(new URL("./fixtures/story-documents/two-sheets.xlsx", import.meta.url)));
+
+test("a fetched Excel link is no longer refused; without LibreOffice it warns and keeps the bytes", async () => {
+  const real = { ...libreOfficeDeps };
+  try {
+    Object.assign(libreOfficeDeps, { env: {}, exists: () => false });
+    setFetchImplForTests(async () => new Response(sheetBytes(), { headers: { "content-type": XLSX_TYPE } }));
+    const doc = await ingestDocument("https://1.1.1.1/budget.xlsx");
+    assert.equal(doc.extractionMethod, "libreoffice-missing");
+    assert.match(doc.text, /^Install LibreOffice to read Excel and PowerPoint files/);
+    assert.equal(doc.rawBytes?.byteLength, sheetBytes().byteLength);
+    // Zip files that are not Office files stay refused.
+    setFetchImplForTests(async () => new Response(sheetBytes(), { headers: { "content-type": "application/zip" } }));
+    const zip = await ingestDocument("https://1.1.1.1/archive.zip");
+    assert.equal(zip.extractionMethod, "refused-content-type");
+  } finally {
+    Object.assign(libreOfficeDeps, real);
+  }
+});
+
+test("a fetched Excel link served as octet-stream is read by its extension", { skip: findSoffice() ? false : "LibreOffice (soffice) is not installed here" }, async () => {
+  setFetchImplForTests(async () => new Response(sheetBytes(), { headers: { "content-type": "application/octet-stream" } }));
+  const doc = await ingestDocument("https://1.1.1.1/files/Budget%202026.xlsx");
+  assert.equal(doc.ok, true);
+  assert.equal(doc.extractionMethod, "libreoffice:sheets:2");
+  assert.match(doc.text, /Sheet: Water Fund/);
+  assert.match(doc.text, /\$31,250,000/);
 });

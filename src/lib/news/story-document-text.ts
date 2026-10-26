@@ -1,13 +1,46 @@
 export const DOCUMENT_FILE_LIMIT = 100 * 1024 * 1024;
 export const DOCUMENT_TEXT_LIMIT = 20_000_000;
 export const DOCUMENT_COUNT_LIMIT = 20;
-export function documentKind(name: string): "pdf" | "image" | "text" | "word" {
+/** What LibreOffice reads for the desk: spreadsheets, slides and Writer files. */
+export type LibreOfficeKind = "sheet" | "slides" | "writer";
+const LIBREOFFICE_EXTENSIONS: Record<string, LibreOfficeKind> = {
+  xlsx: "sheet",
+  xls: "sheet",
+  ods: "sheet",
+  pptx: "slides",
+  ppt: "slides",
+  odp: "slides",
+  odt: "writer",
+};
+const LIBREOFFICE_MIME: Record<string, LibreOfficeKind> = {
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "sheet",
+  "application/vnd.ms-excel": "sheet",
+  "application/vnd.oasis.opendocument.spreadsheet": "sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "slides",
+  "application/vnd.ms-powerpoint": "slides",
+  "application/vnd.oasis.opendocument.presentation": "slides",
+  "application/vnd.oasis.opendocument.text": "writer",
+};
+/** The LibreOffice kind for a file name or URL path, or null. */
+export function libreOfficeKindForName(name: string): LibreOfficeKind | null {
+  const ext = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(name)?.[1]?.toLowerCase();
+  return ext ? (LIBREOFFICE_EXTENSIONS[ext] ?? null) : null;
+}
+/** The LibreOffice kind for a content type, or null. */
+export function libreOfficeKindForMime(mime: string): LibreOfficeKind | null {
+  return LIBREOFFICE_MIME[mime.split(";", 1)[0]!.trim().toLowerCase()] ?? null;
+}
+export function documentKind(
+  name: string,
+): "pdf" | "image" | "text" | "word" | "sheet" | "slides" | "writer" {
   if (/\.pdf$/i.test(name)) return "pdf";
+  const office = libreOfficeKindForName(name);
+  if (office) return office;
   if (/\.(png|jpe?g|webp)$/i.test(name)) return "image";
   if (/\.docx?$/i.test(name)) return "word";
   if (/\.(txt|md|markdown|csv|tsv|srt|vtt|json|log)$/i.test(name)) return "text";
   throw new Error(
-    "Choose PDF, Word DOC/DOCX, PNG, JPG, WebP, TXT, Markdown, CSV, SRT or VTT files.",
+    "Choose PDF, Word DOC/DOCX, Excel, PowerPoint, LibreOffice ODS/ODP/ODT, PNG, JPG, WebP, TXT, Markdown, CSV, SRT or VTT files.",
   );
 }
 /** One attached document a redraft could not finish reading (0.6.64, Unit AB). */

@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import { documentChunks, documentKind, validateDocumentText } from "./story-document-text.ts";
 import { extractStoryDocument } from "./story-documents.server.ts";
 import { readFileSync } from "node:fs";
+import { libreOfficeDeps } from "./libreoffice.server.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 
 /*
@@ -679,4 +680,34 @@ it("redrafts from a partly read scan, still reads the later document, and resume
   assert.equal(complete[0]!.pages, 13);
   assert.equal(complete[0]!.read_pages, null);
   assert.match(complete[0]!.full_text ?? "", /SCANNED PAGE 13 OF 13/);
+});
+
+it("an Excel file LibreOffice cannot open warns, is skipped, and the draft goes on", async () => {
+  const { storeStoryDocument, readStoryDocuments, retryLibreOfficeDocument } =
+    await import("./story-documents.server.ts");
+  const sql = await getSql();
+  const real = { ...libreOfficeDeps };
+  try {
+    Object.assign(libreOfficeDeps, { env: {}, exists: () => false });
+    const [lead] = await sql`insert into leads(user_id,newsroom_id,headline,why,topic) values('lo-skip',1,'Budget','Fixture','council') returning id`;
+    const sheet = await storeStoryDocument(1, "lo-skip", "budget.xlsx", "", readFileSync(new URL("./fixtures/story-documents/two-sheets.xlsx", import.meta.url)));
+    const note = await storeStoryDocument(1, "lo-skip", "notes.txt", "text/plain", Buffer.from("Council notes."));
+    await sql`update story_documents set lead_id=${lead.id} where id in (${sheet.id}, ${note.id})`;
+    const stages: string[] = [];
+    const evidence = await readStoryDocuments(1, Number(lead.id), "codex-balanced", "Read", async (m) => { stages.push(m); }, [], "lo-skip", true, undefined, {
+      probe: async () => ({ ok: true, choice: "codex-balanced" }) as never,
+      chat: async () => ({ ok: true, text: "Interpreted notes" }),
+    });
+    const rows = await sql`select filename,status,detail from story_documents where lead_id=${lead.id} order by filename`;
+    assert.equal(rows[0].status, "failed");
+    assert.match(String(rows[0].detail), /^Install LibreOffice to read Excel and PowerPoint files/);
+    assert.equal(rows[1].status, "read");
+    assert.match(evidence, /Interpreted notes/);
+    assert.ok(stages.some((m) => /budget\.xlsx.*Install LibreOffice/.test(m)));
+    // Try again while it is still missing: the same warning, no crash.
+    const again = await retryLibreOfficeDocument(1, sheet.id);
+    assert.equal(again.ok, false);
+  } finally {
+    Object.assign(libreOfficeDeps, real);
+  }
 });

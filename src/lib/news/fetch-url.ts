@@ -1,6 +1,7 @@
 import { assertHttpUrl, isBlockedAddress, isIP } from "./url-guard.ts";
 import type { FetchSchedule } from "./host-gate.ts";
 import { htmlToPlainText } from "./html-text.ts";
+import { libreOfficeKindForMime, libreOfficeKindForName } from "./story-document-text.ts";
 import { capFetchResponse, FetchResponseRefusal } from "./body-limit.ts";
 
 export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";
@@ -330,6 +331,23 @@ export async function fetchSourceText(
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const ctype = res.headers.get("content-type") ?? "";
   const mediaType = ctype.split(";", 1)[0].trim().toLowerCase();
+  // Excel, PowerPoint and LibreOffice files are read through LibreOffice; every
+  // other zip / octet-stream / image type is still refused below.
+  const officeKind =
+    libreOfficeKindForMime(mediaType) ??
+    (/^application\/(?:octet-stream|zip|x-zip-compressed|vnd\.ms-office)$/.test(mediaType)
+      ? libreOfficeKindForName(url.pathname)
+      : null);
+  if (officeKind && typeof window === "undefined") {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    signal?.throwIfAborted();
+    const fileName = decodeURIComponent(url.pathname.split("/").pop() || "document");
+    const { readWithLibreOffice } = await import("./libreoffice.server.ts");
+    const read = await readWithLibreOffice(bytes, fileName, officeKind);
+    return { text: `${read.note}
+
+${read.text}`.slice(0, STRUCTURED_SOURCE_TEXT_LIMIT), titleHint: fileName };
+  }
   if (/pdf|octet-stream|zip|image\//i.test(ctype)) {
     throw new Error(`Unsupported content type: ${ctype || "unknown"}`);
   }

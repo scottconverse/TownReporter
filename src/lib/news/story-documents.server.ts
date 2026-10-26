@@ -2,6 +2,7 @@ import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   documentKind,
+  libreOfficeKindForName,
   documentChunks,
   validateDocumentText,
   DOCUMENT_FILE_LIMIT,
@@ -15,6 +16,8 @@ import { modelChoiceLabel } from "./model-choice.ts";
 import type { OcrOptions } from "./ingest.ts";
 import { OCR_BATCH_PAGE_LIMIT } from "./ocr-batches.ts";
 import type { LocalModelOverride } from "./ai.ts";
+import { LibreOfficeError, libreOfficeSkipMessage } from "./libreoffice.server.ts";
+import { describeExtractionMethod } from "./extraction-label.ts";
 
 /**
  * How much one redraft job may read before it hands a document back PARTIAL
@@ -257,6 +260,8 @@ export type StoryDocumentExtractionResult = {
   complete: boolean;
   pagesRead: number;
   pagesTotal: number | null;
+  /** "Read by LibreOffice: 3 sheets" -- shown on the file's line. */
+  readNote?: string;
 };
 
 function retainedPageText(pages: readonly RetainedStoryDocumentPage[]) {
@@ -314,6 +319,19 @@ export async function extractStoryDocument(
       pagesTotal: doc.pages,
     };
   const kind = documentKind(doc.filename);
+  if (kind === "sheet" || kind === "slides" || kind === "writer") {
+    const { readWithLibreOffice } = await import("./libreoffice.server.ts");
+    await progress(`Reading ${doc.filename} with LibreOffice`);
+    const read = await readWithLibreOffice(new Uint8Array(doc.original), doc.filename, kind);
+    return {
+      text: validateDocumentText(read.text),
+      pages: read.unit === "sheets" ? null : read.count,
+      complete: true,
+      pagesRead: 0,
+      pagesTotal: read.unit === "sheets" ? null : read.count,
+      readNote: read.note,
+    };
+  }
   if (kind === "word") {
     const { default: WordExtractor } = await import("word-extractor");
     const parsed = await new WordExtractor().extract(Buffer.from(doc.original));
@@ -498,6 +516,13 @@ export async function readStoryDocuments(
     [room, association[1]],
   );
   if (!intake.length) return "";
+  /*
+    Excel / PowerPoint / LibreOffice links the desk fetched this run: the note
+    for the file's line ("Read by LibreOffice: 3 sheets"), and the ones
+    LibreOffice could not read (warned about below, never thrown).
+  */
+  const libreOfficeNotes = new Map<string, string>();
+  const libreOfficeFailures = new Map<string, LibreOfficeError>();
   for (const url of urls) {
     const existing = await sql<{
       id: string;
@@ -506,6 +531,25 @@ export async function readStoryDocuments(
     await onStage(`Fetching supplied source: ${url}`);
     const { ingestDocument } = await import("./ingest.ts");
     const got = await ingestDocument(url, { provider: choice, newsroomId: String(room) });
+    if (/^libreoffice/.test(got.extractionMethod) && got.rawBytes) {
+      const title = libreOfficeKindForName(got.title) ? got.title : `${got.title || "Supplied source"}.xlsx`;
+      const stored = await storeStoryDocument(room, user, title, got.contentType, got.rawBytes);
+      await sql`update story_documents set lead_id=${lead},source_url=${url} where id=${stored.id} and newsroom_id=${room}`;
+      if (got.ok) {
+        const pageCount = /^libreoffice:(?:slides|pages):(\d+)$/.exec(got.extractionMethod);
+        await sql`update story_documents set full_text=${got.text},pages=${pageCount ? Number(pageCount[1]) : null} where id=${stored.id} and newsroom_id=${room}`;
+        libreOfficeNotes.set(stored.id, describeExtractionMethod(got.extractionMethod));
+      } else {
+        libreOfficeFailures.set(
+          stored.id,
+          new LibreOfficeError(
+            got.extractionMethod === "libreoffice-missing" ? "missing" : "failed",
+            got.text.replace(/^LibreOffice could not read [^:]*: /, ""),
+          ),
+        );
+      }
+      continue;
+    }
     if (
       !got.ok ||
       !got.text.trim() ||
@@ -659,6 +703,8 @@ export async function readStoryDocuments(
       const extractionDocument = untrustedPartialPdfText
         ? { ...row, full_text: null, pages: null }
         : row;
+      const knownFailure = libreOfficeFailures.get(row.id);
+      if (knownFailure) throw knownFailure;
       await sql`update story_documents set status='reading',detail='',reading_key=${readingKey},evidence=${resumesSameAssignment ? row.evidence ?? null : null},read_parts=${resumesSameAssignment ? row.read_parts ?? 0 : 0},extraction_pages=${JSON.stringify(checkpointedPages)} where id=${row.id} and newsroom_id=${room}`;
       const extract = () => extractStoryDocument(
         extractionDocument,
@@ -798,9 +844,23 @@ export async function readStoryDocuments(
       );
       const note = notes.join("\n\n");
       evidence.push(note);
-      await sql`update story_documents set evidence=${note},status='read',detail=${`Read all ${fullText.length.toLocaleString()} characters in ${chunks.length} parts${extracted.pages ? ` across ${extracted.pages} pages` : ""}. Original and extracted text retained.`} where id=${row.id} and newsroom_id=${room}`;
+      await sql`update story_documents set evidence=${note},status='read',detail=${`${(extracted.readNote ?? libreOfficeNotes.get(row.id)) ? `${extracted.readNote ?? libreOfficeNotes.get(row.id)}. ` : ""}Read all ${fullText.length.toLocaleString()} characters in ${chunks.length} parts${extracted.pages ? ` across ${extracted.pages} pages` : ""}. Original and extracted text retained.`} where id=${row.id} and newsroom_id=${room}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      /*
+        LibreOffice could not read this file (or is not installed). Warn, never
+        block: the line says why, the story keeps going without it, and the
+        file's line has "Try again". Other documents and the draft go on.
+      */
+      if (error instanceof LibreOfficeError) {
+        const line = libreOfficeSkipMessage(row.filename, error);
+        await sql`update story_documents set status='failed',detail=${line} where id=${row.id} and newsroom_id=${room}`;
+        await onStage(`${row.filename}: ${line}. The draft goes on without it.`);
+        evidence.push(
+          `DOCUMENT NOT READ: ${row.filename} could not be read (${line}). Treat anything it might say as unknown.`,
+        );
+        continue;
+      }
       /*
         A document that retained pages before failing is PARTIAL, not fatal.
         The row records pages read of total and the desk offers "Read the
@@ -882,4 +942,33 @@ export function readEditorialDocuments(
   onStage: (message: string) => Promise<void>, user = "", routing: DocumentReadingRouting = {},
 ) {
   return readStoryDocuments(room, 0, choice, assignment, onStage, [], user, true, requestId, routing);
+}
+
+/**
+ * "Try again" on a file LibreOffice could not read (or could not be found for).
+ * It reads the saved original again right now. On success the extracted text is
+ * kept, so the next draft uses it; on failure the line says why again.
+ */
+export async function retryLibreOfficeDocument(room: number, id: string) {
+  const sql = await getSql();
+  await ensureStoryDocuments(sql);
+  const rows = await sql.query(
+    "select filename,original from story_documents where id=$1 and newsroom_id=$2",
+    [id, room],
+  );
+  const row = rows[0] as { filename: string; original: Uint8Array } | undefined;
+  if (!row) throw new Error("Document unavailable.");
+  const kind = libreOfficeKindForName(row.filename);
+  if (!kind) throw new Error("Only Excel, PowerPoint and LibreOffice files can be tried again here.");
+  try {
+    const { readWithLibreOffice } = await import("./libreoffice.server.ts");
+    const read = await readWithLibreOffice(new Uint8Array(row.original), row.filename, kind);
+    const text = validateDocumentText(read.text);
+    await sql`update story_documents set full_text=${text},pages=${read.unit === "sheets" ? null : read.count},status='uploaded',evidence=null,read_parts=0,total_parts=0,detail=${`${read.note}. The text is ready for the next draft.`} where id=${id} and newsroom_id=${room}`;
+    return { ok: true, detail: read.note };
+  } catch (error) {
+    const line = libreOfficeSkipMessage(row.filename, error);
+    await sql`update story_documents set status='failed',detail=${line} where id=${id} and newsroom_id=${room}`;
+    return { ok: false, detail: line };
+  }
 }

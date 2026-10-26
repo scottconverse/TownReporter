@@ -16,6 +16,7 @@
  * length before reading a byte, and stop mid-stream when a body with no
  * declared length keeps coming.
  */
+import { libreOfficeKindForMime, libreOfficeKindForName } from "./story-document-text.ts";
 
 /**
  * Ceilings by kind. Generous on purpose — a civic page is small, but a council
@@ -92,7 +93,11 @@ export async function readBodyCapped(res: Response, limit: number): Promise<Capp
 
 /** Which ceiling applies, from the URL and what the server claims it sent. */
 export function limitFor(url: string, contentType: string): number {
-  const isPdf = /\.pdf(\?|#|$)/i.test(url) || contentType.toLowerCase().includes("application/pdf");
+  const isPdf =
+    /\.pdf(\?|#|$)/i.test(url) ||
+    contentType.toLowerCase().includes("application/pdf") ||
+    libreOfficeKindForMime(contentType) !== null ||
+    libreOfficeKindForName(url) !== null;
   return isPdf ? BODY_LIMIT.pdf : BODY_LIMIT.html;
 }
 
@@ -165,7 +170,13 @@ export async function capFetchResponse(res: Response, url: URL): Promise<Respons
   }
   const mime = (res.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
   const octetPdf = mime === "application/octet-stream" && /\.pdf$/i.test(url.pathname);
-  if (mime && !READABLE_TYPES.has(mime) && !octetPdf) {
+  // Excel, PowerPoint and LibreOffice files are read through LibreOffice; every
+  // other unreadable type is still refused.
+  const officeFile =
+    libreOfficeKindForMime(mime) !== null ||
+    (/^application\/(?:octet-stream|zip|x-zip-compressed|vnd\.ms-office)$/.test(mime) &&
+      libreOfficeKindForName(url.pathname) !== null);
+  if (mime && !READABLE_TYPES.has(mime) && !octetPdf && !officeFile) {
     await res.body?.cancel().catch(() => undefined);
     throw new FetchResponseRefusal(
       `Unsupported content type: ${mime}. This desk reads web pages, feeds, text and PDFs.`,

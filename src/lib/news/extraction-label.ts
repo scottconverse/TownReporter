@@ -20,6 +20,14 @@ export function describeExtractionMethod(method: string | undefined | null): str
     const [, provider, read, total] = ocr;
     return `Read by OCR · ${provider} · ${read} of ${total} extracted images · PDF page order not established`;
   }
+  const office = /^libreoffice:(sheets|slides|pages):(\d+)$/.exec(raw);
+  if (office) {
+    const count = Number(office[2]);
+    const word = count === 1 ? office[1]!.slice(0, -1) : office[1];
+    return `Read by LibreOffice: ${count} ${word}`;
+  }
+  if (raw === "libreoffice-missing") return "Install LibreOffice to read Excel and PowerPoint files";
+  if (raw === "libreoffice-failed") return "LibreOffice could not read this file";
   const needsOcr = /^needs-ocr:([\s\S]*)$/.exec(raw);
   if (needsOcr) {
     const reason = needsOcr[1]!.trim();
