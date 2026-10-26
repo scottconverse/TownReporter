@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   documentKind,
   libreOfficeKindForName,
+  libreOfficeKindForMime,
   documentChunks,
   validateDocumentText,
   DOCUMENT_FILE_LIMIT,
@@ -532,7 +533,16 @@ export async function readStoryDocuments(
     const { ingestDocument } = await import("./ingest.ts");
     const got = await ingestDocument(url, { provider: choice, newsroomId: String(room) });
     if (/^libreoffice/.test(got.extractionMethod) && got.rawBytes) {
-      const title = libreOfficeKindForName(got.title) ? got.title : `${got.title || "Supplied source"}.xlsx`;
+      // A fetched file with no Office name gets one that matches what it is,
+      // so a slide deck is never stored as ".xlsx".
+      const unit = /^libreoffice:(sheets|slides|pages):/.exec(got.extractionMethod)?.[1];
+      const kind =
+        libreOfficeKindForMime(got.contentType) ??
+        (unit === "slides" ? "slides" : unit === "pages" ? "writer" : "sheet");
+      const extension = kind === "slides" ? "pptx" : kind === "writer" ? "odt" : "xlsx";
+      const title = libreOfficeKindForName(got.title)
+        ? got.title
+        : `${got.title || "Supplied source"}.${extension}`;
       const stored = await storeStoryDocument(room, user, title, got.contentType, got.rawBytes);
       await sql`update story_documents set lead_id=${lead},source_url=${url} where id=${stored.id} and newsroom_id=${room}`;
       if (got.ok) {

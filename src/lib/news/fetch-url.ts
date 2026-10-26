@@ -3,6 +3,9 @@ import type { FetchSchedule } from "./host-gate.ts";
 import { htmlToPlainText } from "./html-text.ts";
 import { libreOfficeKindForMime, libreOfficeKindForName } from "./story-document-text.ts";
 import { capFetchResponse, FetchResponseRefusal } from "./body-limit.ts";
+import { createServerOnlyFn } from "@tanstack/react-start";
+
+const libreOfficeServer = createServerOnlyFn(() => import("./libreoffice.server.ts"));
 
 export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";
 
@@ -342,7 +345,7 @@ export async function fetchSourceText(
     const bytes = new Uint8Array(await res.arrayBuffer());
     signal?.throwIfAborted();
     const fileName = decodeURIComponent(url.pathname.split("/").pop() || "document");
-    const { readWithLibreOffice } = await import("./libreoffice.server.ts");
+    const { readWithLibreOffice } = await libreOfficeServer();
     const read = await readWithLibreOffice(bytes, fileName, officeKind);
     return { text: `${read.note}
 

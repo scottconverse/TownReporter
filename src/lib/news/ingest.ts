@@ -577,6 +577,7 @@ type RedditIngest = {
 const redditServer = createServerOnlyFn(() => import("./reddit.server.ts"));
 const newsletterArchive = createServerOnlyFn(() => import("./newsletter-scan.server.ts"));
 const newsletterSignup = createServerOnlyFn(() => import("./newsletter-signup.ts"));
+const libreOfficeServer = createServerOnlyFn(() => import("./libreoffice.server.ts"));
 async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
   if (typeof window !== "undefined") return null;
   const { isRedditUrl } = await import("./reddit.ts");
@@ -902,9 +903,8 @@ async function ingestDocumentRaw(
         : null);
     if (officeKind && typeof window === "undefined") {
       const fileName = decodeURIComponent(url.pathname.split("/").pop() || "document");
-      const { readWithLibreOffice, libreOfficeSkipMessage, LibreOfficeError } = await import(
-        "./libreoffice.server.ts"
-      );
+      const { readWithLibreOffice, libreOfficeSkipMessage, LibreOfficeError } =
+        await libreOfficeServer();
       try {
         const read = await readWithLibreOffice(buf, fileName, officeKind);
         return empty({
