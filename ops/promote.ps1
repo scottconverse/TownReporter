@@ -11,8 +11,9 @@
 
     1. refuses if this checkout has uncommitted work, so nothing is lost
     2. backs the database up, and refuses to continue if the dump looks empty;
-       copies it to the offsite drive and verifies it there, then prunes the
-       local folder back to the newest three (see ops\lib-backup.ps1)
+       copies it to the offsite drive and verifies it there, then deletes
+       from C: every backup verified on D:, and keeps the newest backup of
+       each of the 3 newest days on D: (see ops\lib-backup.ps1)
     3. records what is on the paper now, to compare against afterwards
     3b. refuses if an editor has a desk job running or queued, unless
         -WaitForJobs (poll up to 15 min) or -Force (proceed anyway) is passed
@@ -845,7 +846,7 @@ if ($resumePoint -and $resumeAt -and (Get-PromoteStepRank 'backup') -lt (Get-Pro
 if (-not $reuseBackup) {
   Add-PromoteStep -Log $log -Name 'backup' -Detail "database $dbName"
   $t0 = Get-Date
-  if ($PSCmdlet.ShouldProcess($dbName, "back up, copy the backup to the offsite drive, and prune the local backups")) {
+  if ($PSCmdlet.ShouldProcess($dbName, "back up, copy the backup to the offsite drive, clear the verified backups from this machine, and keep 3 days on the offsite drive")) {
     $run = Invoke-TownReporterBackupRun -Database $dbName -App $app -Force -LockWaitSeconds 120 -LogFile (Join-Path $app "logs\backup.log")
     if ($run.Skipped) { Die "Could not take a backup ($($run.Reason)). Not promoting without one." 'backup' "Fix whatever stopped the backup (it is in logs\backup.log), then run this script again." }
     # DumpOk, not Ok: -Force means this run always attempts a dump, so a $null or
@@ -854,7 +855,11 @@ if (-not $reuseBackup) {
     # over a full D: drive would take the paper down for no reason at all.
     if ($run.DumpOk -ne $true) { Die "Could not take a backup ($($run.Reason)). Not promoting without one." 'backup' "Fix whatever stopped the backup (it is in logs\backup.log), then run this script again." }
 
-    $backup = Join-Path (Get-TownReporterBackupDir -App $app) $run.State.lastName
+    # Where the backup is NOW: since 2026-10-25 it is deleted from C: once it
+    # is verified on D:, so the note names D: when that is where it is. Falls
+    # back to the C: path when neither folder shows it (the old wording).
+    $backup = Get-TownReporterBackupPath -Name $run.State.lastName -BackupDir (Get-TownReporterBackupDir -App $app) -OffsiteDir (Get-TownReporterBackupOffsiteDir -App $app)
+    if (-not $backup) { $backup = Join-Path (Get-TownReporterBackupDir -App $app) $run.State.lastName }
     $backupNote = "$backup ($([math]::Round($run.State.lastBytes/1MB,1)) MB)"
     Say "backup: $backupNote"
     foreach ($line in $run.Lines) {

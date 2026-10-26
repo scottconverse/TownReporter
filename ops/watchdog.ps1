@@ -86,8 +86,10 @@
   scheduled tasks on the machine.
 
   * Nightly backup (ops\lib-backup.ps1). After 2 AM, with the newest backup
-    older than 20 hours, and only when no editor job is running, it takes one
-    and copies it to the other drive. The rule lives in the library, the same
+    (on C: or D:) older than 20 hours, and only when no editor job is
+    running, it takes one and copies it to D:; C: is then cleared of every
+    backup verified on D:, and D: keeps the newest of each of the 3 newest
+    days. The rule lives in the library, the same
     function promote.ps1 and ops\backup.ps1 call, so there is one backup path
     and not three. A night whose dump FAILED is not retried every five
     minutes: thirty minutes of quiet follows a failure, which is the one case
@@ -890,7 +892,9 @@ if ($env:WATCHDOG_TEST_MODE -ne '1') {
   try {
     . (Join-Path $PSScriptRoot "lib-backup.ps1")
     $backupDir = Get-TownReporterBackupDir -App $app
-    $due = Test-TownReporterBackupDue -BackupDir $backupDir
+    # The newest backup of C: AND D: -- C: is emptied once a backup is
+    # verified on D:, so reading C: alone would start a dump every 5 minutes.
+    $due = Test-TownReporterBackupDue -BackupDir $backupDir -OffsiteDir (Get-TownReporterBackupOffsiteDir -App $app)
     if (-not $due.Due) {
       # Not due is the ordinary answer five minutes at a time; saying so every
       # run would bury the runs that matter.

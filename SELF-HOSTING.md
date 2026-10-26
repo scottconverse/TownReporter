@@ -484,26 +484,40 @@ nothing — deliberate, so an unconfigured box cannot be poked into working.
 
 ### Where they live, and how many
 
+The owner's rule (2026-10-25): *"Keep 3 days of backups. No more. Delete the
+rest. and keep them on D: not C:"*.
+
 | Where | What is kept | Set by |
 | --- | --- | --- |
-| `..\townreporter-backups` — the folder beside this checkout | the newest **3** | `ops\lib-backup.ps1` |
-| `D:\TownReporter-backups` | **everything**, while there is room | `BACKUP_OFFSITE_DIR` in `.env` |
+| `D:\TownReporter-backups` | the newest backup of each of the **3 newest days** that have one | `BACKUP_OFFSITE_DIR` in `.env` |
+| `..\townreporter-backups` — the folder beside this checkout (C:) | **nothing** once a backup is verified on D: — it is only where a new dump is written first | `ops\lib-backup.ps1` |
 
 Each file is `<database>_YYYY-MM-DD_HHmm.sql` — a plain-SQL `pg_dump` of the
 whole database, about 700 MB for the working edition. The local folder is a
 sibling of the app directory on purpose: it is outside every build, promotion
 and rollback path, so none of those can take a backup with it.
 
-The local folder is pruned to the newest three **only after every local file has
-been proved to be on D:** — same size, same SHA-256, checked on every run. If D:
-is missing, will not take a write, has less than 100 GB free, or a copy fails
-its check, **nothing local is deleted** and the Control page's **Attention** card
-says why. Nothing ever deletes from D:; a full D: stops the copies and alerts,
-and the drive is emptied by a person.
+Each local backup is deleted from C: **only after its own copy on D: has been
+proved identical** — same size, same SHA-256, checked on every run. One that does
+not verify stays on C: and the log names it. An empty C: folder is the normal,
+healthy state; the Control page's **Last backup** card and the nightly
+"is a backup due?" check both look at the newest backup on D: **and** C:, so an
+empty C: never starts an extra dump.
+
+On D:, every run keeps the newest backup of each of the three newest days that
+have a backup (the day is read from the file name, so a day with no backup is
+skipped, not counted) and deletes the rest of the dated series there. The
+newest backup is never deleted. `-KeepDays` changes the number of days.
+
+If D: is missing, will not take a write, has less than 100 GB free, or is the
+local folder under another name, **nothing is deleted anywhere**: the backup
+still runs and stays on C:, and the Control page (**Copy on D:** and
+**Attention**) says plainly that nothing was deleted and why. It warns; it
+never stops a backup.
 
 ### One-off items: anything else left in the backups folder
 
-The newest-three rule above only ever looks at the dated `<database>_YYYY-MM-DD_HHmm.sql`
+The three-day rule above only ever looks at the dated `<database>_YYYY-MM-DD_HHmm.sql`
 series. Anything else sitting in that folder — a hand-named `.sql` export, an
 old pg_dump `.dump`, or a whole folder someone left there before an upgrade
 (a pre-migration snapshot, a recovery copy, and so on) — is a **one-off item**,
@@ -512,11 +526,11 @@ proved by size and SHA-256, a folder by file count, total bytes, and a SHA-256
 of every file inside it. They land in `D:\TownReporter-backups\other-safety-copies\`,
 never mixed in with the dated series.
 
-One-off items are never touched by the newest-three rule, and they are not
-kept on C: forever either: once a one-off item is **verified on D: and at
-least 14 days old**, it is removed from the local folder — never from D:,
-which keeps everything. An item that is too young, or that has not verified
-yet, is left alone and the log says which. Something that looks like it might
+One-off items are never touched by the three-day rule. Once a one-off item is
+**verified on D:**, it is removed from the local folder (C:) — there is no
+waiting period. On D:, a one-off item in `other-safety-copies\` is deleted
+once it has been there **more than 3 days**. An item that has not verified
+yet stays on C: and the log says which. Something that looks like it might
 still be being written — a `.incomplete` or `.partial` file, or anything
 touched in the last 10 minutes — is skipped for that run and picked up again
 once it has settled, rather than copied half-finished.
@@ -532,7 +546,7 @@ Control page's **Back up now** button, or:
 ```powershell
 pwsh -NoProfile -File ops\backup.ps1            # dump, copy to D:, prune, alert
 pwsh -NoProfile -File ops\backup.ps1 -Offsite   # copy what is already here; no dump
-pwsh -NoProfile -File ops\backup.ps1 -Keep 5    # keep more than 3 locally
+pwsh -NoProfile -File ops\backup.ps1 -KeepDays 5   # keep 5 days on D: instead of 3
 ```
 
 The log is `logs\backup.log`, and the report the Control page reads is

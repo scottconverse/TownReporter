@@ -21,13 +21,20 @@
   differently from the nightly one would be a bug nobody would find until the
   day it mattered.
 
-  Safe by default in the ways that matter:
+  The owner's rule since 2026-10-25: "Keep 3 days of backups. No more. Delete
+  the rest. and keep them on D: not C:". So:
 
-    * It never deletes anything locally until every local file is proven
-      identical on the offsite drive -- same length AND same SHA256.
-    * It never deletes anything at all if the offsite drive is missing, is not
-      writable, has less than 100 GB free, or any copy failed to verify.
-    * It never deletes anything from the offsite drive, ever.
+    * C: (this machine) keeps nothing once a backup is safe on D:. Each local
+      backup is deleted from C: only after its D: copy is proven identical --
+      same length AND same SHA256. One that does not verify stays on C:.
+    * D: keeps the newest backup of each of the 3 newest days that have a
+      backup (the day is read from the file name), and the rest of the dated
+      series there is deleted. The newest backup is never deleted.
+    * One-off safety copies (hand-named .sql/.dump files, old folders) are
+      deleted from C: once verified on D:, and from D: after 3 days there.
+    * It never deletes anything, on either drive, if the offsite drive is
+      missing, is not writable, has less than 100 GB free, or is the local
+      folder under another name. The backup still runs and stays on C:.
     * It takes the lock, so it cannot collide with the nightly run or a
       promotion. Unlike promote.ps1 it does not wait for the lock: this is an
       operator action, and "another backup is running, try again in a minute"
@@ -41,7 +48,7 @@
   Usage:
     powershell -ExecutionPolicy Bypass -File ops\backup.ps1
     powershell -ExecutionPolicy Bypass -File ops\backup.ps1 -Offsite
-    powershell -ExecutionPolicy Bypass -File ops\backup.ps1 -Keep 5
+    powershell -ExecutionPolicy Bypass -File ops\backup.ps1 -KeepDays 5
     powershell -ExecutionPolicy Bypass -File ops\backup.ps1 -Force
 #>
 [CmdletBinding()]
@@ -54,8 +61,13 @@ param(
   # one is not due. The nightly run applies that rule; a person asking has
   # already decided.
   [switch]$Force,
-  # How many local backups to keep. The owner's number is three.
-  [int]$Keep = 3,
+  # How many of the newest backups to leave on this machine (C:) even after
+  # they are verified on D:. The owner's number is none: "keep them on D:
+  # not C:".
+  [int]$Keep = 0,
+  # How many days of backups D: keeps: the newest backup of each of the
+  # KeepDays newest days that have one. The owner's number is three.
+  [int]$KeepDays = 3,
   # Refuse to copy onto an offsite drive with less free space than this. The
   # owner's drive is 8 TB half empty, so 100 GB is room.
   [int]$MinFreeGb = 100,
@@ -90,6 +102,7 @@ $run = Invoke-TownReporterBackupRun `
   -LogFile $logFile `
   -PgPort $PgPort `
   -Keep $Keep `
+  -KeepDays $KeepDays `
   -MinFreeGb $MinFreeGb `
   -Offsite:$Offsite `
   -Force:$Force
@@ -133,7 +146,7 @@ if ($run.DumpOk -eq $false) {
 }
 if (-not $run.Ok) {
   Write-Host "  The backup is on this machine, but: $($run.Reason)" -ForegroundColor Yellow
-  Write-Host "  Nothing was deleted. Fix the above and re-run with -Offsite." -ForegroundColor Yellow
+  Write-Host "  Nothing that is not safe on D: was deleted. Fix the above and re-run with -Offsite." -ForegroundColor Yellow
   Write-Host ""
   exit 1
 }
@@ -150,8 +163,13 @@ if ($run.DumpOk -ne $true) {
 }
 
 $count = $run.State.localCount
-$newest = if ($run.State.localNewestAt) { ([datetime]::Parse($run.State.localNewestAt)).ToLocalTime().ToString('h:mm tt') } else { 'unknown' }
+$newestAt = if ($run.State.newestAt) { $run.State.newestAt } else { $run.State.localNewestAt }
+$newest = if ($newestAt) { ([datetime]::Parse($newestAt)).ToLocalTime().ToString('h:mm tt') } else { 'unknown' }
+$where = if ($run.State.newestWhere -eq 'offsite') { 'on the offsite drive' } elseif ($run.State.newestWhere -eq 'local') { 'on this machine' } else { '' }
 Write-Host "  Backed up and copied to the offsite drive." -ForegroundColor Green
-Write-Host "  Newest backup on this machine: $newest; $count kept here; $($run.State.offsiteVerified) verified on the offsite drive."
+Write-Host "  Newest backup: $newest, $where. $($run.State.offsiteCount) on the offsite drive (the $KeepDays-day keep); $count still on this machine."
+if ($run.State.pruneBlocked) {
+  Write-Host "  Nothing was deleted: $($run.State.pruneBlocked)" -ForegroundColor Yellow
+}
 Write-Host ""
 exit 0

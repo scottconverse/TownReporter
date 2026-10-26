@@ -22,8 +22,10 @@ That:
 
 1. Refuses if this checkout has uncommitted tracked changes (pass `-AllowDirty`
    to override).
-2. Picks the newest backup in `..\townreporter-backups` (or the one named by
-   `-Backup <path>`), prints its name and size, and refuses anything under 1 MB.
+2. Picks the newest backup in `..\townreporter-backups` or the offsite folder
+   (`BACKUP_OFFSITE_DIR`, default `D:\TownReporter-backups`, where the backups
+   live since 2026-10-25), or the one named by `-Backup <path>`; prints its
+   name, size and folder, and refuses anything under 1 MB.
 3. Terminates connections to `townreporter_dev`, drops and recreates it, and
    restores the dump into it with `psql`. Prints the story count so you can see
    real data landed.

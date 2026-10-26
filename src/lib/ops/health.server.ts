@@ -381,6 +381,11 @@ type BackupRecord = {
   lastError?: string | null;
   skippedReason?: string | null;
   localCount?: number | null;
+  /* Since 2026-10-25 the backups live on the offsite drive (D:) and this
+     machine keeps none once they are verified there, so the count that
+     matters is the offsite one. Older records do not carry it. */
+  offsiteCount?: number | null;
+  offsiteDir?: string | null;
 };
 
 /**
@@ -430,6 +435,18 @@ async function checkBackup(): Promise<HealthCheck[]> {
   const lastSuccessAt = typeof record.lastSuccessAt === "string" ? record.lastSuccessAt : null;
   const rawCount = Number(record.localCount);
   const localCount = Number.isFinite(rawCount) ? rawCount : 0;
+  const rawOffsite = record.offsiteCount == null ? NaN : Number(record.offsiteCount);
+  const offsiteDir = typeof record.offsiteDir === "string" && record.offsiteDir ? record.offsiteDir : "the offsite drive";
+  /* With the offsite count on record: "3 backups on D:\... · none waiting on
+     this machine" -- an empty C: is the normal state, not a warning. Without
+     it (an older record), the old sentence. */
+  const countNote = !lastSuccessAt
+    ? ""
+    : Number.isFinite(rawOffsite)
+      ? `${rawOffsite} backup${rawOffsite === 1 ? "" : "s"} on ${offsiteDir} · ${
+          localCount === 0 ? "none" : localCount
+        } waiting on this machine`
+      : `${localCount} local backup${localCount === 1 ? "" : "s"} on disk`;
   const state = backupState(lastSuccessAt);
   return [
     {
@@ -438,7 +455,7 @@ async function checkBackup(): Promise<HealthCheck[]> {
       state,
       value: lastSuccessAt ? formatAgo(lastSuccessAt) : "no successful backup yet",
       note: [
-        lastSuccessAt ? `${localCount} local backup${localCount === 1 ? "" : "s"} on disk` : "",
+        countNote,
         record.lastError ? `last error: ${String(record.lastError).slice(0, 140)}` : "",
         record.skippedReason ? `skipped: ${String(record.skippedReason).slice(0, 140)}` : "",
         state === "warn"

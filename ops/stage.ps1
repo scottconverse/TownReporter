@@ -72,6 +72,18 @@ $Port = $requestedPort
 . (Join-Path $ops "lib-stage.ps1")
 
 $backupDir = Join-Path (Split-Path -Parent $app) "townreporter-backups"
+# Since 2026-10-25 a verified backup lives on D: only (C: is emptied once the
+# D: copy is proven), so the newest backup is looked for in both folders.
+# BACKUP_OFFSITE_DIR from this checkout's .env, else the owner's D: folder.
+$offsiteDir = 'D:\TownReporter-backups'
+$envPathForOffsite = Join-Path $app ".env"
+if (Test-Path -LiteralPath $envPathForOffsite) {
+  $offLine = Get-Content -LiteralPath $envPathForOffsite | Where-Object { $_ -match '^\s*BACKUP_OFFSITE_DIR\s*=' } | Select-Object -First 1
+  if ($offLine) {
+    $offValue = ($offLine -replace '^\s*BACKUP_OFFSITE_DIR\s*=\s*', '').Trim().Trim('"').Trim("'")
+    if ($offValue) { $offsiteDir = $offValue }
+  }
+}
 $pidFile = Join-Path $ops ".stage.pid"
 $stateFile = Join-Path $ops ".stage.json"
 $dbName = "townreporter_dev"
@@ -211,10 +223,12 @@ if ($Backup) {
   if (-not (Test-Path $Backup)) { Die "Backup file not found: $Backup" }
   $backupFile = Get-Item $Backup
 } else {
-  if (-not (Test-Path $backupDir)) { Die "Backup directory not found: $backupDir" }
-  $backupFile = Get-ChildItem -Path $backupDir -Filter "*.sql" -ErrorAction SilentlyContinue |
+  $searchDirs = @($backupDir, $offsiteDir | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
+  if ($searchDirs.Count -eq 0) { Die "Backup directory not found: neither $backupDir nor $offsiteDir exists" }
+  $backupFile = $searchDirs | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter "*.sql" -File -ErrorAction SilentlyContinue } |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $backupFile) { Die "No .sql backups found in $backupDir" }
+  if (-not $backupFile) { Die "No .sql backups found in $backupDir or $offsiteDir" }
+  Say "newest backup found in: $($backupFile.DirectoryName)"
 }
 $bytes = $backupFile.Length
 Say "backup: $($backupFile.Name) ($([math]::Round($bytes/1MB,1)) MB)"

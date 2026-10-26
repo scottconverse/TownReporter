@@ -377,27 +377,48 @@ export async function probePublicVersion({ site = "https://townreporter.org", ti
   }
 }
 
-/** The newest `*.sql` in the backup folder. Missing folder is an answer, not a throw. */
-export function probeBackup({ dir = DEFAULT_BACKUP_DIR, now = Date.now } = {}) {
-  let names;
+/**
+ * The newest backup, on this machine (C:) or on D:. Missing folder is an
+ * answer, not a throw.
+ *
+ * Since 2026-10-25 a backup is deleted from C: once its copy on D: is
+ * verified, so an empty C: folder is the normal state, not a missing backup.
+ * C: is listed live, as before; what is on D: comes from `offsite` -- the
+ * backup run's own report (probeOffsiteCopy: offsiteNewestName/At/Bytes) --
+ * and never from a listing of D:, which can hang while a sleeping drive
+ * wakes. The newer of the two wins.
+ */
+export function probeBackup({ dir = DEFAULT_BACKUP_DIR, now = Date.now, offsite = null } = {}) {
+  let newest = null;
+  let names = [];
   try {
     names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".sql"));
   } catch {
-    return { ok: false, found: false, dir, detail: `No backup found in ${dir}` };
+    names = [];
   }
-  if (!names.length) return { ok: false, found: false, dir, detail: `No backup found in ${dir}` };
-  let newest = null;
   for (const name of names) {
     try {
       const st = fs.statSync(path.join(dir, name));
-      if (!newest || st.mtimeMs > newest.mtimeMs) newest = { name, size: st.size, mtimeMs: st.mtimeMs };
+      if (!newest || st.mtimeMs > newest.mtimeMs) newest = { name, size: st.size, mtimeMs: st.mtimeMs, where: "local", dir };
     } catch {
       /* vanished mid-listing: the next one still answers */
     }
   }
-  if (!newest) return { ok: false, found: false, dir, detail: `No backup found in ${dir}` };
+  const offAt = offsite && offsite.newestName && offsite.newestAt ? Date.parse(offsite.newestAt) : NaN;
+  if (Number.isFinite(offAt) && (!newest || offAt > newest.mtimeMs)) {
+    newest = {
+      name: offsite.newestName,
+      size: Number(offsite.newestBytes) || 0,
+      mtimeMs: offAt,
+      where: "offsite",
+      dir: offsite.dir || DEFAULT_OFFSITE_DIR,
+    };
+  }
+  const offDir = offsite && offsite.dir ? offsite.dir : null;
+  const notFound = offDir ? `No backup found in ${dir} or on ${offDir}` : `No backup found in ${dir}`;
+  if (!newest) return { ok: false, found: false, dir, detail: notFound };
   const ageMinutes = Math.max(0, Math.round((now() - newest.mtimeMs) / 60000));
-  return { ok: true, found: true, dir, ...newest, ageMinutes };
+  return { ok: true, found: true, ...newest, ageMinutes };
 }
 
 /**
@@ -473,11 +494,22 @@ export function probeOffsiteCopy({ appRoot = null, stateFile = null } = {}) {
   const dir = state.offsiteDir || fallback;
   const freeGb = Number(state.offsiteFreeGb);
   const reported = state.offsiteOk !== undefined && state.offsiteOk !== null;
+  const count = Number(state.offsiteCount);
   return {
     ok: true,
     known: reported,
     dir,
     verified: Number(state.offsiteVerified) || 0,
+    // How many backups are on D: after the 3-day keep, as the run counted
+    // them; null from a run older than that rule (the page then shows
+    // `verified`, as it always did).
+    count: state.offsiteCount !== undefined && state.offsiteCount !== null && Number.isFinite(count) ? count : null,
+    newestName: state.offsiteNewestName || null,
+    newestAt: state.offsiteNewestAt || null,
+    newestBytes: Number(state.offsiteNewestBytes) || 0,
+    // The plain reason the last run deleted nothing (D: missing, full, the
+    // same folder...), or null when the deletes ran.
+    pruneBlocked: state.pruneBlocked || null,
     freeGb: Number.isFinite(freeGb) ? freeGb : null,
     at: state.offsiteAt || state.lastSuccessAt || state.updatedAt || null,
     failing: reported && !isTrue(state.offsiteOk),
@@ -1324,12 +1356,14 @@ export async function collectStatus({
     read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
 
-  const backup = read.backup({ dir: backupDir, now });
   // Both of these read a report the backup run or the watchdog left in the
   // install's own `logs\`, so they take the install being described and never
   // the folder this page happens to be running from.
   const offsite = read.offsite({ appRoot });
   const alerts = read.alerts({ appRoot });
+  // The newest backup of C: and D: -- D: as the run reported it (above), so
+  // an empty C: is never read as "no backup".
+  const backup = read.backup({ dir: backupDir, now, offsite });
 
   // Every card below carries a real `state` -- "ok" / "note" / "down" -- and
   // `ok` derived from it, so the page cannot print OK over a probe that did not
@@ -1370,8 +1404,9 @@ export async function collectStatus({
       "Last backup",
       backup.found ? "ok" : "note",
       backup.found
-        ? `${backup.name} - ${bytes(backup.size)}, written ${formatLocalTime(backup.mtimeMs, { now, timeZone })} (${backup.ageMinutes} minutes ago)`
-        : `No backup found in ${backup.dir}`,
+        ? `${backup.name} - ${bytes(backup.size)}, written ${formatLocalTime(backup.mtimeMs, { now, timeZone })} (${backup.ageMinutes} minutes ago)` +
+            (backup.where === "offsite" ? `, on ${backup.dir}` : "")
+        : backup.detail || `No backup found in ${backup.dir}`,
     ),
     // The copy on the other drive, in the owner's own terms: how many are
     // there, when the last one was checked, and how much room is left. Down
@@ -1380,18 +1415,31 @@ export async function collectStatus({
     card(
       "offsite",
       "Copy on D:",
-      offsite.known ? (offsite.failing ? "down" : offsite.verified > 0 ? "ok" : "note") : "note",
-      !offsite.known
+      offsite.known
+        ? offsite.failing
+          ? "down"
+          : offsite.pruneBlocked
+            ? "note"
+            : (offsite.count ?? offsite.verified) > 0
+              ? "ok"
+              : "note"
+        : "note",
+      (!offsite.known
         ? offsite.detail
         : offsite.failing
           ? `the last copy to ${offsite.dir} failed: ${offsite.reason || "no reason was given"}`
           : [
-              `${offsite.verified} ${offsite.verified === 1 ? "copy" : "copies"} on ${offsite.dir}`,
+              `${offsite.count ?? offsite.verified} ${(offsite.count ?? offsite.verified) === 1 ? "copy" : "copies"} on ${offsite.dir}`,
               offsite.at ? `checked ${formatLocalTime(offsite.at, { now, timeZone })}` : "",
               formatFreeSpace(offsite.freeGb),
             ]
               .filter(Boolean)
-              .join("; "),
+              .join("; ")) +
+        // When the last run could delete nothing because of D:, the page says
+        // so in plain words: the backups are safe, they are on this machine.
+        (offsite.known && offsite.pruneBlocked
+          ? `. Nothing was deleted; the backups stay on this machine (C:) until D: works again.`
+          : ""),
     ),
     // The staged copy. Not answering is normal -- it is not a scheduled task
     // and it does not come back by itself -- so the row is a Note and never a

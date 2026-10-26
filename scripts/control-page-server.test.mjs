@@ -11,6 +11,7 @@ import {
   formatLocalRange,
   formatLocalTime,
   probeAlerts,
+  probeBackup,
   probeOffsiteCopy,
   probeQwen,
   probeMeetingTools,
@@ -815,6 +816,112 @@ test("the real offsite probe reads the run's own report, and says nothing it can
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the newest backup is the newest of this machine and D:, so an empty C: is not 'no backup'", () => {
+  /*
+    The owner's rule since 2026-10-25: backups live on D:, and C: keeps none
+    once they are verified there. So the Last backup card must look at D: too:
+    an empty C: folder with a fresh backup on D: is the healthy state, not a
+    missing backup. Temp folders only; D: itself is never read here.
+  */
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-backups-on-d-"));
+  try {
+    const localDir = path.join(root, "townreporter-backups");
+    fs.mkdirSync(localDir, { recursive: true });
+    const now = () => Date.parse("2026-10-25T14:00:00.000Z");
+    const offsite = {
+      dir: "D:\\TownReporter-backups",
+      newestName: "townreporter_2026-10-25_0200.sql",
+      newestAt: "2026-10-25T08:00:00.000Z",
+      newestBytes: 300000000,
+    };
+
+    // C: empty, D: has the newest: found, and it says where.
+    const onD = probeBackup({ dir: localDir, now, offsite });
+    assert.equal(onD.found, true);
+    assert.equal(onD.where, "offsite");
+    assert.equal(onD.name, "townreporter_2026-10-25_0200.sql");
+    assert.equal(onD.dir, "D:\\TownReporter-backups");
+    assert.equal(onD.size, 300000000);
+    assert.equal(onD.ageMinutes, 360);
+
+    // A newer file on C: (D: not copied yet) wins, and it says this machine.
+    const localFile = path.join(localDir, "townreporter_2026-10-25_1300.sql");
+    fs.writeFileSync(localFile, "-- PostgreSQL database dump complete\n", "utf8");
+    const t = Date.parse("2026-10-25T13:00:00.000Z") / 1000;
+    fs.utimesSync(localFile, t, t);
+    const onC = probeBackup({ dir: localDir, now, offsite });
+    assert.equal(onC.found, true);
+    assert.equal(onC.where, "local");
+    assert.equal(onC.name, "townreporter_2026-10-25_1300.sql");
+
+    // Neither drive has one: not found, and the sentence names both places.
+    fs.rmSync(localFile);
+    const none = probeBackup({ dir: localDir, now, offsite: { dir: "D:\\TownReporter-backups" } });
+    assert.equal(none.found, false);
+    assert.match(none.detail, /D:\\TownReporter-backups/);
+
+    // The run's report carries the D: count, the D: newest and the held-back reason.
+    fs.mkdirSync(path.join(root, "logs"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "logs", "backup-state.json"),
+      JSON.stringify({
+        updatedAt: "2026-10-25T08:05:00.000Z",
+        localCount: 0,
+        offsiteDir: "D:\\TownReporter-backups",
+        offsiteOk: true,
+        offsiteReason: null,
+        offsiteVerified: 1,
+        offsiteFreeGb: 4300,
+        offsiteAt: "2026-10-25T08:04:00.000Z",
+        offsiteCount: 3,
+        offsiteNewestName: "townreporter_2026-10-25_0200.sql",
+        offsiteNewestAt: "2026-10-25T08:00:00.000Z",
+        offsiteNewestBytes: 300000000,
+        pruneBlocked: null,
+      }),
+      "utf8",
+    );
+    const report = probeOffsiteCopy({ appRoot: root });
+    assert.equal(report.count, 3, "the D: count is the count of backups kept there");
+    assert.equal(report.newestName, "townreporter_2026-10-25_0200.sql");
+    assert.equal(report.newestAt, "2026-10-25T08:00:00.000Z");
+    assert.equal(report.newestBytes, 300000000);
+    assert.equal(report.pruneBlocked, null);
+    const fromReport = probeBackup({ dir: localDir, now, offsite: report });
+    assert.equal(fromReport.where, "offsite", "the report's D: newest reaches the Last backup card");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the Copy on D: card says plainly when nothing was deleted", async () => {
+  const held = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      offsite: () => ({
+        ok: true,
+        known: true,
+        dir: "D:\\TownReporter-backups",
+        verified: 0,
+        count: 3,
+        freeGb: 60,
+        at: "2026-09-25T20:04:00.000Z",
+        failing: false,
+        reason: null,
+        localCount: 1,
+        pruneBlocked: "D:\\TownReporter-backups has only 60 GB free",
+        detail: null,
+      }),
+    }),
+  });
+  const card = cardFor(held, "offsite");
+  assert.equal(card.state, "note", "held back is a Note, never a green light and never a block");
+  assert.match(card.detail, /Nothing was deleted; the backups stay on this machine \(C:\) until D: works again/);
+  assert.match(card.detail, /^3 copies on D:\\TownReporter-backups/);
 });
 
 test("the real alerts probe reads firing, and calls an unchecked machine unknown", () => {

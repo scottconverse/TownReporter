@@ -10,13 +10,35 @@
   the folder grew without limit -- 61 files, about 12.5 GB, none of it pruned
   and none of it off the system drive.
 
-  What the owner asked for, in his words: "Keep ONLY 3 days worth and keep only
-  the latest three on the server disk. Keep ALL backups (as long as there's
-  room) on drive D: -- an 8 TB disk, half empty." Plus an alert when a backup
-  has not happened, when the copy to D: is failing, and when D: is filling up.
+  What the owner asked for first (2026-09-25), in his words: "Keep ONLY 3 days
+  worth and keep only the latest three on the server disk. Keep ALL backups (as
+  long as there's room) on drive D:". Plus an alert when a backup has not
+  happened, when the copy to D: is failing, and when D: is filling up.
 
-  Four rules this file exists to keep, each of which is a way to lose data if
-  it is written the other way round:
+  What he asked for on 2026-10-25, which REPLACES the keep rules above, word
+  for word: "Keep 3 days of backups. No more. Delete the rest. and keep them on
+  D: not C:". His reason: a backup is for recovering from fresh damage to the
+  paper, and an old one only wastes space. So since then:
+
+    * C: (the folder beside the app) keeps NOTHING once a backup is verified
+      on D:. The dump is still written to C: first -- that is where pg_dump
+      writes, and it is the copy that survives a missing D: -- and it is
+      deleted from C: the moment its copy on D: is proven identical. An empty
+      C: folder is the normal state now, not a warning.
+    * D: keeps the newest backup of each of the 3 newest DAYS that have a
+      backup, read from the date in the file name. Everything else in the
+      dated series on D: is deleted. "The 3 newest days that have a backup",
+      not "the last 3 calendar days": a week with no backups never empties the
+      drive. The newest backup is never deleted.
+    * One-off safety copies (Get-TownReporterSafetyCopyList): deleted from C:
+      once verified on D:, and deleted from D: once they are more than 3 days
+      old there.
+    * Every reader of "the newest backup" looks at D: and C: and takes the
+      newest of either (Get-TownReporterNewestBackup), so an empty C: never
+      makes the nightly run think no backup exists.
+
+  The rules this file exists to keep, each of which is a way to lose data if
+  it is written the other way round (2 and 3 are the 2026-10-25 versions):
 
     1. A dump that does not END like a complete pg_dump is a failed backup. The
        caller is told so and must not treat the file as a backup. pg_dump
@@ -27,16 +49,20 @@
        file is deleted, so a database that is down at 2 AM cannot fill the disk
        with dumps that failed. A dump that is still valid, or older than the
        rule allows, is a different case and is kept like any other backup.
-    2. Nothing is deleted locally until every local file is proven identical on
+    2. A file is deleted from C: only after THAT file is proven identical on
        D: -- same length AND same SHA256. A delete is the one operation here
-       that cannot be undone, so it goes last and only after a proof.
-    3. Nothing is ever deleted from D:. Pruning there is the owner's business
-       ("keep ALL backups as long as there's room"), and the one-time copy of
-       the existing 61 files is his to run.
-    4. Any failure between here and D: -- the drive missing, not writable, or a
-       copy that does not verify -- deletes NOTHING and returns a reason the
-       caller turns into an alert. Failing closed on a backup is not a
-       conservative choice, it is the only safe one.
+       that cannot be undone, so it goes last and only after a proof. A file
+       that does not verify stays on C:, and the log names it.
+    3. D: is pruned only to the keep rule above, only among files whose names
+       are this series' (<db>_YYYY-MM-DD_HHmm.sql), and never below one
+       complete backup: a day only counts toward the 3 when its backup ENDS
+       like a complete pg_dump, and nothing newer than the newest kept backup
+       is ever deleted.
+    4. Any problem with D: -- the drive missing, not writable, short of room,
+       or the same folder as C: under another name -- deletes NOTHING, on
+       either drive, and returns a reason the caller turns into an alert. The
+       backup itself still runs and stays on C:. Failing closed on a backup is
+       not a conservative choice, it is the only safe one.
 
   Copy-then-verify-then-rename: a copy goes to "<name>.partial" and is hashed
   there; only a verified file is moved onto its real name. A bad copy therefore
@@ -150,6 +176,10 @@ function Get-TownReporterBackupList {
       Bytes   = $file.Length
       Stamp   = $stamp
       Written = $file.LastWriteTime
+      # The database the dump is of, from the name. The D: keep rule counts
+      # days per database, so a dump of another database in the same folder
+      # can never push the paper's own backups out of the 3 days.
+      Db      = $m.Groups['db'].Value
     })
   }
   <#
@@ -166,6 +196,155 @@ function Get-TownReporterBackupList {
   return ,@($out | Sort-Object -Property Stamp -Descending)
 }
 
+# --- The newest backup, wherever it is -------------------------------------
+<#
+  Since 2026-10-25 a verified backup lives on D: only, so "the newest backup"
+  is the newest of the two folders, never the newest in C: alone. Read C: alone
+  and an emptied C: looks like "no backup has ever been taken" -- which would
+  start a fresh dump every five minutes, and tell the owner his backups were
+  missing while three days of them sat on D:.
+
+  Returns $null when neither folder holds one, else the list item (Name, Path,
+  Bytes, Stamp, Written, Db) plus Dir (the folder it is in) and Where ('local'
+  for C:, 'offsite' for D:). A missing D: is simply an empty list here; it is
+  never an error, because "is a backup due" must still be answerable with the
+  drive unplugged.
+#>
+function Get-TownReporterNewestBackup {
+  param(
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [string]$OffsiteDir
+  )
+  $best = $null
+  $where = $null
+  $dir = $null
+  $local = Get-TownReporterBackupList -Dir $BackupDir
+  if ($local.Count -gt 0) { $best = $local[0]; $where = 'local'; $dir = $BackupDir }
+  if ($OffsiteDir) {
+    $offsite = @()
+    try { $offsite = Get-TownReporterBackupList -Dir $OffsiteDir } catch { $offsite = @() }
+    if ($offsite.Count -gt 0 -and ($null -eq $best -or $offsite[0].Stamp -gt $best.Stamp)) {
+      $best = $offsite[0]; $where = 'offsite'; $dir = $OffsiteDir
+    }
+  }
+  if ($null -eq $best) { return $null }
+  return [pscustomobject]@{
+    Name    = $best.Name
+    Path    = $best.Path
+    Bytes   = $best.Bytes
+    Stamp   = $best.Stamp
+    Written = $best.Written
+    Db      = $best.Db
+    Dir     = $dir
+    Where   = $where
+  }
+}
+
+<#
+  Where a named backup is now: C: if it is still there (D: was not ready, or
+  the copy did not verify), else D:, else $null. promote.ps1 prints this as
+  "the backup is at ..." -- since 2026-10-25 the file it just took is usually
+  on D: by the time the run returns, and printing a C: path for a file that is
+  no longer there would send a person looking in the wrong place on the worst
+  day.
+#>
+function Get-TownReporterBackupPath {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [string]$OffsiteDir
+  )
+  $local = Join-Path $BackupDir $Name
+  if (Test-Path -LiteralPath $local -PathType Leaf) { return $local }
+  if ($OffsiteDir) {
+    $off = Join-Path $OffsiteDir $Name
+    if (Test-Path -LiteralPath $off -PathType Leaf) { return $off }
+  }
+  return $null
+}
+
+<#
+  Are the local folder and the offsite folder really two folders?
+
+  Since C: keeps nothing, this is the check that stands between a typo in
+  BACKUP_OFFSITE_DIR and the paper's only backup. If the two names point at the
+  same folder, every file "verifies" against itself -- same size, same SHA256,
+  because it IS the same file -- and the C: prune would then delete it, from
+  the only place it was. The old keep-three rule happened to survive that
+  mistake; keep-nothing does not, so it is checked outright before any delete:
+
+    * the two full paths, case-insensitively, including one inside the other
+      (an offsite folder inside the local one would also be listed as a
+      one-off "safety copy" folder and copied into itself);
+    * then a probe file written in the offsite folder and looked for in the
+      local one, which catches the same folder reached under two names -- a
+      junction, a symlink, a subst drive letter -- that no string compare can.
+
+  Returns @{ Ok; Reason }. Ok = $false means "delete nothing".
+#>
+function Test-TownReporterBackupDirsSeparate {
+  param(
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [Parameter(Mandatory = $true)][string]$OffsiteDir
+  )
+  try {
+    $a = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BackupDir)).TrimEnd('\', '/')
+    $b = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OffsiteDir)).TrimEnd('\', '/')
+  } catch {
+    return @{ Ok = $false; Reason = "the local folder $BackupDir and the offsite folder $OffsiteDir could not be compared ($($_.Exception.Message))" }
+  }
+  if ([string]::Equals($a, $b, [StringComparison]::OrdinalIgnoreCase)) {
+    return @{ Ok = $false; Reason = "the offsite folder $OffsiteDir is the same folder as the local one $BackupDir, so nothing there is a second copy" }
+  }
+  if ($b.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    return @{ Ok = $false; Reason = "the offsite folder $OffsiteDir is inside the local folder $BackupDir, so it is not a second drive" }
+  }
+  if ($a.StartsWith($b + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    return @{ Ok = $false; Reason = "the local folder $BackupDir is inside the offsite folder $OffsiteDir, so it is not a second drive" }
+  }
+  if ((Test-Path -LiteralPath $a -PathType Container) -and (Test-Path -LiteralPath $b -PathType Container)) {
+    $name = ".townreporter-same-folder-test-{0}-{1}" -f $PID, ([guid]::NewGuid().ToString('N'))
+    $probe = Join-Path $b $name
+    $seen = $false
+    try {
+      Set-Content -LiteralPath $probe -Value 'probe' -Encoding ASCII -ErrorAction Stop
+      $seen = Test-Path -LiteralPath (Join-Path $a $name)
+    } catch {
+      return @{ Ok = $false; Reason = "a test file could not be written to $OffsiteDir to prove it is a different folder from $BackupDir ($($_.Exception.Message))" }
+    } finally {
+      try { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($seen) {
+      return @{ Ok = $false; Reason = "the offsite folder $OffsiteDir is the local folder $BackupDir under another name (a link or a mapped drive), so nothing there is a second copy" }
+    }
+  }
+  return @{ Ok = $true; Reason = 'two separate folders' }
+}
+
+<#
+  The one gate every delete in this file goes through, on either drive: D: is
+  there and writable, its free space is known and at least MinFreeGb, and it
+  is not the local folder under another name. Any "no" means nothing is
+  deleted anywhere this run -- the owner's rule for a missing, unwritable or
+  full D: -- and the reason is the sentence the log and the Control page show.
+#>
+function Test-TownReporterDeleteAllowed {
+  param(
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [Parameter(Mandatory = $true)][string]$OffsiteDir,
+    [long]$MinFreeGb = 100
+  )
+  $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
+  if (-not $ready.Ok) { return @{ Ok = $false; Reason = $ready.Reason; FreeGb = $ready.FreeGb } }
+  if ($null -eq $ready.FreeGb -or $ready.FreeGb -lt $MinFreeGb) {
+    $reason = if ($null -eq $ready.FreeGb) { "$OffsiteDir free space could not be read" } else { ("{0} has only {1} GB free, below the {2} GB limit" -f $OffsiteDir, $ready.FreeGb, $MinFreeGb) }
+    return @{ Ok = $false; Reason = $reason; FreeGb = $ready.FreeGb }
+  }
+  $separate = Test-TownReporterBackupDirsSeparate -BackupDir $BackupDir -OffsiteDir $OffsiteDir
+  if (-not $separate.Ok) { return @{ Ok = $false; Reason = $separate.Reason; FreeGb = $ready.FreeGb } }
+  return @{ Ok = $true; Reason = 'ready'; FreeGb = $ready.FreeGb }
+}
+
 # --- The files and folders in that folder that are NOT part of the series ---
 <#
   Everything else in the local backup folder that looks like a one-off safety
@@ -178,7 +357,7 @@ function Get-TownReporterBackupList {
 
   Read: this list is what the SERIES prune never sees. The prune works from
   Get-TownReporterBackupList, so an item in this list can never be deleted
-  locally by the keep-three rule -- that is deliberate, and it is why these
+  by the series rule -- that is deliberate, and it is why these
   two lists are separate functions rather than one with a flag. Deleting a
   one-off item locally is Remove-TownReporterOneOffOld's job, below, and it
   is a different rule (verified on D: AND at least MinAgeMinutes -- see there).
@@ -231,6 +410,10 @@ function Get-TownReporterSafetyCopyList {
       Path        = $file.FullName
       Bytes       = $file.Length
       Written     = $file.LastWriteTime
+      # When THIS copy of it was made, which on D: is when it arrived there
+      # (a copy keeps the source's LastWriteTime but gets a new CreationTime).
+      # The D: one-off rule counts its 3 days from the later of the two.
+      Created     = $file.CreationTime
       IsDirectory = $false
       FileCount   = 1
       Skip        = $isSkip
@@ -263,6 +446,7 @@ function Get-TownReporterSafetyCopyList {
       Path        = $d.FullName
       Bytes       = $bytes
       Written     = $newest
+      Created     = $d.CreationTime
       IsDirectory = $true
       FileCount   = $files.Count
       Skip        = $isSkip
@@ -857,10 +1041,11 @@ function New-TownReporterBackup {
   Test-TownReporterCopyMatches (a file) and Test-TownReporterFolderCopyMatches
   (a folder: file count, total bytes, and a SHA256 of every file at the same
   relative path) prove. They are never added to the series list, so the
-  keep-three prune cannot touch them, and nothing is ever deleted from D:.
-  Removing an old, verified one-off item from C: is Remove-TownReporterOneOffOld's
-  job, below -- a separate rule (verified on D: AND at least 14 days old) from
-  the series' keep-three.
+  series prune cannot touch them. Removing a verified one-off item from C: is
+  Remove-TownReporterOneOffOld's job, and removing one that has been on D: for
+  more than 3 days is Remove-TownReporterOffsiteOneOffOld's -- both below, and
+  both separate rules from the series'. This function itself never deletes a
+  backup or a safety copy from either drive.
 #>
 function Copy-TownReporterBackupOffsite {
   param(
@@ -874,6 +1059,14 @@ function Copy-TownReporterBackupOffsite {
   if (-not $ready.Ok) {
     Write-TownReporterBackupLog $LogFile "offsite copy: NOT copying anything -- $($ready.Reason)"
     return @{ Ok = $false; Reason = $ready.Reason; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb; OtherCopied = 0; OtherVerified = 0; OtherFailed = 0; OtherTotal = 0 }
+  }
+  # A "copy" into the same folder would verify against itself and prove
+  # nothing, so it is reported as a failing copy -- which raises the
+  # offsite-failing alert -- rather than as a success.
+  $separate = Test-TownReporterBackupDirsSeparate -BackupDir $BackupDir -OffsiteDir $OffsiteDir
+  if (-not $separate.Ok) {
+    Write-TownReporterBackupLog $LogFile "offsite copy: NOT copying anything -- $($separate.Reason)"
+    return @{ Ok = $false; Reason = $separate.Reason; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb; OtherCopied = 0; OtherVerified = 0; OtherFailed = 0; OtherTotal = 0 }
   }
 
   $local = Get-TownReporterBackupList -Dir $BackupDir
@@ -962,7 +1155,7 @@ function Copy-TownReporterBackupOffsite {
   # text trailer to find, and a hand-made .sql is not this series' pg_dump
   # output, so the promise here is the hash -- the bytes on D: are the bytes on
   # C: -- and Test-TownReporterCopyMatches is what proves it. Nothing here is
-  # ever deleted, from either side.
+  # deleted from either side; the two one-off prunes below do that, later.
   $copiesDir = Join-Path $OffsiteDir 'other-safety-copies'
   $otherCopied = 0
   $otherVerified = 0
@@ -1061,7 +1254,7 @@ function Copy-TownReporterBackupOffsite {
   # count, and it is one line rather than one per file.
   if ($safety.Count -gt 0) {
     if ($otherFailed -gt 0) {
-      Write-TownReporterBackupLog $LogFile "offsite copy: $otherFailed of $($safety.Count) other safety copies did not make it. Nothing will be deleted locally."
+      Write-TownReporterBackupLog $LogFile "offsite copy: $otherFailed of $($safety.Count) other safety copies did not make it. Those stay on this machine; none of them is deleted."
     } else {
       Write-TownReporterBackupLog $LogFile "offsite copy: all $otherVerified of $($safety.Count) other safety copies are in $copiesDir ($otherCopied copied now, $($otherVerified - $otherCopied) already there)"
     }
@@ -1074,7 +1267,7 @@ function Copy-TownReporterBackupOffsite {
     OtherCopied = $otherCopied; OtherVerified = $otherVerified; OtherFailed = $otherFailed; OtherTotal = $safety.Count
   }
   if ($failed -gt 0) {
-    Write-TownReporterBackupLog $LogFile "offsite copy: $failed of $($local.Count) did not make it ($firstFailure). Nothing will be deleted locally."
+    Write-TownReporterBackupLog $LogFile "offsite copy: $failed of $($local.Count) did not make it ($firstFailure). Those stay on this machine; none of them is deleted."
     return (@{ Ok = $false; Reason = $firstFailure } + $totals)
   }
   if ($local.Count -gt 0) {
@@ -1090,18 +1283,25 @@ function Copy-TownReporterBackupOffsite {
   return (@{ Ok = $true; Reason = 'all verified' } + $totals)
 }
 
-# --- Keeping three on the system disk -------------------------------------
+# --- C: keeps nothing that is safe on D: -----------------------------------
 <#
-  Delete local backups beyond the newest Keep -- but only after every single
-  local file is proven identical on D:, and only while D: has room. Both
-  conditions, in that order, and neither is negotiable:
+  Delete each local series backup that is proven identical on D: -- same
+  length AND same SHA256 -- one file at a time. The owner's rule since
+  2026-10-25: "keep them on D: not C:". So C: is a staging area: pg_dump
+  writes there, the copy step puts the file on D:, and this deletes it from C:
+  the moment the D: copy is proven. An empty C: folder is the normal result.
 
-    - One unverified file means nothing is deleted. Not the unverified one and
-      not the old ones either: if the copy path is broken, the local folder is
-      the only copy of the paper that exists, and it stops being a spare.
-    - D: below MinFreeGb means nothing is deleted either. The owner's rule is
-      "as long as there's room" on D:, so the local folder stays as it is and
-      the alert tells him.
+    - Per file, not all-or-nothing. A file that does not verify on D: stays on
+      C: and is named in the log; the ones that DID verify are still deleted,
+      because their second copy is proven and their first is now only taking
+      room. A C: file that is not on D: is never deleted, whatever its age.
+    - Nothing is deleted at all while D: is missing, not writable, short of
+      MinFreeGb, or is the local folder under another name
+      (Test-TownReporterDeleteAllowed). Then the backups simply stay on C:
+      and the reason goes back to the caller for the alert.
+    - Keep is how many of the newest local backups to leave on C: even when
+      verified. The owner's number is 0; the switch is kept so a call that
+      passes it still works.
 
   Returns the names it deleted so the caller can log them and put them in the
   state file -- a delete with no record of the name is a delete nobody can
@@ -1112,89 +1312,191 @@ function Remove-TownReporterBackupOld {
     [string]$LogFile,
     [Parameter(Mandatory = $true)][string]$BackupDir,
     [Parameter(Mandatory = $true)][string]$OffsiteDir,
-    [int]$Keep = 3,
+    [int]$Keep = 0,
     [long]$MinFreeGb = 100
   )
-  $empty = @{ Ok = $true; Deleted = @(); Kept = 0; Reason = 'nothing to prune'; FreeGb = $null }
+  if ($Keep -lt 0) { $Keep = 0 }
+  $empty = @{ Ok = $true; Deleted = @(); Kept = 0; Unverified = @(); Reason = 'nothing to prune'; FreeGb = $null }
   $local = Get-TownReporterBackupList -Dir $BackupDir
   if ($local.Count -eq 0) { return $empty }
   if ($local.Count -le $Keep) {
-    return @{ Ok = $true; Deleted = @(); Kept = $local.Count; Reason = "only $($local.Count) local backup(s), which is not more than $Keep"; FreeGb = (Get-TownReporterDriveFreeGb -Dir $OffsiteDir) }
+    return @{ Ok = $true; Deleted = @(); Kept = $local.Count; Unverified = @(); Reason = "only $($local.Count) local backup(s), which is not more than $Keep"; FreeGb = (Get-TownReporterDriveFreeGb -Dir $OffsiteDir) }
   }
 
-  $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
-  if (-not $ready.Ok) {
-    Write-TownReporterBackupLog $LogFile "prune: NOT deleting anything -- $($ready.Reason)"
-    return @{ Ok = $false; Deleted = @(); Kept = $local.Count; Reason = $ready.Reason; FreeGb = $ready.FreeGb }
-  }
-
-  if ($null -eq $ready.FreeGb -or $ready.FreeGb -lt $MinFreeGb) {
-    $reason = if ($null -eq $ready.FreeGb) { "$OffsiteDir free space could not be read" } else { ("{0} has only {1} GB free, below the {2} GB limit" -f $OffsiteDir, $ready.FreeGb, $MinFreeGb) }
+  $gate = Test-TownReporterDeleteAllowed -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb
+  if (-not $gate.Ok) {
+    $reason = "$($gate.Reason); nothing is deleted and the backups stay on this machine"
     Write-TownReporterBackupLog $LogFile "prune: NOT deleting anything -- $reason"
-    return @{ Ok = $false; Deleted = @(); Kept = $local.Count; Reason = $reason; FreeGb = $ready.FreeGb }
-  }
-
-  $unverified = New-Object System.Collections.ArrayList
-  foreach ($b in $local) {
-    if (-not (Test-TownReporterCopyMatches -Source $b.Path -Dest (Join-Path $OffsiteDir $b.Name))) {
-      [void]$unverified.Add($b.Name)
-    }
-  }
-  if ($unverified.Count -gt 0) {
-    $reason = ("{0} of {1} local backups are not verified on {2} yet ({3}), so nothing is deleted" -f $unverified.Count, $local.Count, $OffsiteDir, ($unverified -join ', '))
-    Write-TownReporterBackupLog $LogFile "prune: NOT deleting anything -- $reason"
-    return @{ Ok = $false; Deleted = @(); Kept = $local.Count; Reason = $reason; FreeGb = $ready.FreeGb }
+    return @{ Ok = $false; Deleted = @(); Kept = $local.Count; Unverified = @(); Reason = $reason; FreeGb = $gate.FreeGb }
   }
 
   $deleted = New-Object System.Collections.ArrayList
   $failed = New-Object System.Collections.ArrayList
+  $unverified = New-Object System.Collections.ArrayList
   foreach ($b in @($local | Select-Object -Skip $Keep)) {
+    $dest = Join-Path $OffsiteDir $b.Name
+    if (-not (Test-TownReporterCopyMatches -Source $b.Path -Dest $dest)) {
+      [void]$unverified.Add($b.Name)
+      Write-TownReporterBackupLog $LogFile "prune: kept $($b.Name) on this machine -- it is not verified on $OffsiteDir yet"
+      continue
+    }
     try {
       Remove-Item -LiteralPath $b.Path -Force -ErrorAction Stop
       [void]$deleted.Add($b.Name)
-      Write-TownReporterBackupLog $LogFile ("prune: deleted $($b.Name) ({0} MB) -- it is verified on $OffsiteDir" -f [math]::Round($b.Bytes / 1MB, 1))
+      Write-TownReporterBackupLog $LogFile ("prune: deleted $($b.Name) ({0} MB) from this machine -- it is verified on $OffsiteDir" -f [math]::Round($b.Bytes / 1MB, 1))
     } catch {
       [void]$failed.Add($b.Name)
       Write-TownReporterBackupLog $LogFile "prune: could not delete $($b.Name): $($_.Exception.Message)"
     }
   }
 
+  $kept = $local.Count - $deleted.Count
   if ($failed.Count -gt 0) {
-    return @{ Ok = $false; Deleted = @($deleted); Kept = ($local.Count - $deleted.Count); Reason = "could not delete $($failed -join ', ')"; FreeGb = $ready.FreeGb }
+    return @{ Ok = $false; Deleted = @($deleted); Kept = $kept; Unverified = @($unverified); Reason = "could not delete $($failed -join ', ')"; FreeGb = $gate.FreeGb }
   }
-  Write-TownReporterBackupLog $LogFile "prune: kept the newest $Keep on C:, deleted $($deleted.Count) older one(s) that are verified on D:"
-  return @{ Ok = $true; Deleted = @($deleted); Kept = $Keep; Reason = "kept the newest $Keep"; FreeGb = $ready.FreeGb }
+  if ($unverified.Count -gt 0) {
+    $reason = ("{0} of {1} local backups are not verified on {2} yet ({3}), so they stay on this machine" -f $unverified.Count, $local.Count, $OffsiteDir, ($unverified -join ', '))
+    Write-TownReporterBackupLog $LogFile "prune: deleted $($deleted.Count) verified backup(s) from this machine; $reason"
+    return @{ Ok = $false; Deleted = @($deleted); Kept = $kept; Unverified = @($unverified); Reason = $reason; FreeGb = $gate.FreeGb }
+  }
+  Write-TownReporterBackupLog $LogFile "prune: deleted $($deleted.Count) backup(s) from this machine, each verified on $OffsiteDir; $kept left here"
+  return @{ Ok = $true; Deleted = @($deleted); Kept = $kept; Unverified = @(); Reason = "every local backup is verified on $OffsiteDir"; FreeGb = $gate.FreeGb }
 }
 
-# --- Removing OLD one-off items, once they are safe -------------------------
+# --- D: keeps the newest backup of each of the 3 newest days ---------------
+<#
+  The owner's words: "Keep 3 days of backups. No more. Delete the rest." This
+  is the rule for the dated series on D:, and it is the only thing in this
+  file that deletes a series backup from D:.
+
+    - The day is the date in the FILE NAME (<db>_YYYY-MM-DD_HHmm.sql), the
+      record of when the dump was taken -- never the file's modified time,
+      which a copy or a restore can change.
+    - The keep set is, per database, the newest backup of each of the
+      KeepDays newest days that HAVE a backup. Not "the last 3 calendar
+      days": after a week with no backups, the last three days that had one
+      are still kept, so a stopped backup never empties the drive.
+    - A day only counts when its backup ENDS like a complete pg_dump
+      (Test-TownReporterDumpComplete). The copy step never puts an
+      incomplete dump on D:, so this should never matter; if it ever does, a
+      broken file cannot take a good day's place among the three.
+    - The newest backup is never deleted, and neither is anything newer than
+      the newest kept one. A database with no complete backup on D: at all
+      has nothing deleted.
+    - Nothing is deleted while D: is missing, not writable, short of
+      MinFreeGb, or is the local folder under another name.
+    - Only names that match the series are ever seen here
+      (Get-TownReporterBackupList), so a hand-named file, a .partial copy or
+      the other-safety-copies folder can never be touched by this rule.
+
+  Returns Deleted (names), Kept (names) and Ok/Reason.
+#>
+function Remove-TownReporterOffsiteOld {
+  param(
+    [string]$LogFile,
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [Parameter(Mandatory = $true)][string]$OffsiteDir,
+    [int]$KeepDays = 3,
+    [long]$MinFreeGb = 100
+  )
+  if ($KeepDays -lt 1) { $KeepDays = 1 }
+  $list = @()
+  try { $list = Get-TownReporterBackupList -Dir $OffsiteDir } catch { $list = @() }
+  if ($list.Count -eq 0) { return @{ Ok = $true; Deleted = @(); Kept = @(); Reason = "there are no backups on $OffsiteDir to prune" } }
+
+  $gate = Test-TownReporterDeleteAllowed -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb
+  if (-not $gate.Ok) {
+    $reason = "$($gate.Reason); nothing is deleted from $OffsiteDir"
+    Write-TownReporterBackupLog $LogFile "offsite prune: NOT deleting anything -- $reason"
+    return @{ Ok = $false; Deleted = @(); Kept = @($list | ForEach-Object { $_.Name }); Reason = $reason }
+  }
+
+  $deleted = New-Object System.Collections.ArrayList
+  $keptNames = New-Object System.Collections.ArrayList
+  $failed = New-Object System.Collections.ArrayList
+  $notes = New-Object System.Collections.ArrayList
+
+  foreach ($group in @($list | Group-Object -Property Db)) {
+    $files = @($group.Group | Sort-Object -Property Stamp -Descending)
+    $keep = @{}
+    $days = @{}
+    foreach ($f in $files) {
+      if ($days.Count -ge $KeepDays) { break }
+      $day = $f.Stamp.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+      if ($days.ContainsKey($day)) { continue }
+      $check = Test-TownReporterDumpComplete -Path $f.Path
+      if (-not $check.Ok) {
+        Write-TownReporterBackupLog $LogFile "offsite prune: $($f.Name) does not count toward the $KeepDays days -- $($check.Reason)"
+        continue
+      }
+      $days[$day] = $true
+      $keep[$f.Name] = $true
+    }
+
+    if ($keep.Count -eq 0) {
+      $note = "$OffsiteDir holds no complete backup of $($group.Name), so none of its $($files.Count) file(s) is deleted"
+      [void]$notes.Add($note)
+      Write-TownReporterBackupLog $LogFile "offsite prune: NOT deleting anything of $($group.Name) -- $note"
+      foreach ($f in $files) { [void]$keptNames.Add($f.Name) }
+      continue
+    }
+
+    $newestKept = ($files | Where-Object { $keep.ContainsKey($_.Name) } | Select-Object -First 1).Stamp
+    $newestName = $files[0].Name
+    foreach ($f in $files) {
+      if ($keep.ContainsKey($f.Name)) { [void]$keptNames.Add($f.Name); continue }
+      if ($f.Name -eq $newestName -or $f.Stamp -gt $newestKept) {
+        # Newer than every backup that counts, which means it is not complete:
+        # a person should look at it, and this rule never deletes the newest.
+        [void]$keptNames.Add($f.Name)
+        Write-TownReporterBackupLog $LogFile "offsite prune: kept $($f.Name) -- it is newer than the newest complete backup, and the newest is never deleted"
+        continue
+      }
+      try {
+        Remove-Item -LiteralPath $f.Path -Force -ErrorAction Stop
+        [void]$deleted.Add($f.Name)
+        Write-TownReporterBackupLog $LogFile ("offsite prune: deleted $($f.Name) ({0} MB) from $OffsiteDir -- it is not the newest backup of one of the $KeepDays newest days" -f [math]::Round($f.Bytes / 1MB, 1))
+      } catch {
+        [void]$failed.Add($f.Name)
+        [void]$keptNames.Add($f.Name)
+        Write-TownReporterBackupLog $LogFile "offsite prune: could not delete $($f.Name): $($_.Exception.Message)"
+      }
+    }
+  }
+
+  if ($failed.Count -gt 0) {
+    return @{ Ok = $false; Deleted = @($deleted); Kept = @($keptNames); Reason = "could not delete $($failed -join ', ') from $OffsiteDir" }
+  }
+  if ($deleted.Count -gt 0) {
+    Write-TownReporterBackupLog $LogFile "offsite prune: kept $($keptNames.Count) on $OffsiteDir (the newest of each of the $KeepDays newest days), deleted $($deleted.Count)"
+  }
+  $reason = if ($notes.Count -gt 0) { $notes -join '; ' } else { "kept the newest backup of each of the $KeepDays newest days" }
+  return @{ Ok = $true; Deleted = @($deleted); Kept = @($keptNames); Reason = $reason }
+}
+
+# --- Removing one-off items from C:, once they are safe on D: ----------------
 <#
   The one-off items (Get-TownReporterSafetyCopyList: hand-named .sql/.dump
-  files and old top-level folders) are never touched by the keep-three rule
-  above -- that rule only ever sees the dated series. Left alone forever is
-  what CF-unfinished-steps-sweep.md item 14 found: 51 one-off files, 3.4 GB,
-  accumulating on C: because nothing ever cleaned them up automatically. This
-  function is the automatic version of the one-time manual cleanup that item
-  described, and it is deliberately narrower than the series prune:
+  files and old top-level folders) are never touched by the series rules
+  above -- those only ever see the dated series. Left alone forever is what
+  CF-unfinished-steps-sweep.md item 14 found: 51 one-off files, 3.4 GB,
+  accumulating on C: because nothing ever cleaned them up automatically.
 
-    - An item is removed from C: only when it is verified on D: (same rule as
-      the series: same size AND SHA256 for a file, same file count/bytes/
-      per-file SHA256 for a folder) AND it is at least MinAgeDays old, going by
-      the SAME "Written" instant Get-TownReporterSafetyCopyList reports (a
-      file's LastWriteTime, or a folder's newest file's LastWriteTime).
-      Age matters here in a way it does not for the series: these are safety
-      copies someone may still be actively comparing against or restoring
-      from, so a 14-day grace period is the difference between "definitely
-      done with this" and deleting something the day after somebody made it.
-    - Both conditions are per item, independently -- an item newer than
-      MinAgeDays is kept even if it is verified, and an item that fails to
-      verify is kept even if it is old, with the log saying which.
-    - D: missing, not writable, or short of MinFreeGb blocks the WHOLE pass,
-      exactly like the series prune -- nothing here is deleted while the only
-      other copy of it cannot be proven safe.
-    - Nothing is ever deleted from D:, and nothing here can ever touch a
-      dated-series file: SeriesNames is passed straight to
-      Get-TownReporterSafetyCopyList's -Exclude, the same list that keeps a
-      series backup out of the one-off scan in Copy-TownReporterBackupOffsite.
+  Since 2026-10-25 they follow the series' rule on C:: an item is deleted
+  from C: once it is verified on D: (same size AND SHA256 for a file, same
+  file count/bytes/per-file SHA256 for a folder). There is no age floor any
+  more; MinAgeDays is kept, at 0, so a caller that passes it still works.
+
+    - Per item, independently: an item that fails to verify is kept, and the
+      log says which.
+    - D: missing, not writable, short of MinFreeGb, or the local folder under
+      another name blocks the WHOLE pass, exactly like the series prune --
+      nothing here is deleted while the only other copy of it cannot be
+      proven safe.
+    - Nothing here can ever touch a dated-series file: SeriesNames is passed
+      straight to Get-TownReporterSafetyCopyList's -Exclude, the same list
+      that keeps a series backup out of the one-off scan in
+      Copy-TownReporterBackupOffsite.
     - An item Get-TownReporterSafetyCopyList marks Skip (looks like it may
       still be being written) is left alone and logged, the same as the copy
       pass does -- a partial write is never a candidate for deletion.
@@ -1208,7 +1510,7 @@ function Remove-TownReporterOneOffOld {
     [Parameter(Mandatory = $true)][string]$BackupDir,
     [Parameter(Mandatory = $true)][string]$OffsiteDir,
     [string[]]$SeriesNames = @(),
-    [int]$MinAgeDays = 14,
+    [int]$MinAgeDays = 0,
     [long]$MinFreeGb = 100,
     [datetime]$Now = (Get-Date)
   )
@@ -1216,13 +1518,9 @@ function Remove-TownReporterOneOffOld {
   $items = Get-TownReporterSafetyCopyList -Dir $BackupDir -Exclude $SeriesNames -Now $Now
   if ($items.Count -eq 0) { return $empty }
 
-  $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
-  if (-not $ready.Ok) {
-    Write-TownReporterBackupLog $LogFile "one-off prune: NOT deleting anything -- $($ready.Reason)"
-    return @{ Ok = $false; Deleted = @(); Reason = $ready.Reason }
-  }
-  if ($null -eq $ready.FreeGb -or $ready.FreeGb -lt $MinFreeGb) {
-    $reason = if ($null -eq $ready.FreeGb) { "$OffsiteDir free space could not be read" } else { ("{0} has only {1} GB free, below the {2} GB limit" -f $OffsiteDir, $ready.FreeGb, $MinFreeGb) }
+  $gate = Test-TownReporterDeleteAllowed -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb
+  if (-not $gate.Ok) {
+    $reason = "$($gate.Reason); nothing is deleted and the one-off copies stay on this machine"
     Write-TownReporterBackupLog $LogFile "one-off prune: NOT deleting anything -- $reason"
     return @{ Ok = $false; Deleted = @(); Reason = $reason }
   }
@@ -1243,7 +1541,7 @@ function Remove-TownReporterOneOffOld {
     }
 
     $ageDays = [math]::Round(($Now - $item.Written).TotalDays, 1)
-    if ($ageDays -lt $MinAgeDays) {
+    if ($MinAgeDays -gt 0 -and $ageDays -lt $MinAgeDays) {
       Write-TownReporterBackupLog $LogFile ("one-off prune: kept {0} -- only {1} day(s) old, younger than the {2}-day floor" -f $item.Name, $ageDays, $MinAgeDays)
       continue
     }
@@ -1251,13 +1549,79 @@ function Remove-TownReporterOneOffOld {
     try {
       Remove-Item -LiteralPath $item.Path -Force -Recurse -ErrorAction Stop
       [void]$deleted.Add($item.Name)
-      Write-TownReporterBackupLog $LogFile ("one-off prune: pruned $($item.Name) -- verified on $OffsiteDir and $ageDays day(s) old")
+      Write-TownReporterBackupLog $LogFile ("one-off prune: deleted $($item.Name) from this machine -- it is verified on $OffsiteDir")
     } catch {
-      Write-TownReporterBackupLog $LogFile "one-off prune: could not prune $($item.Name): $($_.Exception.Message)"
+      Write-TownReporterBackupLog $LogFile "one-off prune: could not delete $($item.Name): $($_.Exception.Message)"
     }
   }
 
-  return @{ Ok = $true; Deleted = @($deleted); Reason = "$($deleted.Count) one-off item(s) pruned" }
+  return @{ Ok = $true; Deleted = @($deleted); Reason = "$($deleted.Count) one-off item(s) deleted from this machine" }
+}
+
+# --- Removing one-off items from D: after 3 days ---------------------------
+<#
+  The other half of the one-off rule: on D:, in other-safety-copies, an item
+  is deleted once it is more than MaxAgeDays (3) days old.
+
+  "Old" counts from the LATER of two times: when the item was last written
+  (its LastWriteTime, or its newest file's for a folder -- the time a copy
+  keeps from the source) and when this copy was made on D: (its
+  CreationTime). The later one, so a safety copy someone made weeks ago and
+  only just put in the folder still gets 3 days on D: before it goes -- it is
+  never copied, deleted from C: and deleted from D: in the same run.
+
+    - Only items in other-safety-copies, through the same list function the
+      copy uses (.sql/.dump files and top-level folders). A name ending
+      .partial or .incomplete is a copy in progress or a dead one, and is
+      never this rule's to delete.
+    - An item marked Skip (written in the last few minutes) is left alone.
+    - Nothing is deleted while D: is missing, not writable, short of
+      MinFreeGb, or is the local folder under another name.
+#>
+function Remove-TownReporterOffsiteOneOffOld {
+  param(
+    [string]$LogFile,
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [Parameter(Mandatory = $true)][string]$OffsiteDir,
+    [double]$MaxAgeDays = 3,
+    [long]$MinFreeGb = 100,
+    [datetime]$Now = (Get-Date)
+  )
+  $copiesDir = Join-Path $OffsiteDir 'other-safety-copies'
+  $exists = $false
+  try { $exists = Test-Path -LiteralPath $copiesDir -PathType Container } catch { $exists = $false }
+  if (-not $exists) { return @{ Ok = $true; Deleted = @(); Reason = "there is no $copiesDir" } }
+  $items = @()
+  try { $items = Get-TownReporterSafetyCopyList -Dir $copiesDir -Now $Now } catch { $items = @() }
+  if ($items.Count -eq 0) { return @{ Ok = $true; Deleted = @(); Reason = "there are no one-off copies in $copiesDir" } }
+
+  $gate = Test-TownReporterDeleteAllowed -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb
+  if (-not $gate.Ok) {
+    $reason = "$($gate.Reason); nothing is deleted from $copiesDir"
+    Write-TownReporterBackupLog $LogFile "offsite one-off prune: NOT deleting anything -- $reason"
+    return @{ Ok = $false; Deleted = @(); Reason = $reason }
+  }
+
+  $deleted = New-Object System.Collections.ArrayList
+  foreach ($item in $items) {
+    if ($item.Name -match '\.(partial|incomplete)$') { continue }
+    if ($item.Skip) {
+      Write-TownReporterBackupLog $LogFile "offsite one-off prune: skipped $($item.Name) -- $($item.SkipReason)"
+      continue
+    }
+    $since = $item.Written
+    if ($item.Created -and $item.Created -gt $since) { $since = $item.Created }
+    $ageDays = [math]::Round(($Now - $since).TotalDays, 1)
+    if ($ageDays -le $MaxAgeDays) { continue }
+    try {
+      Remove-Item -LiteralPath $item.Path -Force -Recurse -ErrorAction Stop
+      [void]$deleted.Add($item.Name)
+      Write-TownReporterBackupLog $LogFile ("offsite one-off prune: deleted {0} from {1} -- it is {2} day(s) old, past the {3}-day keep" -f $item.Name, $copiesDir, $ageDays, $MaxAgeDays)
+    } catch {
+      Write-TownReporterBackupLog $LogFile "offsite one-off prune: could not delete $($item.Name): $($_.Exception.Message)"
+    }
+  }
+  return @{ Ok = $true; Deleted = @($deleted); Reason = "$($deleted.Count) one-off item(s) deleted from $copiesDir" }
 }
 
 # --- The lock --------------------------------------------------------------
@@ -1324,8 +1688,10 @@ function Exit-TownReporterBackupLock {
   when the last backup succeeded, whether the offsite copy is working, and how
   much room is left on D:.
 
-  It is deliberately not the only source for the cards: the page probes both
-  folders itself, live. This file adds the things a folder listing cannot say
+  It is deliberately not the only source for the cards: the page lists the
+  local folder itself, live, and takes what is on D: from here (offsiteCount,
+  offsiteNewest*), since listing a sleeping removable drive can hang the page.
+  This file adds the things a folder listing cannot say
   (the last failure, the last verification, the free space at the time), and a
   missing or unreadable file degrades to "unknown", never to "fine".
 #>
@@ -1360,6 +1726,25 @@ function Get-TownReporterBackupState {
     prunedCount       = 0
     oneOffPrunedAt    = $null
     oneOffPrunedCount = 0
+    # Since 2026-10-25 (backups live on D:, 3 days kept). The Control page
+    # reads these instead of listing D: itself, because listing a sleeping
+    # removable drive can hang the page while it spins up.
+    offsiteCount             = 0
+    offsiteNewestName        = $null
+    offsiteNewestAt          = $null
+    offsiteNewestBytes       = 0
+    newestName               = $null
+    newestAt                 = $null
+    newestWhere              = $null
+    newestDir                = $null
+    lastPath                 = $null
+    offsitePrunedAt          = $null
+    offsitePrunedCount       = 0
+    offsiteOneOffPrunedAt    = $null
+    offsiteOneOffPrunedCount = 0
+    # The reason nothing was deleted this run (D: missing, full, the same
+    # folder...), or $null when the deletes ran. The page says it plainly.
+    pruneBlocked             = $null
   }
   if (-not (Test-Path -LiteralPath $StateFile)) { return $state }
   try {
@@ -1413,31 +1798,41 @@ function Save-TownReporterBackupState {
   paper is at most a day old" rule, not a "the nightly ran" rule. A promotion
   at 11 PM therefore skips the 2 AM run, which is right: there is a four-hour
   old backup and taking another one changes nothing.
+
+  Since 2026-10-25 "the newest backup" is the newest on C: OR D:
+  (Get-TownReporterNewestBackup). C: is emptied once a backup is verified on
+  D:, so a rule that read C: alone would see "no backup has ever been taken"
+  every five minutes and start a fresh dump each time. With OffsiteDir left
+  out, only C: is read, exactly as before.
 #>
 function Test-TownReporterBackupDue {
   param(
     [Parameter(Mandatory = $true)][string]$BackupDir,
+    [string]$OffsiteDir,
     [datetime]$Now = (Get-Date),
     [int]$Hour = 2,
     [double]$MaxAgeHours = 20
   )
-  $local = Get-TownReporterBackupList -Dir $BackupDir
+  $best = Get-TownReporterNewestBackup -BackupDir $BackupDir -OffsiteDir $OffsiteDir
   $newest = $null
   $ageHours = $null
-  if ($local.Count -gt 0) {
-    $newest = $local[0].Stamp
+  $where = ''
+  if ($null -ne $best) {
+    $newest = $best.Stamp
     $ageHours = [math]::Round(($Now - $newest).TotalHours, 2)
+    $where = if ($best.Where -eq 'offsite') { " (on $($best.Dir))" } else { '' }
   }
   if ($Now.Hour -lt $Hour) {
-    return @{ Due = $false; Newest = $newest; AgeHours = $ageHours; Reason = "it is before $Hour in the morning" }
+    return @{ Due = $false; Newest = $newest; AgeHours = $ageHours; Where = $(if ($best) { $best.Where } else { $null }); Reason = "it is before $Hour in the morning" }
   }
   if ($null -eq $ageHours) {
-    return @{ Due = $true; Newest = $null; AgeHours = $null; Reason = 'no backup has ever been taken here' }
+    $none = if ($OffsiteDir) { "no backup has ever been taken here (none on this machine and none on $OffsiteDir)" } else { 'no backup has ever been taken here' }
+    return @{ Due = $true; Newest = $null; AgeHours = $null; Where = $null; Reason = $none }
   }
   if ($ageHours -lt $MaxAgeHours) {
-    return @{ Due = $false; Newest = $newest; AgeHours = $ageHours; Reason = "the newest backup is only $ageHours hour(s) old" }
+    return @{ Due = $false; Newest = $newest; AgeHours = $ageHours; Where = $best.Where; Reason = "the newest backup$where is only $ageHours hour(s) old" }
   }
-  return @{ Due = $true; Newest = $newest; AgeHours = $ageHours; Reason = "the newest backup is $ageHours hour(s) old" }
+  return @{ Due = $true; Newest = $newest; AgeHours = $ageHours; Where = $best.Where; Reason = "the newest backup$where is $ageHours hour(s) old" }
 }
 
 # --- Is the desk busy? -----------------------------------------------------
@@ -1509,10 +1904,11 @@ function Test-TownReporterDeskBusy {
 
   The three readings come from three different places on purpose:
 
-    backup-stale      the local FOLDER, the same instrument Test-TownReporterBackupDue
-                      uses, so the due rule and the alert can never disagree
-                      about how old the newest backup is. lastSuccessAt is the
-                      fallback for a folder someone has emptied by hand.
+    backup-stale      the two FOLDERS, C: and D: (Get-TownReporterNewestBackup),
+                      the same instrument Test-TownReporterBackupDue uses, so
+                      the due rule and the alert can never disagree about how
+                      old the newest backup is. lastSuccessAt is the fallback
+                      when neither folder can be read.
     offsite-failing   the STATE file, because only a copy attempt can say
                       whether a copy worked; this function has not tried one.
     offsite-low-space a LIVE read of the drive, through the same function the
@@ -1546,10 +1942,15 @@ function Get-TownReporterBackupAlertConditions {
 
   $conditions = New-Object System.Collections.ArrayList
 
+  # The newest of C: and D:, the same instrument the due rule uses -- C: is
+  # empty on a normal day now, so C: alone would raise "backup-stale" every
+  # night with three days of backups sitting on D:.
   $newest = $null
-  $local = Get-TownReporterBackupList -Dir $BackupDir
-  if ($local.Count -gt 0) {
-    $newest = $local[0].Stamp
+  $whereText = ''
+  $best = Get-TownReporterNewestBackup -BackupDir $BackupDir -OffsiteDir $OffsiteDir
+  if ($null -ne $best) {
+    $newest = $best.Stamp
+    $whereText = if ($best.Where -eq 'offsite') { " (it is on $($best.Dir))" } else { " (it is on this machine, $($best.Dir))" }
   } elseif ($state.lastSuccessAt) {
     try {
       $newest = [datetime]::Parse(
@@ -1563,7 +1964,7 @@ function Get-TownReporterBackupAlertConditions {
     [void]$conditions.Add(@{
       Id     = 'backup-stale'
       Active = ($ageHours -gt $MaxAgeHours)
-      Detail = ("the newest backup on this machine is {0} hour(s) old" -f $ageHours)
+      Detail = ("the newest backup is {0} hour(s) old{1}" -f $ageHours, $whereText)
     })
   } else {
     [void]$conditions.Add(@{
@@ -1573,11 +1974,18 @@ function Get-TownReporterBackupAlertConditions {
     })
   }
 
+  # When the last run deleted nothing because of D: (missing, not writable,
+  # short of room, or the local folder under another name), the alerts that
+  # fire for it say so in plain words: the backups are safe, on this machine.
+  # No new alert id -- a missing or full D: already raises offsite-failing or
+  # offsite-low-space, and one problem should be one message on the phone.
+  $heldBack = if ($state.pruneBlocked) { ' Nothing was deleted; the backups stay on this machine (C:) until D: works again.' } else { '' }
+
   if ($null -ne $state.offsiteOk) {
     [void]$conditions.Add(@{
       Id     = 'offsite-failing'
       Active = (-not [bool]$state.offsiteOk)
-      Detail = $(if ($state.offsiteOk) { "the copy to $OffsiteDir verified" } else { "${OffsiteDir}: $($state.offsiteReason)" })
+      Detail = $(if ($state.offsiteOk) { "the copy to $OffsiteDir verified" } else { "${OffsiteDir}: $($state.offsiteReason).$heldBack" })
     })
   } else {
     [void]$conditions.Add(@{
@@ -1598,7 +2006,7 @@ function Get-TownReporterBackupAlertConditions {
     [void]$conditions.Add(@{
       Id     = 'offsite-low-space'
       Active = ($freeGb -lt $MinFreeGb)
-      Detail = ("{0} has {1} GB free and this machine keeps {2} GB in reserve" -f $OffsiteDir, $freeGb, $MinFreeGb)
+      Detail = ("{0} has {1} GB free and this machine keeps {2} GB in reserve.{3}" -f $OffsiteDir, $freeGb, $MinFreeGb, $(if ($freeGb -lt $MinFreeGb) { $heldBack } else { '' }))
     })
   }
 
@@ -1623,7 +2031,8 @@ function Get-TownReporterBackupAlertConditions {
 
 # --- The whole run ---------------------------------------------------------
 <#
-  Backup, copy to D:, prune C:. One function so the watchdog, the manual
+  Backup, copy to D:, clear C:, keep 3 days on D:. One function so the
+  watchdog, the manual
   script and the Control page's button all do exactly the same thing in exactly
   the same order -- three callers with three slightly different orders is how
   the prune ends up running before the copy on one of them.
@@ -1668,15 +2077,22 @@ function Invoke-TownReporterBackupRun {
     [string]$PgBin = "$env:USERPROFILE\scoop\apps\postgresql\current\bin",
     [int]$PgPort = 5433,
     [string]$Database,
-    [int]$Keep = 3,
+    # How many of the newest backups to leave on C: even once they are verified
+    # on D:. The owner's rule since 2026-10-25 is none: "keep them on D: not C:".
+    [int]$Keep = 0,
+    # How many days of backups D: keeps: the newest backup of each of the
+    # KeepDays newest days that have one. "Keep 3 days of backups."
+    [int]$KeepDays = 3,
     [long]$MinFreeGb = 100,
     [int]$MaxAgeHours = 20,
     [int]$NightHour = 2,
     [int]$LockWaitSeconds = 0,
     # How old a verified one-off item (a hand-named .sql/.dump or an old
-    # top-level folder) must be before it is pruned from C:. See
-    # Remove-TownReporterOneOffOld.
-    [int]$OneOffMinAgeDays = 14,
+    # top-level folder) must be before it is deleted from C:. Since
+    # 2026-10-25 there is no floor: verified on D: is enough.
+    [int]$OneOffMinAgeDays = 0,
+    # How long a one-off item is kept on D: (other-safety-copies).
+    [double]$OffsiteOneOffMaxAgeDays = 3,
     [datetime]$Now = (Get-Date),
     [switch]$Offsite,
     [switch]$Force,
@@ -1711,7 +2127,7 @@ function Invoke-TownReporterBackupRun {
 
     # 1. The dump.
     if (-not $Offsite) {
-      $due = Test-TownReporterBackupDue -BackupDir $BackupDir -Now $Now -Hour $NightHour -MaxAgeHours $MaxAgeHours
+      $due = Test-TownReporterBackupDue -BackupDir $BackupDir -OffsiteDir $OffsiteDir -Now $Now -Hour $NightHour -MaxAgeHours $MaxAgeHours
       if (-not $Force -and -not $due.Due) {
         [void]$lines.Add("not taking a backup: $($due.Reason)")
         Write-TownReporterBackupLog $LogFile "not taking a backup: $($due.Reason)"
@@ -1756,34 +2172,89 @@ function Invoke-TownReporterBackupRun {
       [void]$lines.Add("offsite: $($copy.OtherVerified) of $($copy.OtherTotal) other safety copies are in $OffsiteDir\other-safety-copies")
     }
 
-    # 3. The prune. Runs on the copy's verdict and nothing else.
+    # 3. Clearing C:. Each local backup that is verified on D: is deleted from
+    #    this machine; one that is not stays. Not gated on $copy.Ok: the prune
+    #    proves every file against D: itself, so a copy that failed for ONE
+    #    file never keeps the verified others on C:.
+    $blocked = New-Object System.Collections.ArrayList
     $prune = Remove-TownReporterBackupOld -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -Keep $Keep -MinFreeGb $MinFreeGb
-    if ($prune.Ok) {
+    $prunedHere = @($prune.Deleted).Count
+    if ($prunedHere -gt 0) {
       $state['prunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
-      $state['prunedCount'] = @($prune.Deleted).Count
-      if (@($prune.Deleted).Count -gt 0) { [void]$lines.Add("pruned: deleted $(@($prune.Deleted).Count) older local backup(s), keeping the newest $Keep") }
-    } else {
-      [void]$lines.Add("pruned nothing: $($prune.Reason)")
+      $state['prunedCount'] = $prunedHere
+      [void]$lines.Add("cleared this machine: deleted $prunedHere backup(s) from C:, each verified on $OffsiteDir")
+    } elseif ($prune.Ok) {
+      $state['prunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
+      $state['prunedCount'] = 0
+    }
+    if (-not $prune.Ok) {
+      if ($prunedHere -gt 0 -or @($prune.Unverified).Count -gt 0) {
+        [void]$lines.Add("kept on this machine: $($prune.Reason)")
+      } else {
+        [void]$lines.Add("deleted nothing from this machine: $($prune.Reason)")
+        [void]$blocked.Add($prune.Reason)
+      }
     }
 
-    # 3b. The one-off prune: hand-named files and old folders, a separate rule
-    # (verified on D: AND at least $OneOffMinAgeDays old) from the series'
-    # keep-three above. Also runs regardless of $copy.Ok, for the same reason:
-    # Remove-TownReporterOneOffOld verifies each item against D: itself before
-    # ever deleting it.
+    # 3b. The one-off items on C: (hand-named files and old folders): each is
+    # deleted from C: once it is verified in D:\...\other-safety-copies.
     $seriesNamesNow = @((Get-TownReporterBackupList -Dir $BackupDir) | ForEach-Object { $_.Name })
     $oneOffPrune = Remove-TownReporterOneOffOld -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -SeriesNames $seriesNamesNow -MinAgeDays $OneOffMinAgeDays -MinFreeGb $MinFreeGb -Now $Now
     if ($oneOffPrune.Ok) {
       $state['oneOffPrunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
       $state['oneOffPrunedCount'] = @($oneOffPrune.Deleted).Count
-      if (@($oneOffPrune.Deleted).Count -gt 0) { [void]$lines.Add("pruned: deleted $(@($oneOffPrune.Deleted).Count) older one-off item(s) verified on $OffsiteDir and past the $OneOffMinAgeDays-day floor") }
+      if (@($oneOffPrune.Deleted).Count -gt 0) { [void]$lines.Add("cleared this machine: deleted $(@($oneOffPrune.Deleted).Count) one-off item(s) from C:, each verified on $OffsiteDir") }
     } else {
-      [void]$lines.Add("one-off pruned nothing: $($oneOffPrune.Reason)")
+      [void]$lines.Add("one-off items: deleted nothing from this machine: $($oneOffPrune.Reason)")
+      if ($blocked.Count -eq 0) { [void]$blocked.Add($oneOffPrune.Reason) }
     }
 
+    # 4. D: keeps the newest backup of each of the $KeepDays newest days that
+    #    have one, and deletes the rest of the series there. AFTER the C:
+    #    prune on purpose: by then every C: file that could be proven against
+    #    its D: copy has been, so the D: rule never removes a copy that a C:
+    #    file was about to be checked against in this same run.
+    $offPrune = Remove-TownReporterOffsiteOld -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -KeepDays $KeepDays -MinFreeGb $MinFreeGb
+    if ($offPrune.Ok) {
+      $state['offsitePrunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
+      $state['offsitePrunedCount'] = @($offPrune.Deleted).Count
+      if (@($offPrune.Deleted).Count -gt 0) { [void]$lines.Add("kept $KeepDays days on ${OffsiteDir}: deleted $(@($offPrune.Deleted).Count) older backup(s) there, kept $(@($offPrune.Kept).Count)") }
+    } else {
+      [void]$lines.Add("deleted nothing from ${OffsiteDir}: $($offPrune.Reason)")
+      if ($blocked.Count -eq 0) { [void]$blocked.Add($offPrune.Reason) }
+    }
+
+    # 4b. One-off items on D: older than $OffsiteOneOffMaxAgeDays days.
+    $offOneOff = Remove-TownReporterOffsiteOneOffOld -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MaxAgeDays $OffsiteOneOffMaxAgeDays -MinFreeGb $MinFreeGb -Now $Now
+    if ($offOneOff.Ok) {
+      $state['offsiteOneOffPrunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
+      $state['offsiteOneOffPrunedCount'] = @($offOneOff.Deleted).Count
+      if (@($offOneOff.Deleted).Count -gt 0) { [void]$lines.Add("deleted $(@($offOneOff.Deleted).Count) one-off item(s) from $OffsiteDir\other-safety-copies, older than $OffsiteOneOffMaxAgeDays days") }
+    } else {
+      [void]$lines.Add("one-off items: deleted nothing from ${OffsiteDir}: $($offOneOff.Reason)")
+      if ($blocked.Count -eq 0) { [void]$blocked.Add($offOneOff.Reason) }
+    }
+    $state['pruneBlocked'] = if ($blocked.Count -gt 0) { [string]$blocked[0] } else { $null }
+
+    # 5. What is where now, for the Control page and the alerts. D: is listed
+    #    here, by the run, so the page never has to list it.
     $local = Get-TownReporterBackupList -Dir $BackupDir
     $state['localCount'] = $local.Count
     $state['localNewestAt'] = if ($local.Count -gt 0) { Get-TownReporterIsoTime -Time $local[0].Stamp } else { $null }
+    $offList = @()
+    try { $offList = Get-TownReporterBackupList -Dir $OffsiteDir } catch { $offList = @() }
+    $state['offsiteCount'] = $offList.Count
+    $state['offsiteNewestName'] = if ($offList.Count -gt 0) { $offList[0].Name } else { $null }
+    $state['offsiteNewestAt'] = if ($offList.Count -gt 0) { Get-TownReporterIsoTime -Time $offList[0].Stamp } else { $null }
+    $state['offsiteNewestBytes'] = if ($offList.Count -gt 0) { $offList[0].Bytes } else { 0 }
+    $newestNow = Get-TownReporterNewestBackup -BackupDir $BackupDir -OffsiteDir $OffsiteDir
+    $state['newestName'] = if ($newestNow) { $newestNow.Name } else { $null }
+    $state['newestAt'] = if ($newestNow) { Get-TownReporterIsoTime -Time $newestNow.Stamp } else { $null }
+    $state['newestWhere'] = if ($newestNow) { $newestNow.Where } else { $null }
+    $state['newestDir'] = if ($newestNow) { $newestNow.Dir } else { $null }
+    if ($state['lastName']) {
+      $state['lastPath'] = Get-TownReporterBackupPath -Name $state['lastName'] -BackupDir $BackupDir -OffsiteDir $OffsiteDir
+    }
     Save-TownReporterBackupState -StateFile $StateFile -State $state | Out-Null
 
     $ok = ($copy.Ok -and $dumpOk -ne $false)
