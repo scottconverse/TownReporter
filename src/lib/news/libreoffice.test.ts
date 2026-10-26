@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import {
   findSoffice,
   libreOfficeDeps,
+  libreOfficeReason,
   libreOfficeSkipMessage,
   LibreOfficeError,
   notesOnly,
@@ -108,6 +109,13 @@ describe("pure helpers", () => {
     assert.equal(notesOnly("Budget Hearing\nMention the 6% rate.", "Budget Hearing"), "Mention the 6% rate.");
     assert.equal(notesOnly("Water Rates", "Water Rates"), "");
   });
+  it("gives the real reason a file failed, not LibreOffice's Python start-up note", () => {
+    const seen = "Could not find platform independent libraries <prefix>\r\nError: source file could not be loaded\n";
+    assert.equal(libreOfficeReason(seen, 1), "Error: source file could not be loaded");
+    assert.equal(libreOfficeReason("Could not find platform independent libraries <prefix>\n", 1), "LibreOffice stopped with code 1");
+    assert.equal(libreOfficeReason("", 81), "LibreOffice stopped with code 81");
+    assert.equal(libreOfficeReason("convert failed: disk full\n", 1), "convert failed: disk full");
+  });
   it("labels LibreOffice reads for the desk", () => {
     assert.equal(describeExtractionMethod("libreoffice:sheets:3"), "Read by LibreOffice: 3 sheets");
     assert.equal(describeExtractionMethod("libreoffice:slides:1"), "Read by LibreOffice: 1 slide");
@@ -144,7 +152,7 @@ describe("real conversions", needsSoffice, () => {
   it("says why a damaged file could not be read instead of throwing something vague", async () => {
     await assert.rejects(
       readWithLibreOffice(new Uint8Array([1, 2, 3, 4]), "broken.xlsx"),
-      (e: unknown) => e instanceof LibreOfficeError,
+      (e: unknown) => e instanceof LibreOfficeError && !/platform independent libraries/.test(e.message),
     );
   });
 });

@@ -47,6 +47,18 @@ export function libreOfficeSkipMessage(filename: string, error: unknown): string
   return `LibreOffice could not read ${filename}: ${reason}`;
 }
 
+/**
+ * The reason line for a failed conversion. LibreOffice's own Python can print a start-up note
+ * ("Could not find platform independent libraries <prefix>") before the real error, so an
+ * "Error:" line wins, and start-up notes are passed over.
+ */
+export function libreOfficeReason(output: string, code: number | null): string {
+  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const startupNote = /^(Could not find platform (in)?dependent libraries|Consider setting \$PYTHONHOME)/i;
+  const line = lines.find((l) => /^Error\b/i.test(l)) ?? lines.find((l) => !startupNote.test(l));
+  return line?.slice(0, 200) || `LibreOffice stopped with code ${code}`;
+}
+
 /** Things tests replace; production leaves them alone. */
 export const libreOfficeDeps = {
   spawn: nodeSpawn as (command: string, args: string[], options: object) => ChildProcess,
@@ -188,11 +200,7 @@ async function withWorkDir<T>(bytes: Uint8Array, ext: string, job: (work: Work) 
           outDir,
           input,
         ]);
-        if (result.code !== 0)
-          throw new LibreOfficeError(
-            "failed",
-            result.output.trim().split(/\r?\n/)[0]?.slice(0, 200) || `LibreOffice stopped with code ${result.code}`,
-          );
+        if (result.code !== 0) throw new LibreOfficeError("failed", libreOfficeReason(result.output, result.code));
       };
       return await job({ dir, input, out, convert });
     } finally {
