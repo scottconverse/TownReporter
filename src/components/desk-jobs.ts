@@ -55,10 +55,77 @@ export function jobHeadline(job: Pick<JobProgressView, "headline" | "title">): s
  * from the same query and the same first three, with the story's name and both
  * presses ("Open your story", "Cancel"). The box drew the same job again above
  * it with only Cancel, so one job showed as two rows on one screen. On Today
- * the box keeps its count line and draws no rows. Every other page keeps the
- * box's rows, at most three.
+ * the box keeps its count line and draws no rows.
+ *
+ * Every other page that draws a card for a job of its own (Drafts, Server
+ * operations, Dark Desk, the story page, ...) says so through
+ * `useJobCardDrawnOnPage`, and the box leaves that one job out (G24-D1-2). Other
+ * running jobs still show, at most three.
  */
-export function navRunningRows<T>(jobs: readonly T[], pathname: string): T[] {
+export function navRunningRows<T extends { id: string | number }>(
+  jobs: readonly T[],
+  pathname: string,
+  drawnOnPage: ReadonlySet<string | number> = new Set(),
+): T[] {
+  /* Ids from the document are text; ids from the query are numbers. */
   if (pathname.replace(/\/+$/, "") === "/desk") return [];
-  return jobs.slice(0, 3);
+  return jobs.filter((job) => !drawnOnPage.has(job.id) && !drawnOnPage.has(String(job.id))).slice(0, 3);
+}
+
+/*
+  Which jobs the page itself is drawing a card for. Every job card carries its
+  job's id in `data-job-id`; the cards the nav's Running box draws sit inside
+  `.astra-running`, and any other card is the page's own. The nav and the page
+  are not parent and child, so the box reads the document rather than asking
+  each page to report: a page that draws a card for a job is covered with no
+  change to the page.
+*/
+const NAV_BOX = ".astra-running";
+
+/** Ids of the job cards on the page, outside the nav's Running box. */
+export function jobIdsDrawnOutside(root: {
+  querySelectorAll(selector: string): ArrayLike<{
+    getAttribute(name: string): string | null;
+    closest(selector: string): unknown;
+  }>;
+}): Set<string> {
+  const ids = new Set<string>();
+  const cards = root.querySelectorAll("[data-job-id]");
+  for (let i = 0; i < cards.length; i += 1) {
+    const card = cards[i];
+    const id = card.getAttribute("data-job-id");
+    if (id && !card.closest(NAV_BOX)) ids.add(id);
+  }
+  return ids;
+}
+
+/** The job ids the page is drawing a card for, kept current as the page changes. */
+export function useJobsDrawnOnPage(): ReadonlySet<string> {
+  const [ids, setIds] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      const next = jobIdsDrawnOutside(document);
+      setIds((prev) =>
+        prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
+      );
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(read);
+    };
+    read();
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-job-id"],
+    });
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+  return ids;
 }

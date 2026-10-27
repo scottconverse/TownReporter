@@ -1,3 +1,4 @@
+import { withLocalModelNextStep } from "./desk-local-model.ts";
 /**
  * Is the desk able to do the expensive thing before it starts doing it?
  *
@@ -198,7 +199,7 @@ export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflig
     return { ok: false, kind: "unconfigured", guidance: detail, detail: "", retryable: false };
   }
   if (isLocalModelNotReady(detail)) {
-    return { ok: false, kind: "unconfigured", guidance: detail, detail: "", retryable: false };
+    return { ok: false, kind: "unconfigured", guidance: withLocalModelNextStep(detail), detail: "", retryable: false };
   }
 
   const kind: PreflightKind = looksLikeTimeoutText(detail)

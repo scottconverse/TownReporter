@@ -67,6 +67,36 @@ export function deskLocalModelNextStep(choice: {
   return "Next: load a model in LM Studio or Ollama, or pick one on the Models page.";
 }
 
+const NOTHING_LOADED_SENTENCE = "No model is loaded on this computer.";
+
+/**
+ * Wherever the desk's own words say "No model is loaded on this computer.",
+ * say the next step right after it (same wording as the Models page, from
+ * `deskLocalModelNextStep`). Text that already has it, or does not carry the
+ * sentence, comes back unchanged. Display only: the stored error is not edited.
+ */
+export function withLocalModelNextStep(text: string): string {
+  const next = deskLocalModelNextStep({ override: null });
+  if (!next || !text.includes(NOTHING_LOADED_SENTENCE)) return text;
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const i = text.indexOf(NOTHING_LOADED_SENTENCE, at);
+    if (i < 0) break;
+    const end = i + NOTHING_LOADED_SENTENCE.length;
+    out += text.slice(at, end);
+    const rest = text.slice(end);
+    if (rest.startsWith(" Next:")) {
+      at = end;
+    } else {
+      out += ` ${next}`;
+      /* A caller that closes its own list with "." would double ours. */
+      at = rest.startsWith(".") ? end + 1 : end;
+    }
+  }
+  return out + text.slice(at);
+}
+
 export function localServerStatus(server: LocalServer): string {
   if (!server.reachable) return "Could not reach";
   const loaded = server.models.find(

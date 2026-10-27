@@ -406,8 +406,25 @@ describe("Server card rows (CX2)", () => {
     const rows = routineNoticeRows(policy as never, automation as never);
     /* Two distinct kinds, not five approvals. */
     assert.equal(value(rows, "Handled automatically"), "2 kinds");
-    assert.equal(value(rows, "Last run"), "2026-09-23T12:04:00.000Z");
+    assert.match(value(rows, "Last run"), /^Wed, Sept\. 23(, 2026)?, 6:04 a\.m\.$/);
     assert.equal(row(rows, "Last run").help, "2026-09-23 · completed");
+  });
+
+  it("Routine notices: Last run reads as a desk date in the paper's time zone, even from a raw computer date string", () => {
+    const raw = String(new Date("2026-10-25T12:14:55.000Z"));
+    const rows = routineNoticeRows(
+      { paused: false, approvals: [] } as never,
+      { enabled: true, localTime: "06:15", recentRuns: [{ createdAt: raw, localDate: "2026-10-25", status: "completed" }] } as never,
+      "America/Denver",
+    );
+    assert.match(value(rows, "Last run"), /^Sun, Oct\. 25(, 2026)?, 6:14 a\.m\.$/);
+    assert.doesNotMatch(value(rows, "Last run"), /GMT|Daylight/);
+    const other = routineNoticeRows(
+      { paused: false, approvals: [] } as never,
+      { enabled: true, localTime: "06:15", recentRuns: [{ createdAt: raw, localDate: "2026-10-25", status: "completed" }] } as never,
+      "America/New_York",
+    );
+    assert.match(value(other, "Last run"), /^Sun, Oct\. 25(, 2026)?, 8:14 a\.m\.$/);
   });
 
   it("Routine notices: a desk that has never run says so", () => {

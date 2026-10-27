@@ -1894,6 +1894,8 @@ function StoryPage() {
       refresh(["paper"]);
       refresh(["published-desk"]);
       refresh(["lead", id]);
+      /* The story left Drafts: the nav count and the Drafts list agree now (G23-QA-6). */
+      refresh(["drafts-desk"]);
     },
     onError: (err) => {
       setMsg("");

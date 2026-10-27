@@ -294,6 +294,7 @@ const providerRegistryUrl = await load("src/lib/news/provider-registry.ts");
 const paperUrl = await load("src/lib/paper.ts");
 const preflightUrl = await load("src/lib/news/preflight.ts", {
   "./provider-registry.ts": providerRegistryUrl,
+  "./desk-local-model.ts": await load("src/lib/news/desk-local-model.ts"),
 });
 /* U26b (2026-09-30): lead-match.ts imports nothing at all now -- the place
    words its stoplist is built from arrive as a caller's parameter

@@ -36,6 +36,12 @@ const registry = await import(registryUrl);
 const preflightUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/preflight.ts", import.meta.url), "utf8"),
   "preflight.ts",
+  {
+    "./desk-local-model.ts": moduleUrl(
+      await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
+      "desk-local-model.ts",
+    ),
+  },
 );
 const choices = moduleUrl(
   await readFile(new URL("../src/lib/news/model-choice.ts", import.meta.url), "utf8"),

@@ -7,6 +7,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
+import { draftPillText } from "@/lib/desk/draft-pills";
 import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
@@ -201,7 +202,7 @@ function DraftsPage() {
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
           >
-            {f.label} · {counts?.[f.key] ?? 0}
+            {draftPillText(f.label, counts, f.key)}
           </button>
         ))}
       </div>

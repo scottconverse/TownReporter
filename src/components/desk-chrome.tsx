@@ -25,7 +25,7 @@ import { WarningConsentHost } from "@/components/warning-consent-host";
 import { deskWarningConsent } from "@/components/editor-warning-consent";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
-import { jobHeadline, navRunningRows } from "@/components/desk-jobs";
+import { jobHeadline, navRunningRows, useJobsDrawnOnPage } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
 import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
@@ -716,6 +716,7 @@ function RunningBox({
   pathname: string;
   onNavigate: () => void;
 }) {
+  const drawnOnPage = useJobsDrawnOnPage();
   if (!jobs.length) return null;
   return (
     <div className="astra-running">
@@ -727,7 +728,7 @@ function RunningBox({
         the story's name and both presses, so the box draws no rows there --
         see `navRunningRows`.
       */}
-      {navRunningRows(jobs, pathname).map((job) => (
+      {navRunningRows(jobs, pathname, drawnOnPage).map((job) => (
         <div className="astra-running-job" key={job.id}>
           {/*
             ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).

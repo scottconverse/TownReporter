@@ -177,7 +177,8 @@ test("a failed job whose model server did not answer says so plainly, with the c
   const [head, disclosure] = html.split(/<details class="job-card-detail">/);
   assert.ok(disclosure, "expected a technical-detail disclosure");
   assert.doesNotMatch(head, /127\.0\.0\.1:1299/);
-  assert.match(disclosure, /127\.0\.0\.1:1299/);
+  assert.match(disclosure, /ECONNREFUSED/);
+  assert.doesNotMatch(disclosure, /127\.0\.0\.1|1299/, "an editor never reads a raw address");
 });
 
 test("a cancelled job shows the editor's own reason with Retry beside it", () => {

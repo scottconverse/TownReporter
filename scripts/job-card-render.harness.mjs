@@ -79,6 +79,12 @@ const jobCardStateModule = moduleUrl(
 const serverAnswerWordsModule = moduleUrl(
   await readFile(new URL("../src/lib/news/server-answer-words.ts", import.meta.url), "utf8"),
   "server-answer-words.ts",
+  {
+    "./desk-local-model.ts": moduleUrl(
+      await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
+      "desk-local-model.ts",
+    ),
+  },
 );
 
 const JobCardModule = moduleUrl(
