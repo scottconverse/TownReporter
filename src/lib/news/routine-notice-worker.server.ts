@@ -18,12 +18,15 @@ import {
 import {
   eligibleRoutineNotices,
   planRoutineEditions,
+  routineEditionFingerprint,
+  routineEditionUpdateKind,
   routineNoticeLabel,
   type EligibleRoutineNotice,
 } from "./routine-notice-editions.ts";
 import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { sha256 } from "./fetch-url.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 
 type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
 type RoutineReviewReason = { why: string; count: number; label?: string; source?: string };
@@ -456,9 +459,38 @@ export async function performRoutineNoticeWorkWith(
       a.channel.localeCompare(b.channel)
     );
   });
-  const selectedEligible = orderedEligible.slice(0, 5);
-  const overflow = orderedEligible.slice(5);
-  let plans = planRoutineEditions(selectedEligible, localDate);
+  /*
+    Today in town lists ALL of the day's eligible events in one run (D321), so a
+    day with six or more gets its Morning / Afternoon / Evening headings. The
+    five-per-run cap, and the deferral of what is over it, stays for "This
+    weekend" and "Deadlines approaching" exactly as it was.
+  */
+  const cappedChannels = orderedEligible.filter((item) => item.channel !== "today");
+  const keptUnderCap = new Set(cappedChannels.slice(0, 5));
+  const selectedEligible = orderedEligible.filter(
+    (item) => item.channel === "today" || keptUnderCap.has(item),
+  );
+  const overflow = cappedChannels.slice(5);
+  /*
+    The Today in town layout names the town (Paper setup's city) and each source
+    by the name the desk already holds for it. A paper that cannot give its city
+    just gets the wording without a town; it never gets a guessed one.
+  */
+  const town = await getPaperConfig(run.newsroom_id).then(
+    (config) => config.city.trim(),
+    () => "",
+  );
+  const sourceNames = new Map<string, string>();
+  for (const source of sources) {
+    const title = groups.find((group) => group.source.id === source.source_id)?.source.title;
+    if (title?.trim() && !sourceNames.has(source.public_source_url))
+      sourceNames.set(source.public_source_url, title);
+  }
+  let plans = planRoutineEditions(selectedEligible, localDate, {
+    timezone: run.timezone,
+    town,
+    sourceNames,
+  });
   if (new Date(`${localDate}T12:00:00Z`).getUTCDay() !== 5)
     plans = plans.filter((p) => p.channel !== "weekend");
   const noticeStatuses = new Map<string, RoutineNoticeOutcomeStatus>();
@@ -634,10 +666,26 @@ export async function performRoutineNoticeWorkWith(
         markChannel(plan.channel, "in-review");
         continue;
       }
-      const fingerprint = await sha256(plan.body);
+      const bodyHash = await sha256(plan.body);
+      const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
       if (existing) {
-        if (existing.content_fingerprint === fingerprint) {
+        const keysAfterRun = [
+          ...new Set([
+            ...(sameDayKeys.get(plan.channel) ?? []),
+            ...selectedEligible
+              .filter((entry) => entry.channel === plan.channel)
+              .map((entry) => entry.notice.provenance.externalId),
+          ]),
+        ];
+        const update = routineEditionUpdateKind({
+          existingFingerprint: existing.content_fingerprint,
+          existingKeys: [...(sameDayKeys.get(plan.channel) ?? [])],
+          fingerprint,
+          bodyHash,
+          keysAfterRun,
+        });
+        if (update === "unchanged") {
           markChannel(plan.channel, "published");
           continue;
         }
@@ -659,32 +707,31 @@ export async function performRoutineNoticeWorkWith(
           );
           continue;
         }
-        await tx.query(
-          "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
-          [
-            run.actor,
-            run.newsroom_id,
-            existing.article_id,
-            `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
-          ],
-        );
+        /*
+          Decision 11: a change of layout is not news. A story printed before the
+          v2 fingerprint existed, whose events are exactly the events it has now,
+          keeps its text and gets no correction; only its receipt moves to the
+          new fingerprint. A real new or removed event still corrects.
+        */
+        if (update === "layout-only")
+          console.info(
+            `[routine-edition] ${plan.channel} ${localDate}: the layout changed and no correction was posted`,
+          );
+        else
+          await tx.query(
+            "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
+            [
+              run.actor,
+              run.newsroom_id,
+              existing.article_id,
+              `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
+            ],
+          );
         await tx.query(
           "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
-          [
-            existing.id,
-            run.id,
-            fingerprint,
-            JSON.stringify(
-              [...new Set([
-                ...(sameDayKeys.get(plan.channel) ?? []),
-                ...selectedEligible
-                  .filter((entry) => entry.channel === plan.channel)
-                  .map((entry) => entry.notice.provenance.externalId),
-              ])],
-            ),
-          ],
+          [existing.id, run.id, fingerprint, JSON.stringify(keysAfterRun)],
         );
-        corrected += 1;
+        if (update === "correction") corrected += 1;
         markChannel(plan.channel, "published");
         continue;
       }
@@ -696,7 +743,7 @@ export async function performRoutineNoticeWorkWith(
           run.newsroom_id,
           slug,
           plan.headline,
-          "Logistics from approved public sources.",
+          plan.dek ?? "Logistics from approved public sources.",
           plan.body,
           sections[plan.channel],
           JSON.stringify(plan.sourceUrls),
@@ -716,7 +763,7 @@ export async function performRoutineNoticeWorkWith(
               .filter((e) => e.channel === plan.channel)
               .map((e) => e.notice.provenance.externalId),
           ),
-          await sha256(plan.body),
+          bodyHash,
         ],
       );
       published += 1;

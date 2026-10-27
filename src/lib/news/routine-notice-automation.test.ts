@@ -209,10 +209,14 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [room],
   );
   assert.deepEqual(result, { articles: 1, jobs: 1, runs: 1 });
-  const [article] = await sql.query<{ body: string; source_urls: string }>(
-    "select body,source_urls from articles where newsroom_id=$1",
+  const [article] = await sql.query<{ body: string; dek: string; source_urls: string }>(
+    "select body,dek,source_urls from articles where newsroom_id=$1",
     [room],
   );
+  // The Today in town layout: counted dek, timed block, and the source by the name the desk holds for it.
+  assert.match(article!.dek, /^1 event on .+ public calendars today\.$/);
+  assert.match(article!.body, /\n\n\*\*6 p\.m\.\*\*\nConcert\nPark\n\n/);
+  assert.match(article!.body, /\n\nSource: \[Events\]\(https:\/\/events\.example\/calendar\)$/);
   assert.equal(`${article?.body} ${article?.source_urls}`.includes("token=secret"), false);
   assert.deepEqual(JSON.parse(article!.source_urls), ["https://events.example/calendar"]);
 
@@ -652,10 +656,14 @@ test("nonowners cannot activate and a removed approval cascades the automation s
 });
 
 // guards: published notices consume the daily cap and displace unpublished notices
-test("six eligible notices save the overflow and put it first in the next plan", async () => {
+const fridayNow = new Date("2026-09-11T13:00:00Z");
+// The five-per-run cap now holds for "This weekend" and "Deadlines approaching" (Today in town lists every
+// event of the day, D321). On a Friday every event today is also a weekend event, so six of them print all six in
+// Today and five in the weekend story, with the sixth deferred and put first in the next plan.
+test("six eligible notices save the weekend overflow and put it first in the next plan", async () => {
   const source = await activateFixture();
   const sql = await getSql();
-  await tickRoutineNoticeEditions(runNow);
+  await tickRoutineNoticeEditions(fridayNow);
   const [firstJob] = await sql.query<any>(
     "update desk_jobs set status='running',claim_token='overflow-first' where newsroom_id=$1 and kind='routine-notice' returning *",
     [room],
@@ -668,7 +676,7 @@ test("six eligible notices save the overflow and put it first in the next plan",
     fields: {
       issuer: { value: "Arts Council", locator: "issuer" },
       title: { value: title, locator: "title" },
-      start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+      start: { value: "2026-09-11T18:00:00-06:00", locator: "start" },
       venue: { value: "Park", locator: "venue" },
     },
     conflict: false,
@@ -679,11 +687,11 @@ test("six eligible notices save the overflow and put it first in the next plan",
       checkId: 44,
       source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
       formatKey: "community-arts-event-logistics" as const,
-      checkedAt: runNow.toISOString(),
+      checkedAt: fridayNow.toISOString(),
       capture: {
         captureEventId: 88,
         artifactVersionId: 99,
-        observedAt: runNow.toISOString(),
+        observedAt: fridayNow.toISOString(),
         evidenceHref: null,
         textAvailable: true,
       },
@@ -700,15 +708,17 @@ test("six eligible notices save the overflow and put it first in the next plan",
     .map((id) => makeNotice(id, `A Concert ${id}`))
     .concat(makeNotice(6, "Z Deferred Concert"));
   await performRoutineNoticeWorkWith(firstJob as DeskJob, {
-    now: runNow,
+    now: fridayNow,
     check: check(first) as any,
     verifyCheck: async () => {},
   });
   const [firstRun] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [firstJob!.subject_id]);
   const saved = JSON.parse(firstRun!.summary_json);
-  const deferred = saved.notices.find((notice: any) => notice.line.includes("Z Deferred Concert"));
-  assert.equal(saved.notices.length, 6);
-  assert.equal(saved.notices.filter((notice: any) => notice.status === "published").length, 5);
+  const deferred = saved.notices.find((notice: any) => notice.line.includes("Z Deferred Concert") && notice.channel === "weekend");
+  assert.equal(saved.notices.length, 12);
+  assert.equal(saved.notices.filter((notice: any) => notice.channel === "today" && notice.status === "published").length, 6);
+  assert.equal(saved.notices.filter((notice: any) => notice.channel === "weekend" && notice.status === "published").length, 5);
+  assert.equal(saved.notices.filter((notice: any) => notice.status === "deferred").length, 1);
   assert.ok(saved.notices.every((notice: any) =>
     notice.source.sourceId === source.id &&
     notice.binding.captureEventId === 88 &&
@@ -723,13 +733,13 @@ test("six eligible notices save the overflow and put it first in the next plan",
   assert.equal(deferred.binding.artifactVersionId, 99);
   const listed = (await readRoutineNoticeAutomationFor(owner, room)).recentRuns[0]!.notices;
   assert.equal(
-    listed.find((notice) => notice.binding.externalId === deferred.binding.externalId)?.status,
+    listed.find((notice) => notice.channel === "weekend" && notice.binding.externalId === deferred.binding.externalId)?.status,
     "deferred",
   );
 
   const [revision] = await sql.query<{ revision: number }>("update routine_notice_automations set revision=revision+1 where newsroom_id=$1 returning revision", [room]);
   const [nextRun] = await sql.query<{ id: number }>(
-    "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,'2026-09-08',$2,1,'running',$3) returning id",
+    "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,'2026-09-11',$2,1,'running',$3) returning id",
     [room, revision!.revision, owner],
   );
   const [nextJob] = await sql.query<any>(
@@ -740,14 +750,187 @@ test("six eligible notices save the overflow and put it first in the next plan",
     .map((id) => makeNotice(id, `A New Notice ${id}`))
     .concat(makeNotice(6, "Z Deferred Concert"), first.slice(0, 5));
   await performRoutineNoticeWorkWith(nextJob as DeskJob, {
-    now: runNow,
+    now: fridayNow,
     check: check(second) as any,
     verifyCheck: async () => {},
   });
-  const [publication] = await sql.query<{ candidate_keys_json: string }>("select candidate_keys_json from routine_notice_publications where newsroom_id=$1 and channel='today'", [room]);
+  const [publication] = await sql.query<{ candidate_keys_json: string }>("select candidate_keys_json from routine_notice_publications where newsroom_id=$1 and channel='weekend'", [room]);
   assert.ok(JSON.parse(publication!.candidate_keys_json).includes(deferred.binding.externalId));
   const [next] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [nextRun!.id]);
   assert.equal(JSON.parse(next!.summary_json).deferred, 1);
-  const [update] = await sql.query<{ body: string }>("select body from corrections where newsroom_id=$1", [room]);
-  assert.equal(update!.body.includes("A Concert"), false);
+  const updates = await sql.query<{ body: string }>("select body from corrections where newsroom_id=$1", [room]);
+  assert.ok(updates.length >= 1);
+  for (const update of updates) assert.equal(update.body.includes("A Concert"), false);
+});
+
+// D321: Today in town lists ALL of the day's eligible events in one run; the cap stays for the weekend story.
+test("a Friday run with eight events today and seven more on Saturday prints all eight in Today and defers the weekend overflow", async () => {
+  const friday = new Date("2026-09-11T13:00:00Z");
+  const source = await activateFixture();
+  const sql = await getSql();
+  await tickRoutineNoticeEditions(friday);
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='today-all' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  const notice = (id: number, title: string, start: string) => ({
+    id,
+    externalIdHash: `event-${id}`,
+    formatKey: "community-arts-event-logistics" as const,
+    variant: "event",
+    fields: {
+      issuer: { value: "Arts Council", locator: "issuer" },
+      title: { value: title, locator: "title" },
+      start: { value: start, locator: "start" },
+      venue: { value: "Park", locator: "venue" },
+    },
+    conflict: false,
+  });
+  const hours = ["08", "09", "10", "12", "14", "16", "18", "19"];
+  const candidates = [
+    ...hours.map((hour, index) => notice(index + 1, `Friday event ${index + 1}`, `2026-09-11T${hour}:00:00-06:00`)),
+    ...[1, 2, 3, 4, 5, 6, 7].map((index) => notice(100 + index, `Saturday event ${index}`, "2026-09-12T10:00:00-06:00")),
+  ];
+  await performRoutineNoticeWorkWith(job as DeskJob, {
+    now: friday,
+    check: (async () => ({
+      ok: true as const,
+      check: {
+        checkId: 44,
+        source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+        formatKey: "community-arts-event-logistics" as const,
+        checkedAt: friday.toISOString(),
+        capture: {
+          captureEventId: 88,
+          artifactVersionId: 99,
+          observedAt: friday.toISOString(),
+          evidenceHref: null,
+          textAvailable: true,
+        },
+        state: "parsed" as const,
+        counts: { parsed: candidates.length, refused: 0, conflicts: 0 },
+        refusals: [],
+        candidates,
+        newerCaptureAvailable: false,
+        policy: { revision: 1, paused: false, approvalValid: true },
+        canCheck: true,
+      },
+    })) as any,
+    verifyCheck: async () => {},
+  });
+
+  const [todayStory] = await sql.query<{ dek: string; body: string }>(
+    "select a.dek,a.body from articles a join routine_notice_publications p on p.article_id=a.id where p.newsroom_id=$1 and p.channel='today'",
+    [room],
+  );
+  assert.match(todayStory!.dek, /^8 events on .+ public calendars today\.$/);
+  assert.equal(todayStory!.body.match(/^Friday event \d$/gm)?.length, 8);
+  assert.deepEqual(
+    todayStory!.body.split("\n\n").filter((block) => block.startsWith("## ")),
+    ["## Morning", "## Afternoon", "## Evening"],
+  );
+  const [weekendStory] = await sql.query<{ body: string }>(
+    "select a.body from articles a join routine_notice_publications p on p.article_id=a.id where p.newsroom_id=$1 and p.channel='weekend'",
+    [room],
+  );
+  assert.equal(weekendStory!.body.match(/^- /gm)?.length, 5);
+
+  const [run] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [job.subject_id]);
+  const summary = JSON.parse(run!.summary_json);
+  const count = (channel: string, status: string) =>
+    summary.notices.filter((entry: any) => entry.channel === channel && entry.status === status).length;
+  assert.equal(count("today", "published"), 8);
+  assert.equal(count("today", "deferred"), 0);
+  assert.equal(count("weekend", "published"), 5);
+  assert.equal(count("weekend", "deferred"), 10);
+  assert.equal(summary.deferred, 10);
+});
+
+// Decision 11: a change of layout is not news. A story printed in the old layout is not corrected for it.
+test("a story printed in the old layout is corrected only for a real change of events, never for the layout", async () => {
+  const source = await activateFixture();
+  const sql = await getSql();
+  await tickRoutineNoticeEditions(runNow);
+  const notice = (id: number, title: string) => ({
+    id,
+    externalIdHash: `event-${id}`,
+    formatKey: "community-arts-event-logistics" as const,
+    variant: "event",
+    fields: {
+      issuer: { value: "Arts Council", locator: "issuer" },
+      title: { value: title, locator: "title" },
+      start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+      venue: { value: "Park", locator: "venue" },
+    },
+    conflict: false,
+  });
+  const check = (candidates: ReturnType<typeof notice>[]) => async () => ({
+    ok: true as const,
+    check: {
+      checkId: 44,
+      source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: runNow.toISOString(),
+      capture: { captureEventId: 88, artifactVersionId: 99, observedAt: runNow.toISOString(), evidenceHref: null, textAvailable: true },
+      state: "parsed" as const,
+      counts: { parsed: candidates.length, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates,
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  });
+  const [firstJob] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='layout-first' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  await performRoutineNoticeWorkWith(firstJob as DeskJob, {
+    now: runNow,
+    check: check([notice(1, "Concert")]) as any,
+    verifyCheck: async () => {},
+  });
+  const [first] = await sql.query<{ content_fingerprint: string }>(
+    "select content_fingerprint from routine_notice_publications where newsroom_id=$1 and channel='today'",
+    [room],
+  );
+  assert.match(first!.content_fingerprint, /^v2:[0-9a-f]{64}$/, "a new story's receipt carries the version prefix");
+
+  // Make the receipt look like one written before the new layout: a bare hash.
+  await sql.query(
+    "update routine_notice_publications set content_fingerprint=$2 where newsroom_id=$1 and channel='today'",
+    [room, first!.content_fingerprint.slice(3)],
+  );
+  const again = async (claim: string, candidates: ReturnType<typeof notice>[]) => {
+    const [revision] = await sql.query<{ revision: number }>("update routine_notice_automations set revision=revision+1 where newsroom_id=$1 returning revision", [room]);
+    const [run] = await sql.query<{ id: number }>(
+      "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,'2026-09-08',$2,1,'running',$3) returning id",
+      [room, revision!.revision, owner],
+    );
+    const [job] = await sql.query<any>(
+      "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working',$4) returning *",
+      [room, owner, run!.id, claim],
+    );
+    await performRoutineNoticeWorkWith(job as DeskJob, { now: runNow, check: check(candidates) as any, verifyCheck: async () => {} });
+    const [state] = await sql.query<{ corrections: number; content_fingerprint: string; keys: string }>(
+      "select (select count(*)::int from corrections where newsroom_id=$1) corrections,content_fingerprint,candidate_keys_json keys from routine_notice_publications where newsroom_id=$1 and channel='today'",
+      [room],
+    );
+    return state!;
+  };
+
+  // The same events again: no correction for the layout.
+  const same = await again("layout-same", [notice(1, "Concert")]);
+  assert.equal(same.corrections, 0);
+
+  // A real new event on the old-layout story: one correction, and the receipt moves to v2.
+  const grown = await again("layout-grown", [notice(1, "Concert"), notice(2, "Poetry night")]);
+  assert.equal(grown.corrections, 1);
+  assert.match(grown.content_fingerprint, /^v2:/);
+  assert.equal(JSON.parse(grown.keys).length, 2);
+
+  // A v2 story whose text changes with a new event: corrected as always.
+  const more = await again("layout-more", [notice(1, "Concert"), notice(2, "Poetry night"), notice(3, "Film night")]);
+  assert.equal(more.corrections, 2);
+  assert.match(more.content_fingerprint, /^v2:/);
 });

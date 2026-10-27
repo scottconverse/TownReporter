@@ -31,12 +31,16 @@ const n = (
   (src/components/story-body.tsx): `[text](https://…)`, `**bold**`,
   `*em*` / `_em_`, and a bare `https://…`. A routine edition publishes with no
   editor, so nothing outside its owner-approved `Source:` lines may trip one.
+  The Today in town layout adds two things that are meant to: the bold AP time
+  that opens an event block (`**2:30 to 4 p.m.**`), and a `Sign up:` line whose
+  address is the source's own registration link.
 */
 const PUBLIC_READING =
   /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\*\*(.+?)\*\*|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(?<![A-Za-z0-9])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(https?:\/\/[^\s<>]+)/g;
 function assertNoReaderMarkup(body: string) {
   for (const line of body.split("\n")) {
     if (line.startsWith("Source: ")) continue;
+    if (/^\*\*[^*]+\*\*$/.test(line) || /^Sign up: https?:\/\/\S+$/.test(line)) continue;
     PUBLIC_READING.lastIndex = 0;
     assert.doesNotMatch(line, PUBLIC_READING, `reader markup reached the body: ${line}`);
   }
@@ -71,7 +75,11 @@ test("plans bounded Today, Friday weekend, and approaching-deadline editions wit
   );
   const plans = planRoutineEditions(result.eligible, "2026-09-08");
   assert.equal(plans.length, 3);
-  assert.match(plans[0]!.body, /Source: https:\/\/source\.example\/a/);
+  assert.match(plans[0]!.body, /Source: \[source\.example\]\(https:\/\/source\.example\/a\)/);
+  // The other two editions keep their bullet list and raw Source line.
+  assert.match(plans[1]!.body, /^- Walk: /);
+  assert.match(plans[1]!.body, /Source: https:\/\/source\.example\/b$/);
+  assert.match(plans[2]!.body, /Source: https:\/\/source\.example\/c$/);
   assert.equal(planRoutineEditions([], "2026-09-08").length, 0);
 });
 test("assigns offset timestamps by the configured newsroom local day", () => {
