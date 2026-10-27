@@ -162,6 +162,19 @@ const MIGRATIONS_ONLY_FEATURES: Record<string, { reason: string }> = {
       "here because the 0005 replay this fixture used to do into the ensure database hid exactly " +
       "this difference from the comparison (U18a-4 unmasked it).",
   },
+  artifact_chunks_excerpt_trgm: {
+    reason:
+      "migrations-only speed index (migrations/0157_evidence_exact_trgm.sql, G24-S3-2). It needs " +
+      "pg_trgm, which PGLite and non-superuser databases lack, so it is created only by the guarded " +
+      "migration, the same way as 0018's articles_*_trgm indexes. The search gives the same rows " +
+      "with or without it; the runtime ensure side does not create it on purpose.",
+  },
+  artifact_chunks_excerpt_md5: {
+    reason:
+      "migrations-only speed index (migrations/0157_evidence_exact_trgm.sql, G24-S3-2). It only " +
+      "makes the Find evidence candidate-row lookup faster; the rows are the same without it. " +
+      "Kept out of the runtime ensure side so app start never builds an index on a live table.",
+  },
 };
 
 let closePoolForTests: () => Promise<void>;
