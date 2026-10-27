@@ -102,6 +102,16 @@ export function assignmentPrompt(input: {
 }
 
 /**
+ * G25-LO-4: the research lines of the news assignment when the editor chose
+ * "Use only supplied material". The supplied URLs may still be opened; nothing
+ * else on the web may be searched or fetched.
+ */
+export const NEWS_SUPPLIED_SCOPE_LINES: readonly string[] = [
+  "- EDITOR SCOPE: SUPPLIED MATERIAL ONLY. The lead, its evidence and every source URL are in LEAD.md in your working folder. Read all of it. You may open the source URLs LEAD.md lists, and nothing else.",
+  "- Do not run any web search and do not fetch any other web page, record, packet or outlet; this overrides any research step in SKILL.md. Write only what the supplied material supports, and say in the EDITOR FILE what it does not show. Do not invent sources or substitute a different subject.",
+];
+
+/**
  * The assignment handed to the agent for an ordinary NEWS lead.
  *
  * The same job as `assignmentPrompt`, handed the same way, for the other kind
@@ -118,14 +128,25 @@ export function newsAssignmentPrompt(input: {
   topic: string;
   /** Today's date, as the editor's desk would say it (e.g. "Wednesday, Oct. 21, 2026"). */
   today: string;
+  /**
+   * G25-LO-4: the editor chose "Use only supplied material". The two research
+   * lines are swapped for NEWS_SUPPLIED_SCOPE_LINES. Tools stay attached (rule
+   * 23); the words say not to use the web. Other scopes keep the measured text.
+   */
+  suppliedOnly?: boolean;
 }): string {
+  const researchLines = input.suppliedOnly
+    ? NEWS_SUPPLIED_SCOPE_LINES
+    : [
+        "- The lead, its evidence and every source URL are in LEAD.md in your working folder. Read all of it. Open every source URL it lists, and follow what they lead to.",
+        "- Research it yourself from public records and public reporting: the agency, city, county or state record the lead names (clerks, recorders, filings, agendas, resolutions, notice pages, TRACER, dashboards), and any other outlet's account of the same event. Use curl and pdftotext in the shell; web tools may not work here.",
+      ];
   return [
     `Your instructions are the file SKILL.md in your working folder. Read ALL of it first, every line, then follow it exactly. It is the only rule set for this job. Today is ${input.today} (America/Denver).`,
     "",
     "## The assignment (what the editor's desk hands you)",
     `- Write ONE straight local news story about ONE lead: "${input.headline}" (topic: ${input.topic}). Full story mode. This is not a meeting: there is no transcript, no packet, no ALSO AT THE MEETING section, and no ledger.`,
-    "- The lead, its evidence and every source URL are in LEAD.md in your working folder. Read all of it. Open every source URL it lists, and follow what they lead to.",
-    "- Research it yourself from public records and public reporting: the agency, city, county or state record the lead names (clerks, recorders, filings, agendas, resolutions, notice pages, TRACER, dashboards), and any other outlet's account of the same event. Use curl and pdftotext in the shell; web tools may not work here.",
+    ...researchLines,
     "- The audit script is at scripts/audit.py. Run it with: python scripts/audit.py draft.txt",
     "",
     "## Output",

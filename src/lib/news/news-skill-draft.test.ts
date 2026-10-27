@@ -9,6 +9,7 @@ import type { MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts"
 import { pickSourceCopyIngest, type ReportedDraftResult } from "./desk-model-run.ts";
 import type { IngestOptions } from "./ingest.ts";
 import { CLAUDE_CLI_MISSING } from "./ai-claude-code.server.ts";
+import { NEWS_SUPPLIED_SCOPE_LINES } from "./meeting-skill-writer.ts";
 
 /*
   D234: the report-local-news skill writes NORMAL news leads, not only meetings.
@@ -837,4 +838,43 @@ test("an assignment file that cannot be written is a returned failure, not a thr
   assert.equal(ran, false, "the agent never starts without its assignment file");
   assert.equal(result.ok, false);
   assert.match((result as { error: string }).error, /^The writer could not set up its folder: /);
+});
+
+test("G25-LO-4: a supplied-only job tells the skill writer to use LEAD.md's sources and nothing else", async () => {
+  process.env.TOWNREPORTER_DEEPSEEK_BASE_URL = "http://127.0.0.1:9/v1";
+  try {
+    const writeOnce = async (room: number, scope: string) => {
+      const { job } = await fixture(room, "deepseek-flash");
+      const scoped = { ...job, research_scope: scope } as DeskJob;
+      const handed: Array<{ prompt: string; model: string; deepSeek?: unknown }> = [];
+      await performDraftWork(scoped, {
+        readStoryDocuments: async () => "",
+        newsWriterRun: storyWriter(handed),
+        reportAndDraft: async () => {
+          throw new Error("the four-pass writer must not run");
+        },
+        newsSourceCopy: {
+          ingest: async (url) => ({ url, title: "", text: "text", extras: [] }),
+          capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+        },
+        setJobStage: async () => undefined,
+        setJobFailoverNote: async () => undefined,
+        setJobModelRuntime: async () => undefined,
+      });
+      assert.equal(handed.length, 1, "one agent run");
+      return handed[0]!.prompt;
+    };
+
+    const supplied = await writeOnce(88630, "supplied");
+    for (const line of NEWS_SUPPLIED_SCOPE_LINES) {
+      assert.ok(supplied.includes(line), `the supplied-only job's prompt carries: ${line.slice(0, 60)}`);
+    }
+
+    const open = await writeOnce(88631, "public");
+    for (const line of NEWS_SUPPLIED_SCOPE_LINES) {
+      assert.equal(open.includes(line), false, "a public-research job keeps its own research step");
+    }
+  } finally {
+    delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
+  }
 });

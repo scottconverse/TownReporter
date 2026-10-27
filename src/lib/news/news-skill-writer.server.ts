@@ -88,6 +88,8 @@ export async function runNewsSkillWriter(input: {
   reasoningEffort?: ModelEffort | null;
   onStage?: (text: string) => void;
   run?: MeetingSkillWriterRunner;
+  /** The job's research scope; "supplied" keeps the writer off the web (G25-LO-4). */
+  researchScope?: string | null;
   /** Injected for tests: today's date as the desk would say it. */
   today?: string;
   env?: Record<string, string | undefined>;
@@ -148,6 +150,7 @@ export async function runNewsSkillWriter(input: {
   const prompt = newsAssignmentPrompt({
     headline,
     topic,
+    suppliedOnly: input.researchScope === "supplied",
     today: input.today ?? new Date().toLocaleDateString("en-US", {
       weekday: "long", year: "numeric", month: "short", day: "numeric", timeZone: "America/Denver",
     }),

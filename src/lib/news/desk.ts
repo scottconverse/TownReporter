@@ -4387,6 +4387,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             },
             model: writerRuntime.model,
             deepSeek: writerRuntime.deepSeek,
+            researchScope,
             // G25-EF-1: a DeepSeek writer runs the editor's DeepSeek pick (default
             // none); a pick made for another model that DeepSeek stands in for is not one.
             reasoningEffort: writerRuntime.deepSeek && writerRuntime.substitutedFrom ? undefined : effortFromJob(job),
