@@ -327,7 +327,7 @@ function Get-PromoteChildTimeoutSeconds {
     'dbcopy' { return 600 }
     'dbswap' { return 600 }
     'dbstate' { return 120 }
-    'prune' { return 120 }
+    'prune' { return 1080 }
     default { return 0 }
   }
 }
