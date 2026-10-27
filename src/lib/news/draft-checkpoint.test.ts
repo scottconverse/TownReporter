@@ -166,7 +166,7 @@ test("Story retries only the failed writer call and keeps completed research", a
       if (providerCalls.length === 2) {
         await new Promise((resolve) => setTimeout(resolve, 40));
         const [progress] = await sql.query<{ step_text: string }>("select step_text from desk_jobs where id=$1", [job.id]);
-        assert.match(progress.step_text, /Waiting on Gemini 3\.8 Flash \(Pro plan\)/);
+        assert.match(progress.step_text, /Waiting on Claude Sonnet 5\.5/);
       }
       return providerCalls.length === 1
         ? { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" }
@@ -185,13 +185,14 @@ test("Story retries only the failed writer call and keeps completed research", a
   assert.equal(reportCalls, 1, "the reporting pipeline must not restart");
   assert.equal(upstreamResearchCalls, 1, "completed ingestion/search/report gathering must be reused");
   /*
-    Release H adds Gemini Flash after balanced Codex. This explicit Codex
-    choice moves forward to Gemini without repeating completed research;
-    the selected low effort follows the unfinished writer call.
+    Claude Sonnet is the rung after balanced Codex (Gemini left the ladder
+    Oct 26 2026). This explicit Codex choice moves forward without repeating
+    completed research; the selected low effort follows the unfinished
+    writer call.
   */
   assert.deepEqual(providerCalls, [
     { choice: "codex-balanced", effort: "low" },
-    { choice: "gemini-flash", effort: "low" },
+    { choice: "claude-sonnet", effort: "low" },
   ]);
 });
 

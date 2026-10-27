@@ -38,7 +38,7 @@ import { KIND_BUDGETS } from "./provider-registry.ts";
  *
  *  - A hop only ever goes FORWARD (`planAutomaticFailover` slices the ladder
  *    after `current`). DeepSeek advances to Local model; balanced Codex
- *    advances to Gemini Flash since Release H.
+ *    advances to Claude Sonnet (Gemini left the ladder Oct 26 2026).
  *  - The fake probe answers about the rung it was handed instead of returning
  *    one hardcoded provider. The old constant probe ("Claude Sonnet") silently
  *    disagreed with the ladder the moment the ladder changed, and a test that
