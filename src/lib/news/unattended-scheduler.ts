@@ -221,15 +221,34 @@ export function startUnattendedScheduler(): void {
   if (process.env.TOWNREPORTER_MEANING_SEARCH !== "off") {
     let filling = false;
     let backoffUntil = 0;
+    let storyBackoffUntil = 0;
     const tickEvidenceVectors = async () => {
-      if (filling || Date.now() < backoffUntil) return;
+      if (filling) return;
       filling = true;
       try {
-        const { fillEvidenceVectorsOnce } = await import("./evidence-vector-fill.server.ts");
-        await fillEvidenceVectorsOnce({ batch: 32 });
-      } catch (err) {
-        backoffUntil = Date.now() + 30 * 60 * 1000;
-        console.error("[townreporter] evidence vector fill failed; waiting 30 minutes:", err);
+        if (Date.now() >= backoffUntil) {
+          try {
+            const { fillEvidenceVectorsOnce } = await import("./evidence-vector-fill.server.ts");
+            await fillEvidenceVectorsOnce({ batch: 32 });
+          } catch (err) {
+            backoffUntil = Date.now() + 30 * 60 * 1000;
+            console.error("[townreporter] evidence vector fill failed; waiting 30 minutes:", err);
+          }
+        }
+        /*
+          DEF-1: the same clock also gives our published stories and the files
+          editors uploaded a vector (a few at a time, newest first). Its own
+          back-off, so a missing table or model cannot stall the evidence fill.
+        */
+        if (Date.now() >= storyBackoffUntil) {
+          try {
+            const { fillStoryMeaningOnce } = await import("./story-meaning-fill.server.ts");
+            await fillStoryMeaningOnce({ articles: 6, documents: 1 });
+          } catch (err) {
+            storyBackoffUntil = Date.now() + 30 * 60 * 1000;
+            console.error("[townreporter] story meaning fill failed; waiting 30 minutes:", err);
+          }
+        }
       } finally {
         filling = false;
       }
@@ -240,6 +259,12 @@ export function startUnattendedScheduler(): void {
         await pruneEvidenceVectorsOnce();
       } catch (err) {
         console.error("[townreporter] evidence vector prune failed:", err);
+      }
+      try {
+        const { pruneStoryMeaningOnce } = await import("./story-meaning-fill.server.ts");
+        await pruneStoryMeaningOnce();
+      } catch (err) {
+        console.error("[townreporter] story meaning prune failed:", err);
       }
     };
     setTimeout(() => {

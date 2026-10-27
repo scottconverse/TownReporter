@@ -5,6 +5,15 @@ import {
   embedTexts,
   EVIDENCE_DIMS,
 } from "./evidence-embed.server.ts";
+import {
+  pastStoryCoverage,
+  searchPastStories,
+  searchUploadedFiles,
+  uploadedFileCoverage,
+  type PastStoryRow,
+  type StoryMeaningCoverage,
+  type UploadedFileRow,
+} from "./story-meaning-search.server.ts";
 
 /**
  * Evidence search for the Story page (D285/D286).
@@ -22,6 +31,13 @@ import {
  *                  makes a takedown (excerpt blanked) or a legal removal
  *                  (chunk rows deleted) drop out of the next search.
  *
+ * Two more meaning lists come from the paper's own material (DEF-1, desk only):
+ * the published stories ("Our past stories close in meaning") and the files an
+ * editor uploaded, which join "Close in meaning" with a "your file" label.
+ * See `story-meaning-search.server.ts`. They are warn-only: if the model or the
+ * table is not there, the evidence lists above are unchanged and the status
+ * says the meaning lists are not available now.
+ *
  * The vectors are loaded once per process and reloaded after five minutes;
  * the fill and prune paths clear the cache so a freshly embedded piece is
  * visible on the very next search.
@@ -36,6 +52,11 @@ export type EvidenceRow = {
   capturedAt: string;
   excerptStart: string;
   score?: number;
+  /** "file" marks an uploaded file (DEF-1); evidence rows leave this unset. */
+  kind?: "file";
+  /** For a file: the story it was uploaded to, so the desk can open it. */
+  leadId?: number | null;
+  leadHeadline?: string | null;
 };
 
 export type EvidenceMeaningStatus = {
@@ -45,12 +66,24 @@ export type EvidenceMeaningStatus = {
   total: number;
 };
 
+/** Whether the paper's own stories and files could be searched by meaning. */
+export type PastStoriesStatus = {
+  ready: boolean;
+  reason?: string;
+  stories: StoryMeaningCoverage;
+  files: StoryMeaningCoverage;
+};
+
 export type EvidenceSearchResult =
   | {
       ok: true;
       exact: EvidenceRow[];
+      /** Evidence pieces, plus the editor's own uploaded files ("your file"). */
       meaning: EvidenceRow[];
       meaningStatus: EvidenceMeaningStatus;
+      /** The paper's own published stories closest in meaning, newest data. */
+      pastStories: PastStoryRow[];
+      pastStoriesStatus: PastStoriesStatus;
     }
   | { ok: false; error: string };
 
@@ -61,6 +94,9 @@ const EXACT_LIMIT = 30;
 const EXACT_PREFETCH = 600;
 const MEANING_CANDIDATES = 60;
 const MEANING_LIMIT = 5;
+/** Past stories shown in the third list, and files mixed into "Close in meaning". */
+export const PAST_STORIES_LIMIT = 5;
+const FILE_LIMIT = 3;
 const VECTOR_CACHE_MS = 5 * 60 * 1000;
 /** Pieces and coverage counts per newsroom: fresh within about a minute. */
 const PIECES_CACHE_MS = 30 * 1000;
@@ -237,22 +273,24 @@ async function livePieces(newsroomId: number): Promise<LivePieces> {
   return pieces;
 }
 
-/** The meaning list, or the reason it could not be drawn. */
-async function meaningRows(
-  newsroomId: number,
-  q: string,
-  exactMd5s: Set<string>,
-  pieces: LivePieces,
-): Promise<{ rows: EvidenceRow[]; error?: string }> {
-  let queryVector: Float32Array;
+/** The query's meaning vector, or the reason the model could not give one. */
+async function embedQuery(q: string): Promise<{ vector: Float32Array } | { error: string }> {
   try {
     const [embedded] = await embedTexts([q]);
     if (!embedded) throw new Error("the meaning model returned nothing");
-    queryVector = embedded;
+    return { vector: embedded };
   } catch (err) {
-    return { rows: [], error: shortReason(err) };
+    return { error: shortReason(err) };
   }
+}
 
+/** The meaning list, or the reason it could not be drawn. */
+async function meaningRows(
+  newsroomId: number,
+  exactMd5s: Set<string>,
+  pieces: LivePieces,
+  queryVector: Float32Array,
+): Promise<{ rows: EvidenceRow[]; error?: string }> {
   let vectors: Map<string, Float32Array>;
   try {
     vectors = await loadVectors();
@@ -314,6 +352,61 @@ function shortReason(err: unknown): string {
   return trimmed || "the meaning model did not load";
 }
 
+/** An uploaded file as a row in "Close in meaning", labelled "your file" on screen. */
+function fileToRow(file: UploadedFileRow): EvidenceRow {
+  return {
+    md5: `file-${file.documentId}`,
+    chunkId: 0,
+    versionId: 0,
+    title: file.filename,
+    url: "",
+    capturedAt: file.uploadedAt,
+    excerptStart: file.excerptStart,
+    score: file.score,
+    kind: "file",
+    leadId: file.leadId,
+    leadHeadline: file.leadHeadline,
+  };
+}
+
+/**
+ * The paper's own stories and the editor's uploaded files, by meaning. Never
+ * throws: a missing table or a failed read becomes `ready: false`, and the
+ * evidence lists are drawn as if this did not exist.
+ */
+async function ownMeaning(
+  newsroomId: number,
+  embedded: { vector: Float32Array } | { error: string },
+): Promise<{ stories: PastStoryRow[]; files: UploadedFileRow[]; status: PastStoriesStatus }> {
+  const none = { covered: 0, total: 0 };
+  if ("error" in embedded) {
+    return {
+      stories: [],
+      files: [],
+      status: { ready: false, reason: embedded.error, stories: none, files: none },
+    };
+  }
+  try {
+    const [stories, files, storyCoverage, fileCoverage] = await Promise.all([
+      searchPastStories(newsroomId, embedded.vector, { limit: PAST_STORIES_LIMIT }),
+      searchUploadedFiles(newsroomId, embedded.vector, { limit: FILE_LIMIT }),
+      pastStoryCoverage(newsroomId),
+      uploadedFileCoverage(newsroomId),
+    ]);
+    return {
+      stories,
+      files,
+      status: { ready: true, stories: storyCoverage, files: fileCoverage },
+    };
+  } catch (err) {
+    return {
+      stories: [],
+      files: [],
+      status: { ready: false, reason: shortReason(err), stories: none, files: none },
+    };
+  }
+}
+
 export async function searchEvidence(
   context: { newsroomId: number },
   rawQuery: string,
@@ -328,7 +421,12 @@ export async function searchEvidence(
     livePieces(context.newsroomId),
   ]);
   const exactMd5s = new Set(exact.map((row) => row.md5));
-  const meaning = await meaningRows(context.newsroomId, q, exactMd5s, pieces);
+  const embedded = await embedQuery(q);
+  const meaning =
+    "error" in embedded
+      ? { rows: [] as EvidenceRow[], error: embedded.error }
+      : await meaningRows(context.newsroomId, exactMd5s, pieces, embedded.vector);
+  const own = await ownMeaning(context.newsroomId, embedded);
 
   const meaningStatus: EvidenceMeaningStatus = {
     ready: !meaning.error,
@@ -337,5 +435,17 @@ export async function searchEvidence(
   };
   if (meaning.error) meaningStatus.reason = meaning.error;
 
-  return { ok: true, exact, meaning: meaning.rows, meaningStatus };
+  // Files sit in "Close in meaning" beside the evidence, closest first.
+  const meaningWithFiles = [...meaning.rows, ...own.files.map(fileToRow)].sort(
+    (a, b) => (b.score ?? 0) - (a.score ?? 0),
+  );
+
+  return {
+    ok: true,
+    exact,
+    meaning: meaningWithFiles,
+    meaningStatus,
+    pastStories: own.stories,
+    pastStoriesStatus: own.status,
+  };
 }

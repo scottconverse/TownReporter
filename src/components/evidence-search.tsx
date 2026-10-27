@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { addEvidenceToLeadFn, searchEvidenceFn } from "@/lib/news/evidence-search";
 import { formatShortDate } from "@/lib/paper";
 import { withEditorWarningAction } from "@/components/editor-warning-consent.ts";
 import { askDeskToastOverride } from "@/components/desk-toast.ts";
 import type { EvidenceRow, EvidenceSearchResult } from "@/lib/news/evidence-search.server";
+import type { PastStoryRow } from "@/lib/news/story-meaning-search.server";
 
 /**
  * "Find evidence" on the Story page's Sources tab (D285/D286).
@@ -14,6 +16,12 @@ import type { EvidenceRow, EvidenceSearchResult } from "@/lib/news/evidence-sear
  * ("Close in meaning"), with no repeats between the two. Every row opens the
  * original page or adds its address to the lead -- the same source list the
  * "Sources on the lead" block below draws.
+ *
+ * DEF-1 adds, desk only: files the editor uploaded appear in "Close in
+ * meaning" marked "your file", and a third list under the two, "Our past
+ * stories close in meaning", shows the paper's own published stories (headline,
+ * date, link). If the meaning model cannot load, one plain line says so and
+ * the exact-words list works as before.
  *
  * Text is 16px or larger and full contrast in light and dark mode (the
  * old-eyes rule); nothing here uses the muted `meta` colour for the words an
@@ -34,6 +42,46 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** "your file": an uploaded file's row in "Close in meaning". */
+function FileRow({ row }: { row: EvidenceRow }) {
+  return (
+    <li className="evidence-row">
+      <p className="evidence-title">{row.title}</p>
+      <p className="evidence-meta">
+        <span className="evidence-badge">your file</span> · uploaded{" "}
+        {formatShortDate(row.capturedAt)}
+        {row.leadHeadline ? ` · on the story "${row.leadHeadline}"` : ""}
+      </p>
+      {row.excerptStart && <p className="evidence-excerpt">{row.excerptStart}</p>}
+      {row.leadId ? (
+        <div className="evidence-actions">
+          <Link to="/desk/story/$leadId" params={{ leadId: String(row.leadId) }} className="btn">
+            Open that story
+          </Link>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function PastStoriesList({ rows }: { rows: PastStoryRow[] }) {
+  return (
+    <ul className="evidence-list">
+      {rows.map((row) => (
+        <li key={row.articleId} className="evidence-row">
+          <p className="evidence-title">{row.headline}</p>
+          <p className="evidence-meta">Published {formatShortDate(row.publishedAt)}</p>
+          <div className="evidence-actions">
+            <a className="btn" href={`/articles/${row.slug}`} target="_blank" rel="noreferrer">
+              Open story
+            </a>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function EvidenceList({
@@ -85,32 +133,36 @@ function EvidenceList({
     <>
       {error && <p className="evidence-error">{error}</p>}
       <ul className="evidence-list">
-        {rows.map((row) => (
-          <li key={row.md5} className="evidence-row">
-            <p className="evidence-title">{row.title || hostOf(row.url)}</p>
-            <p className="evidence-meta">
-              {hostOf(row.url)} · captured {formatShortDate(row.capturedAt)}
-            </p>
-            <p className="evidence-excerpt">{row.excerptStart}</p>
-            <div className="evidence-actions">
-              <a className="btn" href={row.url} target="_blank" rel="noreferrer">
-                Open
-              </a>
-              {onStory(row.url) ? (
-                <span className="evidence-on-story">On this story</span>
-              ) : (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy === row.md5}
-                  onClick={() => void add(row)}
-                >
-                  {busy === row.md5 ? "Adding…" : "Add to this story"}
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
+        {rows.map((row) =>
+          row.kind === "file" ? (
+            <FileRow key={row.md5} row={row} />
+          ) : (
+            <li key={row.md5} className="evidence-row">
+              <p className="evidence-title">{row.title || hostOf(row.url)}</p>
+              <p className="evidence-meta">
+                {hostOf(row.url)} · captured {formatShortDate(row.capturedAt)}
+              </p>
+              <p className="evidence-excerpt">{row.excerptStart}</p>
+              <div className="evidence-actions">
+                <a className="btn" href={row.url} target="_blank" rel="noreferrer">
+                  Open
+                </a>
+                {onStory(row.url) ? (
+                  <span className="evidence-on-story">On this story</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy === row.md5}
+                    onClick={() => void add(row)}
+                  >
+                    {busy === row.md5 ? "Adding…" : "Add to this story"}
+                  </button>
+                )}
+              </div>
+            </li>
+          ),
+        )}
       </ul>
     </>
   );
@@ -168,6 +220,11 @@ export function EvidenceSearch({ leadId, sources }: Props) {
         </button>
       </form>
       {error && <p className="evidence-error">{error}</p>}
+      {result && (!result.meaningStatus.ready || !result.pastStoriesStatus.ready) && (
+        <p className="evidence-error">
+          Search by meaning is not available now. The exact-words list still works.
+        </p>
+      )}
       {result && (
         <div className="evidence-columns">
           <div className="evidence-col">
@@ -198,7 +255,30 @@ export function EvidenceSearch({ leadId, sources }: Props) {
             <p className="evidence-coverage">
               Close in meaning covers {result.meaningStatus.covered} of{" "}
               {result.meaningStatus.total} evidence pieces so far.
+              {result.pastStoriesStatus.ready && result.pastStoriesStatus.files.total > 0
+                ? ` It also covers ${result.pastStoriesStatus.files.covered} of ${result.pastStoriesStatus.files.total} uploaded files.`
+                : ""}
             </p>
+          </div>
+          <div className="evidence-col evidence-col-wide">
+            <h3 className="evidence-heading">
+              Our past stories close in meaning ({result.pastStories.length})
+            </h3>
+            {result.pastStoriesStatus.ready ? (
+              result.pastStories.length > 0 ? (
+                <PastStoriesList rows={result.pastStories} />
+              ) : (
+                <p className="evidence-empty">No past story is close in meaning yet.</p>
+              )
+            ) : (
+              <p className="evidence-empty">Not available now.</p>
+            )}
+            {result.pastStoriesStatus.ready && (
+              <p className="evidence-coverage">
+                This list covers {result.pastStoriesStatus.stories.covered} of{" "}
+                {result.pastStoriesStatus.stories.total} published stories so far.
+              </p>
+            )}
           </div>
         </div>
       )}

@@ -1515,6 +1515,9 @@
 .desk-ltr .evidence-actions {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
 .desk-ltr .evidence-on-story {font-size:1rem;color:var(--fg);font-weight:700}
 .desk-ltr .evidence-coverage {font-size:1rem;color:var(--fg);margin:10px 0 0}
+/* DEF-1: the third list ("Our past stories") runs full width under the two; the "your file" mark is bold full-contrast 1rem like the rest. */
+.desk-ltr .evidence-col-wide {grid-column:1 / -1}
+.desk-ltr .evidence-badge {font-size:1rem;font-weight:700;color:var(--fg);border:1px solid var(--fg);padding:0 6px}
 @media (max-width:900px) {
   .desk-ltr .evidence-columns {grid-template-columns:minmax(0,1fr)}
 }
