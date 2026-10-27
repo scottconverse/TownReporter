@@ -100,7 +100,8 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
           () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
         ),
     );
-    assert.equal(sentBody?.reasoning_effort, "low");
+    // G25-EF-1 (rule 24): with no pick, DeepSeek runs with effort none.
+    assert.equal(sentBody?.reasoning_effort, "none");
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.text, "A publishable draft.");
   });

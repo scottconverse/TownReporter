@@ -128,13 +128,13 @@ test("an explicit model keeps its own declared list and the exact-model note", (
   }
 });
 
-test("DeepSeek shows its forced Low effort for the run", () => {
+test("DeepSeek shows the effort it runs: None when the stored pick is one it does not offer", () => {
   const html = render({ value: "deepseek-flash", effort: "medium" });
   const select = html.slice(html.indexOf("Thinking effort"));
   const body = select.slice(select.indexOf("<select"));
   const checked = body.slice(0, body.indexOf("</select>")).match(/<option[^>]*selected[^>]*>([^<]*)</);
   assert.ok(checked, "the effort select has a selected option");
-  assert.match(checked[1], /^Low/, "DeepSeek forces the Low rung even when a stored pick says medium (D168)");
+  assert.match(checked[1], /^None/, "DeepSeek runs at none when a stored pick says medium, which it does not offer (G25-EF-1)");
 });
 
 test("both surfaces render the same effort list in a real DOM select (dom-harness)", async () => {

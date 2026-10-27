@@ -31,6 +31,7 @@ import {
   plannerModelFor,
   openAiCompatibleModelEfforts,
   defaultModelEffort,
+  deepSeekRunEffort,
   providerEndpoint,
   providerEntry,
   providerModel,
@@ -239,12 +240,17 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
 function rungGateway(entry: ProviderEntry, resolvedModel?: string | null, pinnedLocal?: LocalModelOverride): LlmConfig | null {
   /*
     Callers pass the newsroom's "Local model" pick on EVERY call, whatever model
-    the editor chose. A rung that names its own model therefore honors the pin
-    only when the pin IS that model; otherwise it keeps its own server and model.
-    On Oct 22-23 2026 this sent "DeepSeek" drafts to LM Studio's flint.
+    the editor chose. On Oct 22-23 2026 that sent "DeepSeek" drafts to LM
+    Studio's flint (MUL-1), and the MUL-1 fix still let a pin whose model id
+    MATCHED the rung's take over the rung's server (G23-ENG-6 / G24-FO-1): a
+    local engine that lists a model named like DeepSeek would carry DeepSeek's
+    call. A pin replaces a rung's endpoint only when pin and rung are the same
+    route: a local engine pin for the rung that picks the local engine's loaded
+    model. A rung that names its own model -- the cloud DeepSeek rung -- always
+    keeps its own endpoint (TOWNREPORTER_DEEPSEEK_BASE_URL or its default).
   */
   const rungModel = resolvedModel || providerModel(entry);
-  const pin = entry.picksLoadedLocalModel || pinnedLocal?.id === rungModel ? pinnedLocal : undefined;
+  const pin = entry.picksLoadedLocalModel ? pinnedLocal : undefined;
   const baseUrl = pin?.baseUrl ?? providerEndpoint(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
@@ -1147,12 +1153,25 @@ export async function grokChat(
   if (isDeepSeekFlashModel(model)) {
     const endpoint = "baseUrl" in provider ? provider : resolveProvider("deepseek-flash");
     if (!endpoint || !("baseUrl" in endpoint)) return { ok: false, error: GROK_UNAVAILABLE };
+    /*
+      G24-FO-2: TOWNREPORTER_CLAUDE_CODE=0 is the operator's switch for "no
+      Claude Code CLI". It already took the CLI off Claude's own rung
+      (resolveClaudeCode); it now takes it off the DeepSeek road too, and
+      DeepSeek goes by its HTTP endpoint. With the switch unset, DeepSeek still
+      runs inside the Claude Code CLI (rule 24).
+    */
     try {
       const cli = await claudeServer();
-      if (await (adapters?.findClaudeCli ?? cli.findClaudeCli)()) {
+      if (env("TOWNREPORTER_CLAUDE_CODE") !== "0" && await (adapters?.findClaudeCli ?? cli.findClaudeCli)()) {
         const result = await (adapters?.claudeCode ?? cli.claudeCodeChat)({
           system: researchSystem(system, true), user, model, timeoutMs,
-          deepSeek: { baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey === "not-needed" ? undefined : endpoint.apiKey },
+          deepSeek: {
+            baseUrl: endpoint.baseUrl,
+            apiKey: endpoint.apiKey === "not-needed" ? undefined : endpoint.apiKey,
+            // G25-EF-1: the relay sets DeepSeek's thinking from this; the CLI's
+            // own --effort flag is never sent for DeepSeek.
+            effort: deepSeekRunEffort(opts?.reasoningEffort),
+          },
         });
         return {
           ...result,
@@ -1162,7 +1181,7 @@ export async function grokChat(
     } catch {
       return { ok: false, error: "DeepSeek Claude Code request failed." };
     }
-    // Only a missing binary retains the original no-tools HTTP fallback.
+    // A missing binary, or the switch above set to 0, takes the HTTP road.
     provider = { ...endpoint, kind: "openai" };
   }
   const toolsEnabled = !isDeepSeekFlashModel(model);
@@ -1515,9 +1534,11 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * A validated per-run editor choice wins. `LLM_REASONING_EFFORT` supplies the
  * default when the run did not choose one. Unknown models omit the field;
  * that is the only transport-safe default. DeepSeek v4.1 Flash always sends
- * `reasoning_effort: "low"` (Scott, Oct 20 2026, D168: "Low EVERYWHERE
- * including inside townreporter"), whatever was requested or set in
- * LLM_REASONING_EFFORT. Omitting the field would select provider default.
+ * the field: the editor's pick when DeepSeek offers it, otherwise "none"
+ * (rule 24, Oct 24 2026, G25-EF-1; this replaces D168's forced "low").
+ * LLM_REASONING_EFFORT does not reach DeepSeek, so the receipt -- which reads
+ * the same registry rule -- always names the effort that ran. Omitting the
+ * field would select the provider default.
  */
 /**
  * Output room every stage of a DeepSeek or Local draft call gets at minimum.
@@ -1561,9 +1582,9 @@ function reasoningEffortFor(
   }
   if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
   const declared = openAiCompatibleModelEfforts(model);
-  // DeepSeek v4.1 Flash always runs at low (D168). A stray effort Automatic
-  // carried in, such as "medium" or an old saved "none", becomes low here.
-  if (isDeepSeekFlashModel(model) && declared.includes("low")) return "low";
+  // DeepSeek v4.1 Flash: the editor's pick when DeepSeek offers it, else
+  // "none" (G25-EF-1). A stray Automatic "medium" runs as none.
+  if (isDeepSeekFlashModel(model) && declared.includes("none")) return deepSeekRunEffort(requested);
   if (requested) {
     return declared.includes(requested) ? requested : undefined;
   }

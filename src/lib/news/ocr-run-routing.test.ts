@@ -57,10 +57,10 @@ describe("ordinary public-document OCR model routing", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-    assert.equal(bodies[0]?.reasoning_effort, "low", "a saved none becomes low (D168)");
-    // DeepSeek v4.1 Flash always runs with low thinking, even when the editor picked High or Max (D168).
-    assert.equal(bodies[1]?.reasoning_effort, "low");
-    assert.equal(bodies[2]?.reasoning_effort, "low");
+    assert.equal(bodies[0]?.reasoning_effort, "none", "a saved none runs as none (G25-EF-1)");
+    // An effort the editor picked by hand that DeepSeek offers wins (G25-EF-1, rule 24).
+    assert.equal(bodies[1]?.reasoning_effort, "high");
+    assert.equal(bodies[2]?.reasoning_effort, "max");
     assert.equal("reasoning_effort" in (bodies[3] ?? {}), false);
   });
 

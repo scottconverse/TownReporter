@@ -135,6 +135,22 @@ export function looksLikeContentRefusal(detail: string | null | undefined): bool
   );
 }
 
+/**
+ * G24-FO-3: a timeout that had already shown a quota sign. The Claude CLI
+ * retries a 429 (usage / rate limit) quietly until the desk's clock runs out,
+ * so the desk's own "timed out" text then carries the real cause after it: the
+ * CLI's last stderr line, or the chat transport's "usage limit (429)" note.
+ * The desk's own counters ("after 45s", "429 bytes out") are taken out first,
+ * so a byte count of 429 is never read as an HTTP 429.
+ */
+export function timeoutShowedQuotaSign(detail: string | null | undefined): boolean {
+  if (!detail || !looksLikeTimeoutOrNoOutput(detail)) return false;
+  const withoutCounters = detail
+    .replace(/\b\d+\s*bytes out\b/gi, "")
+    .replace(/\bafter \d+(?:\.\d+)?\s*(?:s|ms|seconds?|minutes?)\b/gi, "");
+  return looksLikeProviderQuota(withoutCounters);
+}
+
 export function automaticFailoverReason(
   detail: string | null | undefined,
 ): AutomaticFailoverReason | null {
@@ -142,6 +158,9 @@ export function automaticFailoverReason(
   if (/reply was cut off/i.test(detail ?? "")) return "cutoff";
   if (looksLikeUnreadableReply(detail)) return "unreadable";
   if (/returned an empty draft/i.test(detail ?? "")) return "empty";
+  // A timeout that had already shown a 429 / usage-limit sign is a quota stop
+  // (G24-FO-3); with no such sign it still reads "timed out".
+  if (timeoutShowedQuotaSign(detail)) return "quota";
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
   if (looksLikeProviderAuthFailure(detail)) return "auth";

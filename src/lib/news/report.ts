@@ -1333,6 +1333,16 @@ export function discoveredDocumentMatches(text: string, anchor: string): boolean
   return overlap.length >= Math.min(2, wanted.size) && overlap.length > 0;
 }
 
+/**
+ * The writing prompt's scope line when the editor chose "supplied" research
+ * (G25-LO-4). It used to say the model "may use search, fetch ... to verify or
+ * find facts", which is the opposite of the editor's pick. The tools stay
+ * attached (rule 23); the instruction says not to use the web. Other scopes
+ * get no scope line, as before.
+ */
+export const SUPPLIED_SCOPE_INSTRUCTION =
+  "EDITOR SCOPE: SUPPLIED MATERIAL ONLY. Use ONLY the supplied text, the supplied URLs and the supplied research already in this packet. Do not run any web search and do not fetch any web page; this overrides any general research guidance. Do not invent sources or substitute a different subject. State uncertainties honestly.";
+
 export async function reportAndDraft(
   opts: {
     userId: string;
@@ -1774,7 +1784,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       assignmentBlock,
       editorNotesBlock,
       topicContext,
-      suppliedOnly ? "EDITOR SCOPE: Use only supplied text and supplied URLs. You may use search, fetch, files, commands, and MCP tools to verify or find facts, including supplied research. Do not invent sources or substitute a different subject. State uncertainties honestly." : "",
+      suppliedOnly ? SUPPLIED_SCOPE_INSTRUCTION : "",
       `NEWS ANGLE: ${meetingFocus?.summary || research?.angle || opts.lead.headline}`,
       opts.extraEvidenceMode === "meeting-transcript"
         ? `${meetingFocus ? `MEETING STORY SUBJECT IS LOCKED: ${meetingFocus.summary}. Its source segments are ${meetingFocus.segmentIndexes.join(", ")}. ` : "MEETING STORY FOCUS: Choose one consequential verified decision. "}Write one coherent story about that action, not a meeting roundup. Include another agenda item only when it directly explains the chosen action, its impact, or next step. Put other possible stories, closing announcements, and personal scheduling details in FOLLOW/reporting notes, never in the article body. For any vote you mention, verify the transcript's explicit carries/fails outcome; a tally alone does not tell you whether the motion passed. If the outcome is unclear, omit it from the body and note the uncertainty for the editor. Auto-captions alone do not verify a person's name or role. Until a written record identifies the person, report the action or the number of votes without naming or gendering individual speakers; avoid a chain of anonymous-speaker attributions. If a recording runs longer than an hour, write any timecode in hours:minutes:seconds so 2:45 cannot be mistaken for two minutes and 45 seconds.`

@@ -2,10 +2,18 @@
  * each unguessable route owns its endpoint, credential and observer. */
 import { randomUUID } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
+import { deepSeekRunEffort, type ModelEffort } from "./provider-registry.ts";
 
 export type DeepSeekRelayEvidence = {
   kind: "messages" | "tool-use";
-  /** Thinking is enabled at low effort (Scott, Oct 20 2026, D168). */
+  /**
+   * The effort this request went upstream with (G25-EF-1, rule 24): "none"
+   * unless the editor picked another effort DeepSeek offers.
+   */
+  effort: ModelEffort;
+  /** Thinking was turned off and no output_config.effort was sent ("none"). */
+  thinkingDisabled: boolean;
+  /** Thinking is enabled at low effort (the D168 shape; true only for "low"). */
   thinkingLow: boolean;
   effortLow: boolean;
   authMatchesExpected: boolean;
@@ -17,10 +25,22 @@ export type DeepSeekRelayEvidence = {
   toolResults: number;
 };
 export type DeepSeekRelayObserver = (evidence: DeepSeekRelayEvidence) => void;
-type Route = { baseUrl: string; token: string; onEvidence?: DeepSeekRelayObserver };
+type Route = { baseUrl: string; token: string; effort: ModelEffort; onEvidence?: DeepSeekRelayObserver };
 const routes = new Map<string, Route>();
-/** Thinking budget the relay gives DeepSeek at low effort. */
+/** Thinking budget the relay gives DeepSeek at low effort (measured Oct 20 2026, D168). */
 const DEEPSEEK_THINKING_BUDGET = 2048;
+/**
+ * Thinking budgets for the efforts above low. UNVERIFIED: only "none" (D153)
+ * and "low" (D168) were measured on Ollama. They stay well inside the 32,768
+ * output ceiling so the answer always has room.
+ */
+const DEEPSEEK_THINKING_BUDGETS: Partial<Record<ModelEffort, number>> = {
+  low: DEEPSEEK_THINKING_BUDGET,
+  medium: 4096,
+  high: 8192,
+  xhigh: 12_288,
+  max: 16_384,
+};
 /**
  * Output ceiling for deepseek-v4.1-flash:1017-cloud: 32,768 (Scott, Oct 20 2026,
  * DSH standard). Thinking shares it with the answer, so anything smaller cuts
@@ -57,15 +77,26 @@ async function startListener(): Promise<string> {
       let evidence: DeepSeekRelayEvidence | undefined;
       if (suffix === "/v1/messages" && req.method === "POST") {
         const payload = JSON.parse(body.toString("utf8"));
-        // D168: DeepSeek runs with LOW thinking. Measured Oct 20 2026 on Ollama's
-        // /v1/messages for deepseek-v4.1-flash:1017-cloud: thinking enabled with a
-        // budget plus output_config.effort "low" returns a thinking block, then
-        // the text or proper tool_use blocks.
-        payload.thinking = { type: "enabled", budget_tokens: DEEPSEEK_THINKING_BUDGET };
-        payload.output_config = {
-          ...(payload.output_config && typeof payload.output_config === "object" ? payload.output_config : {}),
-          effort: "low",
-        };
+        /*
+          G25-EF-1 (rule 24, Oct 24 2026): DeepSeek runs at the route's effort,
+          "none" unless the editor picked another. "none" is the D153 shape
+          measured Oct 18 2026: thinking disabled and no output_config.effort.
+          Any other effort is the D168 shape measured for "low" on Oct 20
+          2026: thinking enabled with a budget plus output_config.effort.
+        */
+        if (route.effort === "none") {
+          payload.thinking = { type: "disabled" };
+          if (payload.output_config && typeof payload.output_config === "object") delete payload.output_config.effort;
+        } else {
+          payload.thinking = {
+            type: "enabled",
+            budget_tokens: DEEPSEEK_THINKING_BUDGETS[route.effort] ?? DEEPSEEK_THINKING_BUDGET,
+          };
+          payload.output_config = {
+            ...(payload.output_config && typeof payload.output_config === "object" ? payload.output_config : {}),
+            effort: route.effort,
+          };
+        }
         if (!(typeof payload.max_tokens === "number" && payload.max_tokens >= DEEPSEEK_OUTPUT_TOKENS)) {
           payload.max_tokens = DEEPSEEK_OUTPUT_TOKENS;
         }
@@ -75,7 +106,10 @@ async function startListener(): Promise<string> {
           : 0;
         body = Buffer.from(JSON.stringify(payload));
         evidence = {
-          kind: "messages", thinkingLow: payload.thinking.type === "enabled",
+          kind: "messages",
+          effort: route.effort,
+          thinkingDisabled: payload.thinking.type === "disabled" && !Object.hasOwn(payload.output_config ?? {}, "effort"),
+          thinkingLow: payload.thinking.type === "enabled" && route.effort === "low",
           effortLow: payload.output_config?.effort === "low",
           authMatchesExpected: req.headers.authorization === `Bearer ${route.token}`,
           forwardedAuthMatchesExpected: false,
@@ -148,6 +182,8 @@ async function startListener(): Promise<string> {
 /** Lease survives until the child exits. No target or token is a global default. */
 export async function deepSeekRelayRoute(input: {
   baseUrl: string; apiKey?: string; onEvidence?: DeepSeekRelayObserver;
+  /** The effort DeepSeek runs with. No effort (or one DeepSeek does not offer) is "none". */
+  effort?: ModelEffort | null;
 }): Promise<{ baseUrl: string; release: () => void }> {
   listener ??= startListener().catch(error => { listener = undefined; throw error; });
   const origin = await listener;
@@ -155,6 +191,7 @@ export async function deepSeekRelayRoute(input: {
   routes.set(key, Object.freeze({
     baseUrl: input.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, ""),
     token: input.apiKey || "ollama", onEvidence: input.onEvidence,
+    effort: deepSeekRunEffort(input.effort),
   }));
   return { baseUrl: `${origin}/${key}`, release: () => { routes.delete(key); } };
 }

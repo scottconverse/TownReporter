@@ -29,9 +29,9 @@ describe("forced runtime snapshots", () => {
       localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
       modelEffort: "high",
     } as const;
-    // A snapshot saved with an old High pick still parses, and it runs at none:
-    // DeepSeek v4.1 Flash always runs with thinking off (Release H).
-    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), { ...snapshot, modelEffort: "low" });
+    // A snapshot saved with a High pick parses and runs at High: an effort the
+    // editor picked by hand wins (G25-EF-1, rule 24).
+    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
     let received: unknown;
     const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
       claude: async () => assert.fail("DeepSeek must use its own transport"),
@@ -44,13 +44,19 @@ describe("forced runtime snapshots", () => {
     assert.equal(result, "deepseek response");
     assert.equal((received as { choice: string }).choice, "deepseek-flash");
     assert.deepEqual((received as { localModel: unknown }).localModel, snapshot.localModel);
-    assert.equal((received as { reasoningEffort: string }).reasoningEffort, "low");
+    assert.equal((received as { reasoningEffort: string }).reasoningEffort, "high");
     const {resolveProvider}=await import("./ai.ts");
+    const {providerEntry,providerEndpoint}=await import("./provider-registry.ts");
     const pinned={baseUrl:"http://127.0.0.1:11999/v1",id:"pinned-deepseek"};
     const provider=resolveProvider("deepseek-flash",pinned,pinned.id);
     assert.equal(provider?.kind,"openai");
     if (provider?.kind !== "openai") assert.fail("DeepSeek must keep its own compatible transport");
-    assert.equal(provider.baseUrl,pinned.baseUrl);
+    // G23-ENG-6 / G24-FO-1: a Local pin never replaces the cloud DeepSeek
+    // rung's endpoint, even when its model id matches the rung's.
+    const entry=providerEntry("deepseek-flash");
+    if (!entry) assert.fail("deepseek-flash must be in the registry");
+    assert.equal(provider.baseUrl,providerEndpoint(entry));
+    assert.notEqual(provider.baseUrl,pinned.baseUrl);
     assert.equal(provider.model,pinned.id);
   });
   it("keeps DeepSeek on its own server when the Local model pick is passed along", async () => {
@@ -324,7 +330,7 @@ describe("forced runtime snapshots", () => {
         modelChoice: "local-model",
         transport: "local",
         localModel: { baseUrl: scopedBase, id: forcedModel },
-        modelEffort: "low",
+        modelEffort: "none",
       });
       assert.equal(
         requests.at(-1),

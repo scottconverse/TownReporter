@@ -73,7 +73,8 @@ it("D153 DeepSeek actually spawns full-tool Claude CLI with relay, exact model a
       assert.equal(child.args.includes("--effort"), false);
       assert.equal(child.args.includes("--tools"), false);
       assert.equal(child.args.includes("--allowed-tools"), false);
-      assert.equal(child.args[child.args.indexOf("--output-format") + 1], "json");
+      // TXB-2: the chat call streams its events so it can count the tools used.
+      assert.equal(child.args[child.args.indexOf("--output-format") + 1], "stream-json");
       assert.equal(result.meta?.provider, "deepseek-flash");
       assert.equal(result.meta?.model, model);
       assert.equal(result.meta?.toolRounds, 3);
@@ -83,9 +84,10 @@ it("D153 DeepSeek actually spawns full-tool Claude CLI with relay, exact model a
     assert.equal(seen[0].path, "/custom/v1/messages");
     assert.equal(seen[0].authMatches, true);
     assert.equal(seen[0].apiKeyAbsent, true);
-    // D168: the relay asks DeepSeek for LOW thinking.
-    assert.deepEqual(seen[0].body.thinking, { type: "enabled", budget_tokens: 2048 });
-    assert.deepEqual(seen[0].body.output_config, { format: "kept", effort: "low" });
+    // G25-EF-1: an effort the editor picked by hand (High here) wins, and the
+    // relay asks DeepSeek for exactly that.
+    assert.deepEqual(seen[0].body.thinking, { type: "enabled", budget_tokens: 8192 });
+    assert.deepEqual(seen[0].body.output_config, { format: "kept", effort: "high" });
   } finally { await upstream.close(); }
 });
 
@@ -115,6 +117,8 @@ it("D153 every picker, local, custom, model override, automatic and forced route
         assert.equal(input.reasoningEffort, undefined);
         assert.equal(input.timeoutMs, 1234);
         assert.ok(input.deepSeek);
+        // G25-EF-1: no effort was picked, so DeepSeek's relay runs it at none.
+        assert.equal(input.deepSeek.effort, "none");
         assert.ok(input.deepSeek.baseUrl.includes("127.0.0.1:9"));
         return { ok: true, text: "ok", meta: { provider: "claude-code", model: "cli-alias", durationMs: 1, timedOut: false } };
       },
@@ -210,12 +214,14 @@ it("D153 relay reuses one listener, isolates concurrent endpoints, streams and e
     assert.equal(await untouched.text(), "unmodified response");
     assert.deepEqual(received.find(item => item.path?.includes("messages")), {
       path: "/custom/v1/messages?beta=true", authMatches: true,
-      body: JSON.stringify({ ...body, thinking: { type: "enabled", budget_tokens: 2048 }, output_config: { effort: "low", other: true }, max_tokens: 32768 }),
+      // G25-EF-1: a route opened with no effort runs DeepSeek at none (the
+      // D153 shape): thinking disabled and the client's effort removed.
+      body: JSON.stringify({ ...body, thinking: { type: "disabled" }, output_config: { other: true }, max_tokens: 32768 }),
     });
     assert.deepEqual(received.find(item => item.path?.includes("models")), { path: "/other/v1/models?limit=1", body: "unchanged bytes", authMatches: true });
     assert.deepEqual(evidence, [
-      { kind: "messages", thinkingLow: true, effortLow: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 0, toolResults: 1 },
-      { kind: "tool-use", thinkingLow: true, effortLow: true, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 1, toolResults: 1, toolId: "fixture-webfetch-1", toolName: "WebFetch" },
+      { kind: "messages", effort: "none", thinkingDisabled: true, thinkingLow: false, effortLow: false, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 0, toolResults: 1 },
+      { kind: "tool-use", effort: "none", thinkingDisabled: true, thinkingLow: false, effortLow: false, authMatchesExpected: true, forwardedAuthMatchesExpected: true, toolUses: 1, toolResults: 1, toolId: "fixture-webfetch-1", toolName: "WebFetch" },
     ]);
     assert.equal(JSON.stringify(evidence).includes("fixture-one"), false);
     // Inbound mismatch is distinct from the outgoing rung credential evidence.
@@ -224,7 +230,7 @@ it("D153 relay reuses one listener, isolates concurrent endpoints, streams and e
     });
     await unkeyed.text();
     assert.deepEqual(evidence.at(-1), {
-      kind: "messages", thinkingLow: true, effortLow: true,
+      kind: "messages", effort: "none", thinkingDisabled: true, thinkingLow: false, effortLow: false,
       authMatchesExpected: false, forwardedAuthMatchesExpected: true,
       forwardedAuthorization: "Bearer ollama", toolUses: 0, toolResults: 0,
     });
@@ -241,4 +247,36 @@ it("D153 CLI metadata copies exposed counts without fabricating tool executions"
   const absent = parseCliEnvelope(JSON.stringify({ result: "ok" }), context);
   assert.equal(absent.meta?.toolRounds, undefined);
   assert.equal(absent.meta?.toolExecutions, undefined);
+});
+
+it("G25-EF-1 DeepSeek with no effort picked runs at none upstream, and a hand pick runs as picked", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const evidence: DeepSeekRelayEvidence[] = [];
+  const upstream = await endpoint((_req, res, body) => {
+    bodies.push(JSON.parse(body));
+    res.writeHead(200, { "content-type": "application/json" }).end("{}");
+  });
+  try {
+    for (const effort of [undefined, null, "medium", "low", "high", "max"] as const) {
+      const route = await deepSeekRelayRoute({ baseUrl: upstream.baseUrl + "/v1", effort, onEvidence: item => evidence.push(item) });
+      try {
+        const reply = await fetch(route.baseUrl + "/v1/messages", {
+          method: "POST",
+          body: JSON.stringify({ model, thinking: { type: "enabled", budget_tokens: 31999 }, output_config: { effort: "xhigh" }, messages: [] }),
+        });
+        await reply.text();
+      } finally { route.release(); }
+    }
+  } finally { await upstream.close(); }
+  // No pick, an empty pick, and a pick DeepSeek does not offer all run at none:
+  // thinking off and no effort sent upstream.
+  for (const body of bodies.slice(0, 3)) {
+    assert.deepEqual(body.thinking, { type: "disabled" });
+    assert.deepEqual(body.output_config, {});
+  }
+  assert.deepEqual(evidence.slice(0, 3).map(item => [item.effort, item.thinkingDisabled]), [["none", true], ["none", true], ["none", true]]);
+  // A pick DeepSeek offers runs as picked.
+  assert.deepEqual(bodies.slice(3).map(body => (body.output_config as { effort?: string }).effort), ["low", "high", "max"]);
+  assert.deepEqual(bodies.slice(3).map(body => (body.thinking as { type?: string }).type), ["enabled", "enabled", "enabled"]);
+  assert.deepEqual(evidence.slice(3).map(item => [item.effort, item.thinkingDisabled]), [["low", false], ["high", false], ["max", false]]);
 });

@@ -687,7 +687,7 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
-  it("sends the exact DeepSeek low default as Ollama's explicit level", async () => {
+  it("sends the exact DeepSeek none default as Ollama's explicit level, and a hand pick as picked", async () => {
     const originalFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = async (_input, init) => {
@@ -718,16 +718,16 @@ describe("model-picker provider readiness", () => {
           reasoningEffort: "max",
         })).ok, true);
       });
-      assert.equal(bodies[0]!.reasoning_effort, "low", "the low default must be sent explicitly, or Ollama uses its own");
-      // D168: the forced local DeepSeek door is low even when the editor picked high or max.
-      assert.equal(bodies[1]!.reasoning_effort, "low");
-      assert.equal(bodies[2]!.reasoning_effort, "low");
+      assert.equal(bodies[0]!.reasoning_effort, "none", "the none default must be sent explicitly, or Ollama uses its own");
+      // G25-EF-1: a hand pick DeepSeek offers runs as picked.
+      assert.equal(bodies[1]!.reasoning_effort, "high");
+      assert.equal(bodies[2]!.reasoning_effort, "max");
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("forces the custom DeepSeek door to low whatever effort is asked", async () => {
+  it("runs the custom DeepSeek door at the effort DeepSeek offers that was asked", async () => {
     const originalFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = async (_input, init) => {
@@ -755,7 +755,7 @@ describe("model-picker provider readiness", () => {
       }
       assert.deepEqual(
         bodies.map((body) => body.reasoning_effort),
-        ["low", "low", "low"],
+        ["none", "high", "max"],
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -1822,8 +1822,8 @@ describe("the DeepSeek rung's writing call", () => {
     );
     assert.equal(
       request!.body.reasoning_effort,
-      "low",
-      "the rung's low default (D168) is sent explicitly, or Ollama uses its own",
+      "none",
+      "the rung's none default (G25-EF-1) is sent explicitly, or Ollama uses its own",
     );
   });
 });
