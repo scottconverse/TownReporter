@@ -24,6 +24,7 @@ import {
 import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { sha256 } from "./fetch-url.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 
 type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
 type RoutineReviewReason = { why: string; count: number; label?: string; source?: string };
@@ -458,7 +459,26 @@ export async function performRoutineNoticeWorkWith(
   });
   const selectedEligible = orderedEligible.slice(0, 5);
   const overflow = orderedEligible.slice(5);
-  let plans = planRoutineEditions(selectedEligible, localDate);
+  /*
+    The Today in town layout names the town (Paper setup's city) and each source
+    by the name the desk already holds for it. A paper that cannot give its city
+    just gets the wording without a town; it never gets a guessed one.
+  */
+  const town = await getPaperConfig(run.newsroom_id).then(
+    (config) => config.city.trim(),
+    () => "",
+  );
+  const sourceNames = new Map<string, string>();
+  for (const source of sources) {
+    const title = groups.find((group) => group.source.id === source.source_id)?.source.title;
+    if (title?.trim() && !sourceNames.has(source.public_source_url))
+      sourceNames.set(source.public_source_url, title);
+  }
+  let plans = planRoutineEditions(selectedEligible, localDate, {
+    timezone: run.timezone,
+    town,
+    sourceNames,
+  });
   if (new Date(`${localDate}T12:00:00Z`).getUTCDay() !== 5)
     plans = plans.filter((p) => p.channel !== "weekend");
   const noticeStatuses = new Map<string, RoutineNoticeOutcomeStatus>();
@@ -696,7 +716,7 @@ export async function performRoutineNoticeWorkWith(
           run.newsroom_id,
           slug,
           plan.headline,
-          "Logistics from approved public sources.",
+          plan.dek ?? "Logistics from approved public sources.",
           plan.body,
           sections[plan.channel],
           JSON.stringify(plan.sourceUrls),

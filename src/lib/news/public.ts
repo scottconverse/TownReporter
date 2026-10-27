@@ -241,6 +241,7 @@ export async function loadPublishedArticle(slug: string) {
     const sql = await getSql();
     const rows = await sql<ArticleRow & {
       routine_notice: boolean;
+      routine_channel: string | null;
       origin_model_body: string | null;
       origin_research_json: string | null;
       origin_pasted: boolean;
@@ -263,6 +264,11 @@ export async function loadPublishedArticle(slug: string) {
              select 1 from routine_notice_publications r
              where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
            ) as routine_notice,
+           /* Which routine edition this row is ('today', 'weekend', 'deadlines'),
+              or null. The "Today in town" page leaves out the dates box. */
+           (select r.channel from routine_notice_publications r
+             where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
+             limit 1) as routine_channel,
            /* THT-17: the trail row the publish path writes when a piece went
               to paper over claims nobody reviewed ("Publish anyway"). The
               reader line must not say an editor approved such a piece. */

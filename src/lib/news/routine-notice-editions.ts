@@ -16,6 +16,17 @@ export type RoutineEditionPlan = {
   body: string;
   sourceUrls: string[];
   fingerprint: string;
+  /** Only the Today in town edition sets one; the other editions keep the worker's standing line. */
+  dek?: string;
+};
+/** What the Today in town layout needs that the notices themselves do not carry. */
+export type RoutineEditionOptions = {
+  /** The newsroom's time zone; clock times and the Morning/Afternoon/Evening split are read in it. */
+  timezone?: string;
+  /** The newsroom's town (its Paper setup city). Left out, the dek and first sentence name no town. */
+  town?: string;
+  /** A public source address -> the name the code already knows for that source. */
+  sourceNames?: ReadonlyMap<string, string> | Readonly<Record<string, string>>;
 };
 
 const HIGH_RISK =
@@ -261,9 +272,188 @@ function fnv(value: string) {
   for (const c of value) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+/** A day with this many events or more is split under Morning / Afternoon / Evening. */
+export const TODAY_HEADINGS_FROM = 6;
+const NOON = 12 * 60;
+const FIVE_PM = 17 * 60;
+
+type LocalClock = { date: string; minutes: number };
+/** The day and minute a start or end falls on in the newsroom's zone; null for a date with no time. */
+function localClock(value: string | undefined, timezone: string, sourceTimezone?: string): LocalClock | null {
+  if (!value || /^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  let instant: Date | null = null;
+  if (/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) instant = parsed;
+  } else if (sourceTimezone) {
+    instant = namedZoneInstant(value, sourceTimezone);
+  } else {
+    // A wall time with no zone of its own is already the newsroom's.
+    const wall = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(value);
+    return wall ? { date: wall[1]!, minutes: Number(wall[2]) * 60 + Number(wall[3]) } : null;
+  }
+  if (!instant) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    minutes: Number(get("hour")) * 60 + Number(get("minute")),
+  };
+}
+function apClock(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return {
+    text: minute ? `${twelve}:${String(minute).padStart(2, "0")}` : String(twelve),
+    meridiem: hour < 12 ? "a.m." : "p.m.",
+  };
+}
+/** AP style: "2 p.m.", "2:30 to 4 p.m.", "11 a.m. to 1 p.m.". The end is shown only when the data has one. */
+export function apTimeRange(startMinutes: number, endMinutes?: number | null) {
+  const start = apClock(startMinutes);
+  if (endMinutes === undefined || endMinutes === null || endMinutes === startMinutes)
+    return `${start.text} ${start.meridiem}`;
+  const end = apClock(endMinutes);
+  return start.meridiem === end.meridiem
+    ? `${start.text} to ${end.text} ${end.meridiem}`
+    : `${start.text} ${start.meridiem} to ${end.text} ${end.meridiem}`;
+}
+
+type TodayEntry = {
+  /** Minutes after midnight in the newsroom's zone; null when the data gives no start time. */
+  startMinutes: number | null;
+  timeLine: string;
+  name: string;
+  details: string[];
+};
+const FREE_ADMISSION = /^(?:free|free admission|free event|no charge|no cost)[.!]?$/i;
+function todayEntry(row: EligibleRoutineNotice, timezone: string): TodayEntry {
+  const f = row.notice.normalizedFields;
+  const online = (url: string | undefined) => (url ? "Online" : "");
+  let name = "";
+  let place = "";
+  const more: string[] = [];
+  switch (row.notice.formatKey) {
+    case "library-notice":
+      name = plainField(f.program ?? f.branch);
+      place = plainField(f.location) || online(f.participationUrl);
+      if (f.hours) more.push(plainField(f.hours));
+      if (f.closure) more.push(plainField(f.closure));
+      break;
+    case "parks-recreation-notice":
+      name = plainField(f.program);
+      place = plainField(f.location);
+      break;
+    case "community-arts-event-logistics":
+      name = plainField(f.title);
+      place = plainField(f.venue) || online(f.onlineUrl);
+      break;
+    case "public-meeting-logistics":
+      name = plainField(f.title);
+      place = plainField(f.venue) || online(f.attendanceUrl);
+      break;
+    case "waste-recycling-schedule":
+      name = plainField(f.service);
+      place = plainField(f.area);
+      if (f.endDate) more.push(`Through ${readerDate(f.endDate.slice(0, 10))}`);
+      if (f.scheduleChange) more.push(plainField(f.scheduleChange));
+      if (f.collectionInstructions) more.push(plainField(f.collectionInstructions));
+      break;
+    case "registration-deadline":
+      name = plainField(f.program);
+      break;
+  }
+  const start = f.allDay === "true" ? null : localClock(f.start, timezone, f.timezone);
+  let end: LocalClock | null = null;
+  if (start) {
+    end = localClock(f.end, timezone, f.timezone);
+    // An end on another day, or not after the start, would print a wrong range.
+    if (end && (end.date !== start.date || end.minutes <= start.minutes)) end = null;
+  }
+  const details = [place, ...more].filter(Boolean);
+  if (f.admission && FREE_ADMISSION.test(f.admission.trim())) details.push("Free");
+  if (f.registrationUrl && f.registrationRequired !== "false") details.push(`Sign up: ${f.registrationUrl}`);
+  return {
+    startMinutes: start ? start.minutes : null,
+    timeLine: start ? `**${apTimeRange(start.minutes, end?.minutes)}**` : "",
+    name,
+    details,
+  };
+}
+function sourceLabel(url: string, names: RoutineEditionOptions["sourceNames"]) {
+  const known =
+    names instanceof Map ? names.get(url) : names ? (names as Record<string, string>)[url] : undefined;
+  const cleaned = plainField(known);
+  // A "name" that is itself a web address is no better than the raw address.
+  if (cleaned && !/:\/\/|^www\./i.test(cleaned)) return cleaned;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || plainField(url);
+  } catch {
+    return plainField(url);
+  }
+}
+function sourceLine(url: string, names: RoutineEditionOptions["sourceNames"]) {
+  const label = sourceLabel(url, names);
+  if (!/^https?:\/\//i.test(url)) return `Source: ${label}`;
+  return `Source: [${label}](${url.replace(/\s/g, "%20").replace(/\)/g, "%29")})`;
+}
+function todayEdition(
+  rows: EligibleRoutineNotice[],
+  localDate: string,
+  sourceUrls: string[],
+  options: RoutineEditionOptions,
+) {
+  const timezone = options.timezone ?? "UTC";
+  const town = plainField(options.town);
+  const entries = rows
+    .map((row) => todayEntry(row, timezone))
+    .sort(
+      (a, b) =>
+        (a.startMinutes ?? -1) - (b.startMinutes ?? -1) ||
+        a.name.localeCompare(b.name) ||
+        a.details.join("\n").localeCompare(b.details.join("\n")),
+    );
+  const block = (entry: TodayEntry) =>
+    [entry.timeLine, entry.name, ...entry.details].filter(Boolean).join("\n");
+  const listing: string[] = [];
+  if (entries.length >= TODAY_HEADINGS_FROM) {
+    const timed = (e: TodayEntry, from: number, before: number) =>
+      e.startMinutes !== null && e.startMinutes >= from && e.startMinutes < before;
+    const groups: [string, TodayEntry[]][] = [
+      ["All day", entries.filter((e) => e.startMinutes === null)],
+      ["Morning", entries.filter((e) => timed(e, 0, NOON))],
+      ["Afternoon", entries.filter((e) => timed(e, NOON, FIVE_PM))],
+      ["Evening", entries.filter((e) => timed(e, FIVE_PM, 24 * 60))],
+    ];
+    for (const [heading, group] of groups)
+      if (group.length) listing.push(`## ${heading}`, ...group.map(block));
+  } else {
+    listing.push(...entries.map(block));
+  }
+  const count = `${entries.length} ${entries.length === 1 ? "event" : "events"}`;
+  const calendars = town ? `${town}'s public calendars` : "the public calendars";
+  return {
+    dek: `${count} on ${calendars} today.`,
+    body: [
+      `Here is what is on ${calendars} for ${readerDate(localDate)}.`,
+      ...listing,
+      sourceUrls.map((url) => sourceLine(url, options.sourceNames)).join("\n"),
+    ].join("\n\n"),
+  };
+}
 export function planRoutineEditions(
   items: EligibleRoutineNotice[],
   localDate: string,
+  options: RoutineEditionOptions = {},
 ): RoutineEditionPlan[] {
   const labels: { [K in RoutineEditionChannel]: string } = {
     today: "Today in town",
@@ -276,11 +466,17 @@ export function planRoutineEditions(
       .sort((a, b) => a.line.localeCompare(b.line));
     if (!rows.length) return [];
     const sourceUrls = [...new Set(rows.map((x) => x.sourceUrl))];
-    const body = [
-      ...rows.map((row) => `- ${row.line}`),
-      "",
-      ...sourceUrls.map((url) => `Source: ${url}`),
-    ].join("\n");
+    let dek: string | undefined;
+    let body: string;
+    if (channel === "today") {
+      ({ dek, body } = todayEdition(rows, localDate, sourceUrls, options));
+    } else {
+      body = [
+        ...rows.map((row) => `- ${row.line}`),
+        "",
+        ...sourceUrls.map((url) => `Source: ${url}`),
+      ].join("\n");
+    }
     return [
       {
         channel,
@@ -289,6 +485,7 @@ export function planRoutineEditions(
         body,
         sourceUrls,
         fingerprint: fnv(`${channel}\n${localDate}\n${body}`),
+        ...(dek ? { dek } : {}),
       },
     ];
   });

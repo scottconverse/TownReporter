@@ -449,13 +449,21 @@ function ArticlePage() {
           */}
           <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
         </div>
-          <aside className="articleaside">
-            <DatesPanel
-              title="Dates in this story"
-              items={storyDates}
-              empty="No published record attached to this story carries a date of its own."
-            />
-          </aside>
+          {/*
+            The "Today in town" edition lists its events with their times in the
+            story itself, so the box would only say them a second time (Scott,
+            Oct 25 2026: Option 1). Every other story keeps the box. The box's
+            code is untouched; it is simply not drawn for this one edition.
+          */}
+          {article.routine_channel === "today" ? null : (
+            <aside className="articleaside">
+              <DatesPanel
+                title="Dates in this story"
+                items={storyDates}
+                empty="No published record attached to this story carries a date of its own."
+              />
+            </aside>
+          )}
         </div>
       </article>
       {/*

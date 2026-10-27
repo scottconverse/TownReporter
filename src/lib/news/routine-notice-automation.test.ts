@@ -209,10 +209,14 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [room],
   );
   assert.deepEqual(result, { articles: 1, jobs: 1, runs: 1 });
-  const [article] = await sql.query<{ body: string; source_urls: string }>(
-    "select body,source_urls from articles where newsroom_id=$1",
+  const [article] = await sql.query<{ body: string; dek: string; source_urls: string }>(
+    "select body,dek,source_urls from articles where newsroom_id=$1",
     [room],
   );
+  // The Today in town layout: counted dek, timed block, and the source by the name the desk holds for it.
+  assert.match(article!.dek, /^1 event on .+ public calendars today\.$/);
+  assert.match(article!.body, /\n\n\*\*6 p\.m\.\*\*\nConcert\nPark\n\n/);
+  assert.match(article!.body, /\n\nSource: \[Events\]\(https:\/\/events\.example\/calendar\)$/);
   assert.equal(`${article?.body} ${article?.source_urls}`.includes("token=secret"), false);
   assert.deepEqual(JSON.parse(article!.source_urls), ["https://events.example/calendar"]);
 
