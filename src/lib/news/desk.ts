@@ -3786,6 +3786,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,
+    // DEF-1: our own past stories, as background only. Never throws, never waits long.
+    pastStories: await (await import("./past-stories-for-writer.server.ts")).pastStoriesForWriter({
+      newsroomId: owned(context),
+      leadId,
+      headline: lead.headline,
+      why: lead.why,
+      assignment: prevNotes.editorialAssignment?.text,
+    }),
     modelEffort: effortFromJob(job),
     /*
       The paper's own time budgets (0.6.2). Read once, here, and carried in
