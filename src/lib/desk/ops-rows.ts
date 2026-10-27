@@ -46,7 +46,7 @@ import { dailyScanCounts } from "./daily-scan-counts.ts";
 */
 
 import type { HealthCheck, HealthState } from "@/lib/ops/health";
-import { formatClockTime } from "../paper.ts";
+import { formatClockTime, formatWeekdayListDateTime } from "../paper.ts";
 import type { DailyScanPolicy } from "@/lib/news/daily-scan";
 import type { LocalCatalog } from "@/lib/news/local-models";
 import type { MeetingOperatorSettings } from "@/lib/news/meeting-settings";
@@ -327,6 +327,21 @@ export function youtubeRows(state: YouTubeKeyState): OpsRow[] {
 }
 
 /**
+ * "Sun, Oct. 25, 6:14 a.m." from the stored run time. The stored value reaches
+ * the desk as text (a database timestamp turned into a string); a value that is
+ * not a readable time is shown as it came rather than hidden.
+ */
+function lastRunText(createdAt: string, timeZone?: string): string {
+  const when = new Date(createdAt);
+  if (Number.isNaN(when.getTime())) return createdAt;
+  try {
+    return formatWeekdayListDateTime(when, timeZone || undefined) || createdAt;
+  } catch {
+    return createdAt;
+  }
+}
+
+/**
  * Routine notices: the notice kinds the owner has approved, and the last time
  * the desk handled them on its own.
  *
@@ -336,7 +351,11 @@ export function youtubeRows(state: YouTubeKeyState): OpsRow[] {
  * -- it is a rule waiting to be looked at, and counting it would overstate what
  * runs without an editor.
  */
-export function routineNoticeRows(policy: RoutineNoticePolicy, automation: RoutineNoticeAutomation): OpsRow[] {
+export function routineNoticeRows(
+  policy: RoutineNoticePolicy,
+  automation: RoutineNoticeAutomation,
+  timeZone?: string,
+): OpsRow[] {
   const keys = new Set(
     policy.approvals
       .filter((approval) => approval.valid && approval.sourceState === "accepted")
@@ -356,7 +375,7 @@ export function routineNoticeRows(policy: RoutineNoticePolicy, automation: Routi
     },
     {
       label: "Last run",
-      value: lastRun ? lastRun.createdAt : "Not run yet",
+      value: lastRun ? lastRunText(lastRun.createdAt, timeZone) : "Not run yet",
       tone: "plain",
       help: lastRun ? `${lastRun.localDate} · ${lastRun.status}` : undefined,
     },

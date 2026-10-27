@@ -406,6 +406,18 @@ export function formatListDateTime(iso: string | Date | null | undefined, timeZo
   return `${formatListDate(d, timeZone)}, ${formatClockTime(d, timeZone)}`;
 }
 
+/**
+ * The desk's "when did this last happen" face with the weekday:
+ * "Sun, Oct. 25, 6:14 a.m." (and the year when it is not the current one).
+ * `formatListDateTime` plus the short weekday, in the paper's timezone.
+ */
+export function formatWeekdayListDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  const weekday = d.toLocaleDateString("en-US", { weekday: "short", timeZone });
+  return `${weekday}, ${formatListDateTime(d, timeZone)}`;
+}
+
 export function formatAge(iso: string | Date | null | undefined) {
   const d = asDate(iso);
   if (!d) return "";

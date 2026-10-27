@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createDeskQueryClient } from "@/lib/desk/desk-query-client";
 import { AuthProvider } from "@/lib/auth/provider";
 import { siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity } from "@/lib/paper-identity";
@@ -120,12 +121,7 @@ function Root() {
   // transition), so it can never silently override the context's own default
   // and white-screen usePaper()/usePaperDateFormatters() callers.
   const paper = resolvePaperIdentity(Route.useRouteContext().paper);
-  const [client] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: { queries: { refetchOnWindowFocus: false } },
-      }),
-  );
+  const [client] = useState(() => createDeskQueryClient());
   return (
     <html lang="en" className="antialiased" suppressHydrationWarning>
       <head>

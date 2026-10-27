@@ -149,7 +149,7 @@ export function JobCard({
   const noteWords = job.failoverNote ? plainServerWords(job.failoverNote) : null;
 
   return (
-    <div className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
+    <div data-job-id={job.id} className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
       {/*
         THE HEAD IS TWO COLUMNS, AND THE TITLE OWNS ONE LINE (FB1b, item 4).
 

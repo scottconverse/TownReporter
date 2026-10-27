@@ -65,6 +65,7 @@ import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 import { libreOfficeStatusFn } from "@/lib/news/libreoffice-api";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -203,6 +204,7 @@ function policyBody<T>(
 }
 
 function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
+  const { timezone } = usePaper();
   /*
     Health, and only health, is watched: a check going down is the one thing on
     this page that changes without anyone touching it. The poll is 30s and it is
@@ -306,7 +308,7 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     if (!automation.data.ok) return { state: "error", message: automation.data.error };
     return {
       state: "rows",
-      rows: routineNoticeRows(notices.data.policy, automation.data.automation),
+      rows: routineNoticeRows(notices.data.policy, automation.data.automation, timezone),
     };
   })();
 
@@ -612,6 +614,7 @@ function OpsPage() {
 }
 
 function DarkRunHistory({ runs, loading, error }: { runs: readonly DarkRunRow[]; loading: boolean; error: unknown }) {
+  const { formatWeekdayListDateTime } = usePaperDateFormatters();
   return (
     <section className="mt-8" aria-label="Dark Desk run history">
       <details className="astra-panel">
@@ -624,7 +627,7 @@ function DarkRunHistory({ runs, loading, error }: { runs: readonly DarkRunRow[];
           const started = new Date(run.started_at);
           return (
             <article key={run.id} className="side-item">
-              <p><b>{Number.isFinite(started.getTime()) ? started.toLocaleString() : run.started_at}</b>{run.investigation_id == null ? "" : ` · File ${run.investigation_id}`}{run.model_choice ? ` · ${run.model_choice}` : ""}</p>
+              <p><b>{Number.isFinite(started.getTime()) ? formatWeekdayListDateTime(started) : run.started_at}</b>{run.investigation_id == null ? "" : ` · File ${run.investigation_id}`}{run.model_choice ? ` · ${run.model_choice}` : ""}</p>
               {run.summary ? <p>{run.summary}</p> : null}
               {run.error ? <p className="note err">Stopped: {run.error}</p> : null}
               {run.stopReason ? <p className="meta">Stop reason: {run.stopReason}</p> : null}

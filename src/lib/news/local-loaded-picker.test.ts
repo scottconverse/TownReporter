@@ -206,7 +206,8 @@ describe("the refusal the desk gives before any model call", () => {
     const nothing = scanPreflight({ ok: false, error: LOCAL_MODEL_NOTHING_LOADED }, "local-model");
     assert.equal(nothing.ok, false);
     if (!nothing.ok) {
-      assert.equal(nothing.guidance, LOCAL_MODEL_NOTHING_LOADED);
+      assert.ok(nothing.guidance.startsWith(LOCAL_MODEL_NOTHING_LOADED), "the desk's sentence leads");
+      assert.match(nothing.guidance, /Next: load a model/);
       assert.equal(nothing.detail, "", "the sentence is complete; the raw text must not be doubled up");
       assert.equal(nothing.retryable, false);
     }

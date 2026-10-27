@@ -4,8 +4,10 @@ import {
   LOCAL_MODEL_UNCONFIGURED,
   looksLikeProviderAuthFailure,
   providerAuthTarget,
+  LOCAL_MODEL_NOTHING_LOADED,
   scanPreflight,
 } from "./preflight.ts";
+import { deskLocalModelNextStep } from "./desk-local-model.ts";
 
 /**
  * What a new editor meets when nothing is configured yet.
@@ -231,5 +233,17 @@ describe("provider auth detection is shared with the desk copy", () => {
     assert.equal(looksLikeProviderAuthFailure("empty model response"), false);
     assert.equal(looksLikeProviderAuthFailure(""), false);
     assert.equal(looksLikeProviderAuthFailure(null), false);
+  });
+});
+
+describe("nothing loaded: the refusal names the next step", () => {
+  it("shows the Models page's own next step after the sentence", () => {
+    const p = scanPreflight({ ok: false, error: LOCAL_MODEL_NOTHING_LOADED, label: "Local model" } as never, "local-model");
+    assert.equal(p.ok, false);
+    if (!p.ok) {
+      assert.match(p.guidance, /^No model is loaded on this computer\. /);
+      assert.ok(p.guidance.endsWith(deskLocalModelNextStep({ override: null }) as string));
+      assert.equal(p.retryable, false);
+    }
   });
 });

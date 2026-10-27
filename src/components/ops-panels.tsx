@@ -1175,6 +1175,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
  * exactly the named address, and burns on use.
  */
 export function InviteAnEditorPanel() {
+  const { formatListDate } = usePaperDateFormatters();
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const qc = useQueryClient();
   const pendingInvites = useQuery({
@@ -1299,7 +1300,7 @@ export function InviteAnEditorPanel() {
               {pendingInvites.data.map((invite) => (
                 <li key={invite.id} className="flex flex-wrap items-center justify-between gap-3 border border-rule bg-paper-2 p-3">
                   <span className="break-all font-medium">{invite.email}</span>
-                  <span className="text-sm text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</span>
+                  <span className="text-sm text-muted">Expires {formatListDate(invite.expiresAt)}</span>
                   <InkButton
                     tone="quiet"
                     disabled={cancel.isPending}

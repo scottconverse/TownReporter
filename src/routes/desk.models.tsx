@@ -820,7 +820,7 @@ function JobRow({
         <div className="model-job-status">
           <StatusChip
             label={readinessLabel}
-            help={readinessFacts.reason ?? jobStatusHelp(facts)}
+            help={readinessFacts.reason ? plainServerWords(readinessFacts.reason).text : jobStatusHelp(facts)}
             /* Name the resolved default without making it a readiness state. */
             below={
               readinessFacts.reason

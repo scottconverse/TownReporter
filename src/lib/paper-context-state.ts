@@ -7,6 +7,7 @@ import {
   formatListDateTime,
   formatListDate,
   formatClockTime,
+  formatWeekdayListDateTime,
 } from "./paper";
 import { clockTextAt } from "./desk/ops-rows";
 import { DEFAULT_PAPER_IDENTITY, type PaperIdentity } from "./paper-identity";
@@ -49,6 +50,8 @@ export function usePaperDateFormatters() {
       formatDateTime: (iso: string | Date | null | undefined) => formatDateTime(iso, timezone),
       /** "Oct. 2, 6:43 a.m." -- the designer's list face, for desk rows. */
       formatListDateTime: (iso: string | Date | null | undefined) => formatListDateTime(iso, timezone),
+      /** "Sun, Oct. 25, 6:14 a.m." -- the list face with the weekday. */
+      formatWeekdayListDateTime: (iso: string | Date | null | undefined) => formatWeekdayListDateTime(iso, timezone),
       formatListDate: (iso: string | Date | null | undefined) => formatListDate(iso, timezone),
       formatClockTime: (iso: string | Date | null | undefined) => formatClockTime(iso, timezone),
       /** "12:15 p.m." -- the desk's clock, for a moment that was tried. */
