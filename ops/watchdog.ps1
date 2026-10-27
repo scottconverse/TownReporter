@@ -301,6 +301,21 @@ if (-not $appHealthy -and $appPort) {
     Write-Log "app: probe 2 answered 200 after $reprobeSeconds s; not stopping anything"
   } else {
     $appReprobeQueue = Get-TownReporterDiskQueueLength
+    # G25-DK-2 (c): both probes missed. If the disk queue is long too, name the
+    # busiest processes so the cause can be read from the log next time. Logs
+    # only; stops nothing.
+    try {
+      $queueNumber = 0.0
+      if ([double]::TryParse([string]$appReprobeQueue, [ref]$queueNumber) -and $queueNumber -ge 4) {
+        $diskGuardLib = Join-Path $PSScriptRoot "lib-disk-guard.ps1"
+        if (Test-Path -LiteralPath $diskGuardLib) {
+          . $diskGuardLib
+          Write-Log "app: long disk queue ($appReprobeQueue) and :$port not answering; busiest by disk use right now: $(Get-TownReporterTopDiskProcesses)"
+        }
+      }
+    } catch {
+      Write-Log "app: could not list the busiest disk processes: $($_.Exception.Message)"
+    }
   }
 }
 
@@ -400,9 +415,22 @@ if (-not $appHealthy) {
       Remove-TownReporterStartMarker -App $app
     }
 
+    # G24-T1-1: the last look, right before anything is stopped. Probes 1 and 2
+    # were taken before the start-state reads above; a paper that came back
+    # since then must not be stopped. Not asked while a start is in progress
+    # (nothing is stopped then anyway).
+    $cameBack = $null
+    if ($startState.State -ne 'in-progress') {
+      $lastLook = Test-TownReporterAnsweringNow -Port ([int]$port)
+      if ($lastLook.Healthy) { $cameBack = $lastLook }
+    }
+
     if ($startState.State -eq 'in-progress') {
       $where = if ($startState.Source -eq 'marker') { "marker, PID $($startState.MarkerPid), " } else { "task, " }
       Write-Log "app: a start is still running ($where$($startState.AgeSeconds) s of $startDeadline s); not stopping anything"
+    } elseif ($cameBack) {
+      Write-Log "app: the paper came back (200 on the last look before stopping anything); not stopping or starting anything"
+      $appHealthy = $true
     } else {
       $bindableOwners = Get-TownReporterPortOwner $port
       $otherListeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |

@@ -86,6 +86,12 @@ $ops = $PSScriptRoot
 $app = Split-Path -Parent $ops
 . (Join-Path $ops "lib-backup.ps1")
 . (Join-Path $ops "lib-alert.ps1")
+. (Join-Path $ops "lib-port.ps1")
+
+# G25-DK-2: turn on the pause-while-the-paper-is-slow check in the copy and
+# prune loops (see lib-disk-guard.ps1). Never stops the job: it waits, up to a
+# cap, then goes on.
+try { $script:TownReporterDiskGuardPort = [int](Get-TownReporterPort) } catch { }
 
 function Say($msg) { Write-Host "  $msg" }
 

@@ -327,7 +327,7 @@ function Get-PromoteChildTimeoutSeconds {
     'dbcopy' { return 600 }
     'dbswap' { return 600 }
     'dbstate' { return 120 }
-    'prune' { return 120 }
+    'prune' { return 1080 }
     default { return 0 }
   }
 }
@@ -357,6 +357,43 @@ function Get-PromoteDbWaitSeconds {
 #>
 function Get-PromoteHealthTimeoutSeconds {
   return 60
+}
+
+<#
+  G25-PV-1: the verify step's first look at the local page used to be a single
+  try. Right after the new app starts it can be slow for a moment (a cold first
+  render, disk busy), that one try timed out, and promote said "the paper is not
+  healthy" while the paper was fine two minutes later (Oct 21 and Oct 25).
+
+  Runs -Check (a script block that returns @{ Ok; Failures }) up to -Attempts
+  times with -WaitSeconds between tries, about a minute in all with the defaults
+  and the caller's 12 s per-try timeout. Each try is logged through -Log. A pass
+  on any try is a pass. A real failure after the last try returns that last
+  result unchanged, so the caller exits 1 with the same message as before.
+  -Sleep is a seam for tests; it defaults to Start-Sleep.
+#>
+function Invoke-PromoteCheckWithRetry {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$Check,
+    [int]$Attempts = 4,
+    [int]$WaitSeconds = 10,
+    [scriptblock]$Log,
+    [scriptblock]$Sleep
+  )
+  if ($Attempts -lt 1) { $Attempts = 1 }
+  $result = $null
+  for ($try = 1; $try -le $Attempts; $try++) {
+    $result = & $Check
+    if ($result.Ok) {
+      if ($Log) { & $Log "verify: local check passed on try $try of $Attempts" }
+      return $result
+    }
+    if ($Log) { & $Log "verify: local check try $try of ${Attempts} did not pass: $($result.Failures -join '; ')" }
+    if ($try -lt $Attempts) {
+      if ($Sleep) { & $Sleep $WaitSeconds } else { Start-Sleep -Seconds $WaitSeconds }
+    }
+  }
+  return $result
 }
 
 <#
@@ -1518,7 +1555,8 @@ function New-PromoteDbEnvironment {
     [string]$Database = "",
     [string]$Copy = "",
     [string]$Failed = "",
-    [string]$Stamp = ""
+    [string]$Stamp = "",
+    [string]$PaperPort = ""
   )
   $admin = $AdminUrl
   if (-not $admin) { $admin = $DatabaseUrl }
@@ -1566,6 +1604,9 @@ function New-PromoteDbEnvironment {
     PROMOTE_DB_WAIT_SECONDS    = [string](Get-PromoteDbWaitSeconds)
     PROMOTE_DB_TIMEOUT_SECONDS = [string](Get-PromoteChildTimeoutSeconds -Step 'dbcopy')
     PROMOTE_DB_LIVE_PROMOTE    = $live
+    # G25-DK-2: the paper's own port, so the prune can look at it between
+    # drops. Empty = no pause.
+    PROMOTE_DB_PAPER_PORT      = $PaperPort
   }
 }
 
@@ -1789,9 +1830,10 @@ function Invoke-PromoteDatabasePrune {
     [Parameter(Mandatory = $true)][string]$Stamp,
     [string]$Failed = "",
     [string]$DatabaseUrl = "",
-    [string]$AdminUrl = ""
+    [string]$AdminUrl = "",
+    [string]$PaperPort = ""
   )
-  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $CurrentCopy -Failed $Failed -Stamp $Stamp
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $CurrentCopy -Failed $Failed -Stamp $Stamp -PaperPort $PaperPort
   return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'prune' -Step 'prune' -Environment $values
 }
 

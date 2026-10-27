@@ -1136,7 +1136,7 @@ test("the built-in limits are the ones the operator is told about", windowsOnly,
   const install = makeInstall();
   try {
     const harness = writeHarness(install, "limits.ps1", [
-      `Set-Content -Path (Join-Path $app 'result.txt') -Value "deps=$(Get-PromoteChildTimeoutSeconds -Step 'deps');build=$(Get-PromoteChildTimeoutSeconds -Step 'build');verify=$(Get-PromoteChildTimeoutSeconds -Step 'verify');dbcopy=$(Get-PromoteChildTimeoutSeconds -Step 'dbcopy');dbswap=$(Get-PromoteChildTimeoutSeconds -Step 'dbswap');dbstate=$(Get-PromoteChildTimeoutSeconds -Step 'dbstate');dbcheck=$(Get-PromoteChildTimeoutSeconds -Step 'preflight');dbwait=$(Get-PromoteDbWaitSeconds);health=$(Get-PromoteHealthTimeoutSeconds)" -Encoding ASCII`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "deps=$(Get-PromoteChildTimeoutSeconds -Step 'deps');build=$(Get-PromoteChildTimeoutSeconds -Step 'build');verify=$(Get-PromoteChildTimeoutSeconds -Step 'verify');dbcopy=$(Get-PromoteChildTimeoutSeconds -Step 'dbcopy');dbswap=$(Get-PromoteChildTimeoutSeconds -Step 'dbswap');dbstate=$(Get-PromoteChildTimeoutSeconds -Step 'dbstate');dbcheck=$(Get-PromoteChildTimeoutSeconds -Step 'preflight');dbwait=$(Get-PromoteDbWaitSeconds);health=$(Get-PromoteHealthTimeoutSeconds);prune=$(Get-PromoteChildTimeoutSeconds -Step 'prune')" -Encoding ASCII`,
     ]);
     await runPowerShell(harness);
     assert.equal(
@@ -1154,7 +1154,7 @@ test("the built-in limits are the ones the operator is told about", windowsOnly,
       // `dbwait` is how long the promotion waits for the app's connections to
       // close before it refuses -- inside the stop-the-app window, so it is
       // seconds and not minutes.
-      "deps=1200;build=1200;verify=0;dbcopy=600;dbswap=600;dbstate=120;dbcheck=120;dbwait=30;health=60",
+      "deps=1200;build=1200;verify=0;dbcopy=600;dbswap=600;dbstate=120;dbcheck=120;dbwait=30;health=60;prune=1080",
       "the step limits changed without the operator-facing docs changing with them",
     );
   } finally {

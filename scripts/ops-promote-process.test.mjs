@@ -30,7 +30,7 @@ test(
       "Write-Output 'TARGETED-PASS'",
     ].join("; ");
 
-    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
       encoding: "utf8",
       timeout: 60_000,
     });
@@ -93,7 +93,7 @@ test(
       "Write-Output 'WATCHDOG-OWNER-PASS'",
     ].join("; ");
 
-    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
       encoding: "utf8",
       timeout: 60_000,
     });

@@ -15,14 +15,18 @@
           RUN-NOTES.md      which records were opened, what was missed
 
   The folder is KEPT after the run -- it is the evidence for the story, and the
-  editor may need to see the transcript the writer actually read.
+  editor may need to see the transcript the writer actually read. The next run
+  removes job folders older than 14 days, except one a saved draft points to
+  (pruneOldMeetingRunFolders).
 
   WHY THE FOLDER IS BUILT HERE AND NOT BY THE AGENT. Everything the run depends
   on is placed before the agent starts, so a failure is always attributable: if
   `story.txt` is missing afterwards, nothing in the run's inputs was missing.
 */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync,
+} from "node:fs";
+import { join, resolve, sep } from "node:path";
 import type { Sql } from "../db.ts";
 import {
   REPORT_LOCAL_NEWS_REQUIRED_FILES,
@@ -169,6 +173,83 @@ export async function meetingRunRoot(
   return join(process.cwd(), ".townreporter-data");
 }
 
+/** Run folders older than this are cleaned up at the start of the next run. */
+export const MEETING_RUN_KEEP_DAYS = 14;
+
+/** `job-<id>-<six random characters>`, the exact shape mkdtemp gives a run folder. */
+const RUN_FOLDER_NAME = /^job-[A-Za-z0-9_.-]+-[A-Za-z0-9]{6}$/;
+
+function samePath(a: string, b: string): boolean {
+  const norm = (value: string) => {
+    const full = resolve(value);
+    return process.platform === "win32" ? full.toLowerCase() : full;
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * G24-T3-1: every run made a new folder and nothing removed the old ones.
+ *
+ * Deletes the `job-<id>-XXXXXX` folders directly under `runsRoot` that were last
+ * written more than `keepDays` days ago, except a folder a saved draft points to
+ * (`drafts.run_stats.workDir`: the evidence for that story). Only folders whose
+ * name has the run-folder shape are touched, only directly under `runsRoot`, and
+ * a link is never followed. If the saved records cannot be read, nothing is
+ * deleted. It never throws: a cleanup that fails is logged and the run goes on.
+ */
+export async function pruneOldMeetingRunFolders(input: {
+  sql: Sql;
+  runsRoot: string;
+  keepDays?: number;
+  now?: number;
+  log?: (message: string) => void;
+}): Promise<{ deleted: string[]; keptForRecords: string[]; failed: string[] }> {
+  const result = { deleted: [] as string[], keptForRecords: [] as string[], failed: [] as string[] };
+  const log = input.log ?? ((message: string) => console.warn(`[meeting-runs] ${message}`));
+  try {
+    const cutoff = (input.now ?? Date.now()) - (input.keepDays ?? MEETING_RUN_KEEP_DAYS) * 86_400_000;
+    const root = resolve(input.runsRoot);
+    if (!existsSync(root)) return result;
+    const old: string[] = [];
+    for (const name of readdirSync(root)) {
+      if (!RUN_FOLDER_NAME.test(name)) continue;
+      const path = join(root, name);
+      try {
+        const info = lstatSync(path);
+        if (info.isSymbolicLink() || !info.isDirectory()) continue;
+        if (info.mtimeMs < cutoff) old.push(path);
+      } catch (error) {
+        log(`could not look at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!old.length) return result;
+    // Which of them does a saved draft point to? Unreadable records mean "do not know", so nothing goes.
+    const rows = await input.sql.query<{ work_dir: string | null }>(
+      "select run_stats->>'workDir' as work_dir from drafts where run_stats->>'workDir' is not null",
+      [],
+    );
+    const pointedTo = rows.map((row) => row.work_dir ?? "").filter(Boolean);
+    for (const path of old) {
+      if (!path.startsWith(root + sep)) continue;
+      if (pointedTo.some((saved) => samePath(saved, path))) {
+        result.keptForRecords.push(path);
+        continue;
+      }
+      try {
+        rmSync(path, { recursive: true, force: true });
+        result.deleted.push(path);
+      } catch (error) {
+        result.failed.push(path);
+        log(`could not delete ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (result.deleted.length) log(`removed ${result.deleted.length} run folder(s) older than ${input.keepDays ?? MEETING_RUN_KEEP_DAYS} days from ${root}`);
+  } catch (error) {
+    log(`old-run cleanup skipped: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return result;
+}
+
 /**
  * Write the meeting's caption segments out as the transcript the agent reads.
  *
@@ -253,6 +334,8 @@ export async function runMeetingSkillWriter(input: {
   // output. mkdtemp makes a new, empty folder and never one that already exists.
   const runsRoot = join(root, "meeting-runs", `newsroom-${input.newsroomId}`);
   mkdirSync(runsRoot, { recursive: true });
+  // G24-T3-1: old run folders go at the start of a run (never fails the run).
+  await pruneOldMeetingRunFolders({ sql: input.sql, runsRoot });
   const workDir = mkdtempSync(join(runsRoot, `job-${input.jobId}-`));
   mkdirSync(join(workDir, "scripts"), { recursive: true });
   // The skill is copied in, never linked: the agent must not be able to edit the

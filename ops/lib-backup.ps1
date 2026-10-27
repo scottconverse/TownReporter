@@ -125,6 +125,24 @@ function Get-TownReporterBackupDir {
   return (Join-Path (Split-Path -Parent $App) "townreporter-backups")
 }
 
+# G25-DK-2: between batches the copy and prune loops below ask the disk guard
+# whether the paper is slow, and wait (with a log line, up to a cap) if it is.
+# Off unless the caller sets $script:TownReporterDiskGuardPort (backup.ps1 and
+# the watchdog's nightly run do), so a test that dot-sources this file never
+# looks at a real port. The guard file is optional: a world that holds only this
+# file simply has no pause.
+$diskGuardFile = Join-Path $PSScriptRoot 'lib-disk-guard.ps1'
+if (Test-Path -LiteralPath $diskGuardFile) { . $diskGuardFile }
+
+function Wait-TownReporterBackupBatch {
+  param([string]$LogFile, [string]$Step = 'backup')
+  if ($null -eq $script:TownReporterDiskGuardPort) { return }
+  if (-not (Get-Command Wait-TownReporterDiskJobTurn -ErrorAction SilentlyContinue)) { return }
+  try {
+    [void](Wait-TownReporterDiskJobTurn -Port ([int]$script:TownReporterDiskGuardPort) -JobName $Step -Log { param($m) Write-TownReporterBackupLog $LogFile $m })
+  } catch { }
+}
+
 # The offsite folder, from BACKUP_OFFSITE_DIR in the app's .env. Default is
 # D:\TownReporter-backups: the 8 TB drive, half empty, and the half that would
 # survive losing the system disk.
@@ -1093,6 +1111,7 @@ function Copy-TownReporterBackupOffsite {
   # Oldest first, so a run that is cut off leaves the newest backups -- the
   # ones the prune will want to keep -- already on D:.
   foreach ($b in @($local | Sort-Object -Property Stamp)) {
+    Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'offsite copy'
     $dest = Join-Path $OffsiteDir $b.Name
     if (Test-TownReporterCopyMatches -Source $b.Path -Dest $dest) { $verified++; continue }
 
@@ -1186,6 +1205,7 @@ function Copy-TownReporterBackupOffsite {
 
   if ($dirReady) {
     foreach ($f in $safety) {
+      Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'offsite copy of one-off items'
       # A folder is verified by file count, total bytes, and a SHA256 of every
       # file at the same relative path (Test-TownReporterFolderCopyMatches); a
       # single item uses the same same-size-and-SHA256 test as the series.
@@ -1334,6 +1354,7 @@ function Remove-TownReporterBackupOld {
   $failed = New-Object System.Collections.ArrayList
   $unverified = New-Object System.Collections.ArrayList
   foreach ($b in @($local | Select-Object -Skip $Keep)) {
+    Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'prune'
     $dest = Join-Path $OffsiteDir $b.Name
     if (-not (Test-TownReporterCopyMatches -Source $b.Path -Dest $dest)) {
       [void]$unverified.Add($b.Name)
@@ -1445,6 +1466,7 @@ function Remove-TownReporterOffsiteOld {
     $newestName = $files[0].Name
     foreach ($f in $files) {
       if ($keep.ContainsKey($f.Name)) { [void]$keptNames.Add($f.Name); continue }
+      Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'offsite prune'
       if ($f.Name -eq $newestName -or $f.Stamp -gt $newestKept) {
         # Newer than every backup that counts, which means it is not complete:
         # a person should look at it, and this rule never deletes the newest.
@@ -1528,6 +1550,7 @@ function Remove-TownReporterOneOffOld {
   $copiesDir = Join-Path $OffsiteDir 'other-safety-copies'
   $deleted = New-Object System.Collections.ArrayList
   foreach ($item in $items) {
+    Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'one-off prune'
     if ($item.Skip) {
       Write-TownReporterBackupLog $LogFile "one-off prune: skipped $($item.Name) -- $($item.SkipReason)"
       continue
@@ -1605,6 +1628,7 @@ function Remove-TownReporterOffsiteOneOffOld {
   $deleted = New-Object System.Collections.ArrayList
   foreach ($item in $items) {
     if ($item.Name -match '\.(partial|incomplete)$') { continue }
+    Wait-TownReporterBackupBatch -LogFile $LogFile -Step 'offsite one-off prune'
     if ($item.Skip) {
       Write-TownReporterBackupLog $LogFile "offsite one-off prune: skipped $($item.Name) -- $($item.SkipReason)"
       continue

@@ -514,7 +514,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_db == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -550,6 +550,16 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      # G25-CI-1: the browser download took about 6.5 minutes of the old 15-minute
+      # limit on every part. Cached by Playwright's version; the install step
+      # below then finds the browser already there and fetches nothing.
+      - name: Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
       - run: npx playwright install --with-deps chromium
       - run: node scripts/migrate.mjs
       - name: The index actually makes the search cheaper

@@ -57,6 +57,8 @@ export type EvidenceSearchResult =
 export const EVIDENCE_QUERY_MAX = 200;
 export const EVIDENCE_QUERY_EMPTY = "Type a few words to search.";
 const EXACT_LIMIT = 30;
+/** How many newest matching rows the exact-words list reads before it settles (see exactRows). */
+const EXACT_PREFETCH = 600;
 const MEANING_CANDIDATES = 60;
 const MEANING_LIMIT = 5;
 const VECTOR_CACHE_MS = 5 * 60 * 1000;
@@ -136,10 +138,50 @@ function toRow(row: ChunkRow, score?: number): EvidenceRow {
   return out;
 }
 
-/** The exact-words list: one row per distinct excerpt, newest capture first. */
+/**
+ * The exact-words list: one row per distinct excerpt, newest capture first.
+ *
+ * G24-S3-2: the whole match set used to be sorted by excerpt hash just to keep
+ * one row per distinct excerpt (0.4 s on a common word). The rows are now read
+ * newest-first and only the first EXACT_PREFETCH are taken; the first row seen
+ * for an excerpt is its newest capture, which is the one the old query kept. If
+ * those rows hold 30 distinct excerpts, or the match set is smaller than the
+ * prefetch, the answer is the same as the full query's. Only when many matches
+ * are copies of the same excerpt (fewer than 30 distinct in the prefetch) does
+ * it fall back to the full query, so the list never changes. Migration 0157's
+ * trigram index serves the `ilike`.
+ */
 async function exactRows(newsroomId: number, q: string): Promise<EvidenceRow[]> {
   const sql = await getSql();
   const pattern = `%${escapeLikeQuery(q)}%`;
+  const recent = await sql<ChunkRow>`
+    select
+      md5(c.excerpt) as md5,
+      c.id as chunk_id,
+      c.version_id,
+      v.title,
+      v.url,
+      v.captured_at::text as captured_at,
+      left(c.excerpt, 200) as excerpt_start
+    from artifact_chunks c
+    join artifact_versions v on v.id = c.version_id
+    where c.newsroom_id = ${newsroomId}
+      and c.excerpt <> ''
+      and (length(c.excerpt) - length(regexp_replace(c.excerpt, '[\\x01-\\x08\\x0b\\x0e-\\x1f' || chr(65533) || ']', '', 'g'))) < 0.02 * length(c.excerpt)
+      and c.excerpt ilike ${pattern} escape '\\'
+    order by v.captured_at desc, c.id desc
+    limit ${EXACT_PREFETCH}
+  `;
+  const seen = new Set<string>();
+  const firstOfEach: ChunkRow[] = [];
+  for (const row of recent) {
+    if (seen.has(row.md5)) continue;
+    seen.add(row.md5);
+    firstOfEach.push(row);
+  }
+  if (firstOfEach.length >= EXACT_LIMIT || recent.length < EXACT_PREFETCH) {
+    return firstOfEach.slice(0, EXACT_LIMIT).map((row) => toRow(row));
+  }
   const rows = await sql<ChunkRow>`
     select * from (
       select distinct on (md5(c.excerpt))
