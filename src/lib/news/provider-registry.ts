@@ -988,25 +988,37 @@ export function modelEffortsForModel(model: string | undefined | null): readonly
 }
 
 /*
-  Scott, Oct 20 2026 (D168): "Low EVERYWHERE including inside townreporter."
-  DeepSeek V4.1 Flash always runs with LOW thinking. Every rung that reaches
-  it -- Automatic's first rung, a fallback, or an explicit pick -- gets "low",
-  whatever effort the editor picked. (Before D168 it was forced to "none".)
-  The entry's own declared list is DeepSeek's, so its own model id counts even
-  when no exact model was passed or the server reports another id. The Qwen
-  models that default to thinking off are still forced to "none".
+  Scott, Oct 24 2026 (rule 24, G25-EF-1): "The paper's DeepSeek:
+  deepseek-v4.1-flash:1017-cloud, effort NONE, run inside the Claude Code CLI."
+  This replaces D168 (Oct 20, "Low EVERYWHERE"), which forced every DeepSeek
+  run to low whatever the editor picked. Now DeepSeek v4.1 Flash is no longer
+  forced: with no pick it runs at its DEFAULT, "none" (see defaultModelEffort),
+  and an effort the editor picks by hand that DeepSeek offers (low, high, max)
+  wins. The Qwen models that default to thinking off are still forced to
+  "none" -- they offer nothing else.
 */
+function isDeepSeekRung(id: string | undefined | null, exactModel?: string | null): boolean {
+  return isDeepSeekFlashModel(exactModel) || providerEntry(id)?.efforts === DEEPSEEK_V4_1_FLASH_EFFORTS;
+}
+
 function forcedEffort(id: string | undefined | null, exactModel?: string | null): ModelEffort | null {
-  const entry = providerEntry(id);
+  if (isDeepSeekRung(id, exactModel)) return null;
   const choices = modelEffortsFor(id, exactModel);
-  if (
-    (isDeepSeekFlashModel(exactModel) || entry?.efforts === DEEPSEEK_V4_1_FLASH_EFFORTS) &&
-    choices.includes("low")
-  ) {
-    return "low";
-  }
   if (choices.includes("none") && defaultsToThinkingOff(exactModel)) return "none";
   return null;
+}
+
+/**
+ * The effort DeepSeek v4.1 Flash actually runs with (G25-EF-1, rule 24): the
+ * editor's pick when DeepSeek offers it (none, low, high, max), otherwise
+ * "none". No pick, an empty pick, or a pick DeepSeek does not offer (an
+ * Automatic "medium" or "xhigh") all run at none. The relay, the HTTP road and
+ * the receipt all read this one function, so what is recorded is what ran.
+ */
+export function deepSeekRunEffort(requested: unknown): ModelEffort {
+  return typeof requested === "string" && DEEPSEEK_V4_1_FLASH_EFFORTS.includes(requested as ModelEffort)
+    ? (requested as ModelEffort)
+    : "none";
 }
 
 export function defaultModelEffort(
@@ -1018,8 +1030,10 @@ export function defaultModelEffort(
   if (!choices.length) return null;
   const forced = forcedEffort(id, exactModel);
   if (forced) return forced;
+  // DeepSeek v4.1 Flash's own default is "none" (rule 24, G25-EF-1).
+  if (isDeepSeekRung(id, exactModel) && choices.includes("none")) return "none";
   // Automatic has no single effort: each rung runs at its own default (DeepSeek:
-  // low, Codex/Claude: their provider default). Saying "Medium" here was false,
+  // none, Codex/Claude: their provider default). Saying "Medium" here was false,
   // so Automatic (no registry entry) returns null like any unknown choice.
   if (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli")) {
     return null;
@@ -1030,14 +1044,14 @@ export function defaultModelEffort(
 }
 
 /** The effort a picker shows: the editor's pick when this model offers it,
- * otherwise the model's own default (DeepSeek: Low). */
+ * otherwise the model's own default (DeepSeek: None). */
 export function pickerShownEffort(
   id: string | undefined | null,
   exactModel: string | null | undefined,
   effort: ModelEffort | null | undefined,
   options: readonly ModelEffort[] = modelEffortsFor(id, exactModel),
 ): ModelEffort | null {
-  // DeepSeek always runs at low, so the picker must show low, not the pick.
+  // A forced model (the thinking-off Qwens) shows what it runs, not the pick.
   const forced = forcedEffort(id, exactModel);
   if (forced) return forced;
   return effort && options.includes(effort) ? effort : defaultModelEffort(id, exactModel);
@@ -1045,17 +1059,21 @@ export function pickerShownEffort(
 
 /** What an Automatic run does with thinking, named per model. Automatic has no
  * single effort (see defaultModelEffort), so the control says what each model
- * does instead of printing one false "Medium". DeepSeek ignores the pick. */
+ * does instead of printing one false "Medium". DeepSeek runs a pick it offers
+ * (Low, High, Max) and otherwise runs with thinking off (G25-EF-1). */
 export function automaticEffortNote(pick: ModelEffort | null | undefined): string {
   const rest = pick
     ? `${modelEffortLabel(pick, null)} where a model offers it`
     : "each model's own default";
-  return `Thinking effort: ${rest} (DeepSeek v4.1 Flash always runs with low thinking)`;
+  const deepSeek = pick && DEEPSEEK_V4_1_FLASH_EFFORTS.includes(pick)
+    ? `DeepSeek v4.1 Flash runs with ${modelEffortLabel(pick, null)}`
+    : "DeepSeek v4.1 Flash runs with thinking off";
+  return `Thinking effort: ${rest} (${deepSeek})`;
 }
 
-/** An effort a saved snapshot may still carry. A DeepSeek snapshot saved before
- * its effort was forced holds its old pick, which the model still lists:
- * that value is legal, and modelEffort canonicalizes it to low. */
+/** An effort a saved snapshot may still carry. A DeepSeek snapshot holds the
+ * pick it was saved with (D168-era snapshots hold "low"), which the model
+ * still lists: that value is legal and runs as saved. */
 export function storedEffortIsLegal(
   id: string | undefined | null,
   stored: unknown,

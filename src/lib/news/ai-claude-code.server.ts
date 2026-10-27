@@ -405,6 +405,8 @@ export async function claudeCodeChat(opts: {
     baseUrl: string;
     apiKey?: string;
     onEvidence?: import("./deepseek-relay.server.ts").DeepSeekRelayObserver;
+    /** DeepSeek's effort, set by the relay (never the CLI's --effort). Default "none". */
+    effort?: ModelEffort | null;
   };
   /** Inline system prompt. Ignored when `systemPromptFile` is given. */
   system: string;
@@ -498,6 +500,13 @@ export async function claudeCodeChat(opts: {
     system: usingFile ? undefined : opts.system,
     systemPromptFile,
     deepSeek: Boolean(opts.deepSeek),
+    /*
+      TXB-2 / G24-FO-3: the chat call streams its events like the agent run
+      does, so the receipt can name the tools it used and a quota retry the
+      CLI went through is seen before the desk's clock runs out. The answer
+      still comes from the CLI's one result event.
+    */
+    stream: true,
   });
 
   const relay = opts.deepSeek
@@ -542,9 +551,41 @@ export async function claudeCodeChat(opts: {
       return;
     }
 
-    let stdout = "";
+    /*
+      stdout is read one line (one stream event) at a time. `rawStdout` keeps
+      the text only until the first stream event arrives, so an older CLI or
+      test fake that prints one `--output-format json` envelope still works.
+    */
+    let stdoutBytes = 0;
+    let rawStdout = "";
+    let pendingLine = "";
+    let streaming = false;
+    let resultEnvelope: CliEnvelope | undefined;
+    const toolExecutions: Record<string, number> = {};
+    let quotaSign = false;
     let stderr = "";
     let settled = false;
+    const readLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) return;
+      let event: unknown;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      if (!event || typeof event !== "object" || typeof (event as { type?: unknown }).type !== "string") return;
+      streaming = true;
+      rawStdout = "";
+      if ((event as { type: string }).type === "result") {
+        resultEnvelope = event as CliEnvelope;
+        return;
+      }
+      if (streamEventShowsQuota(event)) quotaSign = true;
+      for (const name of toolUseNames(event)) {
+        toolExecutions[name] = (toolExecutions[name] ?? 0) + 1;
+      }
+    };
     const finish = (r: ClaudeCodeResult) => {
       if (settled) return;
       settled = true;
@@ -572,28 +613,58 @@ export async function claudeCodeChat(opts: {
         from one that was mid-answer.
       */
       const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
-      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdout.length} bytes out`;
+      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdoutBytes} bytes out`;
+      /*
+        G24-FO-3: the CLI retries a 429 quietly until this clock runs out. When
+        it had already shown a quota sign, the timeout text says so, and
+        automaticFailoverReason reads it as a usage limit, not "timed out".
+      */
+      const quota = quotaSign || textShowsQuota(stderr) ? ` — ${CLI_QUOTA_RETRY_NOTE}` : "";
       finish({
         ok: false,
-        error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+        error: `Claude Code request timed out after ${seen}${quota}${tail ? ` — ${tail}` : ""}`,
         meta: baseMeta(true),
       });
     }, opts.timeoutMs);
 
     child.stdout?.on("data", (d) => {
-      stdout += String(d);
+      const text = String(d);
+      stdoutBytes += text.length;
+      if (!streaming) rawStdout += text;
+      pendingLine += text;
+      let newline = pendingLine.indexOf("\n");
+      while (newline !== -1) {
+        readLine(pendingLine.slice(0, newline));
+        pendingLine = pendingLine.slice(newline + 1);
+        newline = pendingLine.indexOf("\n");
+      }
     });
     child.stderr?.on("data", (d) => {
       stderr += String(d);
     });
     child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) }));
     child.on("close", (code) => {
-      if (code !== 0 && !stdout.trim()) {
+      // The last line may arrive without its newline.
+      if (pendingLine.trim()) readLine(pendingLine);
+      pendingLine = "";
+      if (code !== 0 && !resultEnvelope && !rawStdout.trim()) {
         const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
         finish({ ok: false, error: `Claude Code failed: ${detail}`, meta: baseMeta(false) });
         return;
       }
-      finish(parseCliEnvelope(stdout, baseMeta(false)));
+      const counted = Object.keys(toolExecutions).length ? { ...toolExecutions } : undefined;
+      if (resultEnvelope) {
+        finish(envelopeResult(
+          counted && resultEnvelope.toolExecutions === undefined ? { ...resultEnvelope, toolExecutions: counted } : resultEnvelope,
+          baseMeta(false),
+        ));
+        return;
+      }
+      if (streaming) {
+        finish({ ok: false, error: "Claude Code ended without a result", meta: baseMeta(false) });
+        return;
+      }
+      finish(parseCliEnvelope(rawStdout, baseMeta(false)));
     });
 
     child.stdin?.on("error", () => {
@@ -625,7 +696,39 @@ export type ClaudeAgentRunResult = {
    * whole files and page text.
    */
   toolExecutions?: Record<string, number>;
+  /**
+   * G26-MR-1: the model the CLI says answered -- the stream's last assistant
+   * `message.model`, else the result event's own `model` / single
+   * `modelUsage` key. Absent when the CLI named none; the asked-for model is
+   * never copied in (rule 16: the model shown is the model that ran).
+   */
+  servedModel?: string;
 };
+
+/**
+ * The model one stream-json event says answered, if it names one (G26-MR-1).
+ * The `init` line is not read: it repeats the model the CLI was told to use.
+ * "<synthetic>" is the CLI's own stand-in for a message no model wrote.
+ */
+export function streamEventServedModel(event: unknown): string | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const e = event as { type?: unknown; message?: unknown; model?: unknown; modelUsage?: unknown };
+  const named = (value: unknown) =>
+    typeof value === "string" && value.trim() && value.trim() !== "<synthetic>" ? value.trim() : undefined;
+  if (e.type === "assistant" && e.message && typeof e.message === "object") {
+    return named((e.message as { model?: unknown }).model);
+  }
+  if (e.type === "result") {
+    const direct = named(e.model);
+    if (direct) return direct;
+    if (e.modelUsage && typeof e.modelUsage === "object" && !Array.isArray(e.modelUsage)) {
+      const keys = Object.keys(e.modelUsage).map((key) => named(key)).filter((key): key is string => Boolean(key));
+      // Two or more models in one run's usage: which wrote the story is not said, so none is named.
+      if (keys.length === 1) return keys[0];
+    }
+  }
+  return undefined;
+}
 
 /** Every tool name a stream event asks for, in the order they appear. */
 function toolUseNames(event: unknown): string[] {
@@ -643,6 +746,42 @@ function toolUseNames(event: unknown): string[] {
     }
   }
   return names;
+}
+
+/** The note a timed-out CLI call carries when it had already shown a quota sign. */
+export const CLI_QUOTA_RETRY_NOTE = "the provider answered with a usage limit (429) and the CLI was still retrying";
+
+/** A 429 / rate-limit / usage-limit sign in free text (the CLI's stderr). */
+function textShowsQuota(text: string): boolean {
+  return /\b429\b|rate[ _-]?limit|usage limit|quota|too many requests/i.test(text);
+}
+
+/**
+ * G24-FO-3: a stream event that shows a quota stop. Claude Code 2.1.x emits
+ * `{"type":"system","subtype":"api_retry","error_status":429,...}` before each
+ * retry, and an assistant event carrying the API error when it gives up.
+ */
+function streamEventShowsQuota(event: unknown): boolean {
+  if (!event || typeof event !== "object") return false;
+  const record = event as {
+    type?: unknown; subtype?: unknown; error_status?: unknown; error?: unknown;
+    message?: { content?: unknown };
+  };
+  if (record.type === "system" && record.subtype === "api_retry") {
+    return record.error_status === 429 || record.error_status === "429"
+      || (typeof record.error === "string" && textShowsQuota(record.error));
+  }
+  if (record.type === "assistant") {
+    if (typeof record.error === "string" && textShowsQuota(record.error)) return true;
+    const content = record.message?.content;
+    if (Array.isArray(content)) {
+      return content.some((block) => {
+        const item = block as { type?: unknown; text?: unknown } | null;
+        return item?.type === "text" && typeof item.text === "string" && /^API Error:?\s*429\b/i.test(item.text.trim());
+      });
+    }
+  }
+  return false;
 }
 
 /**
@@ -711,7 +850,11 @@ export async function claudeCodeAgentRun(opts: {
   prompt: string;
   model: string;
   /** Same relay contract as `claudeCodeChat`: upstream base URL, released after. */
-  deepSeek?: { baseUrl: string; apiKey?: string };
+  deepSeek?: { baseUrl: string; apiKey?: string; effort?: ModelEffort | null };
+  /**
+   * The editor's effort. For Claude it is the CLI's `--effort`; for DeepSeek
+   * it goes to the relay instead (G25-EF-1: "none" unless picked).
+   */
   reasoningEffort?: ModelEffort | null;
   timeoutMs: number;
   /** One short line per step. Never file contents, never environment values. */
@@ -724,13 +867,20 @@ export async function claudeCodeAgentRun(opts: {
     actually did; this is the one fact the stream carries cheaply.
   */
   const toolExecutions: Record<string, number> = {};
-  const done = (result: Omit<ClaudeAgentRunResult, "durationMs" | "toolExecutions">): ClaudeAgentRunResult => ({
-    ...result,
-    durationMs: Date.now() - startedAt,
-    ...(Object.keys(toolExecutions).length
-      ? { toolExecutions: { ...toolExecutions } }
-      : {}),
-  });
+  // G26-MR-1: what the CLI's own stream says answered; the assistant messages win over the result line.
+  let assistantModel: string | undefined;
+  let resultModel: string | undefined;
+  const done = (result: Omit<ClaudeAgentRunResult, "durationMs" | "toolExecutions" | "servedModel">): ClaudeAgentRunResult => {
+    const servedModel = assistantModel ?? resultModel;
+    return {
+      ...result,
+      durationMs: Date.now() - startedAt,
+      ...(Object.keys(toolExecutions).length
+        ? { toolExecutions: { ...toolExecutions } }
+        : {}),
+      ...(servedModel ? { servedModel } : {}),
+    };
+  };
 
   if (!opts.deepSeek && opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
     return done({
@@ -746,7 +896,7 @@ export async function claudeCodeAgentRun(opts: {
 
   const args = buildClaudeCodeArgs({
     model: opts.model,
-    // As with chat, DeepSeek runs at the relay's low effort: the CLI's own
+    // As with chat, DeepSeek's effort is set by the relay: the CLI's own
     // `--effort` values are Claude's, and the relay sets DeepSeek's thinking.
     reasoningEffort: opts.deepSeek ? undefined : opts.reasoningEffort,
     deepSeek: Boolean(opts.deepSeek),
@@ -754,7 +904,10 @@ export async function claudeCodeAgentRun(opts: {
   });
 
   const relay = opts.deepSeek
-    ? await (await import("./deepseek-relay.server.ts")).deepSeekRelayRoute(opts.deepSeek)
+    ? await (await import("./deepseek-relay.server.ts")).deepSeekRelayRoute({
+      ...opts.deepSeek,
+      effort: opts.deepSeek.effort ?? opts.reasoningEffort,
+    })
     : undefined;
   const childEnv = relay && opts.deepSeek
     ? applyDeepSeekRelayEnv(claudeChildEnv(), {
@@ -785,8 +938,9 @@ export async function claudeCodeAgentRun(opts: {
     let stdoutBuffer = "";
     let stderr = "";
     let lastText: string | undefined;
+    let quotaSign = false;
     let settled = false;
-    const finish = (result: Omit<ClaudeAgentRunResult, "durationMs">) => {
+    const finish = (result: Omit<ClaudeAgentRunResult, "durationMs" | "servedModel">) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -800,11 +954,13 @@ export async function claudeCodeAgentRun(opts: {
       const limit = opts.timeoutMs >= 60_000
         ? `${Math.round(opts.timeoutMs / 60_000)} minutes`
         : `${Math.round(opts.timeoutMs / 1_000)} seconds`;
+      // G24-FO-3: say so when the CLI had already shown a quota sign.
+      const quota = quotaSign || textShowsQuota(stderr) ? ` — ${CLI_QUOTA_RETRY_NOTE}` : "";
       finish({
         ok: false,
         exitCode: null,
         timedOut: true,
-        error: `The writer timed out after ${limit}${tail ? ` — ${tail}` : ""}`,
+        error: `The writer timed out after ${limit}${quota}${tail ? ` — ${tail}` : ""}`,
         lastText,
       });
     }, opts.timeoutMs);
@@ -822,10 +978,16 @@ export async function claudeCodeAgentRun(opts: {
         // event.
         return;
       }
+      const served = streamEventServedModel(event);
+      if (served) {
+        if (event.type === "result") resultModel = served;
+        else assistantModel = served;
+      }
       if (event.type === "result" && typeof event.result === "string") {
         lastText = event.result;
         return;
       }
+      if (streamEventShowsQuota(event)) quotaSign = true;
       for (const name of toolUseNames(event)) {
         toolExecutions[name] = (toolExecutions[name] ?? 0) + 1;
       }
@@ -961,6 +1123,11 @@ export function parseCliEnvelope(stdout: string, context?: CliResultContext): Cl
   } catch {
     return { ok: false, error: "Claude Code returned unreadable output", ...(context ? { meta: context } : {}) };
   }
+  return envelopeResult(parsed, context);
+}
+
+/** The answer in one CLI envelope: the json output, or a stream's result event. */
+function envelopeResult(parsed: CliEnvelope, context?: CliResultContext): ClaudeCodeResult {
   const meta = context ? cliMetadata(parsed, context) : undefined;
   if (parsed.is_error) {
     const detail =

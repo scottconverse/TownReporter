@@ -34,6 +34,10 @@ async function runCalls(opts: {
       opts.maxTokens,
       { choice: "custom:probe", newsroomId: 1 },
       {
+        // The HTTP writer request is what this file measures. Without this seam a
+        // machine with a Claude CLI installed sends DeepSeek through the CLI
+        // instead (ai.ts), so the test would spawn a process, not call fetch.
+        findClaudeCli: async () => null,
         resolveCustom: async () => ({
           name: "Probe",
           modelId: opts.modelId,
@@ -48,7 +52,7 @@ async function runCalls(opts: {
   }
 }
 
-test("every draft stage on DeepSeek v4.1 Flash 1017 gets the 16,384 floor with low thinking", async () => {
+test("every draft stage on DeepSeek v4.1 Flash 1017 gets the 16,384 floor with thinking off (effort none)", async () => {
   for (const maxTokens of DRAFT_STAGE_CAPS) {
     const { requests } = await runCalls({
       modelId: "deepseek-v4.1-flash:cloud",
@@ -57,7 +61,7 @@ test("every draft stage on DeepSeek v4.1 Flash 1017 gets the 16,384 floor with l
       replies: [{ finish: "stop", content: "{}" }],
     });
     assert.ok(Number(requests[0].max_tokens) >= 32_768, `stage cap ${maxTokens}`);
-    assert.equal(requests[0].reasoning_effort, "low", `stage cap ${maxTokens}`);
+    assert.equal(requests[0].reasoning_effort, "none", `stage cap ${maxTokens}`);
   }
 });
 
@@ -96,7 +100,10 @@ test("a DeepSeek reply that runs to the ceiling is retried once, warmer, and the
   });
   assert.equal(requests.length, 2);
   assert.ok(Number(requests[1].temperature) > Number(requests[0].temperature));
-  assert.equal(requests[1].reasoning_effort, "low");
+  // "Warmer" is the temperature only: the retry keeps the first try's effort
+  // (none, thinking off -- rule 24), so the receipt's effort is still what ran.
+  assert.equal(requests[0].reasoning_effort, "none");
+  assert.equal(requests[1].reasoning_effort, requests[0].reasoning_effort);
   assert.ok(Number(requests[1].max_tokens) >= 32_768);
   assert.equal(result.ok, true);
   if (result.ok) assert.match(result.text, /A Line runs every 30 minutes/);

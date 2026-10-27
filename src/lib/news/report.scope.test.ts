@@ -1,7 +1,7 @@
 import { NAME_EVIDENCE_SYSTEM, NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc, type ReportDeps } from "./report.ts";
+import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, SUPPLIED_SCOPE_INSTRUCTION, linkOutletInBody, type FetchedDoc, type ReportDeps } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import { runAbsenceGate } from "./absence-gate.ts";
 import { draftSourceInputs } from "./draft-input.ts";
@@ -396,4 +396,29 @@ it("supplied-material absence claims require human review without pretending to 
   assert.ok(out.gate.some(g => g.needsCheck));
   assert.match(out.integrity_notes, /not checked externally/);
   assert.doesNotMatch(JSON.stringify(out.gate), /TownReporter searched/);
+});
+it("G25-LO-4: the supplied-scope writing prompt says supplied material only, no web search or fetch", async () => {
+  const writePackets = async (researchScope?: "supplied") => {
+    const packets: string[] = [];
+    const deps = dependencies({ searches: [], fetched: [], packets: [] });
+    const chat = deps.chat!;
+    deps.chat = async (system, user, ...rest) => {
+      if (system === REPORT_WRITE_SYSTEM) packets.push(user);
+      return chat(system, user, ...rest);
+    };
+    await reportAndDraft({ userId: "lo-4", lead, urls: [supplied], memory: [], ...(researchScope ? { researchScope } : {}), modelChoice: "claude-frontier" }, deps);
+    return packets;
+  };
+  const supplied_ = await writePackets("supplied");
+  assert.ok(supplied_.length > 0, "the write pass ran");
+  for (const packet of supplied_) {
+    assert.ok(packet.includes(SUPPLIED_SCOPE_INSTRUCTION));
+    assert.doesNotMatch(packet, /You may use search, fetch/i);
+  }
+  assert.match(SUPPLIED_SCOPE_INSTRUCTION, /ONLY the supplied/);
+  assert.match(SUPPLIED_SCOPE_INSTRUCTION, /Do not run any web search and do not fetch any web page/);
+  // Other scopes keep today's words: no supplied-only line.
+  const open = await writePackets();
+  assert.ok(open.length > 0);
+  for (const packet of open) assert.equal(packet.includes(SUPPLIED_SCOPE_INSTRUCTION), false);
 });

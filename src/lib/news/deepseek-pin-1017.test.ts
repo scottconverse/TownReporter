@@ -30,9 +30,9 @@ it("D160 the pinned tag still takes the full-tool Claude Code route", async () =
   assert.equal(result.meta?.provider, "deepseek-flash");
 });
 
-it("D168 low thinking holds for the pinned tag, exactly as for the old :cloud tag", () => {
+it("G25-EF-1 effort none holds for the pinned tag, exactly as for the old :cloud tag", () => {
   assert.deepEqual(openAiCompatibleModelEfforts(PINNED), openAiCompatibleModelEfforts("deepseek-v4.1-flash:cloud"));
   assert.ok(openAiCompatibleModelEfforts(PINNED).includes("none"));
-  assert.equal(defaultModelEffort("local-model", PINNED), "low");
-  assert.equal(defaultModelEffort("deepseek-flash", PINNED), "low");
+  assert.equal(defaultModelEffort("local-model", PINNED), "none");
+  assert.equal(defaultModelEffort("deepseek-flash", PINNED), "none");
 });

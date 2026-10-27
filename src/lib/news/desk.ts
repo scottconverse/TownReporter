@@ -4314,6 +4314,23 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   let skillDraft: import("./meeting-skill-writer.server.ts").MeetingSkillWriterSuccess | null = null;
   let skillRunStats: import("./meeting-whole.ts").RunStats | null = null;
   /*
+    G26-MR-1: the model the Claude Code CLI says answered the skill run, read
+    off the CLI's own output by the agent runner. Only the four-pass and batch
+    paths filled `servedModelId` before, so a skill-written story's receipt had
+    no `actualModelId`. When the CLI names no model this stays null and the
+    receipt gets no `actualModelId` -- the asked-for model is never copied in.
+  */
+  let skillServedModel: string | null = null;
+  const reportingServedModel = (
+    run: import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner | undefined,
+  ): import("./meeting-skill-writer.server.ts").MeetingSkillWriterRunner => async (input) => {
+    skillServedModel = null;
+    const runner = run ?? (await import("./ai-claude-code.server.ts")).claudeCodeAgentRun;
+    const result = await runner(input);
+    skillServedModel = result.servedModel?.trim() || null;
+    return result;
+  };
+  /*
     D234 point 2: when the news skill run fails, the four-pass writer finishes
     the draft on the same pick, and the row records who wrote it rather than
     pretending the skill did.
@@ -4362,14 +4379,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             },
             model: writerRuntime.model,
             deepSeek: writerRuntime.deepSeek,
-            reasoningEffort: writerRuntime.deepSeek ? undefined : effortFromJob(job),
+            // G25-EF-1: a DeepSeek writer runs the editor's DeepSeek pick (default
+            // none); a pick made for another model that DeepSeek stands in for is not one.
+            reasoningEffort: writerRuntime.deepSeek && writerRuntime.substitutedFrom ? undefined : effortFromJob(job),
             onStage: (stage) => setStage(job.id, stage),
-            run: deps.newsWriterRun,
+            run: reportingServedModel(deps.newsWriterRun),
           });
           if (!skill.ok) skillError = skill.error;
         }
         if (skill && skill.ok) {
           skillDraft = skill;
+          if (skillServedModel) servedModelId = skillServedModel;
           /*
             The run's own facts for the receipt: which instructions and which
             model wrote the story, and where its files are. The model is the
@@ -4507,13 +4527,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         meetingDate: meetingMaterial?.meeting.date ?? "",
         model: writerRuntime.model,
         deepSeek: writerRuntime.deepSeek,
-        reasoningEffort: writerRuntime.deepSeek ? undefined : effortFromJob(job),
+        // G25-EF-1: a DeepSeek writer runs the editor's DeepSeek pick (default
+        // none); a pick made for another model that DeepSeek stands in for is not one.
+        reasoningEffort: writerRuntime.deepSeek && writerRuntime.substitutedFrom ? undefined : effortFromJob(job),
         onStage: (stage) => setStage(job.id, stage),
-        run: deps.meetingWriterRun,
+        run: reportingServedModel(deps.meetingWriterRun),
         packetUrlForMeeting: deps.meetingPacketUrl,
       });
       if (!skill.ok) return { error: skill.error };
       skillDraft = skill;
+      if (skillServedModel) servedModelId = skillServedModel;
       /*
         What the editor picked, read off the job's own receipt (MS-WIRE W4). A
         pick the writer cannot run is redirected to DeepSeek at commit time, so
