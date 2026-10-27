@@ -696,7 +696,39 @@ export type ClaudeAgentRunResult = {
    * whole files and page text.
    */
   toolExecutions?: Record<string, number>;
+  /**
+   * G26-MR-1: the model the CLI says answered -- the stream's last assistant
+   * `message.model`, else the result event's own `model` / single
+   * `modelUsage` key. Absent when the CLI named none; the asked-for model is
+   * never copied in (rule 16: the model shown is the model that ran).
+   */
+  servedModel?: string;
 };
+
+/**
+ * The model one stream-json event says answered, if it names one (G26-MR-1).
+ * The `init` line is not read: it repeats the model the CLI was told to use.
+ * "<synthetic>" is the CLI's own stand-in for a message no model wrote.
+ */
+export function streamEventServedModel(event: unknown): string | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const e = event as { type?: unknown; message?: unknown; model?: unknown; modelUsage?: unknown };
+  const named = (value: unknown) =>
+    typeof value === "string" && value.trim() && value.trim() !== "<synthetic>" ? value.trim() : undefined;
+  if (e.type === "assistant" && e.message && typeof e.message === "object") {
+    return named((e.message as { model?: unknown }).model);
+  }
+  if (e.type === "result") {
+    const direct = named(e.model);
+    if (direct) return direct;
+    if (e.modelUsage && typeof e.modelUsage === "object" && !Array.isArray(e.modelUsage)) {
+      const keys = Object.keys(e.modelUsage).map((key) => named(key)).filter((key): key is string => Boolean(key));
+      // Two or more models in one run's usage: which wrote the story is not said, so none is named.
+      if (keys.length === 1) return keys[0];
+    }
+  }
+  return undefined;
+}
 
 /** Every tool name a stream event asks for, in the order they appear. */
 function toolUseNames(event: unknown): string[] {
@@ -835,13 +867,20 @@ export async function claudeCodeAgentRun(opts: {
     actually did; this is the one fact the stream carries cheaply.
   */
   const toolExecutions: Record<string, number> = {};
-  const done = (result: Omit<ClaudeAgentRunResult, "durationMs" | "toolExecutions">): ClaudeAgentRunResult => ({
-    ...result,
-    durationMs: Date.now() - startedAt,
-    ...(Object.keys(toolExecutions).length
-      ? { toolExecutions: { ...toolExecutions } }
-      : {}),
-  });
+  // G26-MR-1: what the CLI's own stream says answered; the assistant messages win over the result line.
+  let assistantModel: string | undefined;
+  let resultModel: string | undefined;
+  const done = (result: Omit<ClaudeAgentRunResult, "durationMs" | "toolExecutions" | "servedModel">): ClaudeAgentRunResult => {
+    const servedModel = assistantModel ?? resultModel;
+    return {
+      ...result,
+      durationMs: Date.now() - startedAt,
+      ...(Object.keys(toolExecutions).length
+        ? { toolExecutions: { ...toolExecutions } }
+        : {}),
+      ...(servedModel ? { servedModel } : {}),
+    };
+  };
 
   if (!opts.deepSeek && opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
     return done({
@@ -901,7 +940,7 @@ export async function claudeCodeAgentRun(opts: {
     let lastText: string | undefined;
     let quotaSign = false;
     let settled = false;
-    const finish = (result: Omit<ClaudeAgentRunResult, "durationMs">) => {
+    const finish = (result: Omit<ClaudeAgentRunResult, "durationMs" | "servedModel">) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -938,6 +977,11 @@ export async function claudeCodeAgentRun(opts: {
         // a failure; the run's outcome comes from its exit code and its result
         // event.
         return;
+      }
+      const served = streamEventServedModel(event);
+      if (served) {
+        if (event.type === "result") resultModel = served;
+        else assistantModel = served;
       }
       if (event.type === "result" && typeof event.result === "string") {
         lastText = event.result;
