@@ -1441,6 +1441,16 @@
   font-size: calc(14px * var(--ts));
 }
 /*
+  Find evidence (DEF-1) sits in the inspector, whose text above is 14px. Its
+  words are 16px or larger (old-eyes rule 30), so it overrides the inspector.
+*/
+.desk-ltr.astra .astra-inspector .evidence-search :is(p, label, input, .btn, .evidence-badge, .evidence-on-story) {
+  font-size: calc(16px * var(--ts));
+}
+.desk-ltr.astra .astra-inspector .evidence-search h3.evidence-heading {
+  font-size: calc(17px * var(--ts));
+}
+/*
   "Before you can publish" (unit CT): every reason the Publish button is off,
   at the top of the Checks tab, one row each with the press that clears it.
 
