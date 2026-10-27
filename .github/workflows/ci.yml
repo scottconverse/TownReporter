@@ -886,7 +886,27 @@ jobs:
             done
             kill "$pid" 2>/dev/null || true
           }
+          # Note every PID in the tree first, so we can wait for each one by PID.
+          tree_pids() {
+            local pid="$1"
+            local child
+            echo "$pid"
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              tree_pids "$child"
+            done
+          }
+          PIDS="$(tree_pids "$DEV_PID")"
           kill_tree "$DEV_PID"
+          # A kill only sends a signal. Wait until every PID is gone, so the
+          # next step never walks against this app (Oct 26 2026: the next step
+          # found "This desk already has an editor" and failed).
+          for i in $(seq 1 30); do
+            alive=""
+            for p in $PIDS; do kill -0 "$p" 2>/dev/null && alive="$alive $p"; done
+            [ -z "$alive" ] && break
+            sleep 1
+          done
+          for p in $PIDS; do kill -9 "$p" 2>/dev/null || true; done
       # Guards Automatic's hop on the road the live paper actually uses: live has
       # a Claude CLI, so a DeepSeek call travels the desk's relay. Nightly and on
       # changes to its own files only -- never on every push.
@@ -905,12 +925,14 @@ jobs:
           FAILOVER_WITH_CLAUDE_CLI: "1"
         run: |
           # The step above uses this same fixed port 3317 and a bare kill only sends a signal, so wait for its app to be gone before starting ours.
+          # A slow page answer is not a free port: ask the system who listens.
           for i in $(seq 1 30); do
-            curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3317/ || break
+            ss -ltnH "sport = :3317" | grep -q . || break
             sleep 1
           done
-          if curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3317/; then
+          if ss -ltnH "sport = :3317" | grep -q .; then
             echo "port 3317 is still in use by the first walk's app"
+            ss -ltnpH "sport = :3317" || true
             exit 1
           fi
           npm start > /tmp/failover-cli.log 2>&1 &

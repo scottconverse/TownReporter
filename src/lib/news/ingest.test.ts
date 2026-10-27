@@ -39,8 +39,12 @@ describe("PrimeGov API capture", () => {
     as evidence that a meeting or a document does not exist.
   */
   const portal = "https://longmont.primegov.com/public/portal";
+  // An upcoming meeting 7 days from today. A fixed date (Sep 11) fell out of
+  // the catalog's "last 45 days plus upcoming" window on Oct 27 2026 and
+  // broke this test on every branch.
+  const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const meetingRow = [
-    { id: 3781, title: "City Council Regular Session", date: "2026-09-11", dateTime: "2026-09-11T18:00:00", location: "Chambers", documentList: [{ id: 1, templateId: 2, templateName: "Agenda" }] },
+    { id: 3781, title: "City Council Regular Session", date: soon, dateTime: `${soon}T18:00:00`, location: "Chambers", documentList: [{ id: 1, templateId: 2, templateName: "Agenda" }] },
   ];
 
   it("records an unreachable portal as a failed read, never as an empty catalog", async () => {
