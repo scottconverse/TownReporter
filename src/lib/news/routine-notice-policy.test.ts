@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { beforeEach, test } from "node:test";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   ensureRoutineNoticePolicySchema,
   readRoutineNoticePolicyFor,
@@ -13,29 +13,16 @@ const room = 9520;
 const owner = "routine-owner";
 
 beforeEach(async () => {
-  const sql = await getSql();
-  await sql.query(
-    "create table if not exists newsrooms(id integer primary key,name text not null)",
-  );
-  await sql.query(
-    "create table if not exists newsroom_members(user_id text primary key,newsroom_id integer not null,role text not null)",
-  );
-  await sql.query(
-    "create table if not exists sources(id serial primary key,user_id text not null,newsroom_id integer not null,url text not null,title text not null,status text not null default 'accepted',tier text,kind text)",
-  );
   /*
-    The fixture above is a copy of the production `sources` table, so it carries
-    the migrations too -- a copy that omits one is a fixture that lies about the
-    schema (AK3). 0097 is the suggested-source origin columns; `exec` rather
-    than `query` because the file is several statements.
+    The app's own schema, applied the way the app applies it: every
+    migrations/*.sql in order, 0097's suggested-source columns included. The
+    hand-written copies this replaces had no `articles` table, and
+    routine_notice_publications references articles(id), so the automation DDL
+    failed with 42P01 ("relation articles does not exist"). Idempotent: the
+    first call in a process applies the set, later calls apply nothing.
   */
-  const pg = await getPglite();
-  await pg.exec(
-    await readFile(new URL("../../../migrations/0097_suggested_source_origin.sql", import.meta.url), "utf8"),
-  );
-  await sql.query(
-    "create table if not exists audit_events(id serial primary key,user_id text not null,action text not null,detail text not null default '',created_at timestamptz not null default now(),newsroom_id integer not null default 1,subject_kind text,subject_id integer)",
-  );
+  await applyMigrationsToTestPglite();
+  const sql = await getSql();
   await ensureRoutineNoticePolicySchema();
   await sql.query("delete from routine_notice_policy_changes where newsroom_id=$1", [room]);
   await sql.query("delete from routine_notice_approvals where newsroom_id=$1", [room]);
