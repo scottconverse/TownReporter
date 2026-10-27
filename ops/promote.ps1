@@ -1657,8 +1657,9 @@ if ($fail.Count -gt 0) {
 #>
 if ($dbCopy -and -not $WhatIfPreference) {
   try {
-    $pruned = Invoke-PromoteDatabasePrune -Log $log -App $app -Database $dbName -CurrentCopy $dbCopy -Stamp $dbStamp -Failed $dbFailed -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
+    $pruned = Invoke-PromoteDatabasePrune -Log $log -App $app -Database $dbName -CurrentCopy $dbCopy -Stamp $dbStamp -Failed $dbFailed -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl -PaperPort ([string]$port)
     if ($pruned.Ok) {
+      foreach ($pause in @($pruned.Data.pauses)) { Write-PromoteLog $log "prune: $pause" }
       foreach ($name in @($pruned.Data.dropped)) { Write-PromoteLog $log "prune: dropped $name" }
       foreach ($warning in @($pruned.Data.warnings)) { Write-PromoteLog $log "prune: warning -- $warning" }
       Write-PromoteLog $log "$($pruned.Data.summary)"

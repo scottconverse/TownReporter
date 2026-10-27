@@ -1555,7 +1555,8 @@ function New-PromoteDbEnvironment {
     [string]$Database = "",
     [string]$Copy = "",
     [string]$Failed = "",
-    [string]$Stamp = ""
+    [string]$Stamp = "",
+    [string]$PaperPort = ""
   )
   $admin = $AdminUrl
   if (-not $admin) { $admin = $DatabaseUrl }
@@ -1603,6 +1604,9 @@ function New-PromoteDbEnvironment {
     PROMOTE_DB_WAIT_SECONDS    = [string](Get-PromoteDbWaitSeconds)
     PROMOTE_DB_TIMEOUT_SECONDS = [string](Get-PromoteChildTimeoutSeconds -Step 'dbcopy')
     PROMOTE_DB_LIVE_PROMOTE    = $live
+    # G25-DK-2: the paper's own port, so the prune can look at it between
+    # drops. Empty = no pause.
+    PROMOTE_DB_PAPER_PORT      = $PaperPort
   }
 }
 
@@ -1826,9 +1830,10 @@ function Invoke-PromoteDatabasePrune {
     [Parameter(Mandatory = $true)][string]$Stamp,
     [string]$Failed = "",
     [string]$DatabaseUrl = "",
-    [string]$AdminUrl = ""
+    [string]$AdminUrl = "",
+    [string]$PaperPort = ""
   )
-  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $CurrentCopy -Failed $Failed -Stamp $Stamp
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $CurrentCopy -Failed $Failed -Stamp $Stamp -PaperPort $PaperPort
   return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'prune' -Step 'prune' -Environment $values
 }
 

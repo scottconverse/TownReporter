@@ -1564,6 +1564,121 @@ export async function stateOf(options) {
 }
 
 /**
+ * G25-DK-2: look at the live paper between big disk jobs, and wait while it is
+ * slow. The JS twin of ops/lib-disk-guard.ps1's Wait-TownReporterDiskJobTurn.
+ *
+ * `probe(port)` returns the HTTP status (or `{ status, seconds }`) and throws
+ * when the paper cannot be reached. A fast 200 (inside `slowSeconds`) goes on;
+ * a slow answer, a timeout or a non-200 waits `pollSeconds` and looks again,
+ * up to `maxGapSeconds` for this gap and `budget.maxTotalSeconds` for the whole
+ * job; a refused connection (nothing listens) does not wait. It never throws.
+ * `sleep` and `probe` are seams so a test needs no :3000 and no real wait.
+ *
+ * @param {{ port: number | null | undefined, probe?: (port: number) => Promise<number | { status: number, seconds?: number }>, sleep?: (seconds: number) => Promise<void>, budget?: { usedSeconds: number, maxTotalSeconds: number }, maxGapSeconds?: number, pollSeconds?: number, slowSeconds?: number, label?: string }} options
+ * @returns {Promise<{ waited: number, capped: boolean, notes: string[] }>}
+ */
+export async function waitForPaperTurn(options) {
+  const maxGap = options.maxGapSeconds ?? 120;
+  const poll = options.pollSeconds ?? 5;
+  const slowSeconds = options.slowSeconds ?? 3;
+  const budget = options.budget ?? { usedSeconds: 0, maxTotalSeconds: 900 };
+  const label = options.label ?? "disk job";
+  const probe = options.probe ?? defaultPaperProbe;
+  const sleep = options.sleep ?? ((seconds) => new Promise((done) => setTimeout(done, seconds * 1000)));
+  /** @type {string[]} */
+  const notes = [];
+  const port = Number(options.port);
+  if (!Number.isInteger(port) || port <= 0) return { waited: 0, capped: false, notes };
+  let waited = 0;
+  try {
+    for (;;) {
+      let kind = "fast";
+      let detail = "";
+      const started = Date.now();
+      try {
+        const got = await probe(port);
+        const status = typeof got === "number" ? got : got.status;
+        const seconds = typeof got === "number" || got.seconds === undefined ? (Date.now() - started) / 1000 : got.seconds;
+        if (status !== 200) {
+          kind = "not answering well";
+          detail = `status ${status}`;
+        } else if (seconds > slowSeconds) {
+          kind = "slow";
+          detail = `answered 200 in ${seconds.toFixed(1)} s`;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const code = /** @type {any} */ (error)?.code ?? /** @type {any} */ (error)?.cause?.code;
+        if (code === "ECONNREFUSED" || /refused/i.test(message)) {
+          notes.push(`${label}: nothing listens on :${port}, so there is no slow paper to wait for; going on`);
+          break;
+        }
+        kind = "not answering";
+        detail = message;
+      }
+      if (kind === "fast") break;
+      const left = Math.min(maxGap - waited, budget.maxTotalSeconds - budget.usedSeconds);
+      if (left <= 0) {
+        notes.push(`${label}: the paper on :${port} is still ${kind} (${detail}) after waiting ${waited} s; the wait cap is used up, going on`);
+        return { waited, capped: true, notes };
+      }
+      const step = Math.min(poll, left);
+      notes.push(`${label}: the paper on :${port} is ${kind} (${detail}); pausing ${step} s (${waited} s waited so far)`);
+      await sleep(step);
+      waited += step;
+      budget.usedSeconds += step;
+    }
+  } catch (error) {
+    notes.push(`${label}: the check failed (${error instanceof Error ? error.message : String(error)}); going on`);
+  }
+  if (waited > 0) notes.push(`${label}: the paper on :${port} is answering again after ${waited} s; going on`);
+  return { waited, capped: false, notes };
+}
+
+/** One look at the paper's front page; throws when it cannot be reached. */
+async function defaultPaperProbe(/** @type {number} */ port) {
+  const started = Date.now();
+  const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(10_000) });
+  await response.arrayBuffer();
+  return { status: response.status, seconds: (Date.now() - started) / 1000 };
+}
+
+/**
+ * Drop each named database, one at a time, looking at the paper between drops
+ * (not before the first). A failed drop is a warning. `pauses` holds every
+ * wait note so the promote log shows them.
+ *
+ * @param {{ query: (sql: string) => Promise<unknown> }} client
+ * @param {string[]} drop
+ * @param {{ port?: number | null, probe?: Parameters<typeof waitForPaperTurn>[0]["probe"], sleep?: Parameters<typeof waitForPaperTurn>[0]["sleep"] }} [pacing]
+ */
+export async function dropCopiesPaced(client, drop, pacing = {}) {
+  /** @type {string[]} */
+  const dropped = [];
+  /** @type {string[]} */
+  const warnings = [];
+  /** @type {string[]} */
+  const pauses = [];
+  const budget = { usedSeconds: 0, maxTotalSeconds: 900 };
+  let first = true;
+  for (const name of drop) {
+    if (!first) {
+      const turn = await waitForPaperTurn({ port: pacing.port, probe: pacing.probe, sleep: pacing.sleep, budget, label: `prune before dropping ${name}` });
+      pauses.push(...turn.notes);
+    }
+    first = false;
+    try {
+      await client.query(`drop database ${quoteIdent(name)}`);
+      dropped.push(name);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`could not drop ${name}: ${message}`);
+    }
+  }
+  return { dropped, warnings, pauses };
+}
+
+/**
  * Drop this database's older pre-rollout copies, keeping the newest few.
  *
  * Called once, after a promote has finished and the paper is up (D216). Every
@@ -1578,7 +1693,7 @@ export async function stateOf(options) {
  * housekeeping must never turn a good promote into a bad exit code. The
  * report still says ok, and names what it could not drop in `warnings`.
  *
- * @param {{ adminUrl: string, database: string, currentCopy?: string, stamp?: string, keep?: number, timeoutSeconds?: number, livePromote?: boolean }} options
+ * @param {{ adminUrl: string, database: string, currentCopy?: string, stamp?: string, keep?: number, timeoutSeconds?: number, livePromote?: boolean, paperPort?: number | null }} options
  * @returns {Promise<Record<string, any>>}
  */
 export async function prunePrerolloutCopies(options) {
@@ -1592,6 +1707,7 @@ export async function prunePrerolloutCopies(options) {
     kept: [],
     dropped: [],
     warnings: [],
+    pauses: [],
     summary: "",
   };
   const guard = checkLivePortGuard([options.adminUrl], options.livePromote);
@@ -1607,24 +1723,15 @@ export async function prunePrerolloutCopies(options) {
     const listed = await client.query("select datname from pg_database");
     const names = listed.rows.map((row) => String(row.datname));
     const plan = prerolloutPruneList(names, options.database, keep, options.currentCopy);
-    const dropped = [];
-    /** @type {string[]} */
-    const warnings = [];
-    for (const name of plan.drop) {
-      try {
-        await client.query(`drop database ${quoteIdent(name)}`);
-        dropped.push(name);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        warnings.push(`could not drop ${name}: ${message}`);
-      }
-    }
-    return { kept: plan.keep, dropped, warnings };
+    // G25-DK-2: look at the paper between drops (no port known = no pause).
+    const done = await dropCopiesPaced(client, plan.drop, { port: options.paperPort });
+    return { kept: plan.keep, dropped: done.dropped, warnings: done.warnings, pauses: done.pauses };
   });
 
   report.kept = outcome.kept;
   report.dropped = outcome.dropped;
   report.warnings = outcome.warnings;
+  report.pauses = outcome.pauses;
   report.summary = `prune: kept ${report.kept.length > 0 ? report.kept.join(", ") : "none"}; dropped ${report.dropped.length}`;
   report.ok = true;
   return report;
@@ -1668,6 +1775,9 @@ export function readConfig(env = process.env) {
     // paper's database, and a stray empty or "false" in the environment must
     // read as "no".
     livePromote: (env[LIVE_PROMOTE_ENV] ?? "").trim() === "1",
+    // The live paper's own port, when the caller knows it: the prune looks at
+    // it between drops. Empty means no pause.
+    paperPort: /^[0-9]+$/.test((env.PROMOTE_DB_PAPER_PORT ?? "").trim()) ? Number(env.PROMOTE_DB_PAPER_PORT) : null,
   };
 }
 
@@ -1799,6 +1909,7 @@ export async function runCommand(command, config, measureFreeBytes) {
         stamp: config.stamp,
         timeoutSeconds: config.timeoutSeconds,
         livePromote: config.livePromote,
+        paperPort: config.paperPort,
       });
     default:
       return {
