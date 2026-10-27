@@ -490,3 +490,39 @@ export function planRoutineEditions(
     ];
   });
 }
+
+/**
+ * Receipts written from the Today in town layout on carry this prefix; the older
+ * layout's receipts are the bare hash. The prefix is how a run tells a story
+ * printed in the old layout from one printed in this one.
+ */
+export const EDITION_FINGERPRINT_PREFIX = "v2:";
+export function routineEditionFingerprint(bodyHash: string) {
+  return `${EDITION_FINGERPRINT_PREFIX}${bodyHash}`;
+}
+/**
+ * What a run does about a channel that already has a story today:
+ * - "unchanged": the same text is already printed; nothing to do.
+ * - "layout-only": printed in the old layout (no v2 prefix) and the events are
+ *   exactly the same, so only the receipt moves to the new fingerprint. A change
+ *   of layout is not news, so no correction is posted.
+ * - "correction": a real change (a new or removed event, or a changed text on a
+ *   story already in the v2 layout); a correction is posted as always.
+ */
+export function routineEditionUpdateKind(input: {
+  existingFingerprint: string;
+  existingKeys: readonly string[];
+  fingerprint: string;
+  /** The bare hash of the new body, which is what an old-layout receipt holds. */
+  bodyHash: string;
+  /** Every event key the story holds once this run is done. */
+  keysAfterRun: readonly string[];
+}): "unchanged" | "layout-only" | "correction" {
+  const { existingFingerprint } = input;
+  if (existingFingerprint === input.fingerprint || existingFingerprint === input.bodyHash) return "unchanged";
+  if (existingFingerprint.startsWith(EDITION_FINGERPRINT_PREFIX)) return "correction";
+  const before = new Set(input.existingKeys);
+  const after = new Set(input.keysAfterRun);
+  const same = before.size === after.size && [...after].every((key) => before.has(key));
+  return same ? "layout-only" : "correction";
+}

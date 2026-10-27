@@ -845,3 +845,92 @@ test("a Friday run with eight events today and seven more on Saturday prints all
   assert.equal(count("weekend", "deferred"), 10);
   assert.equal(summary.deferred, 10);
 });
+
+// Decision 11: a change of layout is not news. A story printed in the old layout is not corrected for it.
+test("a story printed in the old layout is corrected only for a real change of events, never for the layout", async () => {
+  const source = await activateFixture();
+  const sql = await getSql();
+  await tickRoutineNoticeEditions(runNow);
+  const notice = (id: number, title: string) => ({
+    id,
+    externalIdHash: `event-${id}`,
+    formatKey: "community-arts-event-logistics" as const,
+    variant: "event",
+    fields: {
+      issuer: { value: "Arts Council", locator: "issuer" },
+      title: { value: title, locator: "title" },
+      start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+      venue: { value: "Park", locator: "venue" },
+    },
+    conflict: false,
+  });
+  const check = (candidates: ReturnType<typeof notice>[]) => async () => ({
+    ok: true as const,
+    check: {
+      checkId: 44,
+      source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: runNow.toISOString(),
+      capture: { captureEventId: 88, artifactVersionId: 99, observedAt: runNow.toISOString(), evidenceHref: null, textAvailable: true },
+      state: "parsed" as const,
+      counts: { parsed: candidates.length, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates,
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  });
+  const [firstJob] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='layout-first' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  await performRoutineNoticeWorkWith(firstJob as DeskJob, {
+    now: runNow,
+    check: check([notice(1, "Concert")]) as any,
+    verifyCheck: async () => {},
+  });
+  const [first] = await sql.query<{ content_fingerprint: string }>(
+    "select content_fingerprint from routine_notice_publications where newsroom_id=$1 and channel='today'",
+    [room],
+  );
+  assert.match(first!.content_fingerprint, /^v2:[0-9a-f]{64}$/, "a new story's receipt carries the version prefix");
+
+  // Make the receipt look like one written before the new layout: a bare hash.
+  await sql.query(
+    "update routine_notice_publications set content_fingerprint=$2 where newsroom_id=$1 and channel='today'",
+    [room, first!.content_fingerprint.slice(3)],
+  );
+  const again = async (claim: string, candidates: ReturnType<typeof notice>[]) => {
+    const [revision] = await sql.query<{ revision: number }>("update routine_notice_automations set revision=revision+1 where newsroom_id=$1 returning revision", [room]);
+    const [run] = await sql.query<{ id: number }>(
+      "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,'2026-09-08',$2,1,'running',$3) returning id",
+      [room, revision!.revision, owner],
+    );
+    const [job] = await sql.query<any>(
+      "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working',$4) returning *",
+      [room, owner, run!.id, claim],
+    );
+    await performRoutineNoticeWorkWith(job as DeskJob, { now: runNow, check: check(candidates) as any, verifyCheck: async () => {} });
+    const [state] = await sql.query<{ corrections: number; content_fingerprint: string; keys: string }>(
+      "select (select count(*)::int from corrections where newsroom_id=$1) corrections,content_fingerprint,candidate_keys_json keys from routine_notice_publications where newsroom_id=$1 and channel='today'",
+      [room],
+    );
+    return state!;
+  };
+
+  // The same events again: no correction for the layout.
+  const same = await again("layout-same", [notice(1, "Concert")]);
+  assert.equal(same.corrections, 0);
+
+  // A real new event on the old-layout story: one correction, and the receipt moves to v2.
+  const grown = await again("layout-grown", [notice(1, "Concert"), notice(2, "Poetry night")]);
+  assert.equal(grown.corrections, 1);
+  assert.match(grown.content_fingerprint, /^v2:/);
+  assert.equal(JSON.parse(grown.keys).length, 2);
+
+  // A v2 story whose text changes with a new event: corrected as always.
+  const more = await again("layout-more", [notice(1, "Concert"), notice(2, "Poetry night"), notice(3, "Film night")]);
+  assert.equal(more.corrections, 2);
+  assert.match(more.content_fingerprint, /^v2:/);
+});

@@ -18,6 +18,8 @@ import {
 import {
   eligibleRoutineNotices,
   planRoutineEditions,
+  routineEditionFingerprint,
+  routineEditionUpdateKind,
   routineNoticeLabel,
   type EligibleRoutineNotice,
 } from "./routine-notice-editions.ts";
@@ -664,10 +666,26 @@ export async function performRoutineNoticeWorkWith(
         markChannel(plan.channel, "in-review");
         continue;
       }
-      const fingerprint = await sha256(plan.body);
+      const bodyHash = await sha256(plan.body);
+      const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
       if (existing) {
-        if (existing.content_fingerprint === fingerprint) {
+        const keysAfterRun = [
+          ...new Set([
+            ...(sameDayKeys.get(plan.channel) ?? []),
+            ...selectedEligible
+              .filter((entry) => entry.channel === plan.channel)
+              .map((entry) => entry.notice.provenance.externalId),
+          ]),
+        ];
+        const update = routineEditionUpdateKind({
+          existingFingerprint: existing.content_fingerprint,
+          existingKeys: [...(sameDayKeys.get(plan.channel) ?? [])],
+          fingerprint,
+          bodyHash,
+          keysAfterRun,
+        });
+        if (update === "unchanged") {
           markChannel(plan.channel, "published");
           continue;
         }
@@ -689,32 +707,31 @@ export async function performRoutineNoticeWorkWith(
           );
           continue;
         }
-        await tx.query(
-          "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
-          [
-            run.actor,
-            run.newsroom_id,
-            existing.article_id,
-            `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
-          ],
-        );
+        /*
+          Decision 11: a change of layout is not news. A story printed before the
+          v2 fingerprint existed, whose events are exactly the events it has now,
+          keeps its text and gets no correction; only its receipt moves to the
+          new fingerprint. A real new or removed event still corrects.
+        */
+        if (update === "layout-only")
+          console.info(
+            `[routine-edition] ${plan.channel} ${localDate}: the layout changed and no correction was posted`,
+          );
+        else
+          await tx.query(
+            "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
+            [
+              run.actor,
+              run.newsroom_id,
+              existing.article_id,
+              `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
+            ],
+          );
         await tx.query(
           "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
-          [
-            existing.id,
-            run.id,
-            fingerprint,
-            JSON.stringify(
-              [...new Set([
-                ...(sameDayKeys.get(plan.channel) ?? []),
-                ...selectedEligible
-                  .filter((entry) => entry.channel === plan.channel)
-                  .map((entry) => entry.notice.provenance.externalId),
-              ])],
-            ),
-          ],
+          [existing.id, run.id, fingerprint, JSON.stringify(keysAfterRun)],
         );
-        corrected += 1;
+        if (update === "correction") corrected += 1;
         markChannel(plan.channel, "published");
         continue;
       }
@@ -746,7 +763,7 @@ export async function performRoutineNoticeWorkWith(
               .filter((e) => e.channel === plan.channel)
               .map((e) => e.notice.provenance.externalId),
           ),
-          await sha256(plan.body),
+          bodyHash,
         ],
       );
       published += 1;
