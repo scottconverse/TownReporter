@@ -457,8 +457,18 @@ export async function performRoutineNoticeWorkWith(
       a.channel.localeCompare(b.channel)
     );
   });
-  const selectedEligible = orderedEligible.slice(0, 5);
-  const overflow = orderedEligible.slice(5);
+  /*
+    Today in town lists ALL of the day's eligible events in one run (D321), so a
+    day with six or more gets its Morning / Afternoon / Evening headings. The
+    five-per-run cap, and the deferral of what is over it, stays for "This
+    weekend" and "Deadlines approaching" exactly as it was.
+  */
+  const cappedChannels = orderedEligible.filter((item) => item.channel !== "today");
+  const keptUnderCap = new Set(cappedChannels.slice(0, 5));
+  const selectedEligible = orderedEligible.filter(
+    (item) => item.channel === "today" || keptUnderCap.has(item),
+  );
+  const overflow = cappedChannels.slice(5);
   /*
     The Today in town layout names the town (Paper setup's city) and each source
     by the name the desk already holds for it. A paper that cannot give its city
