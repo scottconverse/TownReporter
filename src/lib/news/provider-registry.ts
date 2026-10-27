@@ -518,7 +518,9 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     offeredFor: { ...EVERY_SURFACE, ocr: false },
     efforts: ["low", "medium", "high"],
     defaultEffort: "medium",
-    ladderRank: 4,
+    // No ladderRank (Scott, Oct 26 2026: "take gemini OUT of the rotation").
+    // Gemini stays a named pick on every surface. Automatic and every failover
+    // never move a run to it on their own.
   },
   {
     id: "gemini-pro",
@@ -568,13 +570,13 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     /*
       Automatic uses any model the user has a subscription to (Scott, Oct 18
       2026), so Claude Sonnet is the LAST rung on the desk's ladder, after
-      DeepSeek, the local model, Codex Sol and Gemini. A rung that is not ready
+      DeepSeek, the local model and Codex Sol. A rung that is not ready
       is skipped, so a desk with DeepSeek ready never reaches Claude; a desk
       whose only signed-in model is Claude still writes.
 
       It had been off the ladder since 0.6.63 (Unit Y item 1), when the bake-off
       scored it 13.1 against DeepSeek's 30.9. That result still stands: DeepSeek
-      stays first, and Claude is reached only after the four rungs above it.
+      stays first, and Claude is reached only after the three rungs above it.
 
       Opinion is a separate ladder and keeps its own place: an editorial is the
       paper's own voice, and Sonnet is the last thing Opinion tries before a

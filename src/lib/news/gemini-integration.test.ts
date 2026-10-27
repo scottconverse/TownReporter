@@ -15,8 +15,27 @@ test("Gemini Pro plan models are named picks on every writing surface", () => {
   assert.equal(providerEntry("gemini-flash")?.label, "Gemini 3.8 Flash (Pro plan)");
   assert.equal(modelEffort("gemini-pro", "medium"), "medium");
 });
-test("Automatic adds Gemini Flash after balanced Codex, and Claude Sonnet last", () => {
-  assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash", "claude-sonnet"]);
+test("Automatic never puts Gemini on its ladder (Scott, Oct 26 2026)", () => {
+  assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "claude-sonnet"]);
+  for (const id of automaticLadder()) {
+    assert.notEqual(providerEntry(id)?.kind, "gemini-cli", `${id} is a Gemini rung`);
+  }
+});
+test("a failing run never moves to Gemini, even when Gemini is the only ready model", async () => {
+  // Scan 97 (Oct 26 2026) went DeepSeek -> Codex Sol -> Gemini Flash. Every
+  // starting point and every source must now skip Gemini.
+  const geminiOnlyProbe = async (choice: string) => choice.startsWith("gemini-")
+    ? { ok: true as const, choice: "gemini-flash" as const, label: "Gemini" }
+    : { ok: false as const, error: "not available" };
+  for (const current of ["deepseek-flash", "qwen-local", "codex-balanced", "local-model", "claude-sonnet"]) {
+    for (const source of ["auto", "editor", "scheduled"] as const) {
+      const hop = await planAutomaticFailover({
+        source, current, error: "Codex usage limit reached", probe: geminiOnlyProbe,
+        allowExplicitLocalFailover: source === "scheduled",
+      });
+      assert.ok(!hop?.next.startsWith("gemini-"), `${current} (${source}) moved to ${hop?.next}`);
+    }
+  }
 });
 test("the selected Gemini program returns its own failure words to the hop", async () => {
   let called = false;

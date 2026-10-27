@@ -432,7 +432,7 @@ export function retiredModelChoiceNote(value: unknown): string | null {
 
 /**
  * The Automatic ladder, in words: "DeepSeek v4.1 Flash, Local model, Codex Sol
- * 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5".
+ * 6.1 (balanced), then Claude Sonnet 5.5".
  *
  * Read from the registry rather than typed out, so a reordered or retired
  * rung cannot leave this sentence describing a ladder that no longer exists

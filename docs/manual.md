@@ -1375,7 +1375,8 @@ connection unchanged. Thinking effort selects the model suffix: Flash has
 low, medium, and high; Pro has low and high, with medium using high.
 
 Automatic tries DeepSeek, the loaded local model, Codex Sol 6.1 (balanced),
-then Gemini 3.8 Flash (Pro plan). Unavailable models remain selectable and
+then Claude Sonnet 5.5. Automatic and every failover never move a run to
+Gemini; pick Gemini by name to use it. Unavailable models remain selectable and
 explain how to fix the connection. A remembered Ollama Cloud usage-limit
 response appears as a warning with Ollama's own words until a later call or
 a connection test succeeds. Add credit at `ollama.com/settings`, or the desk

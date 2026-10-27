@@ -74,7 +74,7 @@ const RUNG_ONE_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
  * rung reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of
  * its own, because it runs whatever LM Studio has loaded.
  */
-const LADDER_SENTENCE = "DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5";
+const LADDER_SENTENCE = "DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), then Claude Sonnet 5.5";
 /** What the closed picker shows for Automatic (label — optionDetail). */
 const AUTOMATIC_OPTION_TEXT = "Automatic — Recommended ladder";
 /** The secret this walk sets on its own server before booting it. */

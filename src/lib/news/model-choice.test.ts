@@ -76,12 +76,11 @@ describe("model choice contract", () => {
       ],
     );
   });
-  it("runs Automatic on DeepSeek, then Local model, then balanced Codex, then Gemini, then Claude Sonnet", () => {
+  it("runs Automatic on DeepSeek, then Local model, then balanced Codex, then Claude Sonnet (Gemini is a named pick only)", () => {
     assert.deepEqual([...automaticLadder()], [
       "deepseek-flash",
       "qwen-local",
       "codex-balanced",
-      "gemini-flash",
       "claude-sonnet",
     ]);
     // Claude Sonnet is the last rung again (Scott, Oct 18 2026: Automatic uses
@@ -380,7 +379,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
@@ -396,7 +395,7 @@ describe("model choice contract", () => {
     */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), then Claude Sonnet 5.5. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -415,7 +414,7 @@ describe("model choice contract", () => {
       reordered or retired rung cannot leave this wording behind.
     */
     const help = modelChoiceHelp("auto", "scan");
-    assert.match(help, /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/);
+    assert.match(help, /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), then Claude Sonnet 5\.5/);
     assert.match(help, /records which one ran/i);
     assert.doesNotMatch(help, /configured gateway/i);
     /*
@@ -429,7 +428,7 @@ describe("model choice contract", () => {
     assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
     assert.match(
       pickerOptionTitle(automatic!),
-      /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), Gemini 3\.8 Flash \(Pro plan\), then Claude Sonnet 5\.5/,
+      /DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6\.1 \(balanced\), then Claude Sonnet 5\.5/,
     );
   });
 
@@ -565,7 +564,7 @@ describe("the Writing models panel's ladder sentence", () => {
     const sentence = await orderSentenceFn();
     assert.equal(
       sentence(),
-      "Automatic uses DeepSeek v4.1 Flash 1017 first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced), then Gemini 3.8 Flash (Pro plan), then Claude Sonnet 5.5.",
+      "Automatic uses DeepSeek v4.1 Flash 1017 first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5.",
     );
   });
 

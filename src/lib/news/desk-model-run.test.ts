@@ -447,9 +447,9 @@ describe("failOverAndRetry", () => {
     });
 
     assert.ok("error" in result);
-    /* A failed first rung probes all four later rungs once, in order.
+    /* A failed first rung probes all three later rungs once, in order.
        The message names Claude Sonnet 5.5, the final rung that was tried. */
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash", "claude-sonnet"], "each later rung is probed once");
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "claude-sonnet"], "each later rung is probed once");
     assert.match(result.error, /Automatic tried Claude Sonnet 5\.5 next, but it was not ready/);
     assert.match(result.error, /Claude Sonnet 5\.5 is not ready on this machine\./);
   });
@@ -580,7 +580,7 @@ describe("Story provider failure and stage failover", () => {
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash", "claude-sonnet"], "each later rung is probed once");
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "claude-sonnet"], "each later rung is probed once");
     assert.match(result.error, /Automatic tried Claude Sonnet 5\.5 next/);
     assert.match(result.error, /Claude Sonnet 5\.5 is not ready/);
     assert.doesNotMatch(result.error, /Opinion request/);

@@ -152,8 +152,9 @@ describe("planDarkRoundFailover", () => {
     let modelChoiceSet = false;
     let stageSet = false;
 
-    /* Balanced Codex now has Gemini Flash after it on the writing ladder.
-       An explicit choice advances to that ready rung on a technical failure. */
+    /* Balanced Codex has Claude Sonnet after it on the writing ladder (Gemini
+       left the ladder Oct 26 2026). An explicit choice advances to that ready
+       rung on a technical failure. */
     const result = await planDarkRoundFailover(
       job({ model_choice_source: "editor" }),
       CODEX_AUTH_FAILURE,
@@ -169,11 +170,11 @@ describe("planDarkRoundFailover", () => {
     );
 
     assert.deepEqual(result, {
-      next: "gemini-flash",
-      label: "Gemini 3.8 Flash (Pro plan)",
+      next: "claude-sonnet",
+      label: "Claude Sonnet 5.5",
       switchedBecause: "Codex Sol 6.1 sign-in lapsed",
     });
-    assert.deepEqual(probed, ["gemini-flash"]);
+    assert.deepEqual(probed, ["claude-sonnet"]);
     assert.equal(modelChoiceSet, true);
     assert.equal(stageSet, true);
   });
