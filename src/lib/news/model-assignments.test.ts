@@ -324,8 +324,8 @@ describe("effort is validated per exact model", () => {
     );
     assert.equal(
       cleanJobEffort("local-model", "medium", "deepseek-v4.1-flash"),
-      "low",
-      "DeepSeek v4.1 Flash 1017 declares none/low/high/max and defaults to low (D168)",
+      "none",
+      "DeepSeek v4.1 Flash 1017 declares none/low/high/max and defaults to none (rule 24, G25-EF-1)",
     );
   });
 
@@ -350,7 +350,7 @@ describe("effort is validated per exact model", () => {
       exactModel: "deepseek-v4.1-flash",
     });
     assert.equal(resolved.providerId, "local-model");
-    assert.equal(resolved.effort, "low");
+    assert.equal(resolved.effort, "none");
   });
 
   it("offers Automatic the Codex/Claude intersection", () => {

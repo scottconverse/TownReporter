@@ -358,8 +358,8 @@ test("Killed pile: Newest first and Oldest first are opposite orders by kill tim
 test("a batch runtime pick sets the model and the effort that model carries, the same way for the strip and the dialog", () => {
   const pick = batchRuntimePick("deepseek-flash");
   assert.equal(pick.runtime, "deepseek-flash");
-  // D168 (Scott, Oct 20 2026): DeepSeek v4.1 Flash runs at low effort everywhere.
-  assert.equal(pick.effort, "low");
+  // Rule 24 / G25-EF-1 (replaced D168's "low"): DeepSeek v4.1 Flash's own default is effort none.
+  assert.equal(pick.effort, "none");
 });
 
 test("DHE1-6: on the Killed tab, Newest and Oldest give opposite orders by kill day", () => {

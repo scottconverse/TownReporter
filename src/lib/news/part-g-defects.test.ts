@@ -272,7 +272,7 @@ test("B07/FB06: Server health does not call a missing Codex or an empty LM Studi
 });
 
 
-test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking low", async () => {
+test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking off (effort none)", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Record<string, unknown>[] = [];
   globalThis.fetch = async (_url, init) => {
@@ -298,8 +298,8 @@ test("walk D1: DeepSeek v4.1 Flash 1017 gets the full writer room with thinking 
       }),
     });
     assert.ok(Number(requests[0].max_tokens) >= 32768);
-    // D168 (Scott, Oct 20 2026): "Low EVERYWHERE including inside townreporter."
-    assert.equal(requests[0].reasoning_effort, "low");
+    // Rule 24 / G25-EF-1 (replaced D168's forced "low"): with no pick, DeepSeek runs at effort none.
+    assert.equal(requests[0].reasoning_effort, "none");
   } finally {
     globalThis.fetch = originalFetch;
   }

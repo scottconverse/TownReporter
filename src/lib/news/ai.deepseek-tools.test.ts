@@ -62,7 +62,7 @@ for (const model of ids) {
       assert.equal(requests.length, 1);
       assert.equal(Object.hasOwn(requests[0], "tools"), false);
       assert.equal(requests[0].model, model);
-      // D168: DeepSeek v4.1 Flash always sends low thinking, whatever was requested.
+      // G25-EF-1: the requested "low" is a level DeepSeek offers, so it is sent as asked.
       assert.equal(requests[0].reasoning_effort, "low");
       // DeepSeek runs on the 32,768 ceiling (Scott's DSH standard, commits
       // e0cf2429/908229a3); Gemini and Local keep the 16,384 floor.
