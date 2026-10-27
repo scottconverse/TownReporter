@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
@@ -40,6 +41,8 @@ const RUNG_ONE_MODEL = "deepseek-v4.1-flash:cloud";
 
 let fake: ChildProcess | undefined;
 let fakeBaseUrl = "";
+/** The machine's own value, put back when the file finishes. */
+let previousClaudeCliPath: string | undefined;
 
 /** Start the stub on an OS-chosen port and read the port back off its own line. */
 async function startFake(): Promise<string> {
@@ -111,19 +114,43 @@ before(async () => {
   process.env.CODEX_CLI_PATH = join(process.cwd(), "scripts/fakes/fake-codex-cli.mjs");
   process.env.FAKE_CODEX_SIGNED_IN = "0";
   delete process.env.FAKE_CODEX_VALID_DRAFT;
+  /*
+    Seal the test from a real Claude Code CLI on this machine. ai.ts sends
+    DeepSeek Flash through the CLI whenever `findClaudeCli()` finds one, so the
+    suggestion would never reach the HTTP stub above. `claudeCliCandidates()`
+    returns ONLY `CLAUDE_CLI_PATH` when it is set, so pointing it at a path that
+    cannot exist makes "not found" certain. Same seal as daily-scan-automatic-rung.test.ts.
+  */
+  previousClaudeCliPath = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = join(
+    tmpdir(),
+    `tr-no-claude-cli-${process.pid}-${Date.now().toString(36)}`,
+    "claude.exe",
+  );
 
   vite = await createServer({
     configFile: false,
+    // Vite's dependency cache goes to a temp folder, not node_modules/.vite: this
+    // checkout's node_modules is a junction into another worktree's packages.
+    cacheDir: join(tmpdir(), `townreporter-correction-fix-body-${process.pid}`),
     server: { middlewareMode: true },
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ performAddCorrection } = await vite.ssrLoadModule("/src/lib/news/corrections.ts"));
   ({ performSuggestCorrectionWording } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  /*
+    Clear the memoized CLI lookup on the SAME module instance the app code is
+    handed: loaded through this vite server, it is the one desk.ts imports.
+  */
+  const cli = await vite.ssrLoadModule("/src/lib/news/ai-claude-code.server.ts");
+  cli.resetClaudeCliCache();
 });
 
 after(async () => {
   fake?.kill();
+  if (previousClaudeCliPath === undefined) delete process.env.CLAUDE_CLI_PATH;
+  else process.env.CLAUDE_CLI_PATH = previousClaudeCliPath;
   await vite.close();
 });
 

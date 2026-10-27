@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -16,8 +17,26 @@ let readStoryDocuments: typeof import("./story-documents.server.ts").readStoryDo
 let modelChoiceLabel: typeof import("./model-choice.ts").modelChoiceLabel;
 let withClaimedLeadDraftCheckpointLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftCheckpointLock;
 let withClaimedLeadDraftLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftLock;
+/** The machine's own values, put back when the file finishes. */
+let previousClaudeCliPath: string | undefined;
+let previousDataRoot: string | undefined;
+/** A temp data root for this file's runs, removed when the file finishes. */
+let dataRoot = "";
 
 before(async () => {
+  /*
+    Seal this file from a real Claude Code agent and from the worktree. A news
+    lead on a Claude pick runs the report-local-news skill first (D234); with no
+    CLI the skill cannot start, and the four-pass writer finishes the draft on the
+    same pick -- the path this file checks. `claudeCliCandidates()` returns ONLY
+    `CLAUDE_CLI_PATH` when it is set, so a missing path makes "not found" certain.
+    The skill's folders go to a temp data root, not the worktree's .townreporter-data.
+  */
+  previousClaudeCliPath = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = join(tmpdir(),`tr-no-claude-cli-${process.pid}-${Date.now().toString(36)}`,"claude.exe");
+  previousDataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  dataRoot = mkdtempSync(join(tmpdir(),"tr-draft-checkpoint-data-"));
+  process.env.TOWNREPORTER_DATA_ROOT = dataRoot;
   vite=await createServer({configFile:false,cacheDir:join(tmpdir(),`townreporter-draft-checkpoint-${process.pid}`),server:{middlewareMode:true,hmr:{port:0}},resolve:{alias:{"@":join(process.cwd(),"src")}}});
   ({getSql}=await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ensureJobsSchema}=await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
@@ -25,8 +44,16 @@ before(async () => {
   ({ensureStoryDocuments,readStoryDocuments}=await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts"));
   ({withClaimedLeadDraftCheckpointLock,withClaimedLeadDraftLock}=await vite.ssrLoadModule("/src/lib/news/draft-order.server.ts"));
   ({modelChoiceLabel}=await vite.ssrLoadModule("/src/lib/news/model-choice.ts"));
+  // Clear the memoized CLI lookup on the module instance the app code imports.
+  const cli=await vite.ssrLoadModule("/src/lib/news/ai-claude-code.server.ts");
+  cli.resetClaudeCliCache();
 });
-after(async()=>vite?.close());
+after(async()=>{
+  await vite?.close();
+  if(previousClaudeCliPath===undefined) delete process.env.CLAUDE_CLI_PATH; else process.env.CLAUDE_CLI_PATH=previousClaudeCliPath;
+  if(previousDataRoot===undefined) delete process.env.TOWNREPORTER_DATA_ROOT; else process.env.TOWNREPORTER_DATA_ROOT=previousDataRoot;
+  if(dataRoot) rmSync(dataRoot,{recursive:true,force:true});
+});
 
 test("persists a writer checkpoint without completing the job when later reporting fails", async()=>{
   await ensureJobsSchema();
