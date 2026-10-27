@@ -1,12 +1,12 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
-import { runMeetingSkillWriter, type MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts";
+import { pruneOldMeetingRunFolders, runMeetingSkillWriter, type MeetingSkillWriterRunner } from "./meeting-skill-writer.server.ts";
 
 /*
   THE RUN AROUND THE WRITER. The agent itself is faked here: what is under test
@@ -260,5 +260,68 @@ describe("runMeetingSkillWriter", () => {
     if (result.ok) return;
     assert.match(result.error, /no stored captions/i);
     assert.equal(called, false);
+  });
+});
+
+describe("old run folders (G24-T3-1)", () => {
+  const DAY = 86_400_000;
+  const aged = (path: string, days: number) => {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, "story.txt"), "x", "utf8");
+    const when = new Date(Date.now() - days * DAY);
+    utimesSync(path, when, when);
+  };
+
+  it("removes run folders older than 14 days, keeps newer ones, and keeps one a saved draft points to", async () => {
+    const sql = await getSql();
+    const runsRoot = join(mkdtempSync(join(tmpdir(), "mskill-prune-")), "meeting-runs", `newsroom-${NEWSROOM}`);
+    const oldFolder = join(runsRoot, "job-11-aB3dE9");
+    const recentFolder = join(runsRoot, "job-12-zZ9yX8");
+    const pointedTo = join(runsRoot, "job-13-Qw2eR5");
+    const notARun = join(runsRoot, "important-notes");
+    aged(oldFolder, 20);
+    aged(recentFolder, 3);
+    aged(pointedTo, 40);
+    aged(notARun, 90);
+    await sql.query(
+      `insert into drafts (user_id, newsroom_id, headline, dek, body, topic, run_stats)
+       values ($1,$2,'h','d','b','council',$3::jsonb)`,
+      [`prune-test-${Math.random().toString(36).slice(2, 8)}`, NEWSROOM, JSON.stringify({ workDir: pointedTo })],
+    );
+
+    const result = await pruneOldMeetingRunFolders({ sql, runsRoot, log: () => {} });
+    assert.deepEqual(result.deleted, [oldFolder]);
+    assert.deepEqual(result.keptForRecords, [pointedTo]);
+    assert.equal(existsSync(oldFolder), false);
+    assert.equal(existsSync(recentFolder), true);
+    assert.equal(existsSync(pointedTo), true);
+    assert.equal(existsSync(notARun), true, "a folder that is not job-<id>-XXXXXX is never touched");
+  });
+
+  it("does not follow a link, and a failed cleanup never throws", async () => {
+    const sql = await getSql();
+    const base = mkdtempSync(join(tmpdir(), "mskill-prune-link-"));
+    const runsRoot = join(base, "runs");
+    const outside = join(base, "outside");
+    aged(outside, 60);
+    mkdirSync(runsRoot, { recursive: true });
+    try {
+      symlinkSync(outside, join(runsRoot, "job-14-Lk1nK2"), "junction");
+    } catch {
+      return; // links not allowed on this machine; nothing to prove
+    }
+    const logged: string[] = [];
+    const result = await pruneOldMeetingRunFolders({ sql, runsRoot, log: (m) => logged.push(m) });
+    assert.deepEqual(result.deleted, []);
+    assert.equal(existsSync(join(outside, "story.txt")), true);
+
+    // The saved records cannot be read: nothing is deleted, and nothing throws.
+    const folder = join(runsRoot, "job-15-Br0ken");
+    aged(folder, 30);
+    const broken = { query: async () => { throw new Error("database is away"); } } as unknown as typeof sql;
+    const second = await pruneOldMeetingRunFolders({ sql: broken, runsRoot, log: (m) => logged.push(m) });
+    assert.deepEqual(second.deleted, []);
+    assert.equal(existsSync(folder), true);
+    assert.ok(logged.some((m) => /skipped/.test(m)));
   });
 });

@@ -123,6 +123,8 @@ const REQUIRED = [
   // anything at all, so losing it fails at the first line of the one script
   // that puts a release on the live paper.
   "lib-promote.ps1",
+  // Lets a big disk job pause between batches while the paper is slow (G25-DK-2).
+  "lib-disk-guard.ps1",
   // The database half of a promotion: the copy taken before a rollout and the
   // swap that puts it back (unit PR2). Not dot-sourced -- promote.ps1 runs it
   // as a child -- but losing it fails the same way and at the same moment: the
@@ -615,6 +617,92 @@ test(
 );
 
 test(
+  "promote retries the local check, the watchdog looks once more before stopping, and the disk guard waits then goes on (fakes only)",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      G25-PV-1, G24-T1-1, G25-DK-2. Every function here takes its probe, sleep
+      and log as script blocks, so this runs the real library code with no
+      :3000, no real wait and no real disk work. It prints key=value lines.
+    */
+    const dir = mkdtempSync(join(tmpdir(), "ops-fakes-"));
+    try {
+      const q = (p) => `'${p}'`;
+      const probe = join(dir, "probe.ps1");
+      writeFileSync(
+        probe,
+        [
+          '$ErrorActionPreference = "Stop"',
+          `. ${q(join(OPS, "lib-promote.ps1"))}`,
+          `. ${q(join(OPS, "lib-start-guard.ps1"))}`,
+          `. ${q(join(OPS, "lib-disk-guard.ps1"))}`,
+          "$noSleep = { param($s) $script:slept += $s }",
+          "$logLines = New-Object System.Collections.ArrayList",
+          "$log = { param($m) [void]$logLines.Add($m) }",
+          // --- G25-PV-1: times out twice, then answers.
+          "$script:slept = @(); $script:calls = 0",
+          "$r = Invoke-PromoteCheckWithRetry -Attempts 4 -WaitSeconds 10 -Log $log -Sleep $noSleep -Check { $script:calls++; if ($script:calls -lt 3) { @{ Ok = $false; Failures = @('local did not answer: The operation has timed out') } } else { @{ Ok = $true; Failures = @() } } }",
+          '"pv_slow_ok=" + $r.Ok + " calls=" + $script:calls + " slept=" + ($script:slept -join "+") + " logged=" + $logLines.Count',
+          // A real failure: every try fails, the last result comes back unchanged, one wait fewer than tries.
+          "$script:slept = @(); $script:calls = 0; $logLines.Clear()",
+          "$r = Invoke-PromoteCheckWithRetry -Attempts 4 -WaitSeconds 10 -Log $log -Sleep $noSleep -Check { $script:calls++; @{ Ok = $false; Failures = @(\"try $($script:calls) failed\") } }",
+          '"pv_dead_ok=" + $r.Ok + " calls=" + $script:calls + " slept=" + ($script:slept -join "+") + " last=" + $r.Failures[0] + " logged=" + $logLines.Count',
+          // --- G24-T1-1: the last look before stopping the port owner.
+          "$a = Test-TownReporterAnsweringNow -Port 1 -Probe { param($p) 200 }",
+          '"t1_back=" + $a.Healthy + " code=" + $a.Code',
+          "$b = Test-TownReporterAnsweringNow -Port 1 -Probe { param($p) throw 'The operation has timed out' }",
+          '"t1_dead=" + $b.Healthy + " code=" + $b.Code + " err=" + $b.Error',
+          "$c = Test-TownReporterAnsweringNow -Port 1 -Probe { param($p) 503 }",
+          '"t1_503=" + $c.Healthy + " code=" + $c.Code',
+          // --- G25-DK-2: slow twice, then fast: waits, logs, goes on.
+          "Reset-TownReporterDiskJobBudget; $script:slept = @(); $script:n = 0; $logLines.Clear()",
+          "$w = Wait-TownReporterDiskJobTurn -Port 1 -Probe { param($p) $script:n++; if ($script:n -lt 3) { throw 'The operation has timed out' } else { 200 } } -Sleep $noSleep -Log $log -PollSeconds 5",
+          '"dk_slow_waited=" + $w.Waited + " capped=" + $w.Capped + " slept=" + ($script:slept -join "+") + " logged=" + $logLines.Count',
+          // Never recovers: stops at the cap and goes on.
+          "Reset-TownReporterDiskJobBudget; $script:slept = @(); $logLines.Clear()",
+          "$w = Wait-TownReporterDiskJobTurn -Port 1 -Probe { param($p) throw 'The operation has timed out' } -Sleep $noSleep -Log $log -PollSeconds 5 -MaxWaitSeconds 20",
+          '"dk_cap_waited=" + $w.Waited + " capped=" + $w.Capped',
+          // Nothing listening: no wait at all.
+          "Reset-TownReporterDiskJobBudget; $script:slept = @(); $logLines.Clear()",
+          "$w = Wait-TownReporterDiskJobTurn -Port 1 -Probe { param($p) throw 'No connection could be made because the target machine actively refused it' } -Sleep $noSleep -Log $log",
+          '"dk_refused_waited=" + $w.Waited + " slept=" + $script:slept.Count',
+          // The top-process line from fake rows.
+          "$rows = @([pscustomobject]@{ Name = 'robocopy'; IDProcess = 9752; IODataBytesPersec = 52428800 }, [pscustomobject]@{ Name = 'Idle'; IDProcess = 0; IODataBytesPersec = 999999999 }, [pscustomobject]@{ Name = 'pwsh'; IDProcess = 64704; IODataBytesPersec = 1048576 })",
+          '"dk_top=" + (Get-TownReporterTopDiskProcesses -Count 2 -Rows $rows)',
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", probe],
+        { encoding: "utf8", timeout: 120_000 },
+      );
+      const line = (key) => {
+        const found = out.split(/\r?\n/).find((l) => l.startsWith(`${key}=`));
+        assert.ok(found, `the probe printed no ${key}= line:\n${out}`);
+        return found.slice(key.length + 1).trim();
+      };
+      // G25-PV-1: two timeouts then an answer is a pass on the third try.
+      assert.equal(line("pv_slow_ok"), "True calls=3 slept=10+10 logged=3");
+      // A real failure still fails: four tries, three waits, the last result.
+      assert.equal(line("pv_dead_ok"), "False calls=4 slept=10+10+10 last=try 4 failed logged=4");
+      // G24-T1-1
+      assert.equal(line("t1_back"), "True code=200");
+      assert.match(line("t1_dead"), /^False code=0 err=The operation has timed out$/);
+      assert.equal(line("t1_503"), "False code=503");
+      // G25-DK-2
+      assert.equal(line("dk_slow_waited"), "10 capped=False slept=5+5 logged=3");
+      assert.equal(line("dk_cap_waited"), "20 capped=True");
+      assert.equal(line("dk_refused_waited"), "0 slept=0");
+      assert.equal(line("dk_top"), "robocopy (PID 9752) 50.0 MB/s, pwsh (PID 64704) 1.0 MB/s");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "redlib-relocate.ps1 on a fake install: copies it, rewrites its paths, refuses a live one",
   { skip: !onWindows ? "PowerShell only" : false },
   () => {
@@ -871,8 +959,9 @@ test(
 
 // Every process named redlib on this computer, by id. redlib-relocate.ps1 finds
 // processes by NAME across the whole machine, and refuses a destination while one
-// of them cannot be inspected (image state "unverified"). This is what a live
-// Redlib reader on the machine does to every scenario below.
+// of them cannot be inspected (image state "unverified"). The test passes these ids
+// to the script (TR_REDLIB_RELOCATE_IGNORE_PIDS) so a live reader on the machine
+// does not change any scenario below.
 function redlibProcessIds() {
   const out = execFileSync(
     "powershell.exe",
@@ -885,16 +974,13 @@ function redlibProcessIds() {
 test(
   "redlib-relocate.ps1 resolves path aliases, rejects unsafe targets, and fails closed on stale metadata",
   { skip: !onWindows ? "PowerShell only" : false },
-  (t) => {
-    // The scenarios below need no other redlib process on the machine. CI has none.
-    // On a computer with a Redlib reader running, the script refuses every
-    // destination before the copy, lock and rollback logic runs, so the test
-    // says so and skips rather than reporting that refusal as a failure.
+  () => {
+    // G24-T2-1: a real Redlib reader running on this computer (not ours) used to
+    // make this test skip, so it only ever ran on CI. Now the test names those
+    // processes to the script, which then does not look at them. The test never
+    // stops or touches them; its own scenarios still use real stand-in processes.
     const foreignRedlib = redlibProcessIds();
-    if (foreignRedlib.length > 0) {
-      t.skip(`a process named redlib (PID ${foreignRedlib.join(", ")}) is running on this computer; redlib-relocate.ps1 refuses every destination while it cannot inspect that process, so these scenarios cannot run here`);
-      return;
-    }
+    const foreignEnv = { TR_REDLIB_RELOCATE_IGNORE_PIDS: foreignRedlib.join(",") };
     const script = join(OPS, "redlib-relocate.ps1");
     const base = mkdtempSync(join(tmpdir(), "redlib-relocate-edge-"));
     const noEnv = join(base, "absent.env");
@@ -908,7 +994,7 @@ test(
             {
               encoding: "utf8",
               timeout: 120_000,
-              env: { ...process.env, REDLIB_INSTALL_ROOT: "", ...extraEnv },
+              env: { ...process.env, REDLIB_INSTALL_ROOT: "", ...foreignEnv, ...extraEnv },
             },
           ),
         };
@@ -942,6 +1028,7 @@ test(
               env: {
                 ...process.env,
                 REDLIB_INSTALL_ROOT: "",
+                ...foreignEnv,
                 REDLIB_RELOCATE_SCRIPT: script,
                 REDLIB_RELOCATE_FROM: args[0],
                 REDLIB_RELOCATE_TO: args[1],

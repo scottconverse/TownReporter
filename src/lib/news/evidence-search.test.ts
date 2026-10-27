@@ -134,6 +134,42 @@ describe("searchEvidence: exact words", () => {
     assert.equal(result.exact[0]!.title, "New copy");
   });
 
+  it("lists 30 distinct pieces, newest first, and still finds old pieces behind many copies of one (G24-S3-2)", async () => {
+    // 610 recent copies of ONE excerpt would fill a short read of the newest
+    // rows; the three older distinct pieces behind them must still be listed,
+    // each once, newest copy first.
+    const room = 813;
+    for (let i = 0; i < 610; i += 1) {
+      const copy = await capture(`https://example.com/dup-${i}`, `Dup ${i}`, "2026-10-10T10:00:00Z", room);
+      await chunk(copy, "Zebra crossing repainted on Third Street.", room, 0);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const older = await capture(`https://example.com/old-${i}`, `Older ${i}`, `2026-09-0${i + 1}T10:00:00Z`, room);
+      await chunk(older, `Zebra herd number ${i} counted at the park.`, room, 0);
+    }
+    setEmbedderForTests(fakeEmbedder({ zebra: vec(1) }));
+    const result = await searchEvidence({ newsroomId: room }, "zebra");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.exact.length, 4);
+    assert.match(result.exact[0]!.excerptStart, /Zebra crossing/);
+    assert.deepEqual(result.exact.slice(1).map((row) => row.title), ["Older 2", "Older 1", "Older 0"]);
+
+    // And more than 30 distinct pieces: exactly 30, the newest ones.
+    const wide = 814;
+    for (let i = 0; i < 35; i += 1) {
+      const v = await capture(`https://example.com/wide-${i}`, `Wide ${i}`, new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(), wide);
+      await chunk(v, `Giraffe sighting number ${i}.`, wide, 0);
+    }
+    setEmbedderForTests(fakeEmbedder({ giraffe: vec(1) }));
+    const many = await searchEvidence({ newsroomId: wide }, "giraffe");
+    assert.equal(many.ok, true);
+    if (!many.ok) return;
+    assert.equal(many.exact.length, 30);
+    assert.equal(many.exact[0]!.title, "Wide 34");
+    assert.equal(many.exact[29]!.title, "Wide 5");
+  });
+
   it("never shows a blank excerpt", async () => {
     const v = await capture("https://example.com/blank", "Blank", "2026-10-01T10:00:00Z");
     await chunk(v, "");

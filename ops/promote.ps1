@@ -1555,7 +1555,11 @@ if (Skip-Step 'verify') {
   Show ""
   Say "checking"
 
-  $localCheck = Test-RealPageContent -Url "http://127.0.0.1:$port/" -Label "local ($port)"
+  # G25-PV-1: retry for about a minute before calling the paper unhealthy; the
+  # first look right after start can time out on a paper that is fine.
+  $localCheck = Invoke-PromoteCheckWithRetry -Attempts 4 -WaitSeconds 10 `
+    -Log { param($m) Write-PromoteLog $log $m } `
+    -Check { Test-RealPageContent -Url "http://127.0.0.1:$port/" -Label "local ($port)" -TimeoutSec 12 }
   if ($localCheck.Ok) { Say "[ OK ] the paper answers on $port with real content, no error boundary" }
   else { $fail += $localCheck.Failures }
 

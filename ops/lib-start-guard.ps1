@@ -185,3 +185,30 @@ function Get-TownReporterStartState {
 
   return [pscustomobject]@{ State = 'none'; AgeSeconds = -1; Source = 'none'; MarkerPid = 0 }
 }
+
+<#
+  G24-T1-1: one last look before the watchdog stops the port owner.
+
+  The two probes at the top of a run and the stop of the port owner are minutes
+  apart (the start-state reads and a slow machine sit between them), and a paper
+  that came back in that gap was being stopped. This asks once more, right
+  before the stop. Returns @{ Healthy; Code; Error }. Never throws.
+  -Probe is a test seam: a script block that takes the port and returns the
+  status code (or throws).
+#>
+function Test-TownReporterAnsweringNow {
+  param(
+    [Parameter(Mandatory = $true)][int]$Port,
+    [int]$TimeoutSec = 20,
+    [scriptblock]$Probe
+  )
+  $code = 0
+  $err = ""
+  try {
+    if ($Probe) { $code = [int](& $Probe $Port) }
+    else { $code = (Invoke-WebRequest "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec $TimeoutSec).StatusCode }
+  } catch {
+    $err = $_.Exception.Message
+  }
+  return @{ Healthy = ($code -eq 200); Code = $code; Error = $err }
+}

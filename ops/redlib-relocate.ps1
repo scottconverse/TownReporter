@@ -183,7 +183,15 @@ function Get-ExecutableImageState {
     $expected = [TownReporterPathIdentity]::GetFileIdentity($ExecutablePath)
     if (-not $expected) { return 'unverified' }
     $processName = [IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
+    # Test seam (G24-T2-1): the test names the ids of redlib processes that are
+    # not part of its scenario (a real reader running on the machine) so it does
+    # not depend on whether one runs. Unset in real use, so nothing is skipped.
+    $ignoredIds = @()
+    if ($env:TR_REDLIB_RELOCATE_IGNORE_PIDS) {
+      $ignoredIds = @($env:TR_REDLIB_RELOCATE_IGNORE_PIDS -split ',' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+    }
     foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
+      if ($ignoredIds -contains $process.Id) { continue }
       try {
         $imagePath = [string]$process.MainModule.FileName
         if (-not $imagePath) { return 'unverified' }
