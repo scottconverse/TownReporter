@@ -99,6 +99,10 @@ export async function screenModuleUrl(path, overrides = {}, real = [], fixture =
             useDeskJobs: `() => ({jobs:[], activeJobs:[]})`,
             resolveJobModel: `() => ({providerId:"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
             usePaperSetupGate: `() => ({blocked:false})`,
+            // recent-kill.ts: no row was just killed while a screen renders here.
+            useRecentlyKilledRows: `() => ({recent:new Map(), markKilled(){}, clearKilled(){}})`,
+            mergeRecentlyKilled: `(rows) => [...rows]`,
+            recentlyKilledForTab: `() => new Map()`,
             auditDraft: `() => ({findings:[]})`,
             findingsWithIds: `() => []`,
             parseNotes: `() => ({todo:[],todos:[],sources:[],opened:[],found:[],verify:[],unanswered:[]})`,

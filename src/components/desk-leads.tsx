@@ -42,6 +42,45 @@ import { Notice } from "@/components/states";
 export const SEEN_AGAIN_EXPLAINER =
   "Came back: the scanner found this story again after you killed it. It was not refiled. Back returns it to New.";
 
+/**
+ * The row's own answer to a fast Kill: the lead stays where the editor was
+ * looking, with the headline, the word "Killed.", and a real Undo button.
+ *
+ * It is drawn inside the existing row box. The row's other children remain in
+ * the markup for rollback and for the controls' own state, but `.recent-kill-row`
+ * hides them while this line owns the row. The words are normal row type and the
+ * button is the ordinary solid 44px button family, so neither depends on the
+ * bottom-left toast being noticed or on a narrow-screen substitute.
+ */
+export function KilledRowNotice({
+  headline,
+  pending = false,
+  onUndo,
+}: {
+  headline: string;
+  pending?: boolean;
+  onUndo?: () => void;
+}) {
+  const title = editorTitle(headline);
+  return (
+    <div className="recent-kill-message">
+      <span className="recent-kill-copy" role="status" aria-live="polite" aria-atomic="true">
+        <strong>Killed.</strong>{" "}
+        <span className="recent-kill-headline">{title}</span>
+      </span>
+      <InkButton
+        tone="solid"
+        pending={pending}
+        pendingLabel="Undoing…"
+        onClick={onUndo}
+        ariaLabel={`Undo kill: ${title}`}
+      >
+        Undo
+      </InkButton>
+    </div>
+  );
+}
+
 export function LeadRowView({
   lead,
   sectionName,
@@ -73,6 +112,9 @@ export function LeadRowView({
   onKillWithReason,
   onKillNow,
   killPending = false,
+  killedRecently = false,
+  undoKillPending = false,
+  onUndoKill,
 }: {
   lead: LeadRow;
   /** The newsroom's configured display name for the stored section key. */
@@ -205,6 +247,12 @@ export function LeadRowView({
   onKillNow?: () => void;
   /** This row's fast kill is in flight. */
   killPending?: boolean;
+  /** The press just killed this row; keep it in place with its own Undo for KILL_TOAST_MS. */
+  killedRecently?: boolean;
+  /** The row's own Undo is in flight. */
+  undoKillPending?: boolean;
+  /** The row's own Undo, the same restore write as the kill strip. */
+  onUndoKill?: () => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   /*
@@ -528,7 +576,8 @@ export function LeadRowView({
         (lead.status === "killed" ? " dead" : "") +
         (roomy ? " roomy" : "") +
         (deleteSelected ? " picked" : "") +
-        (selected ? " sel" : "")
+        (selected ? " sel" : "") +
+        (killedRecently ? " recent-kill-row" : "")
       }
       /*
         TNB-1 / TPT-2: the row names itself to the keys. X and H on a control in
@@ -542,6 +591,13 @@ export function LeadRowView({
         if (onSelectRow && !isInteractiveTarget(event.target)) onSelectRow();
       }}
     >
+      {killedRecently ? (
+        <KilledRowNotice
+          headline={lead.headline}
+          pending={undoKillPending}
+          onUndo={onUndoKill}
+        />
+      ) : null}
       {/*
         The row's one selection box (defect 1): the design's checkbox in the
         first column. The old "Select for deletion" and "Include in batch

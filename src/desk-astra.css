@@ -1261,6 +1261,55 @@
 .desk-ltr.astra :is(.lead-row, .pub-row, .scan-row):first-child {
   border-top: 0;
 }
+/*
+  The lead's own answer to a fast Kill (owner, 2026-10-28). The row is kept in
+  its place while the optimistic status write moves it out of Open, then this
+  one line takes over the row for the same eight seconds as the bottom-left
+  strip. The other children stay mounted so a failed save can reveal the row
+  again without losing its controls or state.
+*/
+.desk-ltr.astra :is(.lead-row, .today-lead).recent-kill-row {
+  display: block;
+  min-width: 0;
+}
+.desk-ltr.astra :is(.lead-row, .today-lead).recent-kill-row > :not(.recent-kill-message) {
+  display: none;
+}
+.desk-ltr.astra .recent-kill-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+.desk-ltr.astra .recent-kill-copy {
+  min-width: 0;
+  color: var(--fg);
+  font: 700 calc(19px * var(--ts))/1.35 var(--fd);
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .recent-kill-copy strong {
+  color: var(--fg);
+  font-size: inherit;
+}
+.desk-ltr.astra .recent-kill-headline {
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .recent-kill-message > .btn {
+  flex: none;
+  min-height: 44px;
+}
+@media (max-width: 700px) {
+  .desk-ltr.astra .recent-kill-message {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .desk-ltr.astra .recent-kill-message > .btn {
+    width: 100%;
+  }
+}
 .desk-ltr.astra :is(.lead-h, .lead-title, .pub-h, .side-h) {
   font: 700 21px/1.4 var(--fd);
   letter-spacing: -0.2px;
