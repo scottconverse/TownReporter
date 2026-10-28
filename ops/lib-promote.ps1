@@ -377,7 +377,10 @@ function Invoke-PromoteCheckWithRetry {
     [Parameter(Mandatory = $true)][scriptblock]$Check,
     [int]$Attempts = 4,
     [int]$WaitSeconds = 10,
-    [scriptblock]$Log,
+    # Named LogSink, not Log: a caller's script block such as
+    # { param($m) Write-PromoteLog $log $m } looks $log up at call time, and a
+    # parameter named $Log here would hide the caller's $log (G27-PR-1).
+    [Alias('Log')][scriptblock]$LogSink,
     [scriptblock]$Sleep
   )
   if ($Attempts -lt 1) { $Attempts = 1 }
@@ -385,10 +388,10 @@ function Invoke-PromoteCheckWithRetry {
   for ($try = 1; $try -le $Attempts; $try++) {
     $result = & $Check
     if ($result.Ok) {
-      if ($Log) { & $Log "verify: local check passed on try $try of $Attempts" }
+      if ($LogSink) { & $LogSink "verify: local check passed on try $try of $Attempts" }
       return $result
     }
-    if ($Log) { & $Log "verify: local check try $try of ${Attempts} did not pass: $($result.Failures -join '; ')" }
+    if ($LogSink) { & $LogSink "verify: local check try $try of ${Attempts} did not pass: $($result.Failures -join '; ')" }
     if ($try -lt $Attempts) {
       if ($Sleep) { & $Sleep $WaitSeconds } else { Start-Sleep -Seconds $WaitSeconds }
     }

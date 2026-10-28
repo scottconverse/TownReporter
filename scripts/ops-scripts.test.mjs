@@ -647,6 +647,14 @@ test(
           "$script:slept = @(); $script:calls = 0; $logLines.Clear()",
           "$r = Invoke-PromoteCheckWithRetry -Attempts 4 -WaitSeconds 10 -Log $log -Sleep $noSleep -Check { $script:calls++; @{ Ok = $false; Failures = @(\"try $($script:calls) failed\") } }",
           '"pv_dead_ok=" + $r.Ok + " calls=" + $script:calls + " slept=" + ($script:slept -join "+") + " last=" + $r.Failures[0] + " logged=" + $logLines.Count',
+          // G27-PR-1: the call as promote.ps1 makes it -- a real log object in a
+          // variable named $log, and a log block that reads $log when it runs. The
+          // function's own parameter must not hide it (it did, and promote crashed in verify).
+          "$testLogBlock = $log",
+          `$log = [pscustomobject]@{ Path = ${q(join(dir, "shape.log"))} }`,
+          "$r = Invoke-PromoteCheckWithRetry -Attempts 2 -WaitSeconds 0 -Sleep $noSleep -Log { param($m) Write-PromoteLog $log $m } -Check { @{ Ok = $true; Failures = @() } }",
+          '"pv_promote_shape=" + $r.Ok + " lines=" + @(Get-Content -LiteralPath $log.Path).Count',
+          "$log = $testLogBlock",
           // --- G24-T1-1: the last look before stopping the port owner.
           "$a = Test-TownReporterAnsweringNow -Port 1 -Probe { param($p) 200 }",
           '"t1_back=" + $a.Healthy + " code=" + $a.Code',
@@ -687,6 +695,7 @@ test(
       assert.equal(line("pv_slow_ok"), "True calls=3 slept=10+10 logged=3");
       // A real failure still fails: four tries, three waits, the last result.
       assert.equal(line("pv_dead_ok"), "False calls=4 slept=10+10+10 last=try 4 failed logged=4");
+      assert.equal(line("pv_promote_shape"), "True lines=1");
       // G24-T1-1
       assert.equal(line("t1_back"), "True code=200");
       assert.match(line("t1_dead"), /^False code=0 err=The operation has timed out$/);
