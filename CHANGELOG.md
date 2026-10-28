@@ -1,8 +1,28 @@
 # Changelog
 
-Current software version: **0.6.84** (released 2026-10-27). Publication state is recorded by GitHub: [release v0.6.84](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.84).
+Current software version: **0.6.85** (released 2026-10-28). Publication state is recorded by GitHub: [release v0.6.85](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.85).
 
 ## Unreleased
+
+## 0.6.85 — 2026-10-28
+
+This release covers the one product change after 0.6.84 (#336) and the `ops/promote.ps1` log-writing fix (#335). The release guide is [docs/releases/0.6.85.md](docs/releases/0.6.85.md). Changes are grouped by area; the number after a change is the pull request that made it.
+
+### Desk
+
+- **The AI finds duplicate leads itself.** One extra model call per scan batch compares every new lead with recent desk leads (last 30 days, at most 300; killed leads included), printed stories (last 30 days, at most 150), and earlier leads of the same scan. It runs only where the word rule found nothing. If the call fails, the scan files leads as before (#336).
+- **An AI duplicate never lands in Open.** A same-story lead with no new fact marks the old lead as **Came back** (resurfaced) and files nothing new; a lead killed as a duplicate stays killed. A same-story lead with a new fact is filed as **Held**, linked to the old lead as **Possible duplicate**. A match with an earlier lead of the same scan is merged into it, with source links joined. A match with a printed story is filed as **Held**, not Open (#336).
+- **Fast Kill is a small Undo strip.** The row Kill button, X key and Today row Kill no longer show reason chips. They show one line, **Lead killed.**, with **Undo**, for 8 seconds. The strip does not move when the mouse is over it, so the close box is easy to click. On a phone it leaves a 16 px gap on each side (#336).
+- **Bulk Kill does not ask why.** Ticking rows and pressing Kill kills at once and shows one strip, **Killed N leads.**, with **Undo** (#336).
+- **The full Kill paths remain.** More menu -> **Kill with a reason** and the story page's **Kill this lead** still open the full **Kill this lead** dialog with quick fills, the editor's own words and a link. **Kill as duplicate** remains in the More menu (#336).
+
+### Operations
+
+- **Promote logging no longer crashes the verify step.** `ops/promote.ps1` no longer crashes while writing its log (finding G27-PR-1) (#335).
+
+### Release check
+
+- The Test walk on 2026-10-28 passed all 8 kill doors, phone, and Publish. The live paper received 0.6.85 on 2026-10-28.
 
 ## 0.6.84 — 2026-10-27
 
