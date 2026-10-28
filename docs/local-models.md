@@ -10,7 +10,8 @@ incur charges. LM Studio, on-device Ollama models, and llama.cpp remain availabl
 
 Choose **Local model** for a Story, Scan, Opinion, Dark Desk, or forced-model
 run, then choose the exact model below it. TownReporter remembers a separate
-model for each of those five jobs. An older, unscoped saved choice remains a
+model for each of those five jobs, and (since 0.6.84, migration 0129) for AI
+follow-ups and for document reading (OCR) as well. An older, unscoped saved choice remains a
 fallback until the editor makes a choice for that job. Refresh the catalog if
 the Ollama model list changes.
 
@@ -36,6 +37,12 @@ code fence (which TownReporter's JSON extractor accepts), and GLM 5.3 Flash
 returned reasoning prose instead of the requested JSON. This is why the
 initial practical choices are DeepSeek for scan/extraction and GLM 5.2 for
 short-form story prose; they remain editorial aids, not autonomous publishers.
+
+Since D160 (Oct 19 2026) the paper pins DeepSeek v4.1 Flash to the exact Ollama
+tag `deepseek-v4.1-flash:1017-cloud` (migration 0152 moves saved picks of the
+floating `:cloud` tag to it). It is the default model of the paper and the first
+rung of Automatic, and the desk runs it inside the Claude Code program. The
+comparison above used the floating tag and is kept as the dated record it was.
 
 Install [Ollama](https://ollama.com). Run `ollama pull gemma4:12b` (or any
 model you like). Start TownReporter. The Writing model picker lists it under
@@ -196,11 +203,11 @@ Story routing and a separate Opinion frontier path:
 
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, or Claude Code), or an explicit picker choice including Local model                  |
-| Story — Automatic  | configured `LLM_*` gateway when present; otherwise Automatic's ladder — DeepSeek v4.1 Flash, then the local model this computer has loaded if there is one, then Codex Terra |
-| Story — named      | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; Local model; or a saved custom connection is tried first; recognized technical failures move only the unfinished call |
-| Dark — Automatic   | configured gateway when present; otherwise the same ladder — DeepSeek v4.1 Flash, then the local model this computer has loaded if there is one, then Codex Terra; technical retry is per failed call and does not replay searches or completed reads |
-| Opinion            | Automatic uses Codex Sol → Claude Sonnet; a named choice is tried first and the same technical-only per-call retry applies |
+| Scan and Dark Desk | Automatic: a configured `LLM_*` gateway when present; otherwise the ladder below. Or an explicit picker choice including Local model |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise Automatic's ladder — DeepSeek v4.1 Flash 1017, then the local model this computer has loaded if there is one, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5. Gemini is never on it. |
+| Story — named      | Codex Astra 6, Luna 6, Sol 6.1 (balanced) or Sol 6.1; Claude Fable 5.1, Opus 5.5, Sonnet 5.5 or Haiku 5.5; Gemini 3.8 Flash or 3.1 Pro; DeepSeek v4.1 Flash 1017; Local model; or a saved custom connection is tried first; recognized technical failures move only the unfinished call (an explicit Local model pick fails closed and is never handed to a cloud model) |
+| Dark — Automatic   | configured gateway when present; otherwise the same ladder — DeepSeek v4.1 Flash 1017, then the local model this computer has loaded if there is one, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; technical retry is per failed call and does not replay searches or completed reads |
+| Opinion            | Automatic uses DeepSeek v4.1 Flash → Codex Sol 6.1 → Claude Sonnet 5.5 (the local model is not on it); a named choice is tried first and the same technical-only per-call retry applies |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
@@ -327,7 +334,7 @@ Two things it deliberately does NOT get for free:
   silent: the planner falls back to keyword matching without a word.
 
 **Opinion offers it too.** Opinion shares the provider registry with the other
-desks: Automatic retains its documented Codex-to-Claude path, while every named
+desks: Automatic uses Opinion's own ladder (DeepSeek v4.1 Flash, Codex Sol 6.1, Claude Sonnet 5.5), while every named
 Codex and Claude model, Local model and custom choice is the requested first
 runtime. A recognized technical failure can move only the unfinished call and
 records requested and actual model and effort. A provider refusal or invalid
@@ -402,7 +409,7 @@ server, move one to a free port and set `LLM_BASE_URL` for a moved model server.
 
 **The default.** With no saved choice, "Local model" defaults to **Use whatever
 is loaded** whenever a local server reports a model in memory — LM Studio first,
-then Ollama, the same order the Automatic ladder uses. With nothing loaded, it
+then Ollama, the same order the Automatic ladder uses. (The ladder's own Local rung asks LM Studio only: with nothing loaded there it is skipped and the run says "Local model skipped: nothing loaded in LM Studio"; the desk never loads a model.) With nothing loaded, it
 keeps the older default: the preferred cloud model for that job, else the first
 model on a discovered list, and the help line under the picker says which model
 it settled on and why.
@@ -472,9 +479,9 @@ Claude provide vision paths when their prerequisites are met. A text-only
 provider is refused for this path with the reason stated. OCR starts with the model selected for the run and,
 after a recognized technical failure, can try the next ready vision-capable
 cloud runtime. **Unattended OCR has its own order, and it is not the writing
-ladder:** Codex Terra, then Claude, then a local model marked `· vision`. The
-writing ladder for stories and scans (DeepSeek v4.1 Flash, then the local model
-this computer has loaded, then Codex Terra) never re-points OCR. Claude here uses Sonnet or
+ladder:** Codex Sol 6.1 (balanced), then Claude Sonnet 5.5, then a local model marked `· vision`. The
+writing ladder for stories and scans (DeepSeek v4.1 Flash 1017, then the local model
+this computer has loaded, then Codex Sol 6.1 balanced, then Claude Sonnet 5.5) never re-points OCR. Claude here uses Sonnet or
 Haiku, never an automatic Opus default. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model

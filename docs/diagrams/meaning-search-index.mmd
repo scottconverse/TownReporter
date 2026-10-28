@@ -1,0 +1,27 @@
+flowchart LR
+    subgraph write["Background fill (built server, unless TOWNREPORTER_MEANING_SEARCH=off)"]
+        CLK["Clock<br/>3 min after boot, then each minute"] --> EF["32 evidence excerpts"]
+        CLK --> SF["6 published stories<br/>1 uploaded file"]
+        EF --> MODEL["MiniLM-L6-v2<br/>384 numbers, in process"]
+        SF --> MODEL
+        MODEL --> EV[("evidence_vectors<br/>excerpt md5 → vector")]
+        MODEL --> SV[("story_meaning_vectors<br/>kind · owner · part → vector")]
+        PR["Hourly prune"] --> EV
+        PR --> SV
+    end
+
+    subgraph read["Story page → Find evidence"]
+        Q["Editor types a few words"] --> EXACT["Exact words<br/>artifact_chunks, trigram index"]
+        Q --> QV["Embed the query"]
+        QV --> COS["Cosine against stored vectors<br/>minimum score 0.46"]
+        EV --> COS
+        SV --> COS
+        COS --> JOIN["Join each hit back to a live row"]
+        JOIN --> LISTS["Close in meaning<br/>Our past stories close in meaning"]
+    end
+
+    EXACT --> OUT["Lists on the desk"]
+    LISTS --> OUT
+
+    style EV fill:#1c1a17,color:#fff
+    style SV fill:#1c1a17,color:#fff

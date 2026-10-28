@@ -1,7 +1,8 @@
 # Stats and saved reports
 
-**Development status:** this feature is implemented in the development tree;
-deployment and production acceptance are still pending.
+**Status:** shipped since 0.6.73 and part of 0.6.84. The server checks for
+new reports from its own clock (see below); the hourly task is
+`tickStatsReports` in `src/lib/news/stats-reports.server.ts`.
 
 Open **Desk → Stats** as a signed-in editor. Stats counts anonymous page loads,
 not unique people or completed reads. It stores no cookie, fingerprint, IP
@@ -69,7 +70,9 @@ Lists show five rows initially, with **Show all N** for the rest. Weekly reports
 read **Week of Sept. 28** rather than ISO dates. The privacy and location panels
 keep their counting details under **How we count**.
 
-The server also checks automatically after startup and then hourly. It creates
+The built server also checks automatically one minute after startup and then
+hourly, on the same clock that runs the other background work (the daily source-yield refresh and
+the trial-source pass run on that same hourly tick). It creates
 the same completed-period files and skips files that already exist. This is an
 idempotent local archive, not a promise to reconstruct every period: if the
 installation was stopped or unavailable, older missed periods are not filled

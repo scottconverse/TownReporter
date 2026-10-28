@@ -5,20 +5,26 @@ flowchart TB
         TAPE["YouTube · public-access TV"]
         COUNTY["County · schools · utility"]
         REDDIT["r/longmont"]
+        MAIL["Newsletter mailbox<br/>(IMAP, optional)"]
     end
 
     subgraph machine["One machine you own"]
-        APP["TownReporter<br/>Nitro node-server"]
+        APP["TownReporter<br/>Nitro node-server + job clock"]
         DB[("PostgreSQL")]
         PW["Playwright Chromium"]
-        WD["Watchdog<br/>every 5 min"]
+        EMB["MiniLM meaning model<br/>(in process, desk only)"]
+        LO["LibreOffice<br/>(optional)"]
+        WD["Watchdog every 5 min<br/>(legacy install only)"]
     end
 
     subgraph models["Whichever model you point it at"]
-        CC["Claude Code CLI<br/>(no API key)"]
-        CX["Codex CLI<br/>(OAuth, restricted reporting tools)"]
+        CC["Claude Code CLI<br/>(also runs DeepSeek)"]
+        CX["Codex CLI<br/>(OAuth, full tools)"]
+        GM["Gemini (agy)<br/>named pick only"]
+        OL["Ollama<br/>DeepSeek v4.1 Flash 1017"]
+        LM["LM Studio<br/>the loaded local model"]
         API["Anthropic API"]
-        OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
+        OAI["Any OpenAI-compatible URL"]
     end
 
     READER(["Reader"])
@@ -28,7 +34,10 @@ flowchart TB
     APP <--> DB
     APP --> PW
     PW --> outside
+    APP --> EMB
+    APP --> LO
     APP --> models
+    CC -.relay.-> OL
     WD -.watches, restarts.-> APP
     APP --> TUNNEL["Cloudflare Tunnel"]
     TUNNEL --> READER

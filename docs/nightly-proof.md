@@ -39,6 +39,18 @@ durations, not guarantees. The artifact names `scan.kind` (`daily policy`),
 `scan.policySize` (12), and `testDatabase`, and reports attempted/read/blocked,
 leads, provider and model batches from the receipt.
 
+## Which model it uses
+
+The proof does not pick a model. The scan uses the saved daily policy's runtime
+and the draft uses whatever the story page preselects. The story page opens on
+Automatic, which resolves to the paper's default, DeepSeek v4.1 Flash 1017
+(effort None, run inside the Claude Code program), whenever that rung is ready
+(unverified for the proof's draft step; the artifact records what actually ran). The artifact's `provider` field is the job's
+recorded model choice. `scripts/live-pipeline-proof.mjs` has a small label table
+that still prints the picker id `codex-balanced` as "Codex Terra"; that is the
+old name of **Codex Sol 6.1 (balanced)**. Any id not in that table (for example
+`deepseek-flash`) is printed as written.
+
 ## Configuration
 
 Environment variables override these defaults for both a direct Node run

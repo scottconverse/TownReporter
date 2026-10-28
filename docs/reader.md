@@ -1,27 +1,71 @@
 # Reading TownReporter
 
-For TownReporter 0.6.83. The publication uses its configured name, town and visible sections. **Editor’s desk** stays in the public header on desktop and phones; it opens the desk for a signed-in editor and the sign-in flow for everyone else.
+For TownReporter 0.6.84. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
-The front page leads with the latest published story, more recent coverage, sections, local resources and Opinion. Select the publication name to return here from any reader page. **Editor’s desk** in the footer opens the signed-in desk or its sign-in screen. **Public news page** and the TownReporter logo in the desk return to the newspaper.
+![The front page: the lead story, the This week box, the story grid and the Opinion panel](images/01-front-page.png)
 
-Below the front page's lead and Opinion there is a **Latest stories** list: every story we have published, newest first, each row showing its section, headline, a line of summary, the date, the read time and the bookmark. It brings in more as you scroll, and a **Load more stories** button stays under the list for a keyboard, a slow connection or a browser without scripting; when you reach the oldest story it says you are at the first story we published.
+## The top of every page
+
+A yellow bar at the very top shows today’s date and the town (“Today in Longmont · Tue, Oct 27”). On the right of that bar:
+
+- **Search** opens the archive.
+- **Saved** (with a number once you have saved stories) opens your reading list.
+- **Dark mode** / **Light mode** switches the look in one press. The button names the look you will get.
+- **Aa Text size** opens **Reading preferences**.
+- **Editor’s desk** opens the newsroom’s desk for a signed-in editor and the sign-in page for everyone else. Readers can ignore it.
+
+Under the bar is the paper’s name. Select it to return to the front page from any page. On the front page, small links under the name (the town, **Nearby**, the county and the state) choose which ground to read, and the section links run across below. On a narrow screen, **Explore the publication** opens the section menu. **About the newsroom →** goes to the About page.
+
+## The front page
+
+From top to bottom:
+
+- **The lead story**, the newest story from the ground you have chosen, with its section, headline, a line of summary, the date and a read time, and **Read the story →**. Under it sit one or two more recent stories.
+- **This week**, a box beside the lead listing the paper’s newest stories from the last seven days, each with its weekday and headline. In a quiet week it is headed **Latest stories** and shows the newest stories of any age.
+- **A grid of the next six stories.**
+- **Around the region** (stories from outside the home town, when there are at least two) beside the **Opinion** panel with the paper’s newest editorial and **All opinion →**.
+- **Latest stories**, six more rows, newest first, each with its section, headline, a line of summary, the date, the read time and a bookmark. **All stories →** opens the whole archive.
+
+The front page does not scroll on forever. **All stories →** is the way to the rest.
 
 ## Find and save stories
 
-**Search stories** and **Explore the archive** open the complete published archive. Search for a name, place or phrase, choose a section, change newest/oldest order and use Previous/Next. Existing article addresses and section links still work. Empty results offer a route back and a way to clear filters.
+The archive (**Search** in the top bar, **Search the archive** in the footer, or **All stories →**) is titled **Find a story.** Type a name, a place or a phrase into **Search stories, names or places** and press **Search**. Words in the headline and summary are matched, and the story text too once you type three or more letters. It matches the letters you type, not their meaning. **Section** and **Sort** (**Newest first** / **Oldest first**) narrow the list. Twelve stories show per page, with **Previous** and **Next →**. If nothing matches, the page offers **Front page** and **Clear filters**. Every older story address and section link still works.
 
-The bookmark beside any story adds it to **Saved**. Select it again to remove the bookmark. Up to 500 bookmarks stay in this browser and publication; they do not sync between devices. An unpublished or deleted story no longer appears in the reading list.
+The **bookmark** beside any story adds it to **Saved**. Press it again to remove it. Up to 500 stories stay in this browser for this paper. They do not sync between devices, and a story that is later unpublished drops out of your list. Your reading list is at **Saved** and needs no account.
 
 ## Text size and appearance
 
-**Reading preferences** in the header and **Text size** on a story offer Normal and Large text plus Light/Dark appearance. Large text scales story text, headlines and deks. Preferences stay in this browser. On a narrow screen, **Explore the publication** opens the section menu.
+**Aa Text size** (and **Reading preferences** on a story) opens **Make yourself comfortable.** Choose **Normal** or **Large** story text and **Light** or **Dark** for the page, then **Done**. Preferences stay in this browser. Until you choose, the page follows your device’s light or dark setting.
 
-Story controls jump to the story, claims appendix when present, sources, corrections and related coverage. Source links open original records; **View captured version** opens the publication's retained record, which shows a short excerpt of the capture, when it was taken, its content hash and a prominent link to the original. The publication keeps the full capture for its own records and does not republish another outlet's article. Records with multiple observations offer comparisons and links to the underlying captures. The design does not manufacture claims, records or correction entries.
+## A story page
 
-**Share** copies the story address. **Copy credit and link** includes attribution. If clipboard access is unavailable, a dialog provides selectable text. **Follow with RSS** copies or opens the feed for your RSS reader.
+- **The top:** a trail back to the front page and the section, the headline, a line of summary, the paper’s name, the date and the read time. There is no person’s byline. Buttons: **Save**, **Share ↗** and **Aa Text size**.
+- **In this article** lists jump links: **The story**, **Claims and sources** (opinion pieces and others that have an appendix), **Sources & records**, **Corrections** and **Read next**.
+- **Dates in this story** is a box of dates found in the story’s records. It is not shown on the daily “Today in town” roundup.
+- **How we reported this** (the **Follow the evidence** band) shows each source: its title, who published it, the document date and when the paper captured it. **Current source** opens the original page. **View captured version** opens the paper’s saved copy; **Compare versions** appears when a record was captured more than once. If the original has disappeared, the card says so and the saved copy remains.
+- **Corrections & accountability** shows every correction on the story, each with its date, or says none have been posted. **File a correction →** takes you to the Corrections page with this headline filled in.
+- **Share the reporting.** Stories are free to reprint with credit and a link. **Copy credit & original link** copies the headline, “Originally published by <paper>” and the address. **Share ↗** opens **Share this story** with **Copy story link →**. If your browser blocks copying, a box shows selectable text.
+- **Keep reading** offers up to three other recent stories and **More in this section →**.
+
+**View captured version** shows a short excerpt of the paper’s copy, when it was captured, a content fingerprint and a prominent link to the original. The paper keeps the full capture for its own records and does not republish another outlet’s article. If a publisher asked for an excerpt to be taken down, the page says so.
+
+**Opinion pieces** carry the section tag **Opinion** and “OPINION:” at the front of the headline. They have no byline, and their sources appear in a **Claims and sources** appendix at the end.
+
+**Today in town, This weekend and Deadlines approaching** are routine roundups the paper prints from approved public calendars. **Today in town** lists the day’s events in time order (under **Morning**, **Afternoon** and **Evening** when there are six or more), then a **Source:** link to the calendar it came from. If the source changes later, a **Routine update** correction appears.
 
 ## Request a correction
 
-Select **File a correction** on a story to prefill its headline, or open **Corrections** from the footer. Explain what needs correcting; source details, your name and reply email are optional. Text remains in this tab after navigation or reload when browser storage is available.
+Select **File a correction →** on a story, or **Corrections** in the footer. The page is titled **Getting it right includes putting it right.** Fill in what needs correcting (required) and optionally the story’s headline or link, a supporting source, your name and a reply email. Your text stays in this tab after navigation or reload.
 
-**Open correction email** prepares a message to the address the publication configures under **Paper setup → Editor contact email** (the same address the About page prints). A publication that has not configured one is told so rather than given a guessed address. Review and send it in your email app. The website does not send email itself and never displays a false delivery confirmation. If no email app is configured, copy the text and email the displayed address directly. Submitted correspondence is not automatically published; the public correction log contains only corrections filed by the editor.
+**Open correction email →** prepares a message to the address the paper’s owner set as the **Editor contact email** (the same address shown on the About page). Review and send it in your own email app. The website does not send email itself and never claims it did: “This page has not sent your correction.” If no email app is set up, copy the text and write to the address shown. If the paper has not set an address, the page says so. Under the form, **Corrections to published stories** lists the newest 50 public corrections with their dates, each linking back to its story. Your email is not published automatically.
+
+## Follow the paper
+
+- **Follow with RSS** in the footer opens **New stories, in your reader.** with the feed address (`/feed`), **Copy feed address** and **Open feed ↗**. The feed carries the newest 40 stories with their headlines, links, dates and a summary line.
+- **About us** and **How we report** in the footer explain who runs the paper and how it works, in plain words.
+- The footer ends with the paper’s name, the TownReporter version and the location.
+
+## Your privacy
+
+The paper uses no cookies and no accounts and loads no outside scripts or fonts. It counts visits in total, never per person. Readers are never asked to sign in.

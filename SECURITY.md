@@ -60,8 +60,11 @@ not be named. There is no bug bounty.
 
 **In scope** — the code in this repository:
 
-- Authentication and session handling (`better-auth`, the `__Host-` cookie,
-  the bearer path for partitioned-cookie previews — `src/lib/auth/`).
+- Authentication and session handling (`better-auth`, the
+  `__Host-tr-auth.session_token` cookie — `src/lib/auth/`). Email and password
+  is the only sign-in. The Grok sign-in, the preview bearer path and the
+  federation code were removed in the 0.6.83 build; a way to bring any of them
+  back is a report.
 - The desk boundary: every desk and Dark Desk mutation runs through
   `deskMiddleware` (`src/lib/news/desk-auth.ts`), which resolves the user
   from the session and requires owner or editor membership
@@ -76,6 +79,18 @@ not be named. There is no bug bounty.
   way to make those differ, or to reach a private range, loopback,
   link-local, or a mapped IPv6 loopback (`::ffff:127.0.0.1`), is a report.
 - The cron endpoint (`/api/cron/monitors`) and `CRON_SECRET` handling.
+- The reading of untrusted files and mail the desk is handed:
+  - Excel, PowerPoint and LibreOffice files are converted by headless
+    LibreOffice in a temporary profile with macros off, one conversion at a
+    time, with a two-minute limit (`src/lib/news/libreoffice.server.ts`). A way
+    to run a macro, or to make the conversion reach outside its temporary
+    folders, is a report.
+  - The newsletter mailbox is opened read-only, limited to 5 MB a message, with
+    HTML sanitised and no remote content loaded (`src/lib/news/newsletter-*.ts`).
+    The mailbox password is stored encrypted.
+  - The one guarded Chromium read the scan tries when a public site refuses an
+    ordinary request. It never submits a form, enters a credential or solves a
+    challenge.
 - The Opinion voice-file boundary: only a validated path reaches a command
   line. Anything that gets file contents, a relative path, or a path inside
   the repository onto that command line is a report.
@@ -124,6 +139,12 @@ Context, so a report can aim at what is not yet covered:
   trusting an earlier DNS answer.
 - Mapped IPv6 loopback (`::ffff:7f00:1` / `::ffff:127.0.0.1`) is recognized
   and blocked (`src/lib/news/url-guard.ts`).
+- Every override of a desk warning ("Publish anyway", "Kill anyway", and the
+  rest) writes the editor, the time, the warning key and the target to the audit
+  trail, so a warning that was passed over can be read back.
+- The server refuses to serve a database that is behind its migrations (HTTP
+  503, `server/middleware/00-schema-current.ts`), so a half-updated install
+  does not serve a schema the code does not expect.
 - The default test suite (`npm test`) is offline by construction, and a test
   enforces that no default test can reach a live model unasked
   (`scripts/newsroom-security.test.mjs`).
@@ -137,19 +158,30 @@ evidence. Text inside them does not grant an agent additional tools or change
 the reporting job's machine permissions. TownReporter selects the tool surface
 in application code before sending the prompt.
 
-- The Codex CLI runs with its user configuration ignored, shell, computer,
-  browser, apps, plugins, multi-agent and hooks disabled, a read-only sandbox,
-  and ephemeral session state. Web search is enabled only by a code-selected
-  research path; source text cannot turn it on.
-- Claude Code runs restricted with strict MCP configuration, no inherited
-  settings or session persistence, and a fixed allow-list. The allow-list
-  rejects tools outside `WebSearch` and `WebFetch`; calls that need no tools
-  hide the tool surface entirely. OCR is the narrow exception: it exposes only
-  `Read` for the single temporary page image TownReporter created for that
-  OCR call.
-  Opinion calls expose only `WebSearch`; `WebFetch` is absent from their tool
-  definitions as well as their permission list, so it cannot transmit pasted
-  source material through a fetch URL or prompt.
+- Since 0.6.84 the command-line models run with their **full tool set** and
+  permission prompts turned off (decision D149, Oct 18 2026). The tool surface
+  is no longer a security boundary; the boundary is the machine account the
+  server runs under, and what that account can reach.
+  - The Codex CLI runs with `--dangerously-bypass-approvals-and-sandbox`,
+    `--search`, `--ephemeral`, and hooks, memories, project docs and
+    notifications turned off per call (`src/lib/news/ai-codex.server.ts`).
+  - Claude Code runs with `--dangerously-skip-permissions`,
+    `--permission-mode bypassPermissions`, no session persistence, and hooks,
+    memory and personal CLAUDE.md files turned off per call. Its built-in tools
+    and configured MCP servers stay loaded
+    (`src/lib/news/ai-claude-code.server.ts`, `buildClaudeCodeArgs`).
+  - The Gemini CLI runs with `--dangerously-skip-permissions` and slash
+    commands turned off (`src/lib/news/ai-gemini-cli.server.ts`).
+  - Run the server under an account that holds only what the newsroom needs.
+    Text inside a fetched record that tries to steer an agent is a report.
+- DeepSeek v4.1 Flash runs inside the same Claude Code CLI, with no MCP servers loaded, through
+  a small relay the server starts on `127.0.0.1` with an operating-system chosen
+  port (`src/lib/news/deepseek-relay.server.ts`). The relay is a boundary: it
+  strips the incoming auth, API-key and cookie headers, forwards only the
+  route's own bearer token, and sets the thinking budget from the run's
+  effort (off at the default, effort none). A way to reach it from
+  another machine, or to make it forward an operator credential, is a report.
+  `TOWNREPORTER_CLAUDE_CODE=0` sends DeepSeek by plain HTTP instead.
 - OpenAI-compatible and Anthropic API calls, including local-model calls,
   receive text prompts without tool or function definitions. TownReporter
   performs source search and fetching itself through its guarded application

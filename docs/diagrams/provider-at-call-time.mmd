@@ -1,14 +1,15 @@
 flowchart TB
-    CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
-    KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
+    CALL["A model-backed desk action"] --> KIND{"Story / Scan / Dark picker?"}
+    KIND -->|yes: Automatic| Q1{"LLM_BASE_URL configured?"}
     Q1 -->|yes| OAI["Try that gateway first"]
-    Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
-    KIND -->|yes: named choice| ONE["Try that recorded provider first"]
-    OAI --> SAVE["Persist effective provider on job"]
+    Q1 -->|no| READY["First ready rung<br/>DeepSeek v4.1 Flash 1017<br/>then the loaded Local model<br/>then Codex Sol 6.1 balanced<br/>then Claude Sonnet 5.5"]
+    KIND -->|yes: named choice| ONE["Try that recorded provider first<br/>(Gemini is only ever a named choice)"]
+    OAI --> SAVE["Persist the effective provider on the job"]
     READY --> SAVE
     ONE --> SAVE
     SAVE --> RUN["Selected run uses that provider"]
-    RUN -->|quota, unavailable, login lapse, timeout or no output| NEXT["Retry only the unfinished call<br/>on the next ready runtime"]
-    RUN -->|refusal or unrecognized error| SAME["Stop and show the failure"]
+    RUN -->|"quota, unavailable, login lapse,<br/>timeout, no output or unreadable reply"| NEXT["Retry only the unfinished call<br/>on the next ready rung,<br/>write the failover note"]
+    RUN -->|"content refusal or unrecognised error"| SAME["Stop and show the failure"]
+    RUN --> REC["Write the run receipt<br/>requested · actual · effort · skipped rungs"]
 
     style SAVE fill:#1c1a17,color:#fff

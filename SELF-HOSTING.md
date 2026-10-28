@@ -1,8 +1,8 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.83**
+Repository documentation version: **0.6.84**
 
-Repository baseline reviewed 2026-09-30: **0.6.82**, whose release commit is `7cff3d6c`; GitHub published v0.6.82 on 2026-09-28, and `main` is now ahead of that release. See the [0.6.82 release guide](docs/releases/0.6.82.md) for its recorded source and package evidence. Publication does not establish production deployment.
+Release baseline: **0.6.84**, released 2026-10-27 (tag `v0.6.84`). On 2026-10-27 the live paper runs source commit `d5a9ca04`, the 0.6.84 release candidate. The release assets are `TownReporter-0.6.84-windows-x64.zip`, its `.zip.json` metadata and its `.zip.sha256` sidecar. See the [release guides](docs/releases/README.md) for each release's recorded source and package evidence. Publication does not establish production deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -13,7 +13,7 @@ remote development machine as production. The paper is hosted at
 **https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
 Tunnel. “This machine” below refers to Halo.
 
-Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.83.md) covers the reviewed baseline and records its evidence boundaries; it does not rewrite the dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
+Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [release guides](docs/releases/README.md) cover each reviewed baseline and record their evidence boundaries; it does not rewrite the dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
 
 Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
 [TODO](TODO.md). Staging and promotion below require a Halo-local operator.
@@ -130,12 +130,12 @@ type it, and the owner is seated.
 
 | Task                          | When        | Does                                                                                                                                |
 | ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `TownReporter`                | at logon    | starts Postgres, waits for a real query, applies migrations, serves the app; exits non-zero if it cannot |
-| `TownReporter Tunnel`         | at logon    | connects the Cloudflare Tunnel                                                                                                      |
+| `TownReporter`                | at logon, and at boot when registered elevated | starts Postgres, waits for a real query, applies migrations, serves the app; exits non-zero if it cannot |
+| `TownReporter Tunnel`         | at logon, and at boot when registered elevated | connects the Cloudflare Tunnel                                                                                                      |
 | `TownReporter Monitors`       | every 5 min | rechecks watched sources, drains desk jobs                                                                                          |
 | `TownReporter Watchdog`       | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; runs the logon task itself if it failed at boot; appends to `logs/watchdog.log` when there is something to say |
 | `TownReporter Restart`        | on demand   | stops and starts the paper                                                                                                          |
-| `TownReporter Nightly Proof`  | daily 03:30 | runs a real Scan and Draft against `townreporter_dev`; never publishes ([nightly proof](docs/nightly-proof.md))                      |
+| `TownReporter Nightly Proof`  | daily 03:30 | runs a real Scan and Draft against the Test server on port 3400; never publishes ([nightly proof](docs/nightly-proof.md))                      |
 | `TownReporter Tunnel Restart` | on demand   | stops and starts the tunnel                                                                                                         |
 | (Postgres)                    | —           | started by the first task, not separately registered                                                                                |
 
@@ -170,30 +170,35 @@ learned the hard way: a process cannot restart itself, and a tunnel restart
 cannot deliver its own result over the tunnel it has just killed. The Server
 page at `/desk/ops` triggers them and reads the watchdog log.
 
-**After a reboot it comes back when you log in, not before.** Both start
-triggers are _at logon_ for HALO\scott, and the two five-minute tasks are
-interactive as well, so a machine sitting at the lock screen runs nothing. Log
-in and everything starts on its own. Tested by stopping the lot and letting the
-tasks restart it.
+**After a reboot, it depends on how the tasks were registered.** Run
+`ops\install-tasks.ps1` from an **elevated** shell and the paper and the tunnel
+also start **at boot**, whether or not anyone signs in; all six tasks then run
+as this user with no stored password (S4U, run level Limited). The script
+reads the Postgres port from the cluster's config files instead of asking
+`postgres.exe`, because an S4U task for an administrator still gets a full
+admin token and `postgres.exe` refuses one; `pg_ctl` starts the server under a
+restricted token on its own. Run the script **without** elevation and the tasks
+keep the older at-logon form (and the script says "Boot start was not set up"),
+so a machine sitting at the lock screen runs nothing until someone signs in.
 
-If the paper ever needs to survive a reboot with nobody logging in, the tasks
-have to run as S4U ("whether user is logged on or not") — which is a real
-change, not a checkbox, because the desk shells out to the Claude Code and
-Codex CLIs and those read the operator's login out of their profile.
+Whether the Claude Code and Codex logins that the desk shells out to are
+readable by a task that runs with nobody signed in is not tested in this
+repository (unverified); sign in once interactively after a boot start and
+check **Server → Writing models**.
 
 ### What starts after a reboot
 
-In order, once you log in. Nothing here runs before the logon.
+In order. With the tasks registered elevated, the first four rows start at boot; otherwise they wait for the logon.
 
 | What                             | Started by                                   | When                          |
 | -------------------------------- | -------------------------------------------- | ----------------------------- |
-| Postgres on 5433                 | the `TownReporter` task (`ops/start-townreporter.ps1`) | logon, first                  |
-| The paper                        | the same task, after Postgres **answers a query** | logon, a few seconds later    |
-| The Reddit reader (Redlib)       | the same task, detached, then the watchdog   | logon, in the background      |
+| Postgres on 5433                 | the `TownReporter` task (`ops/start-townreporter.ps1`) | boot or logon, first          |
+| The paper                        | the same task, after Postgres **answers a query** | boot or logon, a few seconds later |
+| The Reddit reader (Redlib)       | the same task, detached, then the watchdog   | in the background             |
 | Ollama                           | your own Startup shortcut (`Ollama.lnk`)     | logon, by Windows, not by us  |
-| The Cloudflare Tunnel            | the `TownReporter Tunnel` task               | logon                         |
+| The Cloudflare Tunnel            | the `TownReporter Tunnel` task               | boot or logon                 |
 | Whatever has stopped since       | the `TownReporter Watchdog` task             | every 5 minutes               |
-| A logon start that failed        | the `TownReporter Watchdog` task, by running `\TownReporter` again | 3 minutes after the failure |
+| A start that failed              | the `TownReporter Watchdog` task, by running `\TownReporter` again | 3 minutes after the failure |
 | LM Studio                        | nothing here                                 | not started or touched at all |
 
 Three of these are optional and their absence is a supported state, not a
@@ -365,19 +370,28 @@ trusted automatically.
 
 No API key. When an editor selects a Claude model, or Opinion's Automatic
 reaches its final Claude Sonnet rung, the desk shells out to the local **Claude
-Code** login, so the subscription powers it. Claude Sonnet is on Opinion's
-ladder only; stories, scans and Dark Desk walk DeepSeek v4.1 Flash, then the
-local model this computer has loaded if there is one, then Codex Terra, and do not select
-Claude on their own. No automatic ladder selects Opus; Opus is an
-explicit editor choice. The CLI may also make a small internal Haiku call that
-cannot be turned off from here.
+Code** login, so the subscription powers it. The same Claude Code program also
+runs DeepSeek v4.1 Flash 1017, the paper's default model: it is pointed at a
+loopback relay that talks to Ollama (`docs/D153-deepseek-claude-code.md`).
+Stories, scans and Dark Desk walk DeepSeek v4.1 Flash 1017, then the local model
+this computer has loaded if there is one, then Codex Sol 6.1 (balanced), then
+Claude Sonnet 5.5. Gemini is never on that ladder (removed in PR 331, Oct 27 2026) and
+stays a named pick. Opinion walks DeepSeek, Codex Sol 6.1, then Claude Sonnet
+5.5. No automatic ladder selects Opus; Opus is an explicit editor choice. The
+CLI may also make a small internal Haiku call that cannot be turned off from
+here.
 
-The harness is stripped on every call — importantly `--setting-sources ""`,
-which keeps your personal `CLAUDE.md` and skills **out** of the newsroom's
-prompts. Without it your developer instructions get prepended to every story.
+Each call is started with your personal `CLAUDE.md` files excluded, hooks off,
+automatic memory off and the default output style, so your developer
+instructions are not prepended to every story. Since D149 (Oct 18 2026) the call
+runs with the program's **full tool set and its permission prompts off**; it is
+not read-only, and it can use whatever tools and MCP servers that Claude Code
+installation has configured (the DeepSeek road starts with no MCP servers). The
+child gets an allow-listed environment, not a copy of the server's, and starts in
+the system temporary folder.
 
 ```
-# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
+# ANTHROPIC_MODEL=...               # optional configured-Claude override; Automatic never selects Opus
 # TOWNREPORTER_CLAUDE_CODE=0        # take the CLI out of the chain entirely
 ```
 
@@ -388,30 +402,38 @@ the run.
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or the shared ladder — DeepSeek v4.1 Flash, then the local model (whichever one LM Studio has loaded), then Codex Terra; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
-| Daily scan          | one named Codex or Claude model, Local model, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
-| Story — Automatic   | configured `LLM_*` first when present; otherwise the shared readiness ladder — DeepSeek v4.1 Flash, then the local model (whichever one LM Studio has loaded), then Codex Terra | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
-| Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
-| Opinion             | Automatic starts Codex Sol → Claude Sonnet; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
+| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or the shared ladder — DeepSeek v4.1 Flash 1017, then the local model (whichever one LM Studio has loaded), then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; named choices are tried first | technical recovery retries only the unfinished call (Dark Desk can switch mid-round) and records requested/actual model and effort |
+| Daily scan          | one named model, Local model, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
+| Story — Automatic   | configured `LLM_*` first when present; otherwise the shared readiness ladder above | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
+| Story — named       | Codex Astra 6, Luna 6, Sol 6.1 (balanced) or Sol 6.1; Claude Fable 5.1, Opus 5.5, Sonnet 5.5 or Haiku 5.5; Gemini 3.8 Flash or 3.1 Pro; DeepSeek v4.1 Flash 1017; Local model; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
+| Opinion             | Automatic starts DeepSeek v4.1 Flash → Codex Sol 6.1 → Claude Sonnet 5.5; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
 
-For ordinary Story calls, Codex uses the signed-in account only to authenticate
-its CLI requests; the call does not inherit the operator's full Codex setup.
-Each call ignores Codex user configuration, starts from the system temporary
-directory, runs ephemerally with a read-only sandbox, and disables shell,
-computer, browser, apps, plugins, multi-agent and hook features. Built-in web
-search is added only when the application's trusted caller requests research.
-That is an application-level tool boundary, not an operating-system security
-sandbox: the reporting process still runs as the Windows account, and the
-read-only setting does not by itself restrict which files that account can read.
-Assignments travel over stdin; Opinion loads the complete voice through the native instruction-file setting. Timeout cleanup targets only
-the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
-does not read or store the token.
+The Codex and Gemini programs run the same way as Claude Code: with their full
+tool set and with approvals and sandboxing switched off (Codex is started
+`--ephemeral`, with project docs, developer instructions, personality, hooks and
+memories turned off, in a per-call temporary folder; Gemini in a fresh empty
+folder). Earlier versions of this guide described a read-only Codex sandbox;
+that was true of older builds and is not true now. This is an
+application-level choice of what to load, not an operating-system sandbox: the
+reporting process runs as the Windows account that runs the paper and can reach
+whatever that account can reach. Assignments travel over stdin; Opinion loads the
+complete voice through the native instruction-file setting. Timeout cleanup
+targets only the spawned PID tree. If OAuth expires, open Codex and sign in
+again; the app does not read or store the token.
+
+Two background jobs need no chat model. **Routine editions** (library, parks,
+event, registration and collection notices from owner-approved sources) run on
+the app's own clock through fixed templates. **Search by meaning** loads a small
+embedding model (MiniLM-L6-v2) inside the server and caches it under
+`<data root>/models`; it is not bundled, so the first use needs internet once.
+Set `TOWNREPORTER_MEANING_SEARCH=off` to turn it off. See Parts 4 and 5 of
+[the manual](docs/manual.md).
 
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
 incomplete bodies before draft storage. The Opinion picker offers Automatic,
-Codex Astra, Sol, Terra, and Luna; Claude Fable, Opus, Sonnet, and Haiku; Local model; and custom connections;
-Opinion's Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
-or Publish action.
+every named Codex, Claude and Gemini model, DeepSeek v4.1 Flash, Local model, and
+custom connections; Opinion's Automatic can move down its own ladder once when a
+rung is unavailable. A failed request has no draft or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
 no provider contacted. Its fail-closed launcher removes any inherited
@@ -625,6 +647,16 @@ start that skipped that step.
 against a copy of real production data and serves it locally so the changed
 screens can be walked before anything is promoted. See `docs/staging.md`.
 
+**The three places a build lives.** Dev (staging) is port 3100 with
+`townreporter_dev`, a restore of the newest backup, started by
+`ops\stage.ps1`. The Test tier is a fuller throwaway server on port 3400 with a
+database `townreporter_test_<yyyyMMdd_HHmmss>` on Postgres port 5547 (role
+`tr_test_admin`); full walks including Publish, and the nightly proof, run
+there, and `scripts/nightly-proof-config.mjs` refuses any other shape. How the
+Test server itself is created is not in this repository's scripts (unverified).
+Production is port 3000 behind the tunnel and is never built or migrated while it
+serves.
+
 1. Make and verify changes in
    `C:\Users\scott\Desktop\Code\townreporter-dev`, with the development or a
    disposable database. Before building there, confirm no process is serving
@@ -693,9 +725,12 @@ So the promotion copies the database before it builds:
   rollout fails, the database it was serving becomes
   `<database>_failed_<same stamp>` and the copy takes its name back, so the
   paper is serving exactly the data it had before the promotion started.
-  **Nothing is ever deleted**, by the promotion or by anything in this
-  repository. Old copies and `_failed_` databases are the owner's to remove
-  by hand; until they are, they take disk.
+  **No data is deleted by a failed rollout**: the failed database is kept under its
+  `_failed_` name. `_failed_` databases are the owner's to remove by hand; until they are,
+  they take disk. After a **good** promotion, older `_prerollout_` copies of
+  this database beyond the newest three are dropped (D216); the copy this run
+  made is never dropped, and a prune problem is logged and never changes the
+  promotion's result.
 - **When.** After the app is stopped and everybody has finished connecting to
   the database, because PostgreSQL will not copy a database anybody is
   connected to. The script waits up to 30 seconds for the connections to
@@ -721,8 +756,8 @@ So the promotion copies the database before it builds:
   the check asks for that plus a margin of a quarter of the database or 2 GB,
   whichever is larger. For a 570 MB paper that is about 2.6 GB free (570 MB
   for the copy itself, 2 GB of margin). A failed rollout uses no more: the
-  database that was live is renamed, not duplicated. Copies are never removed
-  automatically, so the free space they take is the owner's to reclaim.
+  database that was live is renamed, not duplicated. Only the three newest copies are kept after a good promotion, so
+  plan for up to three copies plus any `_failed_` databases.
 - **What it costs the machine.** `CREATE DATABASE ... TEMPLATE` forces a
   checkpoint on the whole Postgres cluster, so every other database on the
   box waits for it. Measured on a throwaway Postgres 18.6 with nobody
@@ -901,4 +936,4 @@ jobs. That is why self-hosting is the default.
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet 5.5. Claude and Codex read the complete configured voice using native instruction-file options and research with it in hand in one run; DeepSeek, Local model and saved connections have no web tools, so the desk searches and reads for them. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and is flagged for completion before publication. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.

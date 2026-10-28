@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.83](releases/0.6.83.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.6.84](releases/README.md)** (released 2026-10-27, tag `v0.6.84`; the release assets are `TownReporter-0.6.84-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -14,9 +14,10 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
+| **A model**                 | Every writing picker offers the same list: Automatic; DeepSeek v4.1 Flash 1017; Codex Astra 6, Luna 6, Sol 6.1 (balanced) and Sol 6.1; Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5; Gemini 3.8 Flash and 3.1 Pro; Local model; and saved custom connections. The paper's default is DeepSeek v4.1 Flash 1017. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
+| **Optional tools**          | LibreOffice (reads Excel, PowerPoint and LibreOffice files), `yt-dlp` and `ffmpeg` (meeting capture), `textflowkit` (speech-to-text for captionless meetings), an IMAP mailbox (newsletters). Each is detected; none is required. The model section below and [Part 3 of the manual](manual.md#part-3--running-it) say how each is found. |
 
 Windows, macOS, and Linux all work.
 
@@ -48,7 +49,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk records its per-run choice first. A recognized technical failure can retry only the unfinished call on the next ready runtime and records requested/actual model and effort; a content refusal is terminal. Unattended ladders use Codex first and Claude Sonnet last, never Opus. |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk records its per-run choice first. A recognized technical failure can retry only the unfinished call on the next ready runtime and records requested/actual model and effort; a content refusal is terminal. Automatic walks DeepSeek v4.1 Flash 1017, the loaded Local model, Codex Sol 6.1 (balanced), then Claude Sonnet 5.5 — never Opus, and never Gemini (a named pick only). |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -125,8 +126,8 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 | #   | Set this                                      | What runs                                                                   |
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
 | 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
-| 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet is the last rung of Opinion's Automatic only |
-| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer (whichever one LM Studio has loaded), then Codex Terra; Opinion walks DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet |
+| 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet 5.5 is the last rung of every Automatic ladder |
+| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash 1017, then the local model on this computer (whichever one LM Studio has loaded), then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; Opinion walks DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet 5.5. Gemini is on neither ladder. |
 
 There is no fourth rung. Grok (xAI) was removed as a provider: `XAI_API_KEY`
 is ignored, the SuperGrok sign-in is gone, and an install that still sets the
@@ -162,7 +163,7 @@ codex login     # for Codex
 ```
 
 ```
-# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
+# ANTHROPIC_MODEL=...             # optional configured-Claude override; Automatic never selects Opus
 # CLAUDE_CLI_PATH=...             # only if the binary is somewhere unusual
 # TOWNREPORTER_CLAUDE_CODE=0      # take the CLI out of the chain entirely
 # TOWNREPORTER_CODEX=0            # same switch for the Codex CLI
@@ -170,14 +171,14 @@ codex login     # for Codex
 
 Two things worth knowing:
 
-- **Claude Code is constrained too.** TownReporter omits the operator's `CLAUDE.md`, skills, plugins and MCP configuration, starts the CLI outside the application tree in restricted safe mode, and allows only `WebSearch` and `WebFetch` for a caller-authorized research request. Planning calls hide tools; OCR reads one generated temporary page. Reporting does not receive shell, arbitrary file, browser or agent tools.
+- **Claude Code runs with its full tool set.** Since D149 (Oct 18 2026) every call to the Claude, Codex and Gemini programs has their full tool set and permission prompts off. TownReporter excludes the operator's `CLAUDE.md` files, hooks and auto memory, starts the CLI in the system temporary folder, and gives it an allow-listed environment (no database URL, auth secret or other providers' keys); it still loads whatever settings, plugins and MCP servers that Claude Code installation has configured, except on the DeepSeek road, which loads none. This is not a sandbox. Run the paper under an account whose reach you are willing to give a model. Older versions of this guide described a restricted, read-only mode; that is no longer true.
 - **It is slower than an API.** The CLI spawns a process and reloads a fixed preamble per call — a couple of seconds at best, longer for a real prompt. A draft takes minutes rather than seconds. Time budgets adjust automatically; you do not need to tune anything.
 
 #### Claude by API key
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
+# ANTHROPIC_MODEL=...             # optional configured-Claude override; Automatic never selects Opus
 # ANTHROPIC_EFFORT=high           # low | medium | high | xhigh | max
 ```
 
@@ -215,7 +216,7 @@ Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code 
 #### Named custom connections
 
 For an endpoint used only when an editor explicitly selects it, open
-**Server → Add your own AI API**. Save a recognizable name, an HTTP(S) base
+**Models → Connections → Add your own AI API**. Save a recognizable name, an HTTP(S) base
 URL, an optional key (stored server-side), and a model discovered from `/models`
 or entered manually. **Test connection** checks the saved chat-completions
 path and reports capability information; it does not change Automatic. The
@@ -236,8 +237,8 @@ sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-uses DeepSeek v4.1 Flash first, then the local model this computer has loaded
-if there is one, then Codex Terra, and stores the first ready provider on the job before it is
+uses DeepSeek v4.1 Flash 1017 first, then the local model this computer has loaded
+if there is one, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5, and stores the first ready provider on the job before it is
 enqueued. Every pass in that Story run uses the same
 effective provider unless it reaches a usage limit, becomes unavailable,
 loses its login, or times out mid-run. Automatic then moves the unfinished
@@ -257,15 +258,19 @@ running on their default ports. See
 
 | Choice | Default identity | Prerequisite / boundary |
 | ------ | ---------------- | ----------------------- |
-| Codex Astra / Sol / Terra / Luna | `gpt-6-astra` / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
-| Claude Fable / Opus / Sonnet / Haiku | Claude CLI aliases `fable` / `claude-opus-5-5` / `sonnet` / `haiku` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+| DeepSeek v4.1 Flash 1017 | `deepseek-v4.1-flash:1017-cloud`, effort None by default | Ollama at `http://127.0.0.1:11434/v1` with the model available, and the Claude Code program (the desk runs DeepSeek inside it; without the program it falls back to plain HTTP with no tools). |
+| Codex Astra 6 / Luna 6 / Sol 6.1 (balanced) / Sol 6.1 | `gpt-6-astra` / `gpt-6-luna` / `gpt-6.1-sol` / `gpt-6.1-sol` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
+| Claude Fable 5.1 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5 | `claude-fable-5-1` / `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+| Gemini 3.8 Flash / 3.1 Pro (Pro plan) | `gemini-3.8-flash-<effort>` / `gemini-3.1-pro-<effort>` | The signed-in Gemini program `agy`. Never chosen by Automatic. |
 | Local model | whatever `LLM_MODEL` names | Discovered LM Studio/Ollama/llama.cpp model, or `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
-Compatibility overrides:
+Compatibility overrides (set only to change the model id sent to Codex;
+`..._TERRA_MODEL` is the historical name for the one behind **Sol 6.1
+(balanced)**, `..._SOL_MODEL` for **Sol 6.1**):
 
 ```env
-TOWNREPORTER_CODEX_TERRA_MODEL=gpt-5.6-terra
-TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
+# TOWNREPORTER_CODEX_TERRA_MODEL=
+# TOWNREPORTER_CODEX_SOL_MODEL=
 
 # Optional local Halo Research Gateway MCP search provider; unset keeps the
 # built-in fallback chain. Use only the unauthenticated loopback MCP endpoint.
@@ -275,27 +280,27 @@ TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
 Set `CODEX_CLI_PATH` or `CODEX_HOME` only if normal discovery cannot find the
 binary or OAuth state. TownReporter reuses the signed-in account for CLI
 authentication, but does not pass the operator's Codex setup into reporting
-calls. Each call ignores Codex user configuration, starts from the system
-temporary directory, runs ephemerally with a read-only sandbox, and disables
-shell, computer, browser, apps, plugins, multi-agent and hook features. Native
-web search is added only for a caller-authorized research call. Opinion's full
-voice is supplied separately through Codex's instruction-file setting. These
-are application-level CLI controls, not an operating-system security sandbox:
-the reporting process still runs as the Windows account, and read-only mode
-does not by itself restrict which files that account can read. Treat fetched
+calls. Each call ignores Codex project docs, developer instructions, personality, hooks and
+memories, runs ephemerally, and starts from a per-call temporary folder. Since
+D149 (Oct 18 2026) it runs with Codex's full tool set and with approvals and the
+sandbox switched off; earlier versions ran a read-only sandbox, and that is no
+longer true. Opinion's full voice is supplied separately through Codex's
+instruction-file setting. These are application-level choices of what to load,
+not an operating-system security sandbox: the reporting process runs as the
+Windows account that runs the paper and can reach whatever it can reach. Treat fetched
 pages, transcripts and documents as evidence, never as instructions to expand
 the reporting task.
 
-Opinion displays Automatic, all named Codex and Claude models, Local model,
-plus DeepSeek v4.1 Flash and saved custom connections. Codex Sol is selected by
-default. **Opinion's own
-Automatic** tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if
-the one before it is unavailable.
+Opinion displays Automatic, all named Codex, Claude and Gemini models, Local
+model, plus DeepSeek v4.1 Flash and saved custom connections, and opens on
+Automatic. **Opinion's own
+Automatic** tries DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet 5.5
+once if the one before it is unavailable.
 That is the Opinion ladder only, and DeepSeek is the one rung it shares with the
 desk's own ladder. Stories, scans and Dark Desk walk the desk's
-own Automatic ladder: DeepSeek v4.1 Flash, then the local model on this computer
-(whichever one LM Studio has loaded), then Codex Terra. Claude Sonnet is a hand pick on those
-surfaces. Explicit choices remain the requested first
+own Automatic ladder: DeepSeek v4.1 Flash 1017, then the local model on this computer
+(whichever one LM Studio has loaded), then Codex Sol 6.1 (balanced), then Claude
+Sonnet 5.5. Gemini is a hand pick on every surface. Explicit choices remain the requested first
 runtime and can move only an unfinished call after a recognized technical
 failure. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --
@@ -321,8 +326,10 @@ so they need re-ingest or operator review before page citation. Claude Opus
 a reachable provider is not a guarantee that a particular scan can be read. A
 text-only provider is refused for OCR with the reason stated, and the run moves
 to a vision path rather than trying a model that cannot read an image. Automatic
-OCR checks its established availability order — Anthropic API,
-Codex, Claude Code, then a discovered local vision model. A local model can only
+OCR follows its own order — Codex Sol 6.1 (balanced), then Claude Sonnet 5.5
+(an `ANTHROPIC_API_KEY` when one is set, otherwise the signed-in Claude Code
+program), then a discovered local vision model. DeepSeek and Gemini are not
+offered for OCR. A local model can only
 do it if it is a *vision* model -- pick one marked
 **`· vision`** in the picker (or in the Server page's local-model table).
 A historical built-runtime renderer check was performed with mock transcription. A single
@@ -379,8 +386,8 @@ Without the variable, the Opinion desk says so and spends nothing. Everything
 else on the desk works.
 
 The Opinion picker controls the writing model exactly. Named Claude choices use
-Fable, Opus, Sonnet, or Haiku as labelled; named Codex choices use Astra, Sol,
-Terra, or Luna as labelled.
+Fable 5.1, Opus 5.5, Sonnet 5.5, or Haiku 5.5 as labelled; named Codex choices use
+Astra 6, Luna 6, Sol 6.1 (balanced), or Sol 6.1 as labelled.
 
 Note the length, and the cost. A piece takes ten to forty minutes, because the
 voice researches before it writes. Three measured runs:
@@ -393,7 +400,7 @@ voice researches before it writes. Three measured runs:
 
 `EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
 editorial, and defaults to 45 minutes. A complete provider pair can therefore
-take about 90 minutes plus orchestration overhead. Automatic can try the Claude Sonnet pair after Codex fails, increasing the total duration; it does not fall back to Local model. Explicit Local
+take about 90 minutes plus orchestration overhead. Automatic can move down the Opinion ladder (DeepSeek, Codex Sol 6.1, Claude Sonnet 5.5) after a technical failure, increasing the total duration; it does not fall back to Local model. Explicit Local
 model makes one writing call from supplied material, with no separate research
 pass. The
 historical timings above are not a current maximum. The desk enqueues a job and
@@ -445,15 +452,17 @@ log.
 
 #### What starts after a reboot
 
-Once the operator logs in. Nothing runs before the logon.
+Run `ops/install-tasks.ps1` from an **elevated** shell and the paper and the
+tunnel start at boot, whether or not anyone signs in. Without elevation the
+tasks keep the at-logon form, and nothing runs until the operator logs in.
 
 | What                       | Started by                                          |
 | -------------------------- | --------------------------------------------------- |
-| Postgres                   | the logon task, `ops/start-townreporter.ps1`         |
+| Postgres                   | the start task, `ops/start-townreporter.ps1` (boot or logon) |
 | The paper                  | the same task, after Postgres accepts connections    |
 | The Reddit reader (Redlib) | the same task, detached, and the watchdog after that |
 | Ollama (DeepSeek's server) | the operator's own Startup shortcut (`Ollama.lnk`)   |
-| The tunnel                 | the tunnel logon task, `ops/run-tunnel.ps1`          |
+| The tunnel                 | the tunnel task, `ops/run-tunnel.ps1` (boot or logon) |
 | Anything that has stopped  | the watchdog, every five minutes                     |
 
 The last three are optional. **Redlib** down, missing or switched off
@@ -511,7 +520,7 @@ shortcut adds a scheduled task.
 | unset          | Embedded PGLite. Fast to demo. **Wiped when the process stops.**          |
 | `postgres://…` | Real Postgres. Survives restarts. Use this if you care about the archive. |
 
-Schema is applied by `npm run db:migrate`, which both `npm run dev` and `npm run build` run for you. SQL lives in `migrations/`.
+Schema is applied by `npm run db:migrate`, which both `npm run dev` and `npm run build` run for you. SQL lives in `migrations/` as numbered files; each is applied in one transaction and recorded in `_migrations`. **The built server refuses to serve a database that is behind its migrations**: every request gets a plain 503 ("the paper's database needs an update") and the log names the missing files. Run `npm run db:migrate` and it serves again.
 
 This page used to say the schema was applied "on boot", which was true of the
 build and false of `npm run dev` -- the command the README gives you. A first
@@ -528,14 +537,18 @@ BETTER_AUTH_SECRET=generate-a-long-random-string
 - Email + password on `/login` is the only way in (`src/lib/auth/email-password.ts`). There is no Google, X or broker sign-in to configure.
 - `BETTER_AUTH_SECRET` should be a long random string in any hosted environment. Locally, a process-stable fallback exists so `npm run dev` still signs in.
 - `BETTER_AUTH_URL` should be the public origin people actually type (scheme + host, no path). Wrong origin = cookies that never stick.
-- The session cookie is `__Host-tr-auth.session_token`. **Updating across 0.6.83 signs every editor out once** — the cookie was renamed, so the browser stops sending the old one and the visitor simply lands on `/login`.
+- The session cookie is `__Host-tr-auth.session_token`. Updating from 0.6.82 or earlier to 0.6.83 or later signed every editor out once (the cookie was renamed); updating from 0.6.83 to 0.6.84 does not.
+- On an unclaimed desk, creating the first account needs the one-time **setup code**. The server prints it once in its log and keeps it in `logs/SETUP-CODE.txt` under the data root (`TOWNREPORTER_DATA_ROOT`, else `.townreporter-data` in the project folder); the file is deleted when the code is used.
+- Sign-in is limited to ten attempts every five minutes from one address, and an account locks after ten failed attempts in fifteen minutes (`ACCOUNT_LOCKOUT_MAX_ATTEMPTS`, `ACCOUNT_LOCKOUT_WINDOW_SECONDS`). A correct sign-in clears the lock.
+- A real install (a set `DATABASE_URL`) refuses to start with no `BETTER_AUTH_SECRET`, so a restart cannot silently sign everyone out.
+- Lost password: **Server → Editors & access → Recovery codes** makes owner recovery codes while you are signed in; **Lost your password? Use a recovery code** on the sign-in screen turns an unused code into a one-time temporary password. There is no email reset.
 - `VITE_AUTH_ENABLED=false` makes the desk unsigned-in. **Do not use on a public host.**
 
 ### A second editor
 
 The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected — with one keyed exception.
 
-**Invite an editor** lives at the bottom of the Server page (`/desk/ops`), owner only. Type their email address, copy the one-time link it mints, and hand it over however you like. The link is bound to exactly that address, expires in seven days, burns on use, and the person sets their own password. They arrive as an **editor**: everything on the desk works for them, but they cannot invite others, and “Give up the desk” only removes their own seat — the newsroom stays yours. The server stores only a hash of the link, so copy it when it is shown; minting again for the same address replaces the old link. Do not turn auth off to “fix” anything.
+**Invite an editor** lives in the **Editors & access** card of the Server page (`/desk/ops`), owner only. Type their email address, copy the one-time link it mints, and hand it over however you like. The link is bound to exactly that address, expires in seven days, burns on use, and the person sets their own password. They arrive as an **editor**: everything on the desk works for them, but they cannot invite others, and “Give up the desk” only removes their own seat — the newsroom stays yours. The server stores only a hash of the link, so copy it when it is shown; minting again for the same address replaces the old link. Do not turn auth off to “fix” anything.
 
 ### Cron (source monitors)
 
@@ -626,8 +639,8 @@ Two things stop working there, both by design:
 
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
-instead. Opinion Automatic requires a ready Codex Sol or signed-in Claude
-Sonnet fallback and the configured voice file. Every explicit named Claude or
+instead. Opinion Automatic requires a ready rung (DeepSeek on Ollama, Codex Sol 6.1
+or signed-in Claude Sonnet 5.5) and the configured voice file. Every explicit named Claude or
 Codex model, Local model, or custom choice is tried first; a recognized
 technical failure can move only the unfinished call and records requested and
 actual model and effort. Explicit Local
@@ -645,7 +658,7 @@ npm test
 npm run test:lifecycle   # needs the app on :8080 and Playwright Chromium
 ```
 
-Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, configured YouTube meeting discovery (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, configured-timezone masthead dates, printed-headline collapse, paper setup, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, set up the paper, file a lead, publish, post a correction.
+Node’s built-in test runner, started by `scripts/run-tests-safe.mjs`. No network, no model calls: `DATABASE_URL` is blanked (tests use PGLite with every migration applied) and `fetch` is replaced by a default-deny version. CI splits the suite into six shards (`TOWNREPORTER_TEST_SHARD`, `TOWNREPORTER_TEST_SHARD_TOTAL`) and runs the heavier browser walks nightly or by hand. Coverage includes PrimeGov catalog matching, configured YouTube meeting discovery (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, configured-timezone masthead dates, printed-headline collapse, paper setup, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, set up the paper, file a lead, publish, post a correction.
 
 Nearly every CI browser walk builds the app and drives it through `npm start` (`.output/server/index.mjs`) — the same command production runs — rather than `npm run dev`, so the walks prove the built server, not just the dev server. One job (`smoke-dev` / "Documented dev path works in a browser") is the deliberate exception: it exists to prove the README's own `npm run dev` quick start still works.
 
@@ -796,6 +809,10 @@ After saving Paper setup, open **Server → Sections** (**Newspaper sections** p
 
 Migration 0045 preserves existing topic keys and seeds their labels. It does not rename or delete stories. Runtime filing resolves retired keys so queued work cannot restore a retired section. Existing keys are stable URLs; display names can change. Source assignments and section configuration belong to one newsroom.
 
+### 6. Newsletter mailbox (optional)
+
+In **Paper setup**, the owner can save **The paper's newsletter mailbox**: an IMAP address and password (stored encrypted, never shown back) with a **Test connection** button. The desk polls it every five minutes, de-duplicates messages, keeps attachments, and feeds subscribed newsletters into the archive and the scan. A source can name its newsletter sender. Nothing is sent from the mailbox.
+
 ### What city setup does **not** do
 
 - Invent an agenda portal from the city name. Add the exact public URL.
@@ -813,6 +830,10 @@ TownReporter/
 ├── src/lib/paper.ts           # city, masthead, seed sources
 ├── src/lib/news/              # ingest, PrimeGov, YouTube, Dark Desk, draft
 ├── src/lib/news/ai.ts         # provider resolution + budgets
+├── src/lib/news/provider-registry.ts  # every model, ladder rank, effort, budget
+├── server/                    # middleware (schema guard, headers) and boot plugins
+├── ops/                       # legacy Windows operations scripts
+├── installer/                 # the Windows package
 ├── src/lib/auth/              # email/password sign-in + session
 ├── src/routes/                # paper + desk pages
 ├── migrations/                # Postgres / PGLite schema
@@ -834,7 +855,7 @@ TownReporter/
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet 5.5. Claude and Codex read the complete configured voice using native instruction-file options and research with it in hand; DeepSeek, Local model and saved connections have no web tools, so the desk searches and reads for them. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and is flagged for completion before publication. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 operator notes
 

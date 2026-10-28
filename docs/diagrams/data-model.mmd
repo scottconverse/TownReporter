@@ -4,6 +4,8 @@ erDiagram
     NEWSROOMS ||--o{ ARTICLES : prints
     SOURCES ||--o{ SNAPSHOTS : "hashed each scan"
     SOURCES ||--o{ SOURCE_MONITORS : "expected cadence"
+    SOURCES ||--o| SOURCE_YIELD : "90-day news score"
+    SOURCES ||--o{ LEADS : "source_id"
     SNAPSHOTS ||--o{ ANOMALIES : "changed · gone · missing"
     ANOMALIES ||--o{ LEADS : becomes
     LEADS ||--o{ DRAFTS : "drafted into"
@@ -16,7 +18,19 @@ erDiagram
     INVESTIGATIONS ||--o{ HYPOTHESES : "with what kills it"
     INVESTIGATIONS ||--o{ DEAD_ENDS : "kept, reopenable"
     INVESTIGATIONS ||--o{ INVESTIGATION_BRIEFS : "read this first"
+    INVESTIGATIONS ||--o{ INVESTIGATION_CHALLENGES : "challenge runs"
     EDITORIAL_REQUESTS ||--o| DRAFTS : "written into"
     DRAFTS ||--o| EDITORIAL_EXTRAS : "fact sheet, not printed"
-    DESK_JOBS }o--|| NEWSROOMS : "scan draft dark editorial"
+    ARTIFACTS ||--o{ ARTIFACT_CHUNKS : "passages"
+    ARTIFACT_CHUNKS }o--o| EVIDENCE_VECTORS : "excerpt md5 only"
+    ARTICLES }o--o{ STORY_MEANING_VECTORS : "owner id only"
+    NEWSLETTER_MAILBOXES ||--o{ NEWSLETTER_MESSAGES : polled
+    NEWSLETTER_MESSAGES ||--o{ NEWSLETTER_ATTACHMENTS : carries
+    NEWSROOMS ||--o| ROUTINE_NOTICE_AUTOMATIONS : "owner schedule"
+    ROUTINE_NOTICE_AUTOMATIONS ||--o{ ROUTINE_NOTICE_RUNS : "one per local date"
+    ROUTINE_NOTICE_RUNS ||--o{ ROUTINE_NOTICE_PUBLICATIONS : "editions printed"
+    ROUTINE_NOTICE_PUBLICATIONS }o--o| ARTICLES : "as"
+    NEWSROOMS ||--o{ MODEL_ASSIGNMENTS : "who does what"
+    DESK_JOBS }o--|| NEWSROOMS : "thirteen kinds"
     DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"
+    AUDIT_EVENTS }o--|| NEWSROOMS : "overrides, takedowns, removals"

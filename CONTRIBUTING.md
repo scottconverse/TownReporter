@@ -16,6 +16,10 @@ For a persistent Windows newsroom, use the [installation package](docs/windows-i
    development.
 5. Run `npm run dev` and open `http://localhost:8080`.
 
+A change to the desk is walked before it reaches the live paper: a development
+server first, then a throwaway copy of real data with a full walk that ends in a
+real Publish ([docs/staging.md](docs/staging.md)). Do not skip a tier.
+
 Never point development or tests at a production database. Never commit
 `.env`, credentials, model keys, browser captures or generated build output.
 
@@ -25,15 +29,23 @@ Never point development or tests at a production database. Never commit
   code.
 - Keep reader-facing claims and operator documentation synchronized with the
   actual interface.
-- Run `npm test`, `npm run typecheck` and `npm run lint`.
+- Run `npm test`, `npm run typecheck`, `npm run typecheck:test` and `npm run lint`.
 - If the interface changed, exercise the built screen in a browser at desktop
   and narrow widths.
 - Check `git diff --check` and scan the staged diff for secrets before
   committing.
+- If you change what a screen says or does, change the documentation in the same
+  pull request: the README, the [manual](docs/manual.md), the guide for that
+  screen and the [changelog](CHANGELOG.md). Three tests keep the documents
+  honest: `scripts/docs-links.test.mjs` (every relative link and anchor
+  resolves), `scripts/docs-routes.test.mjs` (every URL a document names is a
+  route the app serves) and `scripts/versions-agree.test.mjs` (every surface
+  that states the version states the same one).
 
 The ordinary test suite is offline and never calls a paid model. Real Postgres,
 browser-flow and live-model lanes are separate; GitHub Actions runs the
-repository's required integration lanes on every push.
+repository's required integration lanes on every push. The Postgres lanes are
+described in [docs/postgres-integration-testing.md](docs/postgres-integration-testing.md).
 
 Every test process replaces `fetch` with a default-deny seal
 (`src/lib/test-support/model-seal.ts`), so a test that forgets to stub the

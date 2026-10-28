@@ -21,7 +21,7 @@ flowchart TB
         REDRAFT["Redraft and reverify citations"]
     end
 
-    GATE{"Publication gate<br/>citations current?"}
+    GATE{"Publish check<br/>citations current?"}
     PAPER(["The printed story"])
     REVIEW["One editor review<br/>published article unchanged"]
 
@@ -35,7 +35,8 @@ flowchart TB
     USED --> MASK
     MASK --> GATE
     GATE -->|current| PAPER
-    GATE -->|"stale, missing or hash mismatch"| REDRAFT
+    GATE -->|"stale, missing or hash mismatch:<br/>a warning, with Publish anyway"| PAPER
+    GATE -->|"or fix first"| REDRAFT
     REDRAFT --> GATE
     REV -.->|"recording revised after publication"| REVIEW
     PAPER -.->|"review only, the printed story is not rewritten"| REVIEW

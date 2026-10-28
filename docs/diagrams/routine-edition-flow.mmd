@@ -1,0 +1,22 @@
+flowchart TB
+    OWN["Owner approves sources and a policy<br/>(Server → Routine notices)"] --> AUTO["Automation saved:<br/>local time, one section per channel,<br/>at most 12 sources"]
+    CLOCK["5-minute clock"] --> DUE{"Past the local time<br/>and no run today?"}
+    AUTO --> DUE
+    DUE -->|yes| RUN["Queue one routine-notice job<br/>(default lane, no model)"]
+    RUN --> AUTH{"Owner role, automation revision<br/>and policy not paused?"}
+    AUTH -->|no| STOPJ["Stop: authority changed"]
+    AUTH -->|yes| CAPT["Capture each approved source"]
+    CAPT --> EXTR["Extract structured fields<br/>six format keys"]
+    EXTR --> SCREEN{"High-risk wording, web address,<br/>cancellation or over-long field?"}
+    SCREEN -->|yes| REVIEWQ["Leave for an editor,<br/>with the reason in plain words"]
+    SCREEN -->|no| ELIG["Eligible notices by channel"]
+    ELIG --> TODAY["Today in town<br/>all of today's events"]
+    ELIG --> WEEK["This weekend<br/>Fridays only"]
+    ELIG --> DEAD["Deadlines approaching<br/>next 7 days"]
+    TODAY --> TPL["Fixed template<br/>source text stripped of markup"]
+    WEEK --> TPL
+    DEAD --> TPL
+    TPL --> PUB["Publish to the channel's section,<br/>once per fingerprint"]
+    PUB --> LOGR["Record the run:<br/>published · corrected · needs review · deferred"]
+
+    style REVIEWQ fill:#7a2d2d,color:#fff

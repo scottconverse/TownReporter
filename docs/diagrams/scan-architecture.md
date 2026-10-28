@@ -1,4 +1,4 @@
-# Scan architecture (v0.6.54)
+# Scan architecture (v0.6.54, coverage and source selection updated for v0.6.84)
 
 Rendered diagrams: `docs/diagrams/*.svg` (generated from the Mermaid sources in
 this file with `docs/diagrams/render.sh`). The manual embeds the same sources
@@ -13,12 +13,13 @@ flowchart TB
         SEC["Section<br/>one beat's assigned sources"]
         CUS["Custom<br/>exact picked set"]
         PACK["Saved source pack<br/>resolves CURRENT accepted membership at run time"]
+        DAILY["Daily scan policy<br/>editor's picks first, then a rotation to the cap<br/>(cap 12, 8 every day by default, 90-minute pool budget)"]
     end
 
     SNAP["Persist selected source IDs into the run snapshot<br/><i>before the first fetch</i>"]
 
     subgraph fetch["2 · Fetch"]
-        F1["Fetch each selected source<br/>hash against last snapshot"]
+        F1["Fetch each selected source<br/>hash against last snapshot<br/>(a refusing site gets one Chromium or feed retry)"]
         F2["Record per-source outcome<br/>changed · disappeared · failed"]
     end
 
@@ -35,6 +36,7 @@ flowchart TB
         A1["sources_selected · attempted · fetched · failed · analysed"]
         A2["model_batches_used · model_batches_failed"]
         A3["failed_sources<br/>which sources failed, by name"]
+        A4["Per-source coverage<br/>read · skipped · blocked · pending, with a reason"]
     end
 
     OUT["Leads filed<br/>+ proposed sources"]
@@ -43,6 +45,7 @@ flowchart TB
     SEC --> SNAP
     CUS --> SNAP
     PACK --> SNAP
+    DAILY --> SNAP
     SNAP --> F1
     F1 --> F2
     F2 --> B1
@@ -55,6 +58,7 @@ flowchart TB
     B5 --> A2
     F2 --> A1
     F2 --> A3
+    F2 --> A4
     B5 --> OUT
 
     style B6 fill:#7a2d2d,color:#fff
@@ -100,6 +104,24 @@ sequenceDiagram
     D-->>P: next page
     Note over P: append + de-duplicate by id<br/>control disappears when loaded >= total
 ```
+
+## Source selection and coverage (v0.6.84)
+
+The daily scan no longer reads the same stored dozen forever. The editor's own
+picks (the every-day count, default 8) always run first and in their order; the
+rest of the cap (at most 12) is filled by a deterministic rotation that prefers
+sources that are due, high priority or have waited longest, and uses each
+source's 90-day news score as one input (`source_yield`). A source that is
+parked by a retry wait or blocked is deferred for this pass and reported, never
+dropped. The whole pool is read inside a 90-minute budget, in batches.
+
+Every run records, per source, one of `read`, `skipped`, `blocked` or `pending`
+with a reason (`time-budget`, `over-cap`, `waiting`, `host-cap`, `not-reached`,
+`fetch-failed`, `blocked-after-render`, `not-due`) on `scan_runs`
+(`src/lib/news/scan-source-coverage.ts`, migration 0132). A thin result can
+therefore be told apart from a full pass. Sources also move by themselves
+between accepted, trial and dormant (`source-trials.ts`); the hourly clock runs a
+light pass over trials and monthly re-checks outside the scan budget.
 
 ## Why this changed
 
