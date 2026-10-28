@@ -176,7 +176,13 @@ function scanDeps(sourceText: string) {
     },
     deps: {
       ingestUrl: async () => ({ text: sourceText, titleHint: "Fixture", extras: [] }),
-      grokChat: async () => {
+      grokChat: async (system: string) => {
+        // The scan also asks the duplicate check once (PR 336). That call is
+        // not the writing pass; answer it with a failure so filing runs as
+        // before, and count only the writing pass.
+        if (/^You are the copy desk's (same-story finder|duplicate checker)/.test(system)) {
+          return { ok: false as const, error: "duplicate check not under test" };
+        }
         calls += 1;
         return { ok: true as const, text: nulModelReply() };
       },
