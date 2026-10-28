@@ -512,7 +512,7 @@ Only the owner sees **Take down this capture** inside an opened captured record.
 
 ### Find evidence
 
-![Find evidence on the Sources tab: Exact words, Close in meaning and Our past stories close in meaning](images/15-find-evidence.png)
+![The Find evidence panel on the Sources tab: a search for Oligarchy Ditch with 12 exact-word matches and zero close-in-meaning results, because the meaning index is not built yet](images/15-find-evidence.png)
 
 `Sources` tab. A box labelled **Find evidence** takes up to 200 characters (placeholder “Words from the story or its sources”). Press **Search**. Up to three lists appear:
 
