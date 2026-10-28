@@ -14,7 +14,7 @@ cd "$(dirname "$0")"
 node -e '
 const fs = require("fs");
 const jobs = [
-  { md: "../manual.md", names: ["system-context","pipeline-source-to-page","job-end-to-end","dark-desk-one-round","opinion-voice-handoff","keeping-it-online","data-model","provider-at-call-time","meeting-to-story"] },
+  { md: "../manual.md", names: ["system-context","pipeline-source-to-page","job-end-to-end","dark-desk-one-round","opinion-voice-handoff","keeping-it-online","data-model","provider-at-call-time","meeting-to-story","routine-edition-flow","meaning-search-index","promote-and-rollback"] },
   { md: "scan-architecture.md", names: ["scan-overview","scan-run-reporting","scan-history-paging"] },
 ];
 let total = 0;

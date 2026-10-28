@@ -3,11 +3,11 @@
 TownReporter can use a saved OpenAI-compatible API connection for a specific
 Daily Scan, Scan, Story draft, Opinion, Dark Desk or Queue batch run. The connection is an optional
 operator setting: it does not install or manage a provider, change
-**Automatic**, or change any existing default or fallback behavior.
+**Automatic** (DeepSeek v4.1 Flash 1017, the loaded Local model, Codex Sol 6.1 balanced, Claude Sonnet 5.5), or change any existing default or fallback behavior. A saved connection appears in the same shared model picker as every other model, and the run record names it as the model that ran.
 
 ## Add a connection
 
-Open **Server** and find **Add your own AI API**.
+Open **Models** (`/desk/models`), choose the **Connections** tab, and find **Add your own AI API**. Only the owner can save, edit, disable or delete a connection.
 
 1. Enter a **Connection name** so editors can recognize it in the model picker.
 2. Enter the provider's **Base URL**. It must be an HTTP or HTTPS URL without
@@ -26,7 +26,8 @@ Open **Server** and find **Add your own AI API**.
 5. Select **Save connection** (or **Save changes** while editing).
 
 The endpoint must support the OpenAI-compatible `/chat/completions` protocol.
-For Gemini, the **Set up Gemini** button fills the connection name, Google AI
+(This is the separate API-key Gemini connection. The named picks Gemini 3.8 Flash and Gemini 3.1 Pro use the signed-in Gemini program `agy` instead, need no key, and are not affected by anything here.)
+For Gemini by API key, the **Set up Gemini** button fills the connection name, Google AI
 Studio OpenAI-compatible base URL, and `gemini-2.5-flash`. Add the key and
 save the connection. It is then ready to choose in the writing-model picker;
 use **Discover models** if you want to choose another model, and use **Test

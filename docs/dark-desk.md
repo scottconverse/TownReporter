@@ -10,9 +10,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Last full guide review: 0.6.27 (2026-09-07). This retained review baseline is separate from the [current release](../README.md).
-This describes software behavior, not independent confirmation of a reporting
-conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
+This page explains the doctrine behind Dark Desk: what it may do, what it may not, and why its output is labelled the way it is. Screen words and buttons were reviewed against 0.6.84 on 2026-10-27; the engine descriptions (the stages, the cap, the searches and the four questions) are carried forward from the 0.6.27 review and have not been re-tested against live runs. For how to use the screen, see [Dark Desk in the manual](manual.md#dark-desk). This describes software behavior, not independent confirmation of a reporting conclusion or of the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 
 ## Where this came from
 
@@ -81,7 +79,7 @@ itself** and the model answers four review questions. This adds a visible
 research-completeness record. It does not decide whether the lead may exist,
 continue, or move to the working queue.
 
-Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, protocol-complete, protocol-incomplete (including failures) and saved for later review. Signals not reviewed in this round remain visible and speculative. The separate triage answers help rank work; the editor controls lead handoff and publication remains a separate human action.
+Stage 2 defaults to the **six strongest new signals per round**. (The 0.6.84 screen no longer has a control for this count; the saved default applies.) The round summary uses every eligible signal as its denominator, separately showing attempted, protocol-complete, protocol-incomplete (including failures) and saved for later review. Signals not reviewed in this round remain visible and speculative. The separate triage answers help rank work; the editor controls lead handoff and publication remains a separate human action.
 
 ### The searches the app runs
 
@@ -143,15 +141,7 @@ commitment, the promises list stays empty.
 
 ## Models, checkpoints and the whole-run limit
 
-The shared picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus,
-Sonnet and Haiku; Local model; Automatic; and saved custom connections. An
-explicit choice remains the requested first runtime. A recognized technical
-failure can move only the unfinished model call, with requested and actual
-model and effort retained; a content refusal is terminal. Dark Desk Automatic uses a configured
-gateway when present; otherwise it starts synthesis on Codex Terra and can
-retry an unfinished synthesis stage on Claude Sonnet. It does not choose Opus or
-Astra automatically. Claude planning uses Haiku; Codex Astra and Luna planning
-uses Luna; Codex Sol and Terra planning uses Terra.
+The shared picker offers Automatic; Codex Astra 6, Sol 6.1 and Luna 6; Gemini 3.8 Flash and 3.1 Pro (Pro plan); Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5; Local model; DeepSeek v4.1 Flash 1017; and saved custom connections. On Dark Desk it is labelled **Digging model**. An explicit choice remains the requested first runtime. A recognized technical failure can move only the unfinished model call, with requested and actual model and effort retained; a content refusal is terminal. Dark Desk Automatic uses a configured gateway when present; otherwise it tries DeepSeek v4.1 Flash 1017, then a Local model that is already loaded, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5. Gemini is a named pick only and is never chosen by Automatic. Automatic never picks Opus. Planning uses the selected provider’s faster planning model.
 
 A round checkpoints research before synthesis. If synthesis times out, the
 completed searches and document reads stay complete and only synthesis is
@@ -176,7 +166,7 @@ Research can pause with unresolved items, but a low-yield or repeated-source
 stop does not override a high-value open trail. New follow-up items are cleaned,
 equivalent labels are merged, and only a bounded high-value working set stays
 active at once. Lower-priority items are saved as deferred work, shown to the
-editor, and resumed at the start of the next **Keep digging** run after the
+editor, and resumed at the start of the next **Keep investigating** run after the
 active set drains. An empty search or unread record cannot by itself close a
 trail. Repeated model assertions that
 a hypothesis is a dead end are not evidence exhaustion; the path closes only
@@ -195,7 +185,7 @@ where the planner falls short:
   press, then community.
 - **Location-scoped by default** — the city, and the county where the record
   is actually held. An unscoped query returns a national explainer.
-- **A 90-day search preference by default.** The editor can choose 1–3650 UTC calendar days of lookback, including the current UTC date, or an inclusive calendar range. The lookback changes at UTC midnight; the paper's display timezone does not change that boundary. The same resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
+- **A 90-day search preference by default.** The engine supports a lookback of 1–3650 UTC calendar days or an inclusive calendar range, counted from UTC midnight rather than the paper’s display timezone. The 0.6.84 screen does not expose this setting, so the saved default of 90 days applies. The resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
 - The tier that answered is recorded on every search.
 
 ## Editor triage
@@ -225,7 +215,7 @@ the working desk cannot mistake a hypothesis for a factual finding.
 
 ## Watching a specific page
 
-The **Watched pages** panel can start a daily investigative watch without opening a dig. It keeps dated captures and compares each readable result with the last readable one; blocked or failed checks remain distinct from unchanged text. A capture becomes a lead only through an explicit **Create unverified lead** action, or can be attached to an investigation. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for OCR choice, downloads, history, pause and stop. These watches do not accept ordinary scanning sources or implement legal removal.
+**Settings → Watched pages** can start a daily investigative watch without opening a dig (**+ Watch a page**). It keeps dated captures and compares each readable result with the last readable one; blocked or failed checks remain distinct from unchanged text. A capture becomes a lead only through an explicit **Create unverified lead** action, or can be attached to an investigation. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for OCR choice, downloads, history, pause and stop. These watches do not accept ordinary scanning sources or implement legal removal. A file’s **Wait and watch** button watches the captured public pages in that file.
 
 When an investigation has many captures, Dark Desk selects relevant records across the complete captured inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. When an applicable complete stored PDF page fits the existing budget, Dark Desk retains it in source order; otherwise it keeps a contiguous neighborhood around the matching passage. Persisted page context travels with its source provenance and is used without adding duplicate generated fragments. Final-brief instructions require each detail to remain paired with the record it describes rather than an adjacent row. These safeguards preserve context and state the attribution rule; they do not guarantee model accuracy. A record absent from a bounded input means the selector did not include it; it does not prove that the source lacks the record or that the record was never captured.
 
@@ -295,6 +285,6 @@ evidence. Mocked local tests cannot replace these records.
 
 ## Saved investigative preferences
 
-**How hard to dig → Change** keeps search dates and the verification count independent of dig, nerve and map. Presets change only the original dials. Save applies the whole visible configuration; validation errors leave it unsaved, and an unconfirmed response tells the editor to reload rather than promising which write reached the server. A failed settings read shows a retry state and never substitutes defaults for a saved configuration.
+The engine keeps per-newsroom research preferences (search window, number of signals sent for adversarial review, batch or responsive research and its decision limit) and records a snapshot on each round before research begins. The snapshot is reused through planning, synthesis, verification and automatic model failover, so editing a setting during a round changes later rounds only. Search dates express a preference, not a factual date filter or completeness claim. Verification counts are saved on the round and separate eligible, attempted, verified, unverified, failed and deferred. Signals the run meter stopped before reaching are counted as **deferred**, saved for a later round, rather than as failures. An attempted signal with no usable verdict, or one whose search trail or result could not be saved, is counted as failed and stays unverified.
 
-Migration0048 stores per-newsroom preferences and a snapshot on each round. The snapshot is recorded before research begins and is reused through planning, synthesis, verification and automatic model failover. Editing settings during a round changes later rounds only. Search dates express a preference, not a factual date filter or completeness claim. Verification counts are saved on the round and separate eligible, attempted, verified, unverified, failed and deferred. Signals the run meter stopped before reaching are counted as **deferred** - saved for a later round - rather than as failures. An attempted signal with no usable verdict, or one whose search trail or result could not be saved, is counted as failed and stays unverified.
+At 0.6.84 the Dark Desk screen has one settings panel, **Settings → How hard to dig**. It sets the **Digging model**, **Thinking effort** and a default depth (**Quick**, **Standard** or **Deep**) that new files open on. The Dig, Nerve and Map sliders, the presets and the search-window and review-count fields described in earlier versions of this guide are no longer on the screen; the saved defaults (90 days, six signals, batch research) apply. These three floors are carried forward from the earlier dial design and were not re-tested in this review: no invented claims of paid influence, every signal labelled with how mature its evidence is, and every theory carrying what would disprove it.

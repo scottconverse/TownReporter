@@ -4,7 +4,7 @@ Use Setup.exe for the self-contained local newsroom. The older online source-ZIP
 
 ## Self-contained Setup.exe
 
-CI builds `TownReporter-<version>-Setup.exe` and its `.sha256` sidecar in the **windows-setup** Actions artifact. This change still needs a successful Windows build and offline acceptance run; it does not claim a published Setup.exe or human fresh-machine acceptance.
+CI (the **Windows packaged installation** workflow) builds `TownReporter-<version>-Setup.exe` and its `.sha256` sidecar in the **windows-setup** Actions artifact, and installs it on a fresh Windows runner with outbound networking blocked. The 0.6.84 release lists the source ZIP, its `.zip.json` metadata and its `.zip.sha256` sidecar; a Setup.exe is available only from a release that lists one or from that Actions artifact. A fresh-machine human acceptance result is not documented here.
 
 1. On Windows 10/11 x64, obtain the **windows-setup** artifact from a successful **Windows packaged installation** Actions run. For a published release, use its Setup.exe asset only if that release actually provides one.
 2. Double-click Setup.exe and choose a folder. The default is `%LOCALAPPDATA%\Programs\TownReporter`. Node, PostgreSQL, app-local Visual C++ DLLs, Chromium and the compiled app are bundled. Installation needs no internet, npm, local build, preinstalled runtime or administrator rights.
@@ -33,11 +33,11 @@ This historical path downloads prerequisites and builds on your computer. It rem
 
 The target is to finish installation and a first manual editorial workflow in under an hour. Download speed, prerequisite installation and any model response time affect that result. This is a goal, not measured proof for every computer or connection.
 
-The repository includes automated Windows installer and package checks. The current software version is [0.6.83](releases/0.6.83.md); its package note names the expected tag and assets, while the JSON metadata and .sha256 sidecar are the authorities for source commit and ZIP hash. The [0.6.54 release guide](releases/0.6.54.md) records the published v0.6.54 release: tag, GitHub release, and the Windows x64 ZIP `TownReporter-0.6.54-windows-x64.zip` (SHA-256 `dfbeb9b9…`). A fresh-machine human acceptance result is still not documented here.
+The repository includes automated Windows installer and package checks. The current software version is 0.6.84 (released 2026-10-27, tag `v0.6.84`; see the [release guides](releases/README.md)); its package note names the expected tag and assets, while the JSON metadata and .sha256 sidecar are the authorities for source commit and ZIP hash. The [0.6.54 release guide](releases/0.6.54.md) records the published v0.6.54 release: tag, GitHub release, and the Windows x64 ZIP `TownReporter-0.6.54-windows-x64.zip` (SHA-256 `dfbeb9b9…`). A fresh-machine human acceptance result is still not documented here.
 
 ### Download and install the source ZIP
 
-1. Open [TownReporter 0.6.83](releases/0.6.83.md) for the release's limits and evidence boundaries. For an actual download, use the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows x64 asset named `TownReporter-<version>-windows-x64.zip` if that release provides it (for this guide, `TownReporter-0.6.83-windows-x64.zip`); do not use the source-code ZIP. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP. If the Windows asset is missing, stop and use a release that provides it.
+1. Open [TownReporter 0.6.84](releases/0.6.84.md) for the release's limits and evidence boundaries (all releases: [release guides](releases/README.md)). For an actual download, use the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows x64 asset named `TownReporter-<version>-windows-x64.zip` if that release provides it (for this guide, `TownReporter-0.6.84-windows-x64.zip`, with `TownReporter-0.6.84-windows-x64.zip.sha256` to check it); do not use the source-code ZIP. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP. If the Windows asset is missing, stop and use a release that provides it.
 2. Open **Install TownReporter.cmd** in the extracted folder. It downloads pinned Node and PostgreSQL distributions, checks their hashes, installs the application dependencies and Chromium, creates a private database and authentication secret, and builds TownReporter.
 3. Read any prerequisite or port-conflict message. An error stops installation; it does not authorize stopping another program. The installer does not need an existing Node, Git or PostgreSQL installation, and does not replace one.
 4. Wait for the readiness check and open the local address the installer prints. The default is **http://127.0.0.1:4388**. If the installer has finished but the server is not running, open **Start TownReporter.cmd** and wait for it to report ready.
@@ -55,6 +55,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer\Install.ps1 
 ```
 
 The saved configuration remembers those ports. Later starts use them automatically. An interrupted download or build can be retried from the same extracted folder; keep the data folder and read any recovery message before moving or removing files.
+
+## Choosing and checking AI
+
+The packaged start path scrubs every inherited `DATABASE_URL`, `BETTER_AUTH_*`, `PUBLIC_SITE_URL`, `VITE_*`, `TOWNREPORTER_*`, `LLM_*`, `ANTHROPIC_*`, `OPENAI_*`, CLI-path and `PGPASSWORD` variable from the process before it starts, then sets its own. The only provider settings it passes through are the ones **Configure AI.cmd** writes to `providers.json`: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `OPENAI_API_KEY`, `CLAUDE_CLI_PATH`, `GEMINI_CLI_PATH`, `CODEX_CLI_PATH`, `TOWNREPORTER_CLAUDE_CODE`, `TOWNREPORTER_CODEX`, `TOWNREPORTER_LOCAL` and `TOWNREPORTER_VOICE_FILE`. Any other name in that file stops the start with "Unsupported provider setting". A signed-in Claude Code, Codex or Gemini (`agy`) program under the same Windows account needs no setting at all.
+
+The paper's default model, DeepSeek v4.1 Flash 1017, needs Ollama running on the default port (`http://127.0.0.1:11434/v1`) with that model available, and the Claude Code program installed and signed in (the desk runs DeepSeek inside it). Without them, **Automatic** skips that rung, tries the model LM Studio has loaded, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5, and records each skip on the run. Gemini is never picked by Automatic; choose it by name. These programs run with their full tool set under the Windows account that runs TownReporter; see Part 3 of [the manual](manual.md#part-3--running-it).
+
+Optional programs the package does not bundle: LibreOffice (Excel and PowerPoint files), `yt-dlp` and `ffmpeg` (meeting capture), `textflowkit` (speech-to-text). **Search by meaning** (desk only) downloads its small MiniLM model into `<data folder>\models` the first time it is used, so it needs internet once; the fill runs in the background and the exact-words search works without it.
 
 ## Your first check
 
@@ -74,7 +82,7 @@ TownReporter does not create backups automatically. To make one, run **Stop Town
 
 Do not send the data folder, `.env` contents, `config.json`, `providers.json`, `pgdata`, or API keys to other people. Do not move the extracted application folder after installation; the launcher binds its process ownership and build checks to that location.
 
-The packaged server listens only on this computer. It does not register global Windows services, start at boot, or configure a public tunnel. Public hosting is a separate operator task; see [setup.md](setup.md). A successful local installation is not proof that a public address is configured.
+The packaged server listens only on this computer. It does not register global Windows services, start at boot, or configure a public tunnel. To update, run a newer Setup.exe over the same folder; it upgrades the application in place and leaves the data folder alone. The server refuses to serve a database that is behind its migrations, so a start that skipped migration shows a plain "database needs an update" page instead of a half-working desk. Public hosting is a separate operator task; see [setup.md](setup.md). A successful local installation is not proof that a public address is configured.
 
 ## If something fails
 

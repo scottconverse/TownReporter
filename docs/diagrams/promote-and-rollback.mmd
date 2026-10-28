@@ -1,0 +1,20 @@
+flowchart TB
+    GO["promote.ps1"] --> PRE{"Checkout clean?<br/>Nothing mid-run?"}
+    PRE -->|no| REF1["Refuse, change nothing"]
+    PRE -->|yes| BK["Back up the database,<br/>copy to D:, verify, prune C:"]
+    BK --> JOBS{"An editor job<br/>running or queued?"}
+    JOBS -->|"yes, no flag"| REF2["Refuse<br/>(-WaitForJobs or -Force)"]
+    JOBS -->|no| STOPAPP["Stop this install's server"]
+    STOPAPP --> COPY["Wait for connections to close, then copy<br/>townreporter → townreporter_prerollout_stamp"]
+    COPY --> FF["Fetch and fast-forward origin/main"]
+    FF --> BUILD["Install if the lockfile moved,<br/>build, which also migrates"]
+    BUILD -->|"install, fast-forward<br/>or build fails"| AUTO["Automatic: stop, swap the copy back,<br/>keep the failed rollout as townreporter_failed_stamp,<br/>restore the previous build, start it"]
+    BUILD -->|ok| START["Start, wait for the port"]
+    START -->|"never answers"| AUTO
+    START -->|answers| VERIFY{"Local page, public page and<br/>story count all agree?"}
+    VERIFY -->|yes| PRUNE["Keep the copy, prune older copies<br/>beyond the newest three"]
+    VERIFY -->|no| HAND["Leave the new app serving,<br/>print: promote.ps1 -RollbackDatabase copy<br/>and what it costs"]
+    HAND --> RB["Operator decides:<br/>writes since the start are lost"]
+
+    style AUTO fill:#7a2d2d,color:#fff
+    style HAND fill:#7a2d2d,color:#fff

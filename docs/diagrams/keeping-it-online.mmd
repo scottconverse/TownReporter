@@ -1,15 +1,21 @@
 flowchart TB
     T["Scheduled task<br/>every 5 minutes"] --> WD["watchdog.ps1"]
-    WD --> C1{"App answering<br/>on PORT from .env?"}
-    C1 -->|no| R1["Start the app"]
-    C1 -->|yes| C2{"cloudflared<br/>running?"}
+    WD --> PG{"Postgres<br/>answering?"}
+    PG -->|no| RPG["Start Postgres,<br/>touch nothing else"]
+    PG -->|yes| C1{"App answering<br/>HTTP 200 on PORT?"}
+    C1 -->|yes| C2
+    C1 -->|no| GUARD{"A start still<br/>under 600 s old?"}
+    GUARD -->|yes| LEAVE["Leave it starting"]
+    GUARD -->|no| AGAIN["Probe again after 30 s"]
+    AGAIN --> SECOND{"Down a second time?"}
+    SECOND -->|no| C2
+    SECOND -->|yes| R1["Stop the port owner by PID,<br/>start the app"]
     R1 --> C2
-    C2 -->|no| R2["Start the tunnel"]
-    C2 -->|yes| C3{"Public URL<br/>answers 200?"}
-    R2 --> C3
-    C3 -->|no| R3["Restart the tunnel"]
-    C3 -->|yes| OK["Write the check and stop"]
-    R3 --> OK
+    LEAVE --> C2
+    C2{"cloudflared running and<br/>public URL answers 200?"} -->|no| R2["Start or restart the tunnel"]
+    C2 -->|yes| NIGHT
+    R2 --> NIGHT
+    NIGHT["After 2 AM, newest backup over 20 h old,<br/>no editor job running: take the backup"] --> OK["Write the check and stop"]
 
     OPS["/desk/ops"] -.reads.-> LOG[("logs/watchdog.log")]
-    WD --> LOG
+    OK --> LOG

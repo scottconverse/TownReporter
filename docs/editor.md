@@ -1,145 +1,26 @@
 # TownReporter — editor’s manual
 
-Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
+**Current software version: [0.6.84](releases/0.6.84.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
-**Current software version: [0.6.83](releases/0.6.83.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+The screenshots in this guide were taken from the running 0.6.84 desk and public paper. If a label ever differs from a picture, the words in the text and on screen are right.
 
-**Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
+**Three rules that run through the whole desk.**
 
-Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
+1. **Nothing prints until a person says so.** Scan does not publish. Draft does not publish. Dark Desk does not publish. **Publish** on the story page is the gate for ordinary reporting. Approved routine notices (like “Today in town”) use their own fixed-template path, which the owner turns on.
+2. **The app warns; it never blocks.** When something looks risky you get a warning and an “anyway” button that names the action, such as **Publish anyway in <Section>** or **Kill anyway**. Cancel changes nothing. Every “anyway” is recorded with your name. (A few true impossibilities, such as publishing an empty story, do stop.)
+3. **One model picker everywhere.** Every AI button uses the same list of models, with **Automatic** as the default. See [Models](#models).
 
 ---
-
-## Names and spellings
-
-New drafts run a separate name check after writing and editing. The story editor shows unresolved people above the draft and provides a written-source link and passage for each matched or corrected spelling. Transcripts, captions and OCR do not confirm their own name spellings. A source match checks spelling, not attendance, quotes or other claims. Missing evidence, incomplete checks and changes after checking stay visible. The editor retains the publishing decision. Saved-evidence checks use only the retained sources; public research during drafting can search written rosters and official records.
-
-## Starting and finding a story
-
-Open **Desk → Write a story**. Click **Add documents** or drop files into the document area. Paste URLs or transcripts in **Links or source text**, and put the angle in **What story do you want?** Choose the writing model and click **Write draft**.
-
-The story editor opens when the job is created. A banner at its top shows progress. If you leave, the Desk has **Open your story** for running jobs and **Your recent drafts** for drafts you can reopen and edit. Research scope and section are in **Research & section**. Drafts are not published until you publish them.
-
-## Current capabilities and remaining work
-
-The Astra desk uses persistent navigation, recent drafts and shared document
-intake. The story workspace places the writing surface beside Checks, Sources
-and Reporting tabs and adapts to narrow screens. Follow-ups record who was
-asked, what is due and when; replies can be added to story reporting notes.
-Historical screenshots illustrate workflows, not the current layout.
-
-Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
-structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
-The verified label is a completed software protocol, not a substitute for
-checking sources. The travel-local five-topic exercise was executed in the
-isolated 0.6.52+ candidate: eight bounded runs, including the September 3-8
-replay. The records and limits are in
-[the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does not
-close a Halo-local or production acceptance exercise.
-
-Models can be discovered through LM Studio, Ollama or llama.cpp and selected
-individually. **Captured-PDF OCR:** scanned PDF OCR renders the
-actual pages in document order, so new page-aware captures can cite the real
-PDF page number. Initial capture attempts the first 12 pages, with a 2 MiB
-rendered-image limit per page and a cooperative 10-minute batch budget. In the
-opened record, **Read entire PDF** continues through every unread page in
-durable 12-page batches and saves each batch before continuing. Each click has
-a shared 10-minute and 48-transcription-attempt ceiling; it pauses with saved
-progress when either is reached. A running page render cannot be forcibly
-interrupted by that budget. Omitted or failed pages
-are explicitly listed and can be retried; a partial packet is not a complete read.
-Older extracted-image OCR records remain labeled as unordered images and need
-re-ingestion before their image numbers can be treated as PDF page numbers.
-This reader can still leave individually failed pages unread; it does not establish transcript accuracy.
-The separate retained-PDF page reader has one bounded built-UI proof: an
-explicit request read real page 13 of a 44-page PDF and saved a page-numbered
-transcript without changing the 16,254,338-byte original or its hash. Direct
-comparison matched the main table rows and key dates, but omitted color-only
-RAG status and had a minor verb error. Full-packet and table-perfect quality
-remain unproven; compare every transcript with the original. See
-[Read selected PDF pages](pdf-page-reading.md).
-
-Configurable sections are available in Paper setup (see Newspaper sections below).
-Manual investigative page watching is available in Dark Desk; see the workflow below. The owner-only legal-removal workflow is documented below; ordinary Delete does not implement it. [The canonical queue](../TODO.md) records current work.
-
-## Reporting assignments and evidence
-
-From a lead, use **Report this meeting** or **Develop this lead** and write the assignment the run should answer. You can add public seed links and choose public research or supplied material. A direct town, beat, date or issue assignment starts from the desk. The assignment tells the run what to cover; it is not evidence and is not printed as story text.
-
-The **Reporting package** stays beside the editable story in the signed-in desk. It contains the run receipt, meeting coverage ledger, story claims and linked sources with locators, score, readiness and known gaps. It is private editorial material; it does not publish with the story. A package marked **PARTIAL** remains partial even if some claims have support. Review the underlying records and caption gaps, and complete ordinary editorial review before publishing.
-
-For each claim, **Recorded reporter status** is what that run filed. **Current saved-document check** is a separate recheck of the filed claim against documents retained by the newsroom. It does not silently rewrite the original status, your current story copy or your evidence judgment. Open the cited pages and decide what the copy can say. A combined or unclear locator, a compound claim, an unrelated page or a caption-only gap is not proof; keep unsupported parts held or split them into claims with their own sources.
-
-For meeting assignments, the ledger maps the meeting to agenda items and recorded actions. Review its evidence references and set each item's editorial treatment as **lead**, **roundup** or **excluded**. Action rows show their outcome, vote, policy stage, reporter disposition and evidence reference. An unread transcript segment or an item without a treatment stays visibly unresolved; the ledger is a coverage aid, not publication acceptance.
-
-Use **Record a correction or disposition** to save a dated note with its source or offline reference. Choose correction, disposition or source note. It is scoped to the current lead and assignment so a later relevant run can retrieve it; saving it does not edit the current story or make the note independent evidence. Check **Kept for the next assignment** to see the records available in this scope.
-
-**Ask for more reporting** starts a new, targeted run from this package. Add optional public seed links, then watch the new run under **Running**. Its result is filed as a new version; the existing draft, notes and checked states remain available while the follow-up runs and if it fails.
-
-## Newspaper sections
-
-The owner manages sections in **Server → Sections** (**Newspaper sections** panel), below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
-
-For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
-
-A section with no sources says so and opens its list by itself: **Sources this section reads (0) — choose or add below**. **Add a new source to this section** takes a URL and an optional label without leaving the page. It is the same add the Sources page runs — the same checks, the same duplicate detection — so the page goes on the watch list straight away; the section's use of it belongs to the section draft, and lands when you **Confirm and apply**. The panel says which half is which, and says so plainly. A URL already on watch is ticked rather than added twice, and the message tells you that instead of claiming a new source. Once a section reads sources, its list goes back to collapsed and its summary line names the first few.
-
-Choose **Review changes** before saving, or **Preview changes** when retiring a section. The unsaved review shows every changed section's name, section order, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft, and **Cancel changes** discards it. Only **Confirm and apply** or **Confirm retirement and apply** writes the reviewed configuration. A failed or stale save keeps the draft available for correction; **Reload saved configuration** explicitly replaces it with the saved version.
-
-While the draft differs from the saved configuration, a bar sits at the bottom of the window: **You have unsaved section changes**, with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Navigating away with a draft — a desk link or closing the tab — asks first; **Stay on this page** keeps both the page and the draft. The older buttons above still work.
-
-Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
-
-Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
-
-## Named outlets
-
-The owner manages the outlets this paper checks by name in **Server → Named outlets**, below Sections. A published story that names one of these outlets has to show the reader where it came from; if it does not, printing stops until an editor adds the source or overrides that outlet for that one draft. Editors can read the list there; only the owner changes it, and anyone else is told so instead of being shown a form.
-
-The panel always says which of three states the paper is in. **Using the built-in list (7 outlets)** means nothing has been stored: the paper checks the outlets it shipped with. Their names, aliases and websites are readable, and **Customize** copies them into an editable draft. **This paper checks no outlet names** means the owner has decided to check none; it is shown as a decision, with a warning that printing no longer stops when a story names another newsroom's work and does not show the reader that source. A count — **This paper checks 9 outlets** — means the paper checks the owner's own list.
-
-Editing works like the sections panel: rows you can rename, give aliases and a website domain, remove, and add. Aliases are the other ways a story may write the outlet's name, separated by commas. A domain decides only what counts as showing the reader the source, so changing one never stops the paper checking a story. A refusal appears beside the field it is about, in words: an empty name, a name or alias another row already answers to (capitals, and a doubled hyphen or punctuation between the words, do not hide a clash), or a domain written as a web address. **Review changes** will not run while a row is refused.
-
-**Review changes** reads the published paper before anything is written: what is added, what is removed, what changed, and — for every removal and every alias dropped — the published stories whose credit stops being checked, by headline and link, newest first, up to 20 with "and N more". That sentence is the point of the screen: *3 published stories credit Times-Call. After this change the paper will no longer check that credit.* Only **Confirm and apply** writes the list, and it writes against the version the preview actually read, so a stale preview is refused and the draft stays for correction. A story that already shows the reader the source is never listed: the change costs the paper a check only where a check was still stopping the story.
-
-While a draft differs from what is stored, the same bar as the sections panel sits at the bottom of the window — **You have unsaved outlet list changes** — with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Leaving with a draft, by a desk link or by closing the tab, asks first; **Stay on this page** keeps both the page and the draft. **Reload saved configuration** discards the draft and reads the stored list back. **Use the built-in list** asks for the shipped list again, as its own change to review; **Check no outlet names** is the empty list, and it is the one setting here that can only lose the paper a check.
 
 ## Two rooms
 
 The **paper** (`/`) is what the public reads: published stories, About, How we report, Corrections, RSS. Ordinary reporting reaches it through your review and publication; approved sources can produce automatic roundups of routine notices through fixed templates.
 
-The **desk** (`/desk`) is the newsroom: sources, scan, queue, story workbench, published record, Dark Desk. Sign-in required.
+The **desk** (`/desk`) is the newsroom: Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Models, Server and Stats. Sign-in required.
 
-![The paper](images/01-front-page.png)
+![The public paper's front page](images/01-front-page.png)
 
-![The desk](images/04-desk.png)
-
-A draft, a reporting note, a research memo, a Dark Desk file — none of that is the paper. If you can see notebook language on the masthead (“What is solid,” “Next checks are…”), something went wrong; it is supposed to be stripped. Tell the operator.
-
----
-
-## Reading the desk: Light/Dark and Text size
-
-Top right of every desk page, next to **View paper**: a **Light / Dark** toggle and a **Text: Normal / Large** toggle. The desk remembers your choices in browser local storage; a new browser starts in Dark with Text: Normal. On the public paper, Light/Dark follows the reader’s system color scheme until the reader saves a choice for that paper. Dark Desk is always dark and does not offer the Light/Dark toggle, but Text size still applies there.
-
-Large scales body text, meta-lines, chips, labels, headlines and reading panes. The informational-text floor is 14px. The theme-token contrast check in `scripts/contrast-audit.mjs` covers those tokens; it is not certification of every rendered state.
-
----
-
-## Sign in
-
-1. On an unclaimed paper, top right: **Create editor**. That opens `/login`. Create your account with email and password, then enter the one-time setup code when prompted. The sign-in form identifies its location. You own the desk after claiming it; the button is gone after that.
-2. The first time, **Set up the paper** opens next. Name the paper and city, choose the timezone, add the starting sources and tell it which YouTube channels and title phrases identify local meetings. Save to open the desk.
-3. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
-4. **Give up the desk** (Server page, at the bottom) unclaims the newsroom. The paper stays, Create editor comes back, and the next owner must enter the one-time setup code required for an unclaimed desk. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
-
-Notes:
-
-- Sign-in is email + password on this desk. There is no Google, X or other third-party button to look for.
-- The first account on an unclaimed desk is the owner and must enter its one-time setup code. For a source checkout, see [the first-run setup notes](setup.md#first-run) for the data-folder path.
-- To prepare for password loss, generate and securely save recovery codes from **Server → Recovery codes**. On the sign-in screen, **Lost your password? Use a recovery code** accepts an unused code and returns a one-time temporary password; sign in with it and then change your password. There is no email reset link. **Give up the desk** transfers ownership and is not recovery.
-- A second person joins by invite: the owner mints a one-time link under **Invite an editor** on the Server page. See [setup.md](setup.md#a-second-editor).
-- If the desk sits on “Opening the desk,” use Sign in again. Session expired.
+A draft, a reporting note, a research memo, a Dark Desk file: none of that is the paper. If you see notebook language on the paper (“What is solid,” “Next checks are…”), something went wrong; it is supposed to be stripped. Tell the operator.
 
 ---
 
@@ -147,457 +28,552 @@ Notes:
 
 This is the loop. Skip steps that have nothing in them.
 
-1. **The desk** — follow any **Needs you** links, then review the queue and Follow-ups. An empty alert strip does not mean all editorial work is finished.
-2. **Sources** — is the watch list still the right list?
-3. **Scan** — one pass over accepted sources. Files leads. This is the expensive click.
-4. **Queue** — read what came in. Hold, kill, or open.
-5. **Workbench** — draft, notes, check the documents, publish or don’t.
+1. **Today** — read **Tonight’s edition** and **In progress** for stories waiting on you, glance at **Running now**, and look at **New leads**. The four-step strip (**Pick leads**, **Draft**, **Check**, **Publish**) shows where work is waiting.
+2. **Sources & scan** — is the watch list still the right list? Press **Run scan now** (on Today, the Queue or Sources & scan). It files leads. This is the expensive click.
+3. **Queue** — read what came in. **Start story**, **Hold**, **Kill**.
+4. **Story page** — draft, read, check against the documents, run **Check draft against evidence**, then publish or don’t.
+5. **Drafts** — everything not yet printed, one row per story, with its status.
 6. **Dark Desk** — only when something doesn’t add up, disappeared, or was never posted.
 7. **Opinion** — when the paper should say what it thinks about something it has reported.
 8. **Published** — if you got it wrong, post a correction, and fix the story text too when the words themselves were wrong. Both are public.
-9. **Server** — a glance, when something feels slow or the site looks down.
-
-Scan does not publish. Draft does not publish. Dark Desk does not publish. **Publish** on the workbench remains the gate for ordinary reporting; approved routine notices use their separate fixed-template path.
+9. **Server** and **Models** — a glance when something feels slow or a login has lapsed.
 
 ---
 
-## Write a story from a link or your own notes
+## Sign in and first run
 
-**Write a story**, on the desk landing page, is the fast path into steps 3–5 above when you already know what the story is: paste URLs or source text into **Links or source text**, add the angle in **What story do you want?**, pick a model, and click **Write draft**. The desk parses whatever you gave it — every link becomes a source, the first line or sentence becomes the headline, and the whole thing you pasted is kept as the lead's Reporting notes, so the draft reads it as evidence the same way it would if you had typed it into the workbench by hand. You land straight on the story page and watch it draft.
+Anyone can read the paper. Only signed-in editors can open the desk.
 
-**Assignment and section selection:** an optional Section selector uses your newspaper's configured reporting sections. Choose the section before writing to keep the story there through the draft pass. Leaving it blank keeps the existing text-based guess, which can fall back to Council; you can still refile afterward. An explicit opening instruction such as “Write a short local item about…” is retained as the editorial assignment, separately from source evidence. This helps preserve the requested subject and brief form, but does not verify facts. If one editing pass cannot shorten an overlong brief, the draft remains available with a warning rather than being discarded.
+**To claim a new desk (the first person in becomes the owner):**
 
-The story writer also uses the existing editing pass to compare ordinary drafts with URL-labeled evidence. If that pass fails or runs out of time, the draft is retained with a review warning. This is not an independent fact-check: review dates, practical instructions and exact citations before publishing. Explicitly cited dashboards/watched source pages are retained; an explicitly empty citation list in a new report-backed draft is not filled from discovery URLs during publication. These changes do not retroactively repair older saved drafts.
+1. Open the public paper. At the bottom of the page, in the **The newsroom** column, press **Create editor**. The button shows only while nobody owns the desk.
+2. On the sign-in page, fill in **Name**, **Email**, **Password** (at least 8 characters), **Confirm password** and **Setup code**. The setup code is printed once when TownReporter is installed, in the server log and in the data folder's `logs/SETUP-CODE.txt`.
+3. Press **Create editor account**.
+4. The desk opens on **Set up the paper** (next section).
 
-It fills the same fields **File a lead yourself** (Queue) asks for by hand, so use whichever is faster: this box when you have a link or notes to paste, the Queue form when you are typing a lead from nothing. Either way, nothing publishes until you click **Publish** on the workbench.
+If the setup code is wrong, the account is still made and you stay signed in. Fix the code and press the button again. After five wrong codes in 15 minutes the page asks you to wait.
+
+**To sign in later:** press **Editor’s desk** at the top or bottom of the public paper, or go to `/desk`. Enter your email and password and press **Sign in with email**. After ten wrong passwords for one email the account locks for 15 minutes.
+
+**To join as a second editor:** the owner makes a one-time link under **Server → Editors & access → Invite an editor** and sends it to you. Open it, choose a password and you are in. The link works once, only for the invited address, and expires after seven days. Invited people are editors, never owners, and do not need a setup code.
+
+**If you lose your password:** on the sign-in page press **Lost your password? Use a recovery code**, type an unused code and press **Use this code**. You get a one-time temporary password to sign in with. The owner makes recovery codes ahead of time on **Server → Editors & access**. There is no email reset link.
+
+**To sign out,** use **Sign out** in the footer of the public paper, next to your name. The desk itself has no Sign out button, on purpose.
+
+**To hand the desk over:** **Server → Editors & access → Give up the desk**. It asks you to type your email address first. For the owner it frees the newsroom for the next person with the setup code; the paper stays. For an invited editor it removes only that editor’s own seat. You cannot take it back.
+
+---
+
+## Set up the paper
+
+`/desk/setup` — the first screen after the owner creates a new desk. Only the owner sees it.
+
+![Set up the paper form with fields for the paper's name, city, state, timezone, meeting video channels and a starting watch list](images/13-paper-setup.png)
+
+**To set up the paper:**
+
+1. Fill in **Paper name**, **City**, **State** and **Timezone (IANA)**. These four are required. The timezone box starts with your browser’s zone, for example `America/Denver`.
+2. Optional: **Tagline**, **Council votes site** (a link shown in the paper’s navigation; leave it blank rather than point readers at another town), **Editor contact email** (shown on About and Corrections; blank shows no address), **Elected officials and staff** (one name and title per line).
+3. **Meeting video channels**: one YouTube channel URL per line. **Meeting title keywords**: the phrases that mark council, board and commission recordings, one per line.
+4. **Starting watch list**: add rows of **URL** and **Title** (**Add another**, **Remove**). These become your first sources.
+5. Press **Save and open the desk**.
+
+Saving writes the choices to the database, sets the front-page kicker, adds the watch list as sources, rewrites the welcome article for your city and opens the desk. Until the owner saves, the public paper shows “Not yet set up”. Every choice can be changed later on **Server → Paper setup**. No code edit or rebuild is needed. The setup form can only be used once; opening `/desk/setup` on a finished paper sends you back to Today.
+
+If a local model program (LM Studio or Ollama) is running with nothing loaded when you finish, Today shows a **Choose your writing model** card to the owner. See [Models](#models).
+
+---
+
+## Getting around the desk
+
+Every desk screen has the same frame: a navigation column on the left and the work area on the right.
+
+![The desk: navigation on the left, Today in the middle with the step strip, Tonight's edition and New leads](images/04-desk.png)
+
+### The navigation
+
+Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), the **Running** box when something is running, then eleven links:
+
+| Link | What it is | Number beside it |
+|---|---|---|
+| **Today** | The home screen | none |
+| **Queue** | Every lead | Open leads |
+| **Drafts** | Stories being written or waiting for checks | Rows on the Drafts screen |
+| **Published** | What is live, and corrections | none |
+| **Opinion** | Editorials | Requests and editorials |
+| **Follow-ups** | AI agents watching for answers | Active follow-ups |
+| **Dark Desk** | Open-ended investigations | Files on the desk |
+| **Sources & scan** | The watch list and the scan | none |
+| **Models** | Which AI does which job | none |
+| **Server** | Owner settings and health | none |
+| **Stats** | Anonymous reader counts | none |
+
+A number shows only once it has loaded, never a made-up zero. The footer has **View the paper ↗**, a **Dark / Light** button, an **Aa Large / Aa Normal** button, and **Press ? for keyboard shortcuts**. A button’s label names what pressing it gives you: it reads **Dark** while the desk is light.
+
+Four screens are not in the navigation but are reachable: **Scan history** (button on Sources & scan), **Import** (see [Import finished stories](#import-finished-stories)), **Beat memory** (the bottom of Published) and **Legal removals** (owner only; linked from Published). All four are also found with search.
+
+**On a phone** the navigation is a drawer. The top bar has **Menu**, the **TownReporter** name (a link to the paper) and **+ New**. The drawer holds the same links and buttons.
+
+### Look and text size
+
+**Dark / Light** and **Aa Large / Aa Normal** are kept in your browser. A browser that never chose starts Dark with normal text. Large text makes everything on the desk 20 percent bigger. The Dark Desk screen follows the same choice. These settings do not follow you to another browser.
+
+### The Running box
+
+While anything is running or waiting, the navigation shows **Running · N** (and **· 3 queued** when jobs are waiting). Each row is a small card: what is running, the model, a clock, **Now:** with the current step, **Last activity** and **Cancel**. Press the heading to go to Today. Scans, drafts, evidence checks, Dark Desk digs, editorials, routine editions and reporting runs all show here.
+
+If a card sees no news from its worker for 60 seconds it says **No activity for m:ss. The model may be slow, or it may have stalled.** and offers **Keep waiting** and, when possible, **Retry on next model**. A stopped card offers **Retry** and **Retry on another model**. A waiting draft offers **Run it on another model**.
+
+### Find a story or screen
+
+Press **Ctrl+K** (**Cmd+K** on a Mac) on any desk screen. The box **Search your newsroom** lists screens, leads (by headline, topic or why-line) and Opinion pieces as you type. Pick one to go there. This search looks only at titles and topics. It does not read story text. Searching by meaning is on the story page; see [Find evidence](#find-evidence). There is no search button on screen, so a phone without a keyboard cannot open this box.
+
+### Keyboard shortcuts
+
+Press **?** (when you are not typing) to open the list. On **Today** and **Queue** these keys work on the highlighted lead: **J / K** next or previous, **S** start a story, **H** hold, **X** kill, **U** undo, **Enter** open. **N** starts a new story. **Ctrl+S** (**⌘S**) saves in the story workbench. **Esc** closes a list or the phone menu. Keys are ignored while you type in a box.
+
+### The app warns; it never blocks
+
+When something looks risky, TownReporter says so and lets you go ahead. The warning appears in one of two ways, and both end with a button that names the action plus the word “anyway”:
+
+- A box titled **Before you continue** with a sentence and two buttons: **Cancel**, and the “anyway” button, for example **Draft this story anyway**, **Run anyway** (for hourly limits and scans), **Check anyway**, or **Stop and restart with <model>**.
+- A message at the corner of the screen that stays until you press its button: **Kill anyway**, **Hold anyway**, **Release anyway**, **Reopen anyway**.
+
+Every “anyway” you press is saved in an audit record with your name. Pressing **Cancel** changes nothing. The same rule runs through Publish; see [Publish](#publish).
+
+### Messages and undo
+
+Every press ends with a short message at the bottom left of the screen (top left on a phone). Successes stay about five seconds, failures twelve, and a Kill message fifteen. Kill, Hold and Release messages carry **Undo**.
+
+---
+
+## The desk
+
+`/desk` — **Today**. What to do next, what is running, and the best new leads.
+
+Read it top to bottom:
+
+1. **The greeting.** “Good morning. Here’s today’s paper.” (or afternoon, evening, by the paper’s clock), with the date and city above it. Buttons: **+ Add a lead**, **+ New story**, **+ Opinion** and **Start reporting**.
+2. **Choose your writing model** (owner only, first run only). Appears when a local model program answered with nothing loaded. Press **Use <model>** next to a local model or **Keep the Automatic ladder**.
+3. **Today’s work.** Four cells: **Pick leads** (new today, button **Review leads**), **Draft** (writing now, **Watch drafts**), **Check** (drafts waiting on you, **Check draft**) and **Publish** (drafts ready, **Review edition**). The numbered square of the next step that has work is yellow.
+4. **Running now.** Cards for what is running, each with **Cancel** and an open button such as **Open your story** or **Open the scan**.
+5. **Tonight’s edition.** Stories that are through writing. Each row has the section, the headline and one chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**, **… Checking facts**, or **Writing · 2:18** / **Queued**. The button changes with the state: **Watch**, **Retry**, **Check**, **Continue**, **Start story**, **Review**. A story prints only when you press Publish on its page; this list prints nothing.
+6. **In progress.** Up to five stories you have started, each with **View progress** or **Open draft**. Nothing here prints until you press Publish.
+7. **New leads.** The best leads from the last finished scan, best first. Two buttons switch between **Open · N** and **Held · N**. Each row shows a score out of 20, chips, the headline, the why-line, evidence squares, the section and age. Buttons: **Start story** (S), **Hold** (H), **Kill** (X). A **Model for Start story** picker sits above the list. Kill and Hold show a message with **Undo**; Kill also offers one-tap reasons (**Not news**, **Not local**, **Old**, **Duplicate**, **Thin**, **Other**). A held lead shows **Release**; a killed lead shows **Undo**. **All leads in the Queue →** goes to the Queue.
+8. **The right rail.**
+   - **AI follow-ups**: the latest findings, with **Review finding** and **All follow-ups**.
+   - **Dark Desk**: counts of **Open files**, **Signals to review** and **Waiting on an AI follow-up**, and **Open Dark Desk →**.
+   - **The wire**: one line per watched source (problems first), **Run scan now**, **All sources**, a **Model for this scan** picker, and a **More from the wire** list with the last scan, source health, suggested sources (**Accept** or **Drop**) and recent published stories.
+
+Today has no “Needs you” panel. Look at Tonight’s edition and In progress for work waiting on you.
+
+**Today in town.** Besides stories you write, the paper can print routine roundups on its own. The owner switches this on under **Server → Routine notices**. Each day the desk reads approved public calendars and prints a fixed-format story headed, for example, “Today in town — Sunday, Oct. 25”, with one block per event in time order (and **Morning**, **Afternoon**, **Evening** headings when there are six or more), then a “Source:” link. A Friday “This weekend” and a “Deadlines approaching” edition work the same way. You will see **Filing the routine edition** in the Running box while one is made, and the printed story under **Published**. These roundups come from approved sources through fixed templates, not from a model, so there is nothing to review before they print. If something in a source looks risky (a cancelled event, an unclear date), the desk leaves it out and counts it as needing review; the owner reads the reasons on the Server page.
+
+![The Today in town edition as a reader sees it: events in time order under a dek, ending with a Source link](images/14-today-in-town.png)
+
+---
+
+## Start a story or add a lead
+
+### New story
+
+`+ New story` on Today, the **N** key, or **+ New** on a phone opens a dialog with three tabs. Nothing prints until you press Publish.
+
+**AI drafts from material** — to have the AI write from your sources:
+
+1. Drop files on **Drop documents here** or press **Choose files**. The desk reads PDF, Word, Excel, PowerPoint, LibreOffice, text, images (with OCR), CSV and subtitle files: up to 20 files, 100 MB each.
+2. Paste web, PDF or YouTube addresses into **Links**, or paste text into **Source text**.
+3. Say what you want in **Assignment**: the angle, what to find out, what to ignore.
+4. Choose **Research scope**: **Research public sources** (follows your links and searches for public evidence) or **Use only supplied material** (reads your text and files only; no searching).
+5. Choose a **Model** (see [Models](#models)).
+6. Press **Start drafting**. The dialog stays open and says the draft is under **Running now**; it will land in **Drafts**.
+
+**Write it myself** — to write your own: fill in **Headline**, **Summary**, **Story**, **Section** and, if you have them, **Sources**. Press **Save draft**, or **Save & check against evidence** to run the evidence check as well. The section must be chosen (“Section not chosen — pick one”) and you still confirm it at Publish.
+
+**Paste a finished story** — for a story written elsewhere: fill in **Original link**, **Credit line**, **Story text** and **Section**, then choose what the AI should do: **Nothing: keep it exactly as pasted**, **Clean up formatting and suggest a headline**, or **Check it against its sources**. Press **Save as draft**. The credit line and link stay on the published page. If the story looks like one already on the paper or the Queue, the dialog says so and links to it. To bring in a whole report with many stories, use **Import many finished stories →** (see [Import finished stories](#import-finished-stories)).
+
+The **+ New story** buttons on Drafts and Queue open an older form called **Write a story** instead. It has the same material boxes (**Add documents**, **Links or source text**, **What story do you want?**), a **Research & section** disclosure with **Drafting scope** and an optional **Section**, a **Writing model** picker and a **Write draft** button. After **Write draft** it takes you straight to the story page. It also offers **Paste a story I already have** (type or paste the story, press **Add to Queue**; no AI reads it).
+
+### Add a lead
+
+**+ Add a lead** (Today and Queue) is for a link or a tip, not a full story. Paste a URL or describe what you heard in **Link or tip**, optionally add **Why it might matter**, and choose **Then**: **Research and score it**, **Research and draft a story now**, or **Just file it as-is** (no AI). Press **Add lead**. The dialog stays open and tells you the lead’s number and what happened, for example “Filed as lead 41 with a usefulness score of 12.”
+
+### Start reporting
+
+**Start reporting** on Today has four choices: **Report a town**, **Report a beat**, **Report a date** and **Report an issue**. Each opens a dialog. Write **What to report on** (this is the assignment; it is not printed as evidence), add optional **Sources to start from** (one public link per line), choose **Research** (**Public research** or **Supplied material only**) and a model, then press **Start reporting**. The run files a package beside each story it opens. Its progress shows under Running.
 
 ---
 
 ## Import finished stories
 
-Some stories arrive already written — a report from a research tool, a document a colleague sent, a piece you wrote somewhere else. **Write a story** is not for those: it treats what you paste as source material and has a model write a new draft from it. **Import finished stories** is the other way in. It is on the desk landing page under the paste box, on the Queue's empty state, and at **Import** in the sidebar.
+`/desk/import` — for stories that are already written: a report from a research tool, a colleague’s piece, your own text from elsewhere. Write a story treats what you paste as source material; Import keeps the words exactly as pasted. You reach it from Ctrl+K (**Import**), the link on the old Write a story form, the Queue’s empty state, and **Import many finished stories →** on the New story dialog’s paste tab. Nothing is saved until you press Import, and nothing is published by an import.
 
-**Paste one story, or a whole report.** You can also choose a saved page (`.md`, `.txt`, `.html`). Nothing is kept in the box; the text you pasted is what gets saved.
+**To import:**
 
-**Read the stories.** The desk reads the text and shows you what it found. It does not rewrite anything: every paragraph it shows you is a paragraph of your paste, word for word, and it will not put a sentence in a story that was not in the text you gave it. A report with headings is split by those headings. A report or story with no usable structure is read once by the writing model you have set up, which is asked only where the stories start and end, what each headline is, and which paragraphs are the body — never to write a line. If that pass changes a single paragraph, the desk throws it away and falls back to splitting on blank lines, and the card says **Could not split this cleanly — check it** so you look before importing.
+1. Paste the report or story into **Paste the report or the story**, or choose a `.md`, `.txt` or `.html` file. The limit is 400,000 characters.
+2. Press **Read the stories**. No model reads it; a report with headings is split by its headings. The notice tells you how many stories and ideas it found.
+3. If there are no headings, the desk offers **Read the stories with a model**. The model is asked only where each story starts and ends; every paragraph must be found word for word in your paste. If it cannot, you get one card holding the whole paste, headlined “Imported text — give this a headline” and marked “Could not split this cleanly — check it.”
+4. Check every card. Everything on it is yours to change:
 
-**Check every story.** One card per story, and everything on it is yours to change:
+| On the card | What it does |
+|---|---|
+| Tick box | **Import this story**. Sections that are not stories arrive unticked |
+| **Import as** | **Finished story** (a draft holding the text) or **Story idea** (a lead with the description as its why) |
+| **Headline**, **Dek**, **Section** | The headline (leading numbers taken off), the line under it, and the section. **Section not chosen — pick one** until you choose |
+| **The text this story carries** | The story as written, the plain-language brief, or both with the brief first |
+| **Sources** | Every link the story cited, each with a tick box. Names the report cited without a link are listed read-only |
+| **Who wrote this — the line readers see** | **An outside AI tool** (prints no line), **A person** (“A person wrote this from public records; an editor reviewed it.”) or **Other wording** |
+| **Editor notes — never published** | Score, triage, the report’s notes, claims ledger and **Hold this on the desk** |
 
-| On the card                          | What it does                                                                                                            |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| The tick box                         | Import this one. Sections that are not stories (beat context, watch lists, dates) arrive unticked.                       |
-| **Headline**                         | The heading, with any leading number (`7.`) taken off. That heading line is the headline, so the text below never opens by repeating it. |
-| **Section**                          | Your newsroom's sections, suggested from the text. **Section not chosen — pick one** until you choose one yourself.      |
-| **Dek**                              | The line under the headline.                                                                                            |
-| **The text this story carries**      | The body as written, or the report's plain-language brief, or both with the brief first. The text is shown underneath.   |
-| **Sources**                          | Every link the story cited, each with its own tick box. Links also stay in the body where they were written.            |
-| **Who wrote this**                   | The line readers see. For a report from an outside research tool the default is "An outside AI research tool wrote this from public records; an editor reviewed it." |
-| **Editor notes — never published**   | Score, triage and the reporter next step the report carried. On a v2.6 report, also the readiness tier's own qualifier and the claims ledger with its statuses. |
-| **Import as**                        | **Finished story** — a draft holding the text it carries, ready to edit and publish. **Story idea** — a lead with the description as its why, for someone to write. |
+Cards may carry flags: **Developing — gaps marked** (a report’s Tier 2 story: it imports as a draft but unticked), **Unverified — Black Desk** (Tier 3, or anything under a Black Desk heading: always a story idea, never a draft, with a **Send it to Dark Desk** link), **Hold**, or a note that the story looks like one already printed or already on the desk. If a report’s run stopped early, a banner above the cards says **PARTIAL** and lists what it did not get to.
 
-A **Hold** in the report is shown on the card as a Hold. If a story looks like one already on the desk or already printed, the card says so and links to the printed one — you decide whether to import it anyway.
-
-**Finished story or story idea.** A civic-scanner v2.6 report says how ready each story is, and that statement is read before anything else. **Tier 1, ready for edit** imports as a finished story, ticked. **Tier 2, developing** also imports as a finished story, but arrives unticked and wearing a **Developing — gaps marked** flag, with the gaps the report admits to written into its editor notes. **Tier 3**, anything the report files under a **Black Desk** or **Possible Stories to Investigate (Unverified)** heading, and every row of a held-and-potential table, is a **Story idea** and never a draft — however many words it runs — flagged **Unverified — Black Desk**, and it carries a link that opens the Dark Desk's start box with the hypothesis and its own next check already in it. The desk reads the tier wherever the report states it: in a heading, in a table column, or inline in a paragraph (**Editorial readiness:** **Tier 1, ready for edit** as a service story…), and the sentence it came in is kept as an editor note.
-
-Only when nothing in the report states a tier or a section does the desk fall back to length: a body of two paragraphs or more and 120 words or more is a **Finished story**, and a short block or a single paragraph is a lead to write rather than a draft to edit. That fallback is what a v2.5 or older report gets, and it is why a long paragraph of speculation must never be the thing that decides: on a v2.6 report the tier decides, so a 200-word Black Desk hypothesis stays a story idea and cannot arrive as publication copy. A lead the report itself flagged **DEMOTE** arrives as a story idea rather than a draft, unticked: the desk is not going to file a one-line note as a finished story, and you can tick it either way. **Import as** on the card overrules the desk whenever it guessed wrong.
-
-A paste that is nothing but a list of ideas — bullets or numbered lines shaped **Headline — description**, or **Headline**: description — is read as one card per idea, headline and description, with no model involved.
-
-A v2.6 full-pipeline run pasted as JSON, in the shape of the tool's `report-schema.json`, is read the same way as its markdown: same cards, same tiers, same claims. Fields the desk does not know are ignored rather than refused, so a later version of the tool still imports; a paste that is not a report at all falls back to the ordinary reading of plain text.
-
-**Import.** The ticked stories go to the **Queue**, each as a lead marked **Imported** with a saved draft holding your paste exactly, its sources attached, and a note of who imported it, when, and from which text. A ticked story idea goes to the Queue as a lead marked **Imported** with the description as its why, waiting to be written — there is no draft, because nobody has written it. An unverified lead arrives as that and nothing more: **Unverified — Black Desk** on its card, a story idea, a lead with no draft under it. Copies of the cited pages are fetched in the background; if one will not load, the import still goes through. **Nothing is published by an import.**
-
-**The claims ledger.** A v2.6 report attaches claims to each story, each one **VERIFIED**, **UNVERIFIED** or **CONTESTED**, with the source IDs behind it. The ledger travels with the story into its editor notes — **never into the published text** — and a card carrying a claim the run could not verify raises a warning where you can see it, before you import anything. Read it: it is the report telling you which sentences it stands behind and which it does not.
-
-**A run that stopped early.** A report whose run says **PARTIAL** shows a banner above the cards, quoting the run's own list of what it did not get to. The cards below are the ones it finished. Nothing on that screen says the rest of the period was covered, and if you need the rest you run the scan again rather than reading the finished cards as a full sweep.
-
-From there an imported story is a story like any other: open it, edit it, redraft it if you want to, and **Publish** it when it is right. A well-formed imported story — headline, section, body, at least one source — is not held back by the checks that exist for AI drafts, such as matching passages to cited records. The checks that protect readers still run.
-
-**One story you already have.** When what you have is a single finished story rather than a report full of them, the desk landing page has a shorter way in, under the import panel: **Paste a story I already have**. Paste it, leave the headline empty and its first line becomes the headline, choose the section, and press **Add to Queue**. The line the headline came from is the headline and not the first line of the body: the paste that follows it is the draft, word for word, line for line, and nothing else is moved or trimmed. Type a headline of your own and the whole paste is the body instead. There is no review screen and no model reads it — its links come across as the story's sources, and it lands in the Queue marked **Imported** as a regular news story. **Nothing is published**, and the section you choose there is not the confirmation: that still happens in the story editor, on the ordinary button, before the story can publish.
+5. Press **Import N stories to the Queue**. Imported leads land in the Queue marked **Imported**. If a card is not word for word what you pasted, the import stops and **Import anyway** appears.
+6. The panel **In the Queue** lists what arrived with **Open the Queue**.
 
 ---
 
-## Sources (`/desk/sources`)
+## Sources & scan
 
-The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
+`/desk/sources` — **Sources & scan**. The watch list, and the expensive button.
 
-**Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A. The add form also carries an optional **Assign to sections** list: tick the newspaper sections this source should feed and it is filed under them as it is saved, in the same step. Opinion and About are not on that list — they are reserved pages.
+One scan reads the pages you chose, compares each with the last copy it saved, and files what changed as leads. It runs when you ask, or once a day if the owner has turned on the daily scan. A scan files leads only. It never drafts or publishes.
 
-**Accept one:** accepting a suggested source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A suggested source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
+The navigation has one item for this area, **Sources & scan**. It opens two pages:
 
-**When a source keeps failing.** A source the desk could not read on three scans in a row stops saying **Could not check** and says **Keeps failing** instead — on its Sources row and on the desk home — with how many scans in a row, the plain reason for the last one, and the date the run of failures began. The desk never pauses or drops a source on its own: the row offers **Pause** (it stops being fetched until you resume it) and **Delete**, which asks once and names the source before taking it off the watch list by the same path **Remove** uses. Pages already saved from that source stay in the newsroom.
+- **Sources & scan** (`/desk/sources`): the watch list, with a right-hand column holding the **Daily scan** panel and **Previous scans**.
+- **Scan history** (`/desk/scan`): the **Run a scan** panel with the scope choices, saved packs, previous scans with coverage, and **Captured meetings**. Reach it with **Scan history →** at the top of Sources & scan.
 
-**Suggested sources.** The third group — **Suggested sources: N** — is everything the desk found while it worked and has not decided yet. It is built for volume: 175 waiting suggestions was normal before this screen existed, and clicking each one to read its page was the only way to decide. Each row now carries the material a decision needs, and several rows can be decided at once.
+The buttons across the top of Sources & scan are **Scan history →**, **Source inventory →** and **+ Add a source**.
 
-- **The reason** the pass recorded — what the page offers the paper, in the model's one sentence. A row suggested before this was recorded says *No reason was recorded when this was suggested* rather than showing a blank.
-- **Suggested by** — the scan, the research pass, or the Dark Desk — and, when the pass was working on a lead, a link to it. **Anyone / The scan / The research pass / The Dark Desk / Not recorded** filter the list by suggester.
-- **Section** — the model's guess, shown as the section picker's starting value. A guess for a section this paper no longer files under starts the picker empty instead, because accepting into it would be refused.
-- Per row: **Accept to <section>** (or **Accept** when no section is set), **Reject**, and an optional **Note** saved with either one.
-- For several: tick **Select <title>** on each row, or **Select all N**, then **Accept selected** or **Reject selected**. The batch section picker files the whole selection under one section; leave it at **No section** to accept without filing.
-- Every press says **Saving…**, then what it did — *Accepted 3 suggestions and filed them under Council* — or **Nothing was changed:** and why. A batch is one transaction: either every row in it is decided, or none is, and the message says which.
+### The watch list
 
-**When a site asks us to wait.** The desk paces itself: one request at a time to any one site, with a few seconds between them, so several pages on the same host arrive as a trickle rather than a burst. If a site answers *too many requests* or *service unavailable*, the desk stops asking and comes back when it was asked to: the row reads **Waiting** with *Asked us to come back at 3:40 PM — will retry then*, and the next scan after that time fetches it. When the site gives no time of its own — it was simply busy — the desk picks the wait itself and says so rather than putting words in the site's mouth: the row reads *Was busy at 3:10 PM — trying again after 3:40 PM*. If a site refuses the desk outright (it answers *forbidden* or *unauthorised*), the source stays on watch and is never dropped: the row reads **Blocked** with *Blocked us at 9:12 AM — trying again after 3:12 PM*, and each further refusal waits longer — the next pass, then six hours, then a day. A host that has refused the desk four times in one day is left alone until the next day rather than asked all day. **Check now** on the row still fetches it immediately, so you can always try yourself.
+The four buttons **On watch**, **Suggested**, **Rejected** and **Could not check** switch the list, each with a count of all sources, not just the ones on screen. The search box (**Search the watch list**) looks at name, address, kind and tier. Each list shows 25 rows at first: “Showing 25 of 1,588 sources” with **Show 25 more**.
 
-Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list and the accept path does not offer the picker; adding, accepting and rejecting are still yours to do.
+Every source has a **Kind** (what it is: official, news, community, social, YouTube, or unclassified) and a **Tier** (how much weight it gets):
 
+- **Tier A** — official record. A source of fact, still checked.
+- **Tier B** — journalism. Attributed, not gospel.
+- **Tier C** — community or discovery clue. Never treated as fact.
 
-**Add many:** bulk paste. Formats the toolkit already taught people:
+The desk works out kind and tier from the web address. A page the paper already has, written any way, is never added twice.
 
-```
-https://yourcity.gov/news
-City Council: https://yourcity.gov/council
-TIER B
-Local Paper: https://www.localnewspaper.com/
-TIER C
-Neighborhood group: https://www.facebook.com/groups/…
-```
+**To add sources:** press **+ Add a source**. The box **Add sources to watch** has four tabs:
 
-- **Tier A** — official record. Treated as a source of fact, still checked.
-- **Tier B** — news. Attributed, not gospel.
-- **Tier C** — community. Scanned as a discovery clue, **never treated as fact.**
+1. **One link** — a **Link**, an optional **Name**. Press **Add source**.
+2. **Paste a list** — one address per line, with an optional name after a comma. A line that starts with **TIER A**, **TIER B** or **TIER C** sets the tier for the addresses below it. A preview shows how many are new and how many are already watched, then **Add N sources**.
+3. **Upload a file** — a file of addresses (the desk reads it as plain text, like a pasted list), then the same preview.
+4. **Ask AI to find sources** — say what the paper should cover, choose where to search (**Government and public-record sites**, **Local organizations and nonprofits**, or **Everything, including local news and forums**) and a model. Found pages land in **Suggested**, never straight onto the watch list.
 
-Suggested sources wait here until you accept or reject them. All three passes file what they find: the **scan** (from `proposed_sources` in its reply), the **research pass** (the public pages it actually read under a lead), and the **Dark Desk** (the pages it read while developing a file). Each one records why it suggested the page, which pass it was, and, when there was one, the lead it was working on. A page this paper already has — same host and path, however it is spelled — is never proposed again, and a search-results page is never proposed at all. A social profile is proposed only to a paper that already watches a social source: this edition ships with the city's and public media's accounts on watch, so a scan finding one is proposing what you asked for, while a paper watching no social sources will not have a Facebook group arrive on its list because a pass opened one on the way to a story. Accepting puts it on the next scan. Rejecting drops it.
+**What each row shows:** the name, a link to the page, “Kind: … · Tier: …”, when it was last read, and a status chip with a plain note:
 
-Newly discovered public records are fair game even if they were not on this list. Dark Desk does not have to ask the watch list for permission to fetch a public URL.
+| Chip | Meaning |
+|---|---|
+| **✓ No change** / **Changed** | Fetched; nothing new, or “2 new items” |
+| **Not checked yet** | Added but not fetched |
+| **Waiting** | The site asked us to come back later; the row says when |
+| **Blocked** | The site refused us; the desk tries again after a longer pause each time |
+| **Could not check** | The last read failed, with a plain reason |
+| **Keeps failing** | Three scans in a row could not read it, with the reason and the date it began |
+| **Paused** | The scanner will not fetch it until you resume |
+| **On trial** / **Dormant (checked once a month)** | The desk is trying a new source, or checking a quiet one less often |
 
----
+When a site refuses a plain read, the desk tries once through a real browser, then looks for the site’s public feeds. The row says “Read through a browser.” or “Read through its feed.” It never submits forms or solves challenges.
 
-## Scan (`/desk/scan`)
+**Row buttons:** **Check now** (a read only; it does not draft or file leads; **Retry** on a failed row), **Pause** / **Resume**, and **More ▾ → Remove** (then **Yes, remove**; a message offers **Undo**). A row that keeps failing shows a red **Delete** that asks once. The desk never pauses or drops a failing source by itself. **Scan preferences** sets a purpose, cadence and deadline for when the daily scan should read the source. **Newsletter sender and signup** records the sender address and signup page for a newsletter the paper’s mailbox receives (the owner sets the mailbox up on the Server page). A **Find a replacement** helper appears under a source that keeps failing.
 
-![Scan](images/05-scan.png)
+**Suggested sources.** The desk files here what the scan, the research pass and Dark Desk found while they worked. Each row shows why it was suggested and by whom (with a link to the lead). The owner can pick a section for each; any editor can **Accept** or **Reject**, with an optional note. To decide many, tick rows (**Select all N**), then **Accept selected** or **Reject selected**: all or none are saved. A **Rejected** source stays in the Rejected list, where **Accept** brings it back.
 
-One pass: fetch every **accepted** source, then one model read for leads and proposed sources.
+**Source inventory** (`/desk/inventory`) shows every source ranked by how much news it produced in the last 90 days, how often it is read, and what the desk did on its own: trial sources it kept or dropped, quiet sources it checks monthly. Every move can be changed with one click.
 
-- It runs **only when you click.** It is not a loop and not a cron for writing. (Monitors in the background can still notice a missing packet. They do not draft.)
-- Stay on the page while it runs.
-- When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
+### Run a scan
 
-Scan has the same **Writing model** picker Story and the queue have, next to
-**Run scan**: Automatic (the default), every named Codex and Claude model, or
-Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it uses DeepSeek v4.1 Flash first, then the local model this computer
-has loaded, if there is one, then Codex Terra. If the first one's login
-lapses partway through the run, the scan moves to the next rung once, if it
-is ready, reusing the same fetched sources rather than fetching them again.
-A named choice is the recorded first provider. A recognized technical failure
-can move only the unfinished model call to the next ready runtime; the job shows
-the switch. A refusal or unrecognized error remains terminal. The choice is per
-click, not remembered between runs.
+![The Scan history screen: previous scans with their status and a Show all button, and the Run a scan panel below](images/05-scan.png)
 
-If no model is ready you get a straight refusal before anything is fetched —
-nothing is spent trying. Need to connect a provider? Open **Set up a writing
-model** under the picker, or see [setup.md](setup.md). If a scan is already
-running on a different model, the desk tells you and points you at that run
-instead of starting a second one.
+Three ways to start one:
 
----
+- **Run scan now** on **Today** (in The wire) or on the **Queue**. These use the shared **Model for this scan** picker.
+- On **Sources & scan**, in the **Daily scan** panel: **Run scan now** (owner only; runs the daily plan on demand with the saved daily settings) and **Scan every accepted source (N)** (any editor; a general scan).
+- On **Scan history**, **Run a scan**: choose a **Scan scope**, a model and press **Run scan**.
 
-## The queue (`/desk/queue`)
+**The three scan scopes:**
 
-![The queue](images/06-queue.png)
+- **General Scan** — every accepted source.
+- **Section scan** — only the accepted sources assigned to one section (pick the section). A section with no accepted sources cannot start.
+- **Custom sources** — exactly the set you pick. Search accepted sources by name or address, filter by **Kind** and **Tier**, tick any number, with a live count. Only accepted sources can be picked. The chosen list is saved into the run before the first fetch.
 
-Everything that might be news, scored and sorted. The scanner files here. Dark Desk can file here. So can you (“File a lead yourself”).
+**Saved source packs.** Press **Save selection as pack** to keep a named set. Pick a pack from **Saved pack** to run it, **Update pack with selection**, **Rename…** or **Delete pack** (with **Undo**). A pack uses its current accepted members when it runs.
 
-Statuses you will use:
+The picker on the scan panel is for that press only. If a scan is already running with a different model, the desk warns and offers **Stop and restart with <model>**. If the paper is not set up, or you have started more than 10 scans this hour, it warns too and offers **Run anyway**.
 
-| Status        | Meaning                                                          |
-| ------------- | ---------------------------------------------------------------- |
-| **New**       | Not opened yet                                                   |
-| **Drafted**   | Workbench has a story in it                                      |
-| **Held**      | Not now. Still on the desk.                                      |
-| **Killed**    | No. Still listed under Killed if you need to undo.               |
-| **Published** | Live on the paper. Lives under Published, not the working queue. |
+**What the reader does.** It asks for one page at a time from any one site, with a pause between requests. It reads only pages on the watch list. A scan reads sources in batches of 16 within a 90-minute budget. Sources never read come first, then the oldest read. Sources that are waiting, blocked or over the limit are skipped and the scan says so. A scan interrupted midway does not resume; start it again.
 
-Every active lead has its own compact **Writing model** picker beside **Draft
-with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it uses DeepSeek v4.1
-Flash first, then the local model this computer has loaded if there is one, then
-Codex Terra. If
-the first one's login lapses partway through the
-run, the draft moves to the next rung once, if it is ready, and the row shows
-which provider took over and why. A named choice is the first recorded provider;
-the same technical-only retry rule applies. The result appears on the same
-row and names the provider the server actually queued. **Open** takes you to
-the workbench to watch the draft land and edit it. Nothing prints from this
-list.
+**What a finished scan says.** A coverage line such as “Read 180 of 201 · 15 wait their turn · 6 blocked” and, under **Source routes and gaps (N)**, each source that was skipped or blocked and why. A summary says how many sources were selected, fetched, failed and analysed, how many leads were filed and how many batches ran. A scan that finds nothing is shown as a success with zero leads (“Fetched N. Filed nothing.”), not an error. A model failure is shown as a failure. A partial scan says “Scan finished with partial coverage”. A scan row that says **Stalled** most likely lost its worker when the app restarted; nothing was lost, so run it again. If the desk cannot scan at all (no model ready, nothing loaded locally) you get “The desk cannot scan yet.” with the reason and, for a lapsed login, a **Sign in to Claude Code** or **Sign in to Codex** button, before anything is fetched. **Open the queue** shows what was filed.
 
-### Draft many stories at once
+**Previous scans.** The panel shows the newest five scans with date, fetched count, leads filed and a status (**Complete**, **Running**, **Failed**, **Stalled**, or a note such as “Cancelled after 40 of 201 sources; 2 leads filed before it stopped stay on the Queue”). **Show all 39** loads older ones. Each row has an **Open** that shows whether it was a scheduled or a manual scan and its summary.
 
-You can start as many drafts as you like. Press **Draft with AI** on one Queue
-row, then on the next row, and so on. Or open a story, press **Draft with AI**,
-go back to the Queue, open the next story, and do the same.
+**Captured meetings** (bottom of Scan history) lists what meeting capture has saved: the meeting, whether the transcript is from official captions or speech-to-text, whether it was matched to agenda items, and a link **Open the story** when a draft or lead was filed. Setting up capture and **Run meetings now** are on the Server page. A transcript is a map of the tape, not the minutes.
 
-- **Leaving the page does not stop a draft.** The draft runs on the server,
-  not in your browser. Come back later and the story is there.
-- **Two drafts write at the same time.** The others wait in line. Each one
-  starts by itself, oldest first, when a draft finishes. A waiting draft shows
-  as queued and says what it is waiting for.
-- **Local model drafts write one at a time**, because they share one computer.
-- **Scans and Dark Desk digs have their own line.** They do not take a draft's
-  place.
-- **A running follow-up check makes new drafts wait** until it finishes.
-- **One draft per story.** If you press **Draft with AI** again on a story that
-  is already drafting with the same model, you get the running draft, not a
-  second one. If you pick a different model, the desk warns you first. If you
-  continue, it stops the running draft and starts a new one.
-- **The line keeps moving after a restart.** When the paper starts again, it
-  picks up drafts that were waiting or stalled. A backup clock (the
-  **TownReporter Monitors** task) also checks the line every five minutes.
-- **After 20 draft starts in one hour, the desk warns** that more may cost more.
-  Press **Run anyway** to start the draft.
-
-### Draft selected leads
-
-The **Draft selected leads** bar prepares up to five eligible Queue leads as
-one atomic batch. Tick the leads, then choose exactly one named **Codex**,
-**Claude**, **Local model**, or saved **Custom AI** connection,
-including Gemini. It deliberately does not offer Automatic. Each lead keeps its
-saved research scope. If the named runtime fails technically, only the unfinished
-call can move to the next ready cloud runtime; a refusal remains terminal. If no
-runtime is ready, or one selected lead cannot be queued, the batch does not start
-and the Queue explains why.
-
-Daily Scan offers the same named model choices and saved Custom
-AI connections, and also Automatic, which the scheduler resolves to a ready
-model before the run is queued. A named model is tried first;
-technical preflight or mid-call switches are recorded, and refusals remain
-terminal. OCR uses the same technical-only rule and considers only
-vision-capable destinations.
-
-The bar also offers an optional **Suggested focus** size of three to five
-leads. Suggestions balance existing lead scores and sections. Review the
-evidence before drafting. They operate on the currently loaded Queue and do not
-claim an actual coverage gap. **Add suggested focus** merges them into your
-current selections and never replaces them. The full Queue remains unchanged.
-
-After a batch starts, its saved runtime and each lead's queued, running,
-completed, or failed state remain visible with a link to that lead's
-workbench. One failed lead does not rewrite the status of the others. Batch
-drafting creates editable drafts only; opening, checking, and publishing a
-story remain editor actions.
-
-Need to connect a provider? Open **Set up a writing model** under the picker.
-The same help is on the workbench and Opinion form. It links installation and
-operator instructions, explains signing in on the server's account, and tells
-you to reload before retrying. Opinion also explains its required voice file.
-
-A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
-
-### Killed — "seen again," and "maybe same as"
-
-The scanner never throws a lead away. If a new lead looks nearly identical to
-one already on the desk, the old one is stamped "seen again." If it only
-looks similar, the candidate is linked to the earlier lead so you decide.
-When that earlier lead was killed, the candidate starts in **Held**, not New.
-You can compare it and return it to New if it contains a genuine development.
-
-**Nearly identical — "seen again."** Killing a lead never deletes it and
-never hides it. If the scanner comes back across what is confidently the same
-story — the same source with a reworded headline, the same source page
-pinned down with a specific date or dollar figure the first version only
-gestured at, or a different portal notice about the same thing, with almost
-nothing else different — it does not refile a duplicate for you to kill
-twice. It stamps the existing killed row instead: a **SEEN AGAIN ×N** badge
-appears on the row, in the same bordered-pill family as KILLED and ≈
-PRINTED (not the muted meta text below the headline), with the date it last
-came back, and the Killed tab sorts what keeps resurfacing to the top. The
-first time any lead on the Killed tab carries a stamp, a one-line note
-appears under the filter row: "Seen again: the scanner found this story
-again after you killed it. It was not refiled. Back returns it to New."
-
-An open lead (New, Held, Drafted) that the scanner rematches this confidently
-gets the same badge instead of a duplicate row. A story that already
-**printed** is never matched this way — a fresh development on a published
-story is real news and always files as a new lead.
-
-**Only similar — "maybe same as #N."** Two headlines can share real ground —
-a source link, a date, a dollar figure, some of the same wording — without
-being confidently the same story: two different agenda items from the same
-meeting page often share a date and a figure and nothing else. When the
-overlap is real but not that strong, the scanner no longer guesses either
-way. It keeps the candidate on the queue (Held when the earlier lead was
-killed, otherwise New), and adds a dotted
-**Possible duplicate · compare #N** chip pointing at the existing lead it resembles — click
-it to open that lead and compare. Nothing is merged, stamped, or hidden;
-you make the call.
-
-This matching runs entirely in code against leads already on the desk — it
-never sends the AI a list of what you killed, so it costs nothing extra to
-scan. When a scan run does stamp a lead as seen again, the scan's own result
-summary names the headline that got merged (for example: "1 lead matched a
-story you already killed and was stamped, not refiled — e.g. '…'"), and, in
-the same sentence, says how many more were filed and tagged maybe-same and
-how many were filed as plain new leads — so the whole picture is something
-you can glance at and check, never something that happens with no trace at
-all.
-
-Nothing about "seen again" or "maybe same as" changes what Kill does: the
-lead stays under Killed, and **Back** still returns it to New at any time,
-resurfaced or not.
+**The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#server-deskops)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads only.
 
 ---
 
-## The workbench (`/desk/story/…`)
+## The queue
 
-![The workbench](images/07-story-editor.png)
+`/desk/queue` — every lead the paper holds, scored and sorted. The scanner files here, Dark Desk files here, imports land here, and so do you. Nothing prints from this list; you open a lead and publish from its story page.
 
-This is where a lead becomes a story, or doesn’t.
+![The Queue: filter tabs, search, sort, and lead rows with score, chips and Start story, Kill and More buttons](images/06-queue.png)
 
-The lead and the notes are on the left and never print. The draft is on the right. **PULL**, next to an unfinished to-do, goes and fetches that one document.
+### The top of the page
+
+- **Model for this scan**: a model picker for the next scan only.
+- **Run scan now**: starts a scan of the accepted sources. A scan card with its stages and **Cancel** appears under the tabs. The scan files leads a batch at a time, so the list fills while it runs. More than 10 scan starts in an hour asks first (**Run anyway**).
+- **Add a lead**: see [Add a lead](#add-a-lead).
+- **+ New story**: opens the older Write a story form.
+
+### Find the lead you want
+
+- **Tabs:** **Open** (not held, killed or published), **Held**, **Killed**, **≈ Printed** (leads that match a story already in print; it is not every published story) and **All**. Each shows a count, or the word “loading”. A Held count in the “waiting” style means leads are waiting on you.
+- **Search** matches the headline, the why-line and the section key.
+- **Sort:** **Best first**, **Newest first**, **Oldest first**. On the Killed tab all three order by when the lead was killed.
+- **Section:** **All**, or one of the paper’s sections.
+- The list shows 25 rows; **Show 25 more** adds more.
+- **J / K / S / H / X / U / Enter** work on the highlighted row.
+
+### What a row shows
+
+| Part | Meaning |
+|---|---|
+| Tick box | Select the row for the bulk bar |
+| Score | Newsworthiness out of 20 (warm at 10, hot at 14) |
+| Chips | The section; the status (**New**, **Drafted**, **Held**, **Killed**, **Published**); **Section not chosen — pick one** when the scan guessed the section; **Imported**; **Looks already printed: <headline>**; **Came back N times** |
+| Headline | A link to the story page |
+| Evidence | One small square per source link and a count such as “3 opened · 1 attached” |
+| Filed | How long ago; killed rows add the kill date |
+
+**Row buttons.** A New or Drafted lead has **Start story**, **Kill** and **More ▾**. A Held lead has **Release**, **Kill** and **More ▾**. A Killed lead has **Bring back** and **More ▾**. **Start story** opens the story page and spends no model.
+
+**More ▾ menu:** **Edit the lead**; **Hold with a reason**; **Kill as duplicate** (when the lead matches a printed story); **Send to Dark Desk** (opens a Dark Desk file filled in from this lead); **Start an AI follow-up**; **Kill with a reason**; **Open**; **The piece** (the printed story); **Back**; **Hold (no reason)**; the block **Draft with a chosen model**; and **Delete**.
+
+**To draft a lead from the Queue:** open **More ▾**, find **Draft with a chosen model**, check the model (press “Model: … · change” to pick another), then press **Draft with AI** (**Redraft with AI** if it already has a draft). The row says “Draft queued with <model>. Open the lead to watch it arrive.” Press **Open** or the headline to watch it.
+
+### Kill, hold, release and bring back
+
+- **Kill** is one press. The lead moves to Killed and a message offers **Undo** and one-tap reasons (**Not news**, **Not local**, **Old**, **Duplicate**, **Thin**, **Other**). It stays on screen for 15 seconds. Kill is not delete: the lead stays under Killed.
+- **Kill with a reason** asks for a quick fill (**Not news**, **Already printed**, **Outside our area**, **Bad source or unreadable**), your own words and an optional link.
+- **Hold with a reason** lets you say **Waiting on a record or date**, **Waiting on an AI follow-up** or **Not now, maybe later**, plus a note. A held lead waits under Held until you press **Release**.
+- If a lead has a draft or a published story, Kill and Hold warn first with **Kill anyway** or **Hold anyway**. The draft and the story are kept.
+- **Bring back** returns a killed lead to the Queue, and a drafted lead comes back as Drafted.
+- **Delete** (in More ▾) asks once, in the row: “Deletes this lead and any draft on it.” Press **Yes, delete** or **Keep**. A deleted lead is kept for 30 days under **Server → Recently deleted**, and **Undo** appears where you deleted it. A published story stays on the paper.
+
+### Came back, and possible duplicates
+
+The scanner never throws a lead away. If a new lead is confidently the same as one already on the desk, it does not file a copy. It marks the old row **Came back N times** (with the date) instead. On the Killed tab a line explains: “the scanner found this story again after you killed it. It was not refiled. Back returns it to New.”
+
+If a new lead only looks similar, it is filed with a chip: **Possible duplicate · compare**. If it is a killed story that returned with new facts, it is filed under **Held** with **New facts · compare** and a line beginning “Developing: new facts on a story you killed”. Press the chip to open the story page, where **Compare these two leads** shows both side by side. The buttons are **Not a duplicate — move to New**, **Same story — kill this one**, and **Newer facts — reopen the old one**. The desk also asks its model one short yes-or-no question per scan about borderline pairs. Nothing is merged or hidden without you.
+
+### Select several leads
+
+Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
+
+- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away.
+- **Kill** on several leads asks “Why?” once, writes the reason on all of them and shows **Undo**.
+- **Delete selected** asks first and lists each lead.
+- A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
+
+### Many drafts at once
+
+You can start as many drafts as you like. Leaving the page does not stop a draft; it runs on the server. Two drafts write at a time, and the rest wait in line oldest first, saying what they are waiting for. A draft that uses the local model waits if another local job is running. Scans and Dark Desk digs have their own lines. A running follow-up check makes new drafts wait. There is one draft per story: pressing Draft again with the same model returns the running one; choosing a different model warns, and **Stop and restart with <model>** replaces it. After 20 draft starts in an hour the desk warns that it may cost more and offers **Run anyway**. Waiting drafts resume after a restart.
+
+### Empty and error states
+
+An empty Queue says “Queue is empty — run the first scan or file a lead” (or, when stories are already on the paper, “Nothing open — N already on the paper. Last scan filed no new leads.”) with a **New story** button and a link to **Import finished stories**. If the Queue cannot load, press **Try again**.
+
+---
+
+## Drafts
+
+`/desk/drafts` — everything not yet printed, one row per story.
+
+![The Drafts list with filter pills and rows showing a status chip, headline and one button](images/17-drafts.png)
+
+- **Filter pills:** **All**, **Running**, **Needs you**, **Yours** and **Failed**, each with a count that stays blank until it has loaded. **Needs you** means the checks are waiting on you. **Yours** means you wrote or changed the headline.
+- **A row** shows a chip (for a finished draft, the readiness chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**; for a running one, **Queued · 0:12** or **Writing · 2:18** with a live clock; for a first draft that failed, **Draft failed**), a line such as “Council · AI”, “Council · Written by you” or “Council · Reprint”, the headline, and the model’s name or the time it was saved. A running row carries the full job card with **Cancel**.
+- **The button** names the next step: **Watch** (running), **Retry** (failed), **Check** (evidence to check), **Start story** (no draft yet) or **Review** (ready). Every button opens the story page.
+- **More ▾:** **Open the story workbench** and **Hold, kill or delete it in the Queue**.
+- Only leads that are New, Drafted or Held and have a draft appear here. Killed and published leads do not. The list refreshes itself every few seconds. A row that cannot be shown names the problem and links to the Queue; it does not break the page.
+
+---
+
+## The story workbench
+
+`/desk/story/:id` — where a lead becomes a story. Open it from a Queue row (**Start story**, the headline, or **More ▾ → Open**), from a Drafts row, from Today, or from the link on a running job.
+
+![The story workbench: Checks, Sources and Reporting tabs on the left, the headline, summary and story on the right, and the Publish bar at the bottom](images/07-story-editor.png)
+
+### How the page is laid out
+
+- **Top:** a **← Today** link, “Story from lead · <section>”, a readiness chip, and **Kill this lead** (hidden once a story is on the paper).
+- **Left:** three tabs. **Checks** holds the “Before you can publish” list, the evidence check and **Names and spellings**. **Sources** holds **Find evidence**, **Source documents** and **Sources on the lead**. **Reporting** holds **Redraft settings**, the lead, **Reporting notes** and the **Reporting package**. Notes and sources never print.
+- **Right:** the writing surface: **Headline · yours**, **Summary** (the line under the headline) and **Story**. A closed **Story details** fold holds **Story direction for AI**, **Topic** (the section), **Geography**, the outlet check and **Pulled notes**.
+- **Action row:** **Save edits**, **Check draft against evidence**, **Draft with AI** (or **Redraft…** once there is a draft), **Stop** while a draft runs, and **More ▾**.
+- **Bottom:** the Publish bar.
+
+Everything here is open to any signed-in editor. A draft written by the AI is a first pass. Read it against the documents.
+
+### The readiness chip
+
+The chip at the top says where the story stands: **… Checking facts**, **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready** or **No draft yet**, with a plain sentence beside it. **Not ready** means the desk has a warning on the Publish list. It does not turn Publish off.
 
 ### Draft
 
-Before **Draft with AI**, choose **Drafting scope**. **Research public sources** follows supplied links and searches for relevant public evidence. **Use only supplied material** reads your text and opens only URLs you supply; it does not discover sources or run external searches. Use this control to limit research, rather than writing “do not search” inside pasted material. The choice is saved with the queued job, including retries.
+**To draft a lead with the AI:**
 
-Supplied-only drafting supports every Story model, including Codex. It does not run discovery or external searches. Uploaded originals remain saved; if Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained material. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+1. Open **Reporting → Redraft settings** (or look at the **Writer** bar) and check the model and the research scope. **Change model or research** opens the choices.
+2. Choose a **Drafting scope**:
+   - **Research public sources** follows your links and searches for public evidence.
+   - **Use only supplied material** reads your text and the documents you attached, and opens only the web addresses you filed yourself. It does not search and does not fetch other pages, and it tells the writer so. Use this control instead of writing “do not search” inside pasted text.
+3. Press **Draft with AI**. Press **Redraft…** later to ask for a new version: the box **What should change?** takes your note, the choice **My headline and my edits** keeps your headline, and **Start redraft** begins. Your current saved draft stays in place until the new one finishes.
 
-#### The headline
+While it runs, a card named **Drafting story** shows the model, a clock, stage chips (**Opening source material**, **Looking for primary sources**, **Planning the reporting**, **Writing the draft**, **Checking the draft against the evidence**, **Connecting the story to saved sources**), a **Now:** line with the writer’s own step, and **Last activity**. You can leave the page: the draft keeps running on the server. **Stop** (or **Cancel** on the card) ends it and no draft is saved. After 60 seconds with no news the card offers **Keep waiting** and **Retry on next model**.
 
-The headline is the first field on the story, inside a box with a visible edge and a small **Edit** hint. That is not decoration: the headline is yours to write, at any point.
+**Which writer runs.** A normal news lead is written first by the research writer, which can search and read for itself. If it cannot finish, the same model writes the story the usual way and the page says so: “The research writer could not finish (…). The story is being written the usual way, on the same model.” A meeting lead uses the meeting writer. The notes panel is headed **Writer’s notes** on a news lead and **Meeting ledger** on a meeting lead.
 
-**Redraft will not replace a headline you have changed.** The desk keeps the headline the model wrote separately from the one on the page, and remembers which of the two you last decided. Once you have edited the headline — or the words on the page already differ from what the last draft wrote — a redraft keeps your headline and files the model's new attempt beside it rather than over it. If you only rewrote the body, the headline still belongs to the model and a redraft may improve it.
+**What the model line tells you.** After a draft finishes, the Writer bar shows a receipt: **Last draft: <model>, <time>**. If the desk moved to another model, it says why: “You picked Automatic. <Model> wrote this draft because <reason>.” or “You picked A. B wrote this draft because A timed out.” Reasons include a lapsed sign-in, a usage limit, an empty or unreadable reply, and the model being unavailable. A content refusal never moves to another model; it stops the run.
 
-Two buttons sit beside the box:
+**Warnings when you press Draft.** The desk may open **Before you continue** with a button such as **Draft anyway**: the model is not ready (“If you draft anyway, the desk will use the next ready writing model”), the lead was killed (drafting puts it back on the desk), a draft is already running on another model (**Stop and restart with <model>**), or you have started 20 drafts this hour (**Run anyway**). For a meeting lead you may be told a model has not been tested with the meeting writer; DeepSeek v4.1 Flash 1017 has.
 
-- **Use the lead's headline** puts back the line the scan filed the lead under, in one press. Redrafts drift; the words the desk first read on the lead are often the ones you want.
-- **Suggest headlines** asks the story model for three options and shows them as a list under the box. One click puts one in the box, and nothing is applied without that click. The desk drops anything that could not be printed, rather than offering you a headline the paper would refuse.
+### Choose the model
 
-A headline you change on a draft is saved with **Save** like any other edit, and redrafts keep it from then on.
+The model picker is the same on every screen that uses AI. It is labelled **Writing model** (**Digging model** on Dark Desk) with a **Thinking effort** control under it. See [Models](#models) for the full list and what Automatic does.
 
-#### Rewriting the headline of a story already on the paper
+### Headline, summary and story
 
-A printed story can still be re-headed — the words were wrong, or the story moved on. Do it on the story page: the headline field loads the words that are actually on the paper, and **Save headline** changes them. The **Published** page offers the same thing: **Edit headline** beside a story opens a box under its headline.
+- **Headline · yours** is yours to write at any time. A redraft will not replace a headline you have changed.
+- **Use the lead’s headline** puts back the line the scan filed the lead under.
+- **Suggest headlines** asks the story model for three options. On a draft it opens a **Headline** box: pick one, **Keep mine**, or type your own, then **Use this headline** (**Suggest 3 more** asks again). Nothing changes until you press **Use this headline**.
+- **Summary** is the line under the headline. **Story** is the body; the small line above it says **Saved <time>**, **Unsaved changes** or **Published story**.
+- **Save edits** (Ctrl+S) keeps your changes without printing. **Preview as reader** (in **More ▾**) shows the story as a reader would see it.
+- **Story details → Story direction for AI** names the decision or question you want covered. It steers the draft and is not evidence. **Topic** is the section the story files under.
 
-Either way the write changes the words only. **The URL does not change**, so every link anyone holds keeps working, and the search engines keep what they have. The public story page, the front page and the RSS feed all show the new headline on their next render. The desk records what the headline used to say, which account changed it and when, so "when did that change?" has an answer.
+### Add to a story
 
-No correction notice is published for a headline change. A correction is for a story that was wrong; the paper's correction rules have never applied to headlines. If the story itself was wrong, post the correction as well.
+**+ Add to story** (in **More ▾**) opens **Add to this story**: drop new documents or paste text, a link or your own paragraph under **New material**, then choose **How**: **AI weaves it in**, **Add as an update at the top** (marked Updated with the time) or **Paste in as-is at the end**. A first press shows **Now** and **After your change** side by side; nothing is saved until you press **Add** again.
 
-During public-source reporting, a captured recurring record such as an agenda, meeting page, report, packet or RFP can start an automatic background watch for later changes or disappearance. The watch does not draft or publish. This automatic behavior is separate from the editor-created watches under **Dark Desk → Watch a page / view watches**; that manual-watch panel does not currently provide management controls for automatic watches.
+### Documents on the story
 
-Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
+The **Sources** tab lists **Source documents** with their reading state and counts such as “3/5 parts read”. Buttons: **Download original** and **Download full extracted text**. The desk reads PDF, Word, Excel, PowerPoint, LibreOffice, text, images (with OCR), CSV and subtitle files; Excel, PowerPoint and LibreOffice files are read with LibreOffice, and if that is missing the row offers **Get LibreOffice** and **Try again**. Up to 20 files, 100 MB each, 20 million characters of text per document. If a document was only partly read, a notice says so and **Read the rest** starts a redraft that reads more.
 
-The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it uses DeepSeek v4.1 Flash
-first, then the local model this computer has loaded if there is one, then Codex
-Terra — choosing the first ready one before enqueueing, and keeping it
-for every reporting and writing pass unless it reaches a usage limit, becomes
-unavailable, loses its login, or times out. Automatic moves the unfinished work
-once to the next ready provider and shows the switch in the workbench. A model
-content refusal stops the run. Choose a named model as the first runtime: Codex
-Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
-The technical-only retry rule applies to named choices too. Redraft has the same
-picker.
+### Reporting notes
 
-Choose **Local model**, then the individual model found through LM Studio, Ollama or llama.cpp. An Ollama model ending in `:cloud` runs in Ollama Cloud; the local Ollama service routes the request and the picker labels the model **Ollama Cloud** with its reported context window. A configured `LLM_BASE_URL` is also supported. Availability means the route can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
+The **Reporting** tab’s **Reporting notes** never print. They hold the news and why it matters, **Still to pull** to-dos (yours are tagged “yours”; type one in **Add a reporting note**), **Claims and sources**, **Verify before print**, and **Documents opened for this draft**. Notes survive a redraft.
 
-You can stay on the page to watch, or leave it: the draft keeps running on the
-server either way (see [Draft many stories at once](#draft-many-stories-at-once)).
-If you stay and the click dies before the reply comes back, the workbench
-keeps looking until the draft is on the lead, then fills the form. You should
-not need to reload. If a real failure happens, its message survives a reload
-and includes the provider's safe diagnostic detail when available. Fix what it
-names, then click Draft/Redraft again.
+**To fetch a missing document:** press **Pull** next to a still-to-pull line. It searches and reads without any AI, and drops the excerpt into **Pulled notes** (in **Story details**) for you to cut into the story. **Stop** and **Continue pull** control it. Redraft reads **Pulled notes**; nothing in them prints.
 
-When the reporting hangs on another newsroom, the draft should name them and link the **story URL** so they get the traffic. A homepage or `/local-news` index is not that URL. Their rewrite is not a substitute for the company’s own announcement. If the desk only has a listing, notes ask you to pull the full URL; do not publish a paraphrase of their legal claims as if TownReporter established them.
+**Draft history and transcript revisions** lists earlier saved drafts with **View saved draft and evidence**.
 
-A second box under the story, **Pulled notes**, does not print. **Pull** next to a still-to-pull line searches that item, opens what it finds, and drops the excerpt there for you to cut into the story. Redraft reads that box. The checkbox only strikes the line.
+### Meeting stories
 
-Draft is allowed to be wrong. Read it against the documents.
+A meeting lead shows **Where this draft came from**: the meeting recording and the exact transcript passages the saved draft used (**Open transcript**, **Watch the video**, timestamps). **Transcript material considered** is a separate list of candidates and is not proof the draft used them. **Transcript the reporter will read** chooses between the Whisper transcript and YouTube captions; a transcript not aligned to the agenda warns before drafting.
 
-### Check a saved draft against its evidence
+If the transcript changed after the draft, a block reads **Newer transcript available — review before publishing**. Compare each cited passage, tick that you did, write what you verified and press **Save review against current transcript**, or press **Redraft from current transcript**. This is a warning at Publish, not a block.
 
-**Check draft against evidence** applies to the exact draft version currently saved for the story. Save any headline, dek, topic or body edits first, then choose the model in the workbench picker and start the check. The control stays unavailable while edits are unsaved, a save is pending or another check is active. The queued job records the model selection and does not restart discovery or initial writing.
+A speaker name the desk cannot confirm is replaced in the saved copy by “an unidentified speaker”, along with a title next to it such as “Mayor Pro Tem”. Names inside direct quotes or links are kept and still need your check. The mask records what could not be verified; it does not verify anything.
 
-Queued, running and failed states remain visible in a full-width progress card that names the current stage and selected model. A successful job writes a new saved draft version while retaining the original version; it does not publish or approve either one. The workbench opens **Evidence check results**, with the changed fields shown side by side, unresolved verification notes, **Keep checked version**, and **Restore previous version**. Restoring loads the previous version as unsaved text so the editor can review it before clicking **Save edits**. If the saved captures do not provide enough evidence to complete the pass, the result is marked incomplete and still needs editor review rather than being presented as checked.
+**Report this meeting** (or **Develop this lead** if there is already a draft), in **More ▾**, starts a reporting run: write **What to report on**, add optional **Sources to start from**, choose **Public research** or **Supplied material only** and a model, press **Start reporting**. The **Reporting package** then shows what was read, what was established, what still needs checking, the stories the run filed, an **Action ledger** of meeting actions (set each item’s treatment to **Lead**, **Roundup** or **Excluded**), and **Ask for more reporting** for a follow-up run. **Record a correction or disposition** saves a dated, sourced note for later assignments. The package never publishes.
 
-Typing while the check or its final reload is running does not silently replace the editor's local text. The checked version is loaded automatically only when the fields still match the snapshot taken at the click. Otherwise the workbench preserves the unsaved buffer and offers an explicit **Reload checked draft** action, which intentionally replaces those local edits.
+### Names and spellings
 
-These controls are included in this release. A saved draft or completed check still needs editorial review.
-
-When the writer omits a usable claim ledger, the final reporting pass may run one citation-only repair against saved public captures. It accepts a source only when an exact clause from the finished draft is paired with an exact passage from that retained capture. If none can be proved, the story remains saved and the publish bar lists what still needs review before it can publish. Opened-but-uncited pages are never attached automatically.
-
-Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
-
-### Recorded finding evidence
-
-Draft reporting uses the originating newsroom's paper settings and captured records. Public evidence links and comparisons expose records from the public newspaper's newsroom only; a matching source URL does not authorize access to another newsroom's captures. Historical capture references that point across newsrooms or to a different source URL are excluded rather than guessed or repaired.
-
-When a draft has recorded findings, **Finding evidence review** lists those findings only; it is not an inventory of every claim in the story. Each row shows the recorded passage and locator, its cited captured record, and mechanical checks for whether that record is available, whether the passage appears there, and whether a newer capture is available. Those checks do not decide whether a finding is true: a passage match only confirms that the recorded words occur in the cited version, a missing record is not a contradiction, and a newer capture does not make the older record false.
-
-**Claims returned by this draft pass** is a separate private inventory of only the structured claims returned when that draft was created. It is not a scan of the current body or a complete claim inventory, and later human edits do not add claims to it. A row can use only the exact captured version or capture event named in that draft's provenance for its returned URL. Missing, cross-newsroom, or repointed provenance stays unavailable; a same-URL or newer capture is never substituted. The same editor judgments are available, but no judgment is automatic and none authorizes publication.
-
-For a body fact an editor adds or changes, use **Claims added by an editor** in the same private pane. Write the fact, choose its kind, then explicitly select one to six already captured records in this newsroom and mark each **corroborating**, **contrary**, or **context**. The selector names the exact captured version and date; it does not fetch a URL, choose a newer version, or treat several hosts as independent evidence. A changed fact or selected record reopens its judgment. A support judgment needs a readable record explicitly marked corroborating; a contradiction needs a reason and a readable record explicitly marked contrary. These rows are private review notes: they do not alter the article, public evidence, model work, or publication permission.
-
-Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**, or **Needs reporting**, and optionally record why. **Supports** and **Contradicts** require a readable cited captured version; **Contradicts** also requires a reason. **Does not support** means the cited material is insufficient; it does not assert contrary evidence. Save the draft before saving a judgment. Changes to the draft or cited record can reopen saved judgments. Another editor's save makes an older view refuse; reload the current review before deciding again. This adds no automatic judgment or publication permission, and the existing draft-wide keep/remove decision remains available.
-
-**View cited captured version** opens the stored text privately inside the workbench. **Review newer capture** opens the newer stored version for comparison; it does not automatically change your judgment. A failed reload keeps your unsaved judgment and reason. A successful explicit reload discards those unsaved edits.
-
-After **Save edits**, the review refreshes for the saved draft without reloading the page. Judgment controls remain unavailable while a replacement draft is queued or running, or while a draft-wide evidence decision is saving. When the replacement job completes, the workbench loads its draft and review together.
-
-If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
+On the **Checks** tab. The desk checks names against written sources it opened. A name marked “needs review” is not established. A source match checks spelling only, not attendance or quotes. Captions and OCR do not confirm their own spellings. Edit the text and redraft or re-check to settle a name.
 
 ### Style check
 
-Everything else the desk checks about a draft is about whether it is true. **Style check** is the one panel about whether it reads. It is measured by code, not by a model, and it looks for shapes rather than facts: a claim attributed to nobody (**Experts say…**), a sentence that asserts importance and reports nothing, a participle tail on the end of a sentence, a dressed-up verb where **said** would do, filler, the same phrase cycling through different synonyms, a paste artifact, a tracking parameter or redirect in a link, a paragraph past the length the story form reads best under, a draft whose sentences are all the same length, a draft with no short sentence next to a long one, and the same six words repeated.
+A row in **Checks** appears when the code finds shapes that read badly: an unattributed claim (“Experts say…”), filler, a dressed-up verb, repeated phrases, a very long paragraph and the like. Tick the findings you want fixed and press **Fix these with the model**. The model may not change a quotation, a number, a name or a link; a rewrite that does is refused and your text is kept. The result is saved as an ordinary draft revision. Nothing here blocks or publishes anything.
 
-The list is at the bottom of the draft. It says how many things to fix, and for each one where it is — paragraph and sentence — what it is, and the sentence it came from. **Review** findings sit under a fold beneath them: those are for you to read, not to fix. The list measures the text on the page, so it stays current as you type. Every line is a suggestion. Nothing there blocks a save or a publish, and nothing there publishes anything.
+### Check draft against evidence
 
-**Fix these with the model** runs one repair pass, on demand, using the model the picker is set to. The model is given the list and the draft, and returns the draft with those problems fixed. It may not change a quotation, a number, a name or a link: a rewrite that does is refused, your text is kept, and the desk says why. The result is saved as an ordinary draft revision — the same as **Save** — so it is never a publication. The list then shows whatever is left, which may be nothing.
+**Check draft against evidence** compares the exact saved draft with the web pages the desk captured and the documents you attached. Save your edits first. It does not restart discovery or the first writing pass. A card, **Checking the draft against the evidence**, shows the model and the stage.
 
-A model never decides what counts as a fault here. The code names the problems, the model repairs only those, and the code checks the repair.
+When it finishes, the checked version is a new saved draft and your original is kept. If you did not type meanwhile it loads automatically. If you did, your edits are kept and **Reload checked draft** replaces them on purpose. **Compare versions** (in **More ▾**, or **Compare checked vs. previous version**) shows a side-by-side with **Keep checked version** and **Restore previous**; restoring loads the old text as unsaved text until you press **Save edits**. If the captures could not support a full pass, the result is marked incomplete and still needs your review. Neither outcome publishes or approves anything.
 
-### Reporting notes (do not print)
+### The evidence list
 
-The notes pane is the notebook:
+The **Evidence check** list on the Checks tab shows one row per recorded claim. A short line says how many claims the AI checked and how many need you. Chips: **✓ Supported**, **! Needs review**, **Checked · not found**, **Could not check**. The rows that need a person come first; the rows the AI supported are folded under **Show the N claims the AI supported**, with **Spot-check** and **Accept the AI’s supported rows**.
 
-- What’s the news, why it matters, the angle
-- To-dos you can strike and restore. **Pull** searches that line and drops the excerpt under the story. The checkbox only strikes it. Lines you type are tagged **yours**; machine-suggested checks are not. A long to-do the desk wrote itself is shortened the way a sub-editor cuts a line — at a word, without leaving half a word or a dangling comma behind — and a to-do stored by an earlier version can always be saved back, however long it is. A long to-do on the list is never a reason a save or a publish is refused
-- If the notes themselves fail to save, the desk says so in one plain sentence and the story still saves and prints. Your notes are never the reason a valid draft stays off the paper
-- Claims and sources — load-bearing facts with URLs
-- What you found, what still needs a check
-- Pages you opened
+Open a row to see the passage, mechanical checks (does the recorded passage appear in the cited saved copy, is a newer copy available), and **View cited captured version** or **Review newer capture**. Then record your own **Editor judgment**: **Supports**, **Does not support**, **Contradicts** or **Needs reporting**, with a reason. For a sentence the AI called not supported you may **Remove this sentence from the draft** or **Mark checked anyway**. A passage match only shows the words occur in that copy; it does not show the claim is true. Save the draft before saving a judgment.
 
-**Research memo** persists across redrafts. A new Draft with AI will not blow away the memo. The memo never prints.
+**+ Add a claim** lets you add a fact you put in yourself and tie it to one to six captured records, marked **Corroborating**, **Contrary** or **Context**. These are private review notes.
 
-Write like a reporter talking to yourself. None of this is copy.
+If you change the story after its evidence was gathered, the page asks you to choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removing clears the old public source list but keeps the original in the private draft archive.
+
+A draft with no recorded claims and a checkable fact in it (a number, a date, a weekday, a vote) shows **! Not checked yet**. Run the evidence check, or read it against your sources and press **I checked this story myself**.
+
+Only the owner sees **Take down this capture** inside an opened captured record. It deletes the excerpt and stored original, keeps the address and history, and cannot be undone.
+
+### Find evidence
+
+![The Find evidence panel on the Sources tab: a search for Oligarchy Ditch with 12 exact-word matches and zero close-in-meaning results, because the meaning index is not built yet](images/15-find-evidence.png)
+
+`Sources` tab. A box labelled **Find evidence** takes up to 200 characters (placeholder “Words from the story or its sources”). Press **Search**. Up to three lists appear:
+
+- **Exact words (N)** — pieces of captured pages and transcripts that contain your words.
+- **Close in meaning (N)** — captured pieces, and up to three of your uploaded files (marked “your file”), whose meaning is close to what you typed, even when the words differ.
+- **Our past stories close in meaning (N)** — the paper’s own published stories on the same subject.
+
+Each captured piece shows its title, host and capture date, an excerpt, **Open** (the original page) and **Add to this story**, which puts that address on the lead’s source list. A past story shows its headline, “Published <date>” and **Open story**; an uploaded file shows **Open that story**. Nothing from a result is ever added to the story’s text. Small lines say how much of the archive is searchable yet, because the desk indexes a little each minute, newest first. If search by meaning is not ready the page says “Search by meaning is not available now. The exact-words list still works.”
+
+This panel is on the editor desk only. The public paper’s search box looks only at headlines and text and has no meaning search. The writer is also given the five closest past stories as background only, with instructions to mention, quote, cite or link nothing from them.
 
 ### Publish
 
-Claims that a record does not exist have a separate publication safeguard. The
-application searches before asking for confirmation; review the actual records
-and the visible check rather than confirming an absence because one fetch
-failed. Tool-status language is not a report about the town.
+The Publish bar sits at the bottom of the page while a draft exists. Its main button names the section the story will print under: **Publish in <Section>**. Pressing it opens a confirmation, not a separate Confirm step to find first. The confirmation says: “This puts the story on the public paper and in the feed, under your name, now. Corrections are published, not silent edits.” Press **Yes, print it in <Section>** or **Not yet**.
 
-**Publish in \<Section\>** saves, then puts the story on the paper. The button names the section the story will print under, because that is the decision the press carries: it records your confirmation of that section for the exact version being printed, and then publishes. There is no separate Confirm button to find first. A small **change** link beside the button puts your cursor in the section chooser if the name is not the one you want — and the button takes the new name as soon as you pick it.
+If the desk could not place the story, the button reads **No section chosen. Pick one, or publish in <Section> anyway.** Pressing it opens **Story details** and the section chooser. A second button, **Publish anyway in <Section> (no section was chosen)**, publishes at once. A small **change** (or **pick the section**) link beside the button goes to the chooser.
 
-When the desk could not place the story, the section reads **Section not chosen — pick one** and the publish button is disabled, with that reason printed beside it. Pick a section and it lights up. The desk will not print a guess.
+**The app warns; it does not block.** Above the bar a list called **Before you can publish** shows each warning with a **Warning** chip and a button that clears it. The warnings are:
 
-The server enforces the same thing, not just the button: it refuses a draft whose section nobody confirmed for the version being printed, and if the section your request carried is not the one on the draft, it says so in plain words instead of printing the wrong section. Every time the section that printed is not the one the scanner chose, the desk records it — the lead, both sections and the time — and Stats counts them under **Section chosen by hand**.
+| Warning | What it means | Button |
+|---|---|---|
+| This draft looks cut off | The body does not end in a full stop or closing quote | **Read the draft** |
+| The dek is empty | No line under the headline | **Write a dek** |
+| This story is not ready | The readiness reason | **Review remaining checks** |
+| This draft was last written … days ago | Older than 14 days; check dates and “Saturday”-style words | **Read the draft** |
+| No section has been chosen | | **Pick a section** |
+| The body names <Outlet> and the Sources do not show it | Credit another newsroom | **Override <Outlet>** or **Add a source** |
+| A claim of absence has not been confirmed | The story says a document is not there | **Confirm the claim** |
+| N claims need review | The evidence check raised claims no one judged | **Review the claims**, or **Publish anyway in <Section> — I accept these claims are unreviewed** (records your acceptance, then opens the confirmation) |
+| No claims were recorded, so nothing has been checked | | **Run the evidence check** or **I checked this story myself** |
+| The story changed after its evidence was checked | | **I checked: keep this evidence** |
+| An evidence check is running on this draft | The answer is not in yet | **Publish anyway in <Section>** |
+| This draft is on hold / is killed | Publishing un-holds or restores it | **Publish anyway** |
+| The recording this draft quotes has changed | A meeting citation is stale | **Review the citation** |
+| The writer asks you to check N things | The writer’s own list (**The meeting writer asks you…** on a meeting story) | **Review the checks** |
 
-After that it has a public URL under `/articles/…`. Provenance (source title, organization, document date, exact URL, capture time) goes with it when the records resolve.
+Only a few true impossibilities turn the button off: an empty headline, an empty story, a publish already running, an evidence decision still saving, and a lead the desk can no longer find. When you publish over warnings the confirmation lists them, the button reads **Publish anyway in <Section>**, and the desk records which warnings you published over and who you are. After you accept unreviewed claims the button reads **Publish now in <Section>**.
 
-Before you hit it:
+**After you publish,** the bar shows a green **Published** button, with **Read it on the paper** and **See it under Published**. The story leaves Drafts and gets its public address under `/articles/…`. To change a printed story, use **Save headline** (the address never changes, the old headline is kept, and no correction is printed) or **Save changes** for the summary, section or body (each warns first: “This story is live. Your change will show on the public page.”, with **Change it anyway**), and **Re-check live evidence**. To post a correction, go to **Published**.
 
-- Every material number, name, date, and quote has a document you can show.
-- If the only source is a YouTube caption, you have checked the packet or the minutes, or you have written the story as “on the tape,” not “the minutes say.”
-- You are willing to put your name on it. The software will not.
+Before you publish: every material number, name, date and quote has a document you can show; a quote or name taken only from a YouTube caption has been checked against the packet or the minutes; and you are willing to put your name on it. The software will not.
 
-Hold or kill from the queue if it is not ready. There is no shame in a held lead.
+### Kill the lead
+
+**Kill this lead** (top of the page) opens **Kill this lead** with the same quick fills as the Queue. Killing keeps any draft, and **Reopen** brings it back. A reported story has no Delete here; Delete is on the Queue row and on editorial pages.
 
 ---
 
 ## Follow-ups
 
-Use the story workbench to record who you asked, what answer is needed and
-when it is due. The desk rail shows outstanding requests; **All follow-ups**
-opens the full list at `/desk/follow-ups`, with Open, Answered and Dropped
-filters. It is reached from the rail and story, not a separate main navigation tab.
+`/desk/follow-ups` — AI agents that keep watching for an answer to an open question and add what they find to the story’s reporting notes. They never publish.
 
-**Record reply** keeps the response and adds it to the linked story's reporting
-notes. **Nudge** records that you followed up; it does not send an email or
-message. **Drop** stops tracking the request without pretending it was answered.
-Check the linked story before drafting from a reply; a response is attributed
-reporting material, not automatically a proven fact.
+- **+ New AI follow-up** opens a dialog: **What to find out**, **Where to look** (up to 8 links), an optional **Story**, **Model for this follow-up**, and **How**: **Re-check these pages on a schedule**, **Search the web and public records**, or **Watch for the next agenda or minutes**. Press **Start follow-up**. With no link on a re-check, the desk warns and offers **Create this follow-up anyway**.
+- **Filters:** **Active**, **Found something**, **Could not check**, **Stopped**.
+- **A card** shows a state chip (**Running now**, **Waiting**, **Found an answer**, **Checked · no change**, **Could not check**, **Stopping…**, **Stopped**, **Finished**), the question, the schedule, the time of the last and next check, and the result in words.
+- **Buttons** depend on the state: **Review finding**, **Add to story**, **Mark done**, **Pause**, **Edit**, **Stop**, **Retry now**, **Run now**, **Resume**.
+- You can also start one from a Queue row (**More ▾ → Start an AI follow-up**), from a Dark Desk file, or from the **AI follow-ups** rail on Today.
+
+A follow-up is a source of leads to check, not a proven fact. Read the finding and the page it came from before using it.
+
+---
 
 ## Meetings and tapes
 
@@ -609,752 +585,488 @@ Longmont’s desk watches three kinds of meeting record. They are not interchang
 | **Minutes** (PrimeGov, when posted) | The official action                               | Official                              |
 | **YouTube tape + captions**         | What was said, including asides and “skip it all” | A map of the meeting, **not minutes** |
 
-How they join: a council video titled like `08/25/2026` joins that day’s packet. A planning video about 206 S. Main joins the Avis notice in that packet. Month must match — June’s museum board is not August’s.
+How they join: a council video titled like `08/25/2026` joins that day’s packet. A planning video about 206 S. Main joins the Avis notice in that packet. Month must match: June’s museum board is not August’s.
 
 **Captions:**
 
 - Auto-captions invent names. “Kimbark” will come out as something else. Do not publish a proper name off a caption without a check.
 - Quotes need a check. Play the tape or read the packet.
 - Upcoming livestreams have **no transcript yet**. The desk rechecks; you do not invent one.
-- Any extra channel listed under **Paper setup → Meeting video channels** is a sister tape. If the first channel has no captions, the desk can use a matching tape from one of those channels. Same rules.
+- Any extra channel listed under **Server → Paper setup → Meeting video channels** (or **Server → Meeting capture → Meeting channels**) is a sister tape. If the first channel has no captions, the desk can use a matching tape from one of those channels. Same rules.
 
-**Minutes not posted** after 36 hours (council / commission / board / authority, skipping cancel / continued / TBD) is a catalog note. It is a reason to look, not a story by itself.
-
-Dark Desk is told: search the whole tape; names may be wrong; quotes need a check. It will still guess. You are the check.
+**Minutes not posted** 36 hours after a council, commission, board or authority meeting (skipping cancelled, continued and TBD items) is a catalog note. It is a reason to look, not a story by itself.
 
 ### Meetings with no captions (speech-to-text)
 
-Some tapes have no captions at all, so capture ends at the audio. If the owner
-has installed **textflowkit** on this machine and named it, the desk can listen
-to that recording and write a transcript from it. The pass you already run —
-**Run meetings now**, or the scheduled one — queues that work; there is nothing
-extra to press. One recording is transcribed at a time, it can be stopped, and
-if the machine restarts mid-run the desk picks the work up again. What the desk
-does with it afterwards is the same as for a caption transcript: alignment,
-citations with timestamps, drafts, and the publish checks all read it the same
-way.
+Some tapes have no captions at all, so capture ends at the audio. If the owner has installed **TextFlowKit** on this machine, the desk can listen to that recording and write a transcript from it. The meeting pass you already run (**Run meetings now**, or the scheduled one) queues that work; there is nothing extra to press. One recording is transcribed at a time, and if the machine restarts mid-run the desk picks the work up again. After that, alignment, citations with timestamps, drafts and the publish checks read it the same way as a caption transcript.
 
 Two things to keep straight.
 
-**It is not the city’s record.** The desk labels these rows, next to the
-transcript’s hashes, as *speech-to-text (Whisper via textflowkit), not official
-captions*. Everything already said about auto-captions applies, and more
-sharply: a machine listened to audio and wrote down what it thought it heard.
-Names, numbers, and ordinance titles are exactly where it is most confident and
-most wrong. Play the tape before you print a quote or a name from one.
+**It is not the city’s record.** The desk labels these rows “Saved transcript: speech-to-text, not official captions.” Everything said about auto-captions applies, and more sharply: a machine listened to audio and wrote down what it thought it heard. Names, numbers and ordinance titles are exactly where it is most confident and most wrong. Play the tape before you print a quote or a name from one.
 
-**The desk says whether it is available.** **Server → Meeting capture** shows
-one line: *Speech-to-text: textflowkit 0.1.8 (model small, language en)* when it
-is there, or *not installed … meetings without captions stay audio-only* when it
-is not. If that line says not installed, a captionless meeting staying
-audio-only is the honest outcome, not a fault.
+**The desk says whether it is available.** **Server → Meeting capture** shows one line: “Speech-to-text: textflowkit <version> found at <path>” with its engine, model and language, or “textflowkit not installed … meetings without captions stay audio-only.” If it says not installed, a captionless meeting staying audio-only is the honest outcome, not a fault.
 
-A transcription that fails — the tool missing, the audio unreadable, or the run
-running past its allowance — leaves a named reason on the meeting row and keeps
-the recording exactly where it was. The next pass retries it. Nothing is written
-over: the audio is never deleted, and a transcript is never stored unless the
-recording it came from still matches the hash the desk recorded for those bytes.
-
-If captions turn up later, they are a new revision like any other, and the
-same rules apply — including the review step when a transcript changes after
-publication. Speech-to-text never overwrites a caption transcript.
+A transcription that fails (tool missing, audio unreadable, run too long) leaves a named reason on the meeting row and keeps the recording where it was. The next pass retries it. Nothing is written over: the audio is never deleted, and a transcript is never stored unless the recording it came from still matches the fingerprint the desk recorded. Speech-to-text never overwrites a caption transcript. If captions turn up later they are a new revision like any other.
 
 ### From a meeting recording to a story
 
-After channels and title keywords are saved in **Paper setup**, an owner can
-open **Server → Meeting capture**, enable meeting capture, and choose **Run
-meetings now**. This on-demand pass does not consume the scheduled daily run;
-you can start another pass when you need one. While it is running, **Stop**
-asks the active pass to stop. **Resume stopped captures** continues eligible
-partial captures already on disk; the result says how many resumed and how many
-had no partial file. **Force re-capture and retain revision** is for one
-specified video when you need to check whether its recording changed.
+After channels and title keywords are saved, the owner opens **Server → Meeting capture**, turns meeting capture on and presses **Run meetings now**. This on-demand pass does not use up the scheduled daily run. **Stop** asks the active pass to stop. **Resume stopped captures** continues eligible partial captures already on disk. **Force re-capture and retain revision** is for one named video when you need to check whether its recording changed.
 
-Open **Scan → Captured meetings** to see what the pass found. Each row reports
-capture and alignment state. When the system filed a lead, use **Open the
-story** from that row: it opens the Queue/story workbench, where the generated
-draft can be reviewed, edited, or redrafted. A captured transcript is not a
-promise that a story was generated: a failed capture, unaligned agenda, or
-lead without a draft is shown as such. Alignment and citations help you locate
-the recording; they do not establish that every claim is true.
+Open **Sources & scan → Scan history → Captured meetings** to see what the pass found. Each card reports its capture and alignment state. When the desk filed a lead, **Open the story** opens the story page, where the generated draft can be reviewed, edited or redrafted. A captured transcript is not a promise that a story was written: a failed capture, an unaligned agenda, or a lead without a draft is shown as such. Alignment and citations help you find the place in the recording; they do not show every claim is true.
 
-Use **Story direction for AI** in the story workbench to name the decision or
-question you want the draft to cover, then choose **Draft with AI** or
-**Redraft**. An exact ordinance or resolution number is matched to the
-captured transcript; if that named measure is absent, the draft is refused
-instead of switching to a different meeting story. **Pulled notes** can give
-the writer leads to check, but they are not independent evidence and do not
-print. Review the saved story and its used citations before publication.
+On the story page, **Story details → Story direction for AI** names the decision or question you want covered. An exact ordinance or resolution number is matched to the captured transcript; if that named measure is absent, the draft is refused instead of switching to a different meeting story. **Pulled notes** can give the writer leads to check, but they are not independent evidence and do not print.
 
-In the story workbench, **Where this draft came from** shows the persisted
-transcript citations actually used by the current saved draft. **Transcript
-material considered** is a separate candidate list and is not proof that the
-draft used those passages. Click a timestamp to open the recording at that
-point. If a newer transcript exists, the workbench names the old and current
-artifacts, compares cited excerpts where a timestamp match is available, and
-offers **Redraft and reverify citations**. A missing comparison is labeled
-unavailable; it must not be treated as confirmation. Publishing remains
-blocked until the current transcript is used and its citations are verified.
+**Where this draft came from** shows the transcript passages the saved draft actually used. **Transcript material considered** is a separate list and is not proof the draft used those passages. A timestamp opens the recording at that point. If a newer transcript exists, the page says **Newer transcript available — review before publishing**, names the old and current versions, and compares each cited passage where a match exists. Press **Redraft from current transcript**, or compare each citation, write what you verified and press **Save review against current transcript**. A missing comparison is labelled unavailable and must not be read as confirmation. A stale citation is a warning at Publish, not a block.
 
-A meeting draft is also checked for speaker identity before you see it. A name
-the check cannot resolve is replaced in the saved copy with neutral wording —
-“an unidentified speaker” — including a two-word office, so “Mayor Pro Tem”
-does not survive as a loose title in front of a masked name. That mask records
-what the desk could not verify; it does not verify anything. If a name matters,
-read the passage and restore it yourself.
+A meeting draft is also checked for speaker identity. A name the check cannot resolve is replaced in the saved copy with neutral wording (“an unidentified speaker”), including a title beside it such as “Mayor Pro Tem”. Names inside direct quotes or links are kept and still need your check. The mask records what the desk could not verify; it does not verify anything. If a name matters, read the passage and restore it yourself. Check any vote tally against the tape or the minutes before you print it.
 
-Two honest limits on this path. Vote extraction refuses to guess: structured
-votes come back **not established** rather than inferred from prose, so a tally
-or a mover can appear in a draft with no citation behind it. Check the tape
-before you print one. A capture can also fail because YouTube rate-limited it
-(HTTP 429); the desk retries that video on a later pass instead of inventing a
-transcript.
+A capture can fail because YouTube rate-limited it (HTTP 429); the desk retries that video on a later pass instead of inventing a transcript.
 
-If a transcript changes after publication, open **Published**. The page puts
-pending transcript reviews first, shows the old published evidence beside the
-current recording, and requires a note plus checking every cited passage to
-mark it still accurate. That records the accepted artifact B evidence without
-rewriting the article's original artifact A provenance. If the story needs a
-change, choose **Needs correction**, write the correction, and use **Publish
-correction**. Completed review history remains with the published article; it
-does not silently edit the printed story.
-
-### Finding videos with Google's official YouTube Data API
-
-**Where the key goes:** open **Server → YouTube** (the direct link is
-`/desk/ops#youtube-key`). Paste the key, then **Save key**.
-
-**Making the key.** In Google Cloud, create a project, turn on **YouTube Data
-API v3** for it, then create an API key and restrict that key to the YouTube
-Data API. TownReporter pays nothing for this: the API allows 10,000 units a
-day free, and every call this desk makes costs 1 unit. It never uses
-`search.list`, which alone would cost 100.
-
-**The key is write-only.** It is encrypted before it is stored and it is never
-sent back to the page — the box says *A key is saved* or *No key*, and there is
-no control anywhere that shows the key again. If you lose it, make a new one in
-Google Cloud and paste that; there is nothing to recover here.
-
-- **Test** spends one unit and asks Google about the first channel the desk
-  watches. It answers *Key works. Google answered for the channel …* or
-  Google's refusal in plain words, for example *Google says this key is not
-  allowed to use the YouTube Data API. Check that the key is right, that the
-  YouTube Data API v3 is turned on for its project, and that the key is not
-  restricted to another API.* Type a key and press **Test** to check it before
-  saving it — a tested key is not stored.
-- **Remove** takes the key back out. The desk reads the public feed again from
-  the next scan.
-- **YouTube units used today: N of 10,000** sits next to the box, so you can
-  see a scan eating into the day's allowance before it runs out.
-
-**What changes with a key set.** Channel videos, durations and live/upcoming
-state come from Google's documented service instead of the channel page HTML,
-the public RSS feed, and the yt-dlp listing. The scan receipt says which reader
-actually ran — *Read YouTube with the official API.* or *… Read the public feed
-instead.* — and the Meeting capture line names it too, so a short list is never
-mistaken for a thin channel when the desk had in fact fallen back.
-
-**What does not change.** Transcripts and media still come from yt-dlp and
-textflowkit. The API cannot download captions for videos this desk does not own,
-so nothing about caption or audio capture moves.
-
-**When the allowance runs out.** Google resets it at midnight Pacific. On the
-day Google refuses for quota the desk stops asking, says so under the key box,
-and reads the public feed for the rest of that Pacific day rather than spending
-more calls on refusals. It tries the official API again the next day. A key
-that is missing, rejected, or unreachable at any moment falls back the same
-way: the scan keeps running on the public feed and says so, instead of failing.
-
-An owner can also put `YOUTUBE_API_KEY` in the app's environment. A key set
-there is used in place of any saved one, and overrides it — see `.env.example`.
+If a transcript changes after publication, open **Published**. The story shows **Transcript changed — evidence review required** with the old evidence beside the current recording. Check each citation, write a note and press **Still accurate — close review**, or press **Needs correction** and write the correction. The completed review stays with the story and never edits the printed text silently.
 
 ---
 
 ## Dark Desk (`/desk/dark`)
 
-The recursive investigative lane. **It never publishes.** Publication is a separate human action on the queue / workbench.
+`/desk/dark` — investigations that never print on their own. Its header reads “Investigations · nothing here prints on its own”.
 
-![Dark Desk](images/08-dark-desk.png)
+![Dark Desk: files in the left rail, the open file on the right with its activity, case file and Decide buttons](images/08-dark-desk.png)
 
-An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Unknown, weak, speculative, and previously-dead trails stay investigable. That is on purpose. Curiosity is not a gate.
+A Dark Desk **file** starts with a question and a tip: a link, a document, a rumour, a name, a contract number. The desk searches, fetches, keeps copies of what it reads, follows names and writes down what it thinks connects, always labelled and always with what would disprove it. For each odd thing it keeps two explanations alive: a concrete theory of what may be happening underneath, and the strongest ordinary explanation. Missing names, recipients, filings and permits become follow-up work, not reasons to drop the lead. “Not found in the material opened so far” never becomes “does not exist”. Any editor can use every control here. Dark Desk has no Publish button by design; the only way out is **Send to the queue**, which files a lead for a person to review.
 
-### Three piles
+Dark Desk searches the city and state saved in Paper setup, plus the county saved there if there is one. It does not carry Longmont’s jurisdictions over to another town.
 
-| Pile            | Meaning                                                             | What you do                          |
-| --------------- | ------------------------------------------------------------------- | ------------------------------------ |
-| **To look at**  | New. Nobody has opened it.                                          | Start digging                        |
-| **On the desk** | Started. Includes files that stopped because there is more to read. | Open file / Keep digging / Set aside |
-| **Set aside**   | Parked or finished. Nothing is deleted.                             | Pull back / Read                     |
+### The left rail
 
-Start digging **moves** a card from To look at onto the desk. The card stays on To look at, with a status line, until the file actually opens. A failed click says so — it does not vanish. Close file leaves it on the desk. Set aside files it. Pull back restores it.
+Piles show five files at a time (**Show all N**):
 
-A research round is a short batch, then a stop. Remaining pages stay on the file. That stop is **not a failure** and not “too many leads.” Keep digging reads the next batch.
+- **Open files** — files you are working. Each row shows a status line such as “Reading · 3 of 12 records”, “Stopped · 12 records”, “Case file ready · 12 records”, “Found an answer”, or “Sent to the queue”.
+- **Signals to review** — things the desk noticed: a missing report, a record that changed, an overdue item, an unverified tip. Pressing a card opens **Start a Dark Desk file** with the card’s text filled in; it does not start digging by itself.
+- **Waiting on an AI follow-up** — files that have a follow-up or a page watch attached.
+- **Set aside** — files you set aside or closed. Nothing is deleted.
 
-Keep the file open while its research job is running and Dark Desk refreshes that file through later synthesis, verification and brief writing, even after the round counter has paused. The final brief or a persistent run error appears without a manual reload. This watches only the file currently open; if you switch files, reopen the first one to read its latest saved result.
+The **Dark Desk** number in the navigation counts open files and files waiting on a follow-up.
 
-### Which model digs
+At the foot of the rail, **Check r/<name> for signals** reads the paper’s Reddit source (see below).
 
-Next to **Keep digging** there is a **Digging model** picker, the same one the
-queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
-Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
-Dark Desk Automatic uses a configured gateway when present; otherwise it uses
-DeepSeek v4.1 Flash first, then the local model this computer has loaded if
-there is one, then Codex Terra. Planning uses Claude Haiku or the cheaper Codex
-planning model. If synthesis times out, only synthesis moves to the next model;
-completed searches and document reads do not run again. A model you name is the
-recorded first choice. A recognized technical failure can move only the failed
-model call to the next ready runtime; a content refusal stops the run.
+### Start a file
 
-The choice is checked before the round starts. If no model is ready, the desk
-says so and nothing is spent.
+**To start a file:** press **+ Start a file**.
 
-A file remembers its requested first runtime, so Keep digging starts the next
-round with that choice even when an earlier call needed a recorded technical
-retry. Change it whenever you like; the next round uses the new first choice.
-**What Dark Desk did** — the round history at the bottom of the page —
-names the model that dug each round.
-
-While a round runs, the open file names the real stage and shows elapsed time,
-model calls, searches and document reads. The saved run keeps those totals and
-the per-call provider, model, duration, result and timeout. Token totals appear
-only when the provider reports them. A whole-run ceiling applies across every
-stage, and the final line says whether the run stopped for sufficient evidence,
-repeated sources, diminishing returns, no material new finding, or a resource
-limit.
-
-This arrived in 0.6.2. Before that, Dark Desk was the one screen with no
-picker: rounds ran on whatever the machine was configured for.
+1. **The question** — what you are trying to find out (at least 8 characters).
+2. **The tip or starting point** — a link, document, post or what you heard (at least 8 characters).
+3. **The ordinary explanation** (optional) — what would make this a non-story. The file tries to rule it out first.
+4. **Limits** — **Quick look** (up to 10 records, 20 minutes), **Standard** (30 records, 2 hours) or **Deep** (100 records, 8 hours). It opens on the saved default.
+5. **Digging model** and **Thinking effort**.
+6. Press **Open the file**. The first round starts at once. You can stop it any time.
 
 ### The open file
 
-The reading list comes first.
+Top to bottom:
 
-- **What to read** — pages and documents already captured. Title, excerpt, Open original, Read captured copy.
-- **Still unopened** — names and links mentioned that have not been fetched yet. That is not the reading list.
+1. **The question** as a heading, and **More file actions**: **Set aside**, **Pull back** (on a closed file), **Start another AI follow-up**.
+2. The **ordinary explanation to rule out**, if you gave one, and the **Digging model for this file**. Changing it affects the next round; the file remembers the last model used.
+3. While a round runs, a card with four stages (**Question**, **Gather**, **Case file**, **Challenge**), a **Now:** line, and a red **Stop**. If the round fails you get **Retry** and **Retry on next model**.
+4. Notes about the file: a round stopped by an app restart (nothing lost), a mostly-blocked warning (“This dig is mostly hitting walls…”), a batch stop (“Dark Desk opened a batch of records, then stopped so it would not run all night … That is normal — not an error”), or the reason a file is paused.
+5. Boxes **Scope**, **Depth** and **Limit**, read-only: the area searched, and the limit chosen at the start.
+6. **Activity** (time-stamped plain lines; **Show earlier**) beside the **Case file**: **Findings**, **Contradictions**, **Unanswered** and **AI follow-ups running**. A **More** link shows the brief — **Read this first**, **The hypothesis**, **What points at it**, **The boring explanation that also fits**, **What would settle it**, **Do this next** and a percent supported — with **Rewrite the brief**. **Challenge the case** has the desk argue against its own file; it needs at least one sourced finding.
+7. **Decide**:
+   - **Keep investigating** — start the next round. Dark Desk works in short batches and then stops. A stop with pages still unread is not a failure and not “too many leads”; press this to read the next batch. Lower-priority trails stay visible as deferred work and are picked up again when the active set is done.
+   - **Start an AI follow-up** — an agent keeps looking for an answer and reports on Follow-ups.
+   - **Wait and watch** — pick captured public pages to watch; the file moves to Waiting.
+   - **Send to the queue** — shows a packet for review (**Suggested headline**, **Evidence**, **Uncertainties**, **Contradictions**, **What would kill the story**); press **Send to the queue** to file a lead. An **Undo** is offered for ten seconds. Publication remains an editorial decision.
+   - **Close: no finding** — records a no-finding decision with an optional reason. The file stays readable under Set aside.
+8. **The file’s records ▸** (closed at first). **What to read** is every captured page and document: click a title and the captured copy opens below, with **Open original**, **Previous** and **Next**. For a retained PDF, **Read selected pages** and **Read entire PDF** read it in batches of up to 12 pages, save each batch, and list exactly which pages remain unread. **Still to pursue** lists open trails (**Follow this lead** opens a new file from one). Further down: every search the round ran (with whether it hit an official record, local press or community source), dead ends, questions the AI tested, and **What we know**.
 
-Empty editorial sections stay hidden until they have content.
+Do not send yourself to the public `/evidence/…` pages for unpublished captures; those show only records cited in a printed story. Plain English is the rule on this screen: if you see “hop” or a raw error, that is a bug, not a task for you.
 
-Do not send yourself to the public `/evidence/…` routes for unpublished captures. Those pages only show records cited in a **printed** story.
+### Models and warnings on Dark Desk
 
-Plain English on this page. If you see “hop,” “frontier,” or a raw TypeError, that is a bug in the UI, not a task for you.
+The **Digging model** picker is the shared picker (see [Models](#models)). Automatic here tries DeepSeek v4.1 Flash 1017, then a loaded Local model, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; if synthesis times out, only that stage moves on, and completed searches are not repeated. A model you name is tried first; a content refusal stops the run. If no model is ready, the round does not start and nothing is spent.
 
-Worth a look ranks missing reports, disappeared records, monitor alerts, reopened trails, open promises, and high-newsworthiness leads. Ranking is not a gate — you can still open anything.
+Warnings arrive as **Before you continue** with an “anyway” button: the paper is not set up (**Open this investigation anyway**), a round is running on another model (**Stop and restart with <model>**), or more than 8 rounds an hour (**Run anyway**). The Reddit check is capped at 6 an hour with no override.
 
-Full UI contract: [dark-desk-editor.md](dark-desk-editor.md).
+### Dark Desk settings (how hard to dig)
 
-### How hard to dig — the two dials
+![Dark Desk settings: the Digging model, thinking effort and default depth](images/09-dark-dials.png)
 
-![The dials](images/09-dark-dials.png)
+**Settings** (top right) opens **Dark Desk settings**. **How hard to dig** now has three parts: the **Digging model**, **Thinking effort**, and a default depth of **Quick** (10 records · 20 minutes), **Standard** (30 records · 2 hours) or **Deep** (100 records · 8 hours), saved with **Save default** (or **Reset**). Each new file opens on that depth. The older Dig, Nerve and Map sliders, presets and search-window controls are no longer on the screen.
 
-Under the piles there is a panel called **How hard to dig**. Press **Change** to
-open it.
+Three rules hold at every setting: the desk never invents a claim that someone was paid; everything it writes is labelled with how mature the evidence is (fact, observation, allegation, inference, hypothesis, unknown); and every theory carries what would kill it. Black Desk signals are speculative and capped at 50 percent confidence in code. A signal marked “protocol complete” means the searches and review questions were done. It is not a verdict. See [the doctrine and its limits](dark-desk.md).
 
-| Dial                        | What it moves                                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Dig — how far it chases** | Hops, searches, whether it may leave the watch list, how far it follows a name into a company, a parcel, a contract |
-| **Nerve — how speculative** | How sure it has to be before it writes something down, and whether it may propose a theory or only ask a question   |
-| **Map**                     | City · county · region · adjacent — how far out it is allowed to look                                               |
+**Watched pages** (also in Settings) lists pages the desk checks daily, with **+ Watch a page**: enter the **Page URL**, a **Watch name**, **Why watch this page?** and optionally an **Investigation**, then **Save watch and capture page**. A first capture, “no text change”, “text changed”, “page moved” and “check failed” are kept as separate outcomes; a failed check never replaces the last readable copy. **Stop watching** keeps the history. Daily checks need the local scheduler running.
 
-The paragraph above the sliders is not decoration. It is written from the same
-rules the run itself uses, in plain words: _"Up to 3 hops, following any public
-record it finds, including archived copies. One account is enough to open a
-file. No confidence floor at all — it writes the hunch down and labels it a
-hunch."_ If the paragraph says it, the run does it.
+**Reddit check.** The button **Check r/<name> for signals** reads the paper’s one Reddit source from Sources through four feeds, then up to three full threads through a local Redlib. It needs exactly one clear subreddit among the accepted sources; otherwise the button says **Reddit unavailable** and links to **Review Sources**. No subreddit is guessed from a town name. Posts are unverified tips. A post that scores high enough and is dated within 30 days is filed as a tip automatically; you can file any listed post by hand with **File as tip**. Each result says whether the full thread or only the RSS excerpt was read.
 
-**Presets** are there for the two ends. A low, careful setting for a file you
-intend to publish from. **Black Sky** for the night you want it to go as far as
-it can.
-
-Three things never move, at any setting:
-
-1. It will not invent a claim that someone was paid.
-2. Everything it writes down is labelled with how mature the evidence is —
-   fact, observation, allegation, inference, hypothesis, unknown.
-3. Every theory carries what would kill it.
-
-Turning Nerve up does not make it more confident. It makes it willing to write
-down a weaker thought — **and say that it is weak**.
-
----
+If you have no files yet, the screen offers **+ Start a file** and the Reddit check. If it cannot load, press **Try again**.
 
 ### Watch a specific page in Dark Desk
 
-Open **Dark Desk → Watch a page / view watches**. Enter a public URL, a name and why it matters. Optionally select an investigation: its readable captures will be attached there automatically. Choose the model used if a scanned PDF needs OCR, then **Save watch and capture page**. The watch is saved before the first check; a pending check is not a captured record. An already-watched URL opens the existing watch without renaming it or moving its investigation.
+Use this for a page that might change or vanish: a city notice, a board roster, a company page.
 
-Daily checks require the existing local scheduler. **Check now** uses the same guarded fetch and capture path. History distinguishes a first capture, unchanged text, changed text, a moved page, source blocking, unavailable pages, failed checks and unreadable or refused files. Redirects show their trail and whether text also changed. A failure never replaces the last readable comparison baseline. The readable diff is a bounded text comparison, not a claim that every visual or structural page change was found. Open the stored text, download its complete current or previous copy, or follow **Open original** to inspect the source.
+1. On Dark Desk, press **Settings** (top right).
+2. Under **Watched pages**, press **+ Watch a page**.
+3. Enter the **Page URL**, a **Watch name** and **Why watch this page?**. Optionally pick an **Investigation** to attach it to.
+4. Press **Save watch and capture page**.
 
-For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
+The desk saves a first copy now and checks again daily while the local scheduler runs. Each check is kept as its own result: **no text change**, **text changed**, **page moved** or **check failed**. A failed check never replaces the last readable copy. **Stop watching** ends the checks and keeps the history.
 
-### Choose an investigative search window and adversarial-review limit
+---
 
-On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals for adversarial review per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
+## Opinion
 
-These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows protocol-complete signals out of all eligible signals, attempted, protocol-incomplete (including failures), and saved for later review. The questions describe research completeness and never block editor handoff. Search dates guide queries and providers; always check dates in the captured evidence.
+`/desk/opinion` — the paper’s own position.
 
-## Opinion (`/desk/opinion`)
+![Opinion: the AI and file-your-own cards above the Requests and editorials list](images/10-opinion.png)
 
-![Opinion](images/10-opinion.png)
+An editorial is an unsigned draft of the paper’s position until you publish it. “OPINION” goes at the front of the headline and there is no byline. Claims and sources run in an appendix at the end for readers who disagree. An editor’s fact sheet and an image prompt are kept for you and never print.
 
-Where the paper says what it thinks.
+### Write an editorial with the AI
 
-Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
+**To write one:**
 
-Choose **Automatic**, any named Codex or Claude model, **Local model**, or
-**DeepSeek v4.1 Flash**;
-saved custom connections are offered too. Automatic is selected by default, so an
-editor who never opens the menu writes with the first ready rung.
-**Opinion's own Automatic** tries
-DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if the one before it
-is unavailable — that order belongs
-to Opinion, and DeepSeek is a named pick there as well. Stories, scans and Dark
-Desk walk the desk's own Automatic ladder:
-DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
-then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
-remains the requested first runtime; a recognized technical failure can move
-only the unfinished call and records requested and actual model and effort.
-A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options, and they research and write with it in hand — the voice file holds the research protocol (local record, packet and tape rules, triangulation, the surprise hunt), so the writer that follows it needs both the file and the tools in the same run. DeepSeek v4.1 Flash, **Local model** and saved connections have no web tools of their own, so the desk fetches for them — and the model holds the same voice while it plans those searches and reads what came back, so the protocol governs the research and not only the writing. The desk reads the newsroom's own record first, in the protocol's order: the city's PrimeGov agendas, packets and minutes (PDFs, with OCR for a scanned packet), the meeting transcripts this desk captured, and the pages it already holds. Research then runs to the protocol's stopping conditions — every load-bearing claim doubly sourced, two surprising facts with one from a local primary document — rather than to a fixed number of searches, with a safety ceiling of 30 minutes and 80 pages (`EDITORIAL_RESEARCH_CEILING_MS`, `EDITORIAL_RESEARCH_PAGE_CEILING`) and **Cancel** stopping it at any point before the piece is written.
-Readiness lists every missing prerequisite — voice file, installation, or
-login — before the button is enabled, and the server checks again when you
-click. If OAuth expires, open the named provider on this machine and sign in;
-nothing is queued or spent until the next readiness check succeeds.
+1. Press **+ New editorial**, or the card **Have the AI write an editorial →**.
+2. Give it a position in **Subject, source text, or links**, and/or add documents (**Add documents**, up to 20; PDF, Word, Excel, PowerPoint, text, images with OCR). Keep the writing instruction separate from the evidence. **Anything you want it to know (optional)** is for the angle.
+3. Choose **Drafting scope**: **Research public sources** or **Use only supplied material**.
+4. Choose the **Writing model**. Opinion opens on **Automatic**. Opinion’s own Automatic tries **DeepSeek v4.1 Flash 1017**, then **Codex Sol 6.1**, then **Claude Sonnet 5.5**. It has no Local model rung. A named choice is tried first; a technical failure can move only the unfinished call; a refusal is final.
+5. Press **Write an editorial**.
 
-The Codex path uses the signed-in account for authentication, but the reporting
-call does not inherit the operator's full Codex setup. TownReporter launches it
-ephemerally from the system temporary directory with a read-only sandbox and
-disables shell, computer, browser, apps, plugins, multi-agent and hook features.
-Native web search is enabled only for an explicitly authorized research call.
-Opinion receives its configured voice separately. These are application-level
-CLI controls, not an operating-system security sandbox; the process still runs
-as the Windows account, and read-only mode alone does not restrict file reads.
-Claude Code separately omits the operator's `CLAUDE.md`, skills, plugins and MCP
-configuration and runs in restricted safe mode. Research calls allow only
-`WebSearch` and `WebFetch`; planning calls hide tools; OCR reads one generated
-temporary page. The reporting job has no shell, arbitrary file, browser or
-agent tools.
+The desk writes with the paper’s **editorial voice**, a text file that also holds the research protocol. If none is saved, the page says “The paper’s editorial voice has not been saved.” The owner sets it in the **Paper’s editorial voice** panel on this page (paste it or **Load voice from a text file**, at least 500 characters, then **Save paper’s voice**). An editor can press **Write anyway** to use a neutral house voice.
 
-What comes back:
+Claude and Codex research and write in one run with the voice in hand. DeepSeek, Local model and saved connections have no web tools, so the desk does their searching and reading first, local record first: the city’s PrimeGov agendas, packets and minutes, the meeting transcripts the desk captured, and pages it already holds. It stops when its protocol is satisfied or at a safety ceiling of 30 minutes and 80 pages. An editorial is the most expensive thing the newsroom does and can take 10 to 40 minutes. The row shows a running clock and the page re-checks every 20 seconds. **Cancel** stops it before anything is written.
 
-- `OPINION:` at the front of the headline, so it cannot be mistaken for a
-  report.
-- **No byline.** An unsigned editorial is the paper's position, not one
-  writer's. That is the century-old convention and the honest one for a paper
-  run by one person.
-- **Claims and sources** at the end of the piece. People do not believe an
-  op-ed they dislike; the receipts are there for them.
-- An editor's fact sheet and an image prompt that **do not print** — they are
-  for you.
+The desk checks that the result is really an editorial. A provider refusal, a limitation note, an implausible headline or an incomplete body makes the row **Failed** and files no draft; there is then no Read, Edit or Publish button to mistake for success. A failed row offers **Restore saved material**, which puts your subject and instruction back in the form (press **Have the AI write an editorial →** to see them).
 
-The desk checks that the delivery is actually an editorial before it files
-anything. A provider refusal, limitation note, neutral-summary substitute,
-implausible headline, or incomplete body makes the row **Failed** and creates no
-draft. There is then no Read, Edit, or Publish action to mistake for success.
-Opinion's Automatic can move from DeepSeek v4.1 Flash to Codex Sol and on to
-Claude Sonnet once. A named
-choice is tried
-first and the same technical-only unfinished-call rule applies. A finished row
-names the requested and actual model and effort. Opus is never selected by an
-unattended ladder, on any surface.
+Three things warn first and offer a **Write anyway** button: the paper is not fully set up, more than 20 documents, or material over 20 million characters.
 
-**Edit** opens the piece in its own editor. That is where you change the
-headline, fix a line, print it, or throw it away. The fact sheet and the image
-prompt sit under the piece there, marked _does not print_.
+### File one you wrote
 
-Earlier measured runs took **ten to forty minutes**; that is an observation,
-not a deadline. The current research and writing passes each have a default
-45-minute ceiling. The Claude pair can therefore take about 90 minutes.
-An explicit Local model, DeepSeek v4.1 Flash or saved connection makes one
-writing call, and the desk's own research pass runs before it inside the
-"Researching with the desk" stage. That pass is the desk's, not the frontier
-research engine, but it is not a token look either: it runs to the protocol's
-stopping conditions, so a piece that needs a dozen searches gets them, and it
-stops for the editor at any hop. Its ceiling is 30 minutes and 80 pages by
-default, under this 45-minute per-pass clock. The row
-shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
-The page rechecks every twenty seconds.
+**Paste a piece I wrote** takes the piece with the headline on the first line. **CLAIMS AND SOURCES**, **EDITOR’S FACT SHEET** and an image prompt are picked up if they are there. Press **File it as a draft**. It lands as the editor’s own words, exactly like one written here. Machine citation markers are removed and you are told to re-add real source links.
+
+### The list
+
+**Requests & editorials** lists every request and piece. A chip says **Writing m:ss**, **Stalled**, **Failed**, **Published**, or **! Claims missing**. Buttons: **Read it** / **Close**, **Edit** (opens the draft workbench at `/desk/story/draft/:id`), **Publish** or **Publish anyway**, **View**, **Repair claims**, and **Delete**. Delete asks in the row (**Yes, delete** / **Keep**), keeps a copy for 30 days and offers **Undo**. A stalled row says the app likely restarted and nothing was lost.
+
+**Read it** opens the piece with its claims, name check, fact sheet and image prompt (each with a copy button). **Publish to the paper** publishes from there.
+
+### Publish an editorial
+
+Publish warns, never blocks. One box lists every warning with one button, **Publish anyway**:
+
+- No dek yet.
+- The evidence needs review before publishing an edited editorial.
+- **Claims and sources are incomplete.** Every op-ed needs a sourced appendix with a link or a document filename and a page or section locator. The button then reads **Publish anyway — I accept these claims are unreviewed**.
+- Choose the section the editorial files under.
+
+The only refusals are a missing headline or body. On the draft workbench the button is **Publish in <Section>** and opens a confirmation: “This puts the piece on the public paper and in the feed, as the paper’s own position. Corrections are published, not silent edits.” The public paper shows no AI line on the editorial or on any story.
+
+---
+
+## Models
+
+`/desk/models` — which AI does which job, and whether it is actually connected. Any editor can read this screen; only the owner can change it.
+
+Behind every AI button on the desk is the same **model picker**. It is labelled **Writing model** (**Digging model** on Dark Desk), with a **Thinking effort** control under it. The list is the same everywhere:
+
+![The model picker with Automatic expanded to show its ladder](images/16-model-picker.png)
+
+| Choice | What it is |
+|---|---|
+| **Automatic — Recommended ladder** | The desk tries models in a fixed order (below) |
+| **Codex Astra 6**, **Codex Sol 6.1**, **Codex Luna 6** | OpenAI models, through the Codex program signed in on this machine |
+| **Gemini 3.8 Flash (Pro plan)**, **Gemini 3.1 Pro (Pro plan)** | Google models, through the Gemini program signed in to your Google Pro plan. A named pick only; never part of Automatic |
+| **Claude Fable 5.1**, **Claude Opus 5.5**, **Claude Sonnet 5.5**, **Claude Haiku 5.5** | Anthropic models, through the Claude Code program signed in on this machine |
+| **Local model** | A model already loaded in LM Studio, Ollama or llama.cpp on this computer |
+| **DeepSeek v4.1 Flash 1017** | The paper’s default writer, run through Ollama and the Claude Code program, with thinking off |
+| **<name> (key)** | A saved API connection you added yourself |
+
+A model that is not ready shows the reason after its name.
+
+**What Automatic does.** It tries, in order: **DeepSeek v4.1 Flash 1017**, then **Local model** (only if one is already loaded; TownReporter never loads one for you), then **Codex Sol 6.1 (balanced)**, then **Claude Sonnet 5.5**. If the first reaches a usage limit, becomes unavailable, loses its login or runs out of time, the unfinished call moves to the next one that is ready, once, and the desk shows the move. A content refusal stops the run. Gemini is never on the ladder. Opus is never picked by Automatic.
+
+**Opinion has its own shorter Automatic:** DeepSeek v4.1 Flash 1017, then Codex Sol 6.1, then Claude Sonnet 5.5. See [Opinion](#opinion).
+
+**A model you name** is tried first. A technical failure can move only the unfinished call to the next ready model; a content refusal is final.
+
+**Thinking effort** is the choice of how hard the model thinks: **None — fastest**, **Low — faster**, **Medium — balanced**, **High — deeper**, **Extra high — longest** or **Maximum — hardest work**. Each model offers only the levels it supports. DeepSeek v4.1 Flash 1017 always starts at None.
+
+**To choose the Local model:** the owner opens **Models → Connections → Local & self-hosted**, finds **The desk’s local model**, and chooses **Use whatever model is loaded (recommended)** or **Always use one model**. Editors see the choice read-only.
+
+**Set up a writing model,** under every picker, explains how to install and sign in to the Codex, Claude Code and Gemini programs and how to add your own API. TownReporter does not install software or sign you in from that box.
+
+### Who does what
+
+The first tab lists nine jobs. For each, the owner picks a **First choice**, an **Effort**, and up to two fallbacks:
+
+1. **Daily scan & lead filing**
+2. **Lead scoring & duplicates**
+3. **Story drafting**
+4. **Opinion writing**
+5. **Evidence check**
+6. **Headline suggestions**
+7. **Dark Desk research**
+8. **AI follow-ups**
+9. **Document reading & OCR**
+
+Press **Save assignments** (or **Reset**). Whatever is saved here is what runs: every picker on the desk starts on the job’s saved first choice, and an editor’s pick for one run beats it. A fallback is used only after a technical failure. A small chip under a job says whether its model is **Ready**, **Sign in needed**, **Turned off**, **Not installed**, **Last test failed** or has a **Warning**. A job left on Automatic shows no chip. Above the table, **Models on this computer** lists what LM Studio or Ollama reports, with **Refresh**. Speech-to-text for recordings uses TextFlowKit (Whisper); the chat picker does not apply to it.
+
+### Connections
+
+The second tab, **Connections**, has three groups.
+
+- **Frontier · API key.** Your saved API connections. Each card has **Test**, **Settings** and **Remove**. **+ Add a connection** (owner) opens **Add a connection**: a name, a **Base URL**, an optional **API key** (stored encrypted on the server, never shown again) and a model id. A **Set up Gemini** button fills in the Gemini preset. Each saved connection can be edited, have models discovered, tested (**Test connection**; this may cost a small charge), disabled and deleted (permanent).
+- **Subscription sign-ins (OAuth).** Cards for **Claude Code** and **Codex** show whether the program is installed and signed in, with **Sign in to Claude Code** / **Sign in to Codex** and **Test**. A sign-in shows a link to open and, for Codex, a one-time code; the card turns to **Signed in** by itself. **Test** asks the model for one word and says how long it took: the only button that proves it can write. There is no Sign out, on purpose. Being signed in to claude.ai in a browser is a different login and does not count. A **Gemini (Pro plan)** card shows **Ready** or **Not ready** only; install the Gemini program and sign in with Google on that machine.
+- **Local & self-hosted.** One card per local server (LM Studio, Ollama, llama.cpp), showing its models, which is in memory and which the desk uses, and **Use this one** for the owner. **Test all connections** (top of the page) re-reads every sign-in and looks for servers; it asks no model a question.
+
+When a draft fails because a login lapsed, the error carries a **Sign in to Claude Code** or **Sign in to Codex** button that takes you to the sign-in with the link ready.
+
+### Signing in to a writing model
+
+The desk writes through programs installed on this machine, using the subscription you already pay for: **Claude Code** and **Codex** (and **Gemini** on a Google Pro plan). When a login runs out, drafts fail with a “sign in” message. The fix is on **Models → Connections → Subscription sign-ins (OAuth)**, and the same cards are reached from **Server → Writing models** (`/desk/ops/writing-models`).
+
+Each card says in words whether the program is installed, whether it is signed in, and whether it has been turned off.
+
+1. Press **Sign in to Claude Code** or **Sign in to Codex**. The card shows what the program prints. For Claude Code that is a link: open it and finish signing in. For Codex it is a link **and** a one-time code: open the link and type the code.
+2. Wait a few seconds. The card turns to **Signed in** by itself. A countdown shows, with a **Cancel** if you change your mind.
+3. Press **Test**. It asks the model for one word and says how long it took. It is the only button that proves the desk can actually write: a login can look present and still be refused by the provider.
+
+There is no Sign out, on purpose. A stale login is fixed by signing in again, not by signing out first. **Being signed in to claude.ai in your browser or in the Claude desktop app is a different login and does not count.** The desk sees only the command-line program’s login.
+
+When a draft or scan fails because a login lapsed, the error carries a **Sign in to Claude Code** or **Sign in to Codex** button. Pressing it starts the sign-in and takes you to the card with the link waiting.
+
+### How long a model may take
+
+**Server → Time budgets** (owner only) has a **Time per call** field for each program: how long the desk waits for one answer before giving up. By default that is 5 minutes for the Codex, Claude Code and Gemini programs and 10 minutes for local models. **Save** stores a value; **Reset** puts the shipped value back. You can set anything from 10 seconds to 60 minutes. Outside that range the field tells you the range instead of picking a number for you.
+
+Most people never touch it. A model can take several minutes to read a long document pack, and a short limit would report that as a failure every time. Raising the number does not make a model faster or slower; it only changes how long the desk waits.
 
 ### Add your own AI API
 
-Owner editors can open **Server → Add your own AI API** to save a named
-OpenAI-compatible endpoint. Enter its base URL, optionally enter a key for
-server-side storage, then discover models or type a model id manually. Save
-before discovery, and use **Test connection** when the endpoint is enabled;
-the result shows the tested chat-completions capability alongside response and
-model-discovery status. These are diagnostics, not a guarantee that a later
-run will finish.
-
-Use **Edit** to change the name, URL or model; leave the key blank to retain it
-or explicitly remove it. **Disable** keeps the record but removes it from
-pickers and actions; **Enable** restores it. **Delete** is permanent. Selecting
-the saved name in a Scan, Story, Opinion or Dark Desk picker makes that endpoint
-the recorded first runtime. A recognized technical failure can move the
-unfinished call to the next ready runtime; a refusal or unrecognized failure is
-terminal. The Opinion voice accompanies that authorized retry. This is a supported connection
-workflow; see [the detailed connection guide](custom-ai-connections.md).
-
-An editorial is a **draft**. Read it, edit it in the story workbench, and
-publish it like any other piece — or don't. It will happily conclude that your
-lead was wrong; one real run opened with the discovery that the record it was
-sent to attack had never been missing at all.
+Owner only. On **Models → Connections**, under **Frontier · API key**, press **+ Add a connection**. Fill in a name, a **Base URL**, an optional **API key** and a model id, and save. The key is stored encrypted on the server and never shown again. **Set up Gemini** fills in the Gemini preset. The card then has **Test connection** (this may cost a small charge), **Settings** (edit, discover models, disable) and **Remove**. The model appears in every picker as “<name> (key)” and is tried when you pick it by name.
 
 ---
 
 ## Server (`/desk/ops`)
 
-![Server](images/11-server.png)
+`/desk/ops` — this machine’s health and the owner’s settings.
 
-Historical 0.5.1 screen: it illustrates the older operator-managed installation,
-not the controls available in a new Windows package.
+![The Server page: twelve cards for Writing models, Health, Paper setup, Recently deleted, Sections, Daily scan, Meeting capture, YouTube, Routine notices, Named outlets, Editors & access and Time budgets](images/11-server.png)
 
-For the **Windows installation package**, Server reports this installation's
-version, work queue, private database and local HTTP readiness. The work queue
-separates current queued/running counts and the latest terminal result by
-workflow from retained failure history; old failures stay visible without
-making an idle queue look currently failed. **Run health
-check** is read-only: it does not repair anything. **Restart the paper** asks for
-confirmation and restarts only this installation. Local readiness does not prove
-that a public address or tunnel works. The package installs no tunnel, watchdog,
-scheduled tasks or automatic five-minute repair; unavailable maintenance actions
-stay disabled. Use its own Start/Stop launchers if the desk cannot be reached.
+The page is a grid of twelve cards. Each shows a few numbers and has a button that opens that card’s own screen (with a **← Server** link back). Most cards are for the owner only; an editor sees the title and one sentence saying so. A line at the top says whether LibreOffice is found (Excel and PowerPoint files are skipped without it). At the bottom, **Dark Desk run history** lists recent runs with their model and usage.
 
-For a **separately configured legacy installation**, the Health list can also
-report the operator's public URL, Cloudflare tunnel and watchdog task. Those
-checks run from the server machine, not from a reader in another town. A missing
-or stale watchdog result needs operator investigation; do not assume repair will
-happen. Legacy task ownership must be configured as described in
-[SELF-HOSTING.md](../SELF-HOSTING.md) before those controls are available.
+| Card | What it is | Who |
+|---|---|---|
+| **Writing models** | The Automatic ladder, numbered. **Assign models to jobs →** and **All connections** | Everyone sees the ladder |
+| **Health** | Database, disk, last backup, errors in 24 hours. **View logs**, **Restart workers** | Owner |
+| **Paper setup** | The paper’s name, town and watch list; **Edit setup**, **Invite an editor** | Owner |
+| **Recently deleted** | The 30-day trash. **Open trash** | Any editor |
+| **Sections** | The paper’s sections. **Edit sections** | Owner |
+| **Daily scan** | The scheduled scan. **Scan settings** | Owner |
+| **Meeting capture** | Public meeting recordings and transcripts. **Capture settings** | Owner |
+| **YouTube** | The YouTube key. **Replace key** | Any editor |
+| **Routine notices** | What the desk may print on its own. **Notice rules** | Owner |
+| **Named outlets** | Outlets a story must credit. **Edit outlets** | Owner |
+| **Editors & access** | Invites, recovery codes, Give up the desk | Owner; everyone for Give up the desk |
+| **Time budgets** | How long one answer from each model may take. **Adjust times** | Owner |
 
-Every available maintenance action explains its effect before you run it.
+### Health
 
-The daily scan controls on Server are available to the owner.
-They start disabled. The owner chooses a local time in the paper's configured
-timezone, selects as many as 12 accepted sources from any reporting beat, and
-chooses the model for each scheduled run. **Automatic** is the default for a
-newsroom that has never saved the schedule, and works down the same writing
-ladder a story uses: DeepSeek v4.1 Flash first, then the local model if one is
-already loaded, then Codex Terra. The owner may instead name one explicit
-model: Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku;
-the already selected local model; or a saved Custom AI connection such as an
-OpenAI-compatible Gemini endpoint. A legacy saved
-"Claude Code subscription" setting opens as Claude Sonnet. A technical preflight
-or model-call failure can switch only unfinished work and records the requested
-and actual model and effort. A schedule saved before 0.6.64 keeps the model it
-names — nothing rewrites a stored choice on its own; the owner switches it to
-Automatic by hand. Because the reservation is written before the run is queued,
-Automatic is resolved to a ready model at that point, and the record shows the
-requested and the resolved model as a pair. Custom credentials stay encrypted in newsroom
-settings and are resolved only when the run starts. It reads bounded excerpts from the selected
-sources; it does not claim full-site coverage.
+The screen lists the checks (Paper, Running for, Public site, Database, Work queue, Disk, Last backup, errors in 24 hours) and refreshes every 30 seconds. **Check now** re-reads them. The Last backup row shows the age of the last good backup, and the note counts the backups kept on the backup drive (three days). **View logs** shows the last lines of each log. **Restart workers** reveals six actions, each with a **Run** button and a line saying what it does first: **Run health check now**, **Restart the tunnel**, **Restart the paper**, **Apply database migrations**, **Re-download the fonts** and **Rotate the logs**. The two that interrupt the paper ask again with **Yes, do it**. On the Windows package, the health check is read-only and no tunnel or watchdog exists, so those actions show “Unavailable”; use **Start TownReporter** and **Stop TownReporter** if the desk cannot be reached. Local readiness does not prove a reader in another town can reach the paper.
 
-At most one reservation is kept for each local calendar day, and only one
-daily run may remain queued or working for a newsroom. If the app was off at
-the scheduled time, the next scheduler tick that day runs the missed scan; it
-does not replay every missed day. **Pause** and **Resume** retain the settings.
-Disabling or pausing the schedule, changing its revision, removing the owner's
-role or losing the job lease stops the older run before further external work
-or final result writes. A subscription quota error pauses the schedule until
-the owner resumes it manually; the desk does not invent a reset time. Use
-**Open scan history** to inspect scheduled scan results and **Open the queue**
-to review any leads. A daily scan files leads only: it does not draft, publish or send digests.
+### Paper setup
 
-Routine notice permissions on Server are preparation only. The owner may save exact accepted source-and-format pairs, pause them, and read their recent permission changes. If a source is later rejected, removed, or changes address, its recorded pair stays inactive. Pause keeps that record. The owner must explicitly revoke it, or explicitly select the current accepted address to replace the prior address; a changed address is never selected automatically.
+The same fields as first-run setup, with **Save**. It also holds the **County** (Dark Desk searches the city and the county; blank searches the city only) and **The paper’s newsletter mailbox**: a mailbox the paper owns (address, IMAP host, port, SSL, password) that is subscribed to newsletters from your sources. The desk checks it about every 30 minutes, reads only senders you allowed on a source, and lists newsletters that still need a confirmation click under **Waiting for you**. **Test connection** checks the saved mailbox.
 
-The same panel can manually check all six approved structured formats: Schema.org Event data for library, parks/recreation, and community/arts logistics; explicit Schema.org application deadlines and dated library hours; designated RFC 5545 calendars for deadlines and waste schedules; and PrimeGov meeting logistics. Permission-only Event checks and non-calendar application-deadline checks work without saved automation context. Calendar-based registration deadlines require the saved issuer and locality; waste schedules additionally require the owner-entered collection area; public-meeting logistics require the saved issuer, locality and timezone; and library structured hours require the saved issuer and branch. Save those fields in **Automatic routine editions** before activating dependent formats. A check stores the bounded captured source and reports structurally parsed candidates, refusals, and conflicting entries in the same observation. **Parsed** means the fields fit the selected format; it does not verify the issuer, facts, eligibility, completeness, or authority. Checks do not start a monitor, create a lead or draft, or publish anything. Only the owner can open a check's bound captured source, and a changed or removed capture is refused instead of substituted.
+### Recently deleted
 
-**Automatic routine editions** is a separate, owner-only control and starts paused. Select no more than 12 approved structured sources, enter the authoritative issuer and locality, give each one a public attribution address, choose the Today, Weekend, and Deadlines sections, and review the displayed attribution format before activating. A private or personalized fetch address is never printed in the article. Waste calendars also require an owner-entered collection area; do not use a household address. The daily scheduler creates **Today in town** after the chosen local time, **This weekend** on Friday for Friday through Sunday, and **Deadlines approaching** only for a new or changed deadline in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. It publishes no empty edition and uses at most five logistics items in a run.
+Everything deleted from the desk waits here for 30 days. **Restore** puts it back where it was, with its original address and corrections. **Delete for good** asks again (**Yes, for good**) and then nothing is left to restore. It does not erase old database backups; legal removal is a separate owner process.
 
-The generated copy is limited to validated dates, times, places and service or program text, plus the configured public source links. Registration URLs are required structured input for deadline eligibility but are not separately rendered in the generated body. Allegation, dispute, investigation, medical, legal, emergency, conflicting, cancelled, recurring, ambiguous, or unsupported material stays out and is counted for review. Changing permissions, activation, ownership, a source address, captured evidence, or the worker lease cancels the old commit. An unchanged retry is idempotent. A changed automation-owned edition gets a visible correction; a manually edited, removed, or unpublished article is left for review. Recent runs show published, corrected, eligible, and review counts with links to published editions. Disable the control to stop later reservations; permissions remain separate and can also be paused.
+### Newspaper sections
 
-Owners also have:
+`Server → Sections` — **Newspaper sections**. Add a name and permanent key, rename the display label, move sections up or down, hide them from the section navigation, write a reporting brief and scan instructions, and choose the accepted sources each section reads. Keys cannot change after saving. Hiding does not delete stories. A section with no sources says so and opens its list; **Add a new source to this section** takes a URL and optional label and puts the page on the watch list at once (the section’s use of it is saved at **Confirm and apply**). Retire a section only into another active reporting section (**Retire into**): its leads, drafts and articles move, and old links follow. Opinion and About are reserved pages and cannot retire.
 
-- **Paper setup** — change the public identity, timezone, contact links, watch
-  list, meeting-video channels and meeting-title keywords. Saving takes effect
-  from the database; no rebuild is needed.
-- **Invite an editor** — enter the person's email, then copy the one-time link.
-  It is valid for that address only, expires after seven days and disappears
-  after use. TownReporter does not send it for you: you send the link
-  yourself, however you'd normally reach that person. Next to the link is a
-  ready-to-send message with the same explanation spelled out (one-time
-  link, seven-day expiry, opens "create account" mode, no code to type) --
-  **Copy message** puts it on the clipboard so you don't have to compose it.
-  What the invited person sees: they open the link, land on the sign-in page
-  already in create-account mode with their email filled in, choose a
-  password, and they're an editor. There is no code to type anywhere -- the
-  link itself is the credential, and it only works once.
+Nothing is saved until you press **Review changes**, check the summary (names, order, visibility, replacement, brief, instructions and sources), and press **Confirm and apply** (**Confirm retirement and apply** when retiring). **Back to editing** keeps your draft, **Cancel changes** discards it, and **Reload saved configuration** replaces it with what is saved. While you have unsaved changes a bar at the bottom says **You have unsaved section changes**, and leaving the page asks first (**Stay on this page**).
+
+### Daily scan
+
+Owner only. Turn on **Run once each day**, set the **Local time**, choose the **Writing model** (Automatic by default) and effort, set **Daily priority set** and **Read every day**, and tick the accepted sources you want read first. Every other accepted source is still read by age, never-read first, inside a 90-minute budget. Values outside the usual range warn and offer **Save this schedule anyway**. **Save daily scan**, **Pause daily scan** and **Resume daily scan** control it; the status block shows the next run, the last run, and the model asked for and the model that ran. A usage limit does not pause the schedule; the next day runs and the model call can move on. It pauses itself, with the reason shown, if the timezone is invalid, the owner account changed or the chosen model cannot start. It files leads only. **Open scan history** and **Open the queue** are below.
+
+### Meeting capture
+
+Owner only. It shows whether TextFlowKit speech-to-text is installed (“meetings without captions stay audio-only” if not). Settings: turn **Meeting capture** on, list the **Meeting channels** (YouTube channel URLs in priority order), choose the **Storage root**, the **Retention mode** (**Transcript only**, **Audio only**, **Media**) and the capture caps (duration and size; a longer or larger capture is refused with a reason, never cut short). **Run meetings now** starts a pass without using the scheduled run, **Stop** asks it to stop, **Resume stopped captures** continues partial captures, and **Force re-capture and retain revision** re-checks one video. See **Scan history → Captured meetings** for results. Speech-to-text is not the city’s record: names, numbers and ordinance titles are where it is most confident and most wrong.
+
+### YouTube
+
+Paste a YouTube Data API v3 key and press **Save key**, then **Test** (spends one of the day’s 10,000 free units). With a key the desk reads channel videos from Google’s official service; without one, or when Google refuses for quota, it reads the public feed and says so. The key is encrypted and never shown again; **Remove** takes it out. Transcripts and media still come from yt-dlp and TextFlowKit.
+
+### Routine notices
+
+Owner only; three parts.
+
+- **Routine notice permissions** — choose exact accepted source and format pairs: **Library notices**, **Parks and recreation notices**, **Community and arts event logistics**, **Routine registration deadlines**, **Waste and recycling schedules**, **Public meeting logistics** (up to 60 pairs). **Pause routine notice permissions** stops later checks. Permissions alone never publish.
+- **Manual notice checks** — **Check captured notices** reads an approved source once and reports what it found structurally. “Parsed” means the fields fit the format; it does not verify the issuer, facts or authority. Checks create no lead, draft or article.
+- **Automatic routine editions** — owner only; **starts paused**. Choose up to 12 approved sources and for each the **Authoritative issuer**, **Locality**, **Public attribution URL** and, where needed, the **Area or branch** (never a household address). Choose the **Today section**, **Weekend section** and **Deadlines section** and the local time. **Save paused settings**, or **Save and activate**. After activation the daily scheduler files **Today in town**, a Friday **This weekend** and **Deadlines approaching** (only new or changed deadlines in the next seven days). Anything cancelled, conflicting, risky or unclear stays out and is counted for review. A real source change corrects an edition the automation owns; a story an editor edited, removed or unpublished is left alone. **Recent runs** show counts of eligible, published, corrected and needs-review items, with **Why they need review** and **Review source checks**. Disable it, or pause permissions, to stop later editions.
+
+### Named outlets
+
+Owner only. A published story that names one of these outlets has to show the reader its source; if it does not, the Publish list warns and an editor can add the source or override that outlet for that draft. The panel says which of three states you are in: **Using the built-in list (N outlets)**, **This paper checks N outlets**, or **This paper checks no outlet names** (a decision, with a warning that Publish will no longer flag work from other newsrooms). **Customize** copies the built-in list into a draft. Edit **Outlet name**, **Aliases** and **Domain** per row (**Add outlet**, **Remove outlet**). **Review changes** shows what is added, removed and changed and which published stories stop being checked, then **Confirm and apply** writes it.
+
+### Editors & access
+
+Open to everyone, because it holds your way out.
+
+- **Invite an editor** (owner): enter **Their email**, press **Make the invite link**, copy the link or the ready-made message and send it yourself; TownReporter sends no email. The link works once, for that address only, and expires after seven days. **Pending invites** lists open links with **Cancel invite**. Editors can report, draft and publish; ownership, invitations, legal removals and owner-only settings stay with the owner.
+- **Recovery codes** (owner): **Generate recovery codes** makes ten single-use codes, shown once. Tick **I saved these somewhere safe.**, then **Download as .txt** or **Done**. Generating a new set retires the old one.
+- **Give up the desk** (anyone): see [Sign in and first run](#sign-in-and-first-run).
+
+### Time budgets
+
+Owner only. **Time per call** is how long the desk waits for one answer from a model before giving up: by default 5 minutes for the Codex, Claude Code and Gemini programs and 10 minutes for local models. Set any value from 10 seconds to 60 minutes and press **Save**; **Reset** returns the shipped value. Raising it does not make a model faster. It only changes how long the desk will wait.
+
+### Legal removals
+
+`/desk/legal-removals` — owner only; reached from **Published** and from search. A separate process for removing a story and its connected application copies, with no Undo. See [Legal removal: owner workflow](#legal-removal-owner-workflow).
 
 ---
 
-## Stats (`/desk/stats`)
+## Stats
 
-Read-only, editor-only. Right after Server in the nav.
+`/desk/stats` — any signed-in editor, read-only. Counts of anonymous page loads: no cookies, no accounts, no stored addresses, no identifier that lasts past the day.
 
-Shows anonymous page loads, not unique people or completed reads — no cookies,
-no fingerprinting, just a count of how many times an instrumented page loaded.
-Alongside that it shows a **daily visitor estimate** and a **where readers are**
-panel: a city and a country derived by Cloudflare from the reader's IP address,
-counted by the day and once per reader rather than per page load, and printed by
-name only on days when at least 25 readers were counted in it — its quieter
-days, and every smaller place on a finished day, are added together into "other
-places" by the hourly check rather than kept individually. The visitors figure
-is built from a value the server keeps in memory only, discarded at midnight and
-on restart. No address, user-agent string or place is ever stored as a value,
-and no reader can be followed from one day to the next — but the figure is an
-estimate and can be wrong in **both** directions: a restart or a busy day can
-count the same reader twice, and one shared address reads as one reader. Three
-things:
+- **Range buttons:** **Today**, **7 days**, **30 days**, **12 months**. **Export CSV** downloads the numbers.
+- **Reading right now:** readers on the site this minute and the pages they are on, refreshed every 15 seconds. **Arriving from, right now** and **Right now, readers are on** (phone, tablet, computer).
+- **Six tiles**, each compared with the period before: **Visits**, **Page loads**, **Avg reading time**, **Total reading**, **Read another story**, **Left without reading**.
+- **Stories, by how much they were read:** each published story’s visits, average read, how far readers got, and whether they opened another.
+- **Where visits come from**, **Where readers are** (a place is named only on days when at least 25 readers were counted there; everything smaller is **Other places**), **Visitors** (an estimate that can be wrong both ways), **Sections, by reading time**, **When people read** and **Trust signals** (clicks on the paper’s own controls, such as View captured version).
+- **Section chosen by hand:** how many stories were printed under a section the scanner did not pick.
+- **Saved reports:** **Save latest reports** keeps snapshots of the last completed day, week and month on this installation; **Read report** opens one.
 
-- **Site** — all-time total, last 7 calendar dates including today, and last
-  30 calendar dates including today, added across the home page and published
-  story pages. Other public pages are not included.
-- **Stories** — every published story, ranked by all-time story-page loads,
-  linking straight to the story.
-- **Section chosen by hand** — how many published stories printed under a
-  section the scanner did not pick. Not a view count: it is here because this is
-  the page that says how the desk is doing, and the number only means something
-  next to the story counts. Each one is a decision you made, logged with the
-  lead, the section the scanner chose, the section you printed under, and when.
-  A story whose model section was never recorded is not counted — an absent
-  record is not a disagreement.
-
-A view is counted by a small beacon that fires from the reader's browser
-_after_ the page has already loaded, so it can never slow the paper down —
-and if counting ever fails for any reason, the public page is completely
-unaffected; this page just shows nothing new until it recovers. Views are
-scoped to your newsroom.
+These are page loads, not unique people or completed reads. A view is counted by a small signal sent after the page has loaded, so a counting failure can never slow or break the public page.
 
 ---
 
-## Signing in to a writing model
+## Published and corrections
 
-The desk writes through one of two programs installed on this machine —
-**Claude Code** or **Codex** — using the subscription you already pay for.
-When one of those logins runs out, every draft fails with "sign in again". The
-**Writing models** panel at the top of the Server page is where you fix that,
-without opening a terminal.
+`/desk/published` — what is live, and its corrections.
 
-Each row tells you three things in words: whether the program is installed,
-whether it is signed in (and as whom, where the program will say), and whether
-you have turned it off yourself.
+![Published: filters, search and a row for each printed story with Views, Corrections and the More menu](images/12-published.png)
 
-- **Sign in** starts the program's own sign-in and shows you what it prints. For
-  Claude Code that is a link: open it, finish signing in there, and the row
-  turns to "Signed in" by itself within a few seconds. For Codex it is a link
-  **and** a one-time code — open the link, type the code, and the row flips the
-  same way. There is a countdown, and a **Cancel** if you change your mind.
-- **Test** asks the model for one word and tells you how long it took. This is
-  the only button that proves the desk can actually write: a login can look
-  present and still be refused by the provider, and nothing but a real question
-  tells the difference.
+Filter with **All**, **This week**, **With corrections** and **Opinion**, or search headlines and sections. Each row shows the date printed, section, headline, any corrections as “Correction, <date>: …”, Views and a **Review needed** chip if a transcript review is open. Rows show 25 at a time (**Show 25 more**). **Beat memory** at the bottom lists the people, places and organizations the drafting AI is told the paper has already covered.
 
-There is no **Sign out**, on purpose. Signing out is one mis-click away from
-stopping the paper, and nothing here needs it — a stale login is fixed by
-signing in again, not by signing out first.
+### Row actions
 
-**Being signed in to claude.ai in your browser, or in the Claude desktop app,
-is a different login and does not count here.** Those keep their own
-credentials. The desk only sees the command-line program's login, which is what
-this panel shows and what these buttons change.
+- **View** opens the public page.
+- **Edit headline** opens a box under the headline. Type the new headline and press **Save the new headline**. The link does not change, no link breaks, the old words and your name are recorded, and no correction is posted. A correction is for a story that was wrong. If the story itself was wrong, post the correction as well.
+- **More ▾ → Post correction** opens **Add a correction**:
+  1. Fill in **What was wrong** (“The fee was $4,200”) and **What is right** (“The fee is $2,400”).
+  2. Press **Suggest wording** (the **Correction wording model** writes a note in the paper’s voice from those two lines; it is put in the box, never posted) or **Use a plain note** (no model: “An earlier version of this story said … In fact, …”). Both need both lines.
+  3. Read and change the note in **The correction**. Tick **Also fix the story text** to edit the printed body in the same act; the corrected text and the note go public together, the URL does not change, and the old text is kept with your name and the time.
+  4. Check the **Preview**, then press **Publish correction**.
+  
+  A very short note, or a note that starts with the marker the desk uses for its own automatic corrections, warns first and the button then reads **Publish anyway**. A correction attaches only to a published story in your newsroom. Corrections appear above the story and on the public corrections page, permanently.
+- **More ▾ → Take off the paper** (ordinary delete) shows: “This takes it off the paper. Its URL becomes a 404, the feed and the sitemap drop it, and anyone holding a link has a dead link. Its corrections go too. Consider a correction instead.” Press **Yes, take it off** or **Keep it**. It is kept 30 days under **Server → Recently deleted**, and **Undo** appears right away.
+- **More ▾ → Go to the evidence review** (only when open) and **Legal removal** (owner only).
 
-When a draft or a scan fails because a login has lapsed, the error itself now
-carries a **Sign in to Claude Code** / **Sign in to Codex** button: pressing it
-starts the sign-in and takes you straight to this panel with the link waiting.
+### When a meeting transcript changes after publication
 
-### How long a model may take
+A published meeting story shows **Transcript changed — evidence review required**. It compares each cited passage with the current recording. Tick that you checked each citation, add a note, and press **Still accurate — close review**, or press **Needs correction**, which opens the correction dialog tied to that review. Completed review history stays with the story. Nothing edits the printed story silently.
 
-Each model in this panel has a **Time per call** field: _how long the desk
-waits for one answer before giving up._ It shows a number of seconds and, next
-to it, the number this desk ships with, so a changed value reads as a decision
-rather than as the way it has always been. **Save** stores it; **Reset** — which
-only appears once you have stored something — puts the shipped number back.
-
-Owner only, like everything else on this page.
-
-Most people never touch it. The reason it exists: a model running on this same
-machine can take four minutes to read a long document pack, and the shipped
-ceiling of two and a half minutes would report that as a failure every time.
-If a provider keeps timing out on long reads and you know it is working, this
-is the number to raise. Anything between 10 seconds and 60 minutes; type
-something outside that and the field tells you the range rather than quietly
-picking a different number for you.
-
-Raising it does not make a model slower or faster. It only changes how long
-the desk is willing to wait.
+The owner’s steps for a legal removal are in [Legal removal: owner workflow](#legal-removal-owner-workflow).
 
 ---
 
 ## Delete
 
-Every list has a **Delete** button: leads in the queue, editorials on Opinion,
-and stories under Published. It asks once, in the row, and says what it costs.
+Lists have a **Delete** that asks once, in the row, and says what it costs.
 
-**Kill is not delete.** Kill parks a lead under Killed and you can bring it
-back. Delete removes it.
+**Kill is not delete.** Kill parks a lead under Killed and you can bring it back. Delete removes it.
 
-| Delete this       | And this happens                                                                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| A lead            | It goes, and any draft on it goes. A story already printed from it **stays on the paper** — that is a separate button.                      |
-| An editorial      | The draft goes. If it was printed, the printed piece stays; remove that under Published.                                                    |
-| A published story | It comes off the paper. Its URL becomes a 404, the feed and sitemap drop it, its corrections go, and anyone holding a link has a dead link. |
+| Delete this | Where | What happens |
+|---|---|---|
+| A lead | Queue: **More ▾ → Delete**, or **Delete selected (N)** | The lead and any draft on it go. A story already printed from it **stays on the paper**. |
+| An editorial | Opinion: **Delete** on the row | The draft goes. A printed piece stays; take it off under Published. |
+| A published story | Published: **More ▾ → Take off the paper** | It comes off the paper. Its address becomes a 404, the feed and sitemap drop it, its corrections go, and anyone holding a link has a dead link. |
 
-That last one is the loud one. The paper's normal answer to being wrong is a
-**correction**, in public, above the story. Delete is for the thing that should
-never have existed — the wrong name, the private detail, the piece filed against
-someone it should not have been.
+The last one is the loud one. The paper’s normal answer to being wrong is a **correction**, in public. Taking a story off is for the thing that should never have existed.
 
 ### It is not gone yet
 
-Ordinary **Delete** sends work to Trash first. The owner-only legal-removal process below has a separate, irreversible policy.
+Ordinary delete sends work to the trash first.
 
-- An **Undo** link appears right where you deleted it. One click and it is back.
-- After that, it waits **30 days** under **Recently deleted** on the Server
-  page (`/desk/ops`). **Restore** puts it back exactly where it was — a story
-  keeps its URL, its corrections come back with it, an editorial keeps its fact
-  sheet.
-- **Delete for good** on that list is the one with nothing behind it. It says so.
-- After 30 days it goes on its own.
+- An **Undo** appears right where you deleted it.
+- After that it waits **30 days** under **Server → Recently deleted** (`/desk/ops`). **Restore** puts it back where it was: a story keeps its address and corrections, an editorial keeps its fact sheet.
+- **Delete for good** (then **Yes, for good**) removes the trash copy with nothing behind it.
+- After 30 days it goes by itself.
 
-**Delete for good** removes the application's trash copy. It does not scrub existing database backups. Use the separate owner-only legal-removal workflow below for its reviewed scope and retention policy; ordinary deletion is not proof that all retained copies are gone.
+**Delete for good** does not scrub database backups. The owner-only process below is for a removal that must be more than that.
 
 ---
 
 ## Legal removal: owner workflow
 
-Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.
+Owner only. Open **Published → More ▾ → Legal removal** beside a story, or go to `/desk/legal-removals` (Ctrl+K, “Legal removals”) to revisit a case. It skips the trash and has **no Undo**.
 
-1. Select the affected stories and **Review connected copies**. All stories sharing a lead must be selected before its reporting records can be removed. Review the counts and historical candidates. Old drafts, memory, audit labels and trash do not always carry article IDs; select only the records in scope. Selected entries remain visible and can be unchecked. Mixed trash requires explicit whole-snapshot selection. Changed records require a fresh preview.
-2. Review independent evidence. Known same-paper URL copies and references in captures, chunks, original blobs, source snapshots, search results, associated frontier records, source/monitor descriptors and watch history are listed but **not automatically deleted**. These known copies block court destruction even with the evidence checkbox checked. Retained application removal may proceed with review explicitly pending. A local operator must resolve unsupported captured-copy cleanup; a checkbox does not establish erasure.
-3. Choose the policy. **Keep an owner-only copy for 12 calendar months** uses the calendar anniversary, with February 29 clamped to February 28 in a non-leap year. This is owner access control, not encryption. The existing scheduled tick and case-list reads purge expired copies. Expired text cannot be opened even if cleanup has failed. **Explicit court destruction** never inserts removed text into the retained-copy table and requires the historical/evidence scope to be resolved first.
-4. Enter a case identifier without story text, type **REMOVE**, and confirm. The transaction removes selected application copies, scrubs exact linked editorial source descriptors and blocks stale filing/restoration. Independent editorial drafts remain for review; interrupted writing must be restarted with reviewed sources. Foreign-newsroom relationships refuse removal rather than cascading into another paper. Matching automatic watches are paused and ordinary sources are excluded from scans, preserving their evidence for review. Stop remains available; resuming a removed article's watch is refused.
-5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
+1. Select the stories and press **Review connected copies**. Every story that shares a lead must be selected before the lead’s reporting records can go. Review the counts and the older candidates. You can untick any entry. Changed records need a fresh preview.
+2. Review the independent evidence. Copies in captures, saved pages, search results, watches and similar records are **listed, not automatically deleted**. A local operator must clear anything the desk cannot. A tick box does not erase a copy.
+3. Choose the policy. **Keep an owner-only copy for 12 months** keeps the removed text where only the owner can open it until the calendar anniversary. **Keep nothing: a court order requires destruction** keeps no copy and needs the listed evidence resolved first.
+4. Enter a **Reason (required)**, with no story text in it, type **REMOVE**, and press **Remove permanently**. The selected copies in the application go, and matching watches are paused.
+5. The case page opens. **Open owner-only retained text (audited)** works until the copy expires. Record affected backup identifiers and operator cleanup attestations there. An attestation records what an operator reports. It is not proof of erasure.
 
-Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
-
----
-
-## Published and corrections (`/desk/published`)
-
-![Published](images/12-published.png)
-
-What is live on the paper, with its corrections.
-
-**Edit headline** beside a story rewrites the words at the top of it without touching anything else. It opens a box under the headline that is on the paper now, so you are looking at what you are replacing. The URL does not change, no link breaks, and the desk keeps the old headline, your account and the time. This is the one part of a printed story the desk lets you change without a notice, because the words are the story's name rather than its content.
-
-If you got it wrong: open the story here, write the correction in the open, post it. It appears on `/corrections` and with the article. Do not silently rewrite a published piece and hope nobody notices. We would rather look careful than look first.
-
-The correction box no longer starts empty. Above it are two short lines — **What was wrong** and **What is right** — and you type the fact, not the sentence: *the fee was $4,200* / *the fee is $2,400*. Then either button fills the box below.
-
-**Suggest wording** asks the story model to write the note, in the paper's voice, from those two lines and the story it can see. It is asked not to add a fact, a number, a name or a date that is not in your two lines, and the note it writes is put in the box, not published. You read it, change any word of it, and post it yourself. The button says **Suggesting…** while it waits, then **Suggested below. Read it, change any of it, then post it.** If the model cannot be reached, the desk says so and leaves the box exactly as you left it — your typing is never replaced by a partial or guessed note.
-
-**Use a plain note** writes the same note on the desk, with no model and no network: *An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.* It works when nothing else does, and it is the button to press if you would rather not spend a model call. Both buttons need both lines, because a note built from half a fact reads finished and says nothing.
-
-Nothing posts until you press **Publish correction**, and you can always ignore both buttons and type the note yourself; that path is unchanged.
-
-**Also fix the story text** is the second choice, and it is off unless you turn it on. Left off, the correction is exactly what it has always been: a public note above a story whose words do not change. Turned on, it opens the printed body in a box that already holds the story as it printed, so you are editing the words on the paper rather than retyping them, and you press **Publish correction** once. The corrected text and the note go public together, in one act. The URL does not change and no link breaks. The desk keeps the text the story used to carry, with your account, the time and the correction that justified the change, so the paper can always answer what it printed and who changed it. Readers see the corrected story and the note; the replaced words are never printed again. If the box holds the same text the story already has, or is empty, the desk refuses rather than recording a change that did not happen.
-
-A correction can attach only to a published story in your newsroom. If the selected story is no longer available, the desk refuses the correction instead of saving an unattached note. Return to Published and select the current story before posting again.
+New reads of the story, feed and sitemap stop returning it. Browser caches, search-engine copies, provider history and old backups are outside the application’s reach, and restoring an older database can bring removed content back. Do not treat this as proof that no copy exists anywhere.
 
 ---
 
 ## What never prints
 
 - Reporting notes and the research memo
-- The editorial's fact sheet and image prompt
-- Dark Desk files, hypotheses, open questions, dead ends
+- An editorial’s fact sheet and image prompt
+- Dark Desk files, hypotheses, open questions and dead ends
 - Scan summaries and proposed sources
 - “What is solid / not solid yet”
-- Captions passed off as minutes
-- Private-citizen dossiers with no material public-interest trail
+- Captions or speech-to-text passed off as minutes
+- Dossiers on private citizens with no public-interest trail
 
-Ordinary stories reach `/articles/…` only after an editor clicks **Publish**. Only owner-approved
-routine notices from approved sources and fixed templates may reach the paper automatically.
+Ordinary stories reach `/articles/…` only after an editor presses **Publish**. Only routine notices from sources the owner approved, through the fixed templates, can reach the paper on their own. The public paper carries no AI wording on stories.
 
 ---
 
 ## The public paper, after you publish
 
-Readers get:
+Readers get the story; the sources behind it (title, publisher, document date, address, capture time); **View captured version** and **Compare versions** where a source was captured more than once; and any corrections, with their dates. Homepages are not stand-ins for documents. A source that has disappeared says so, and the saved copy stays.
 
-- The story
-- Provenance — source title, organization, document date, exact URL, capture time
-- Compare versions, when more than one capture of a cited record exists
-- “What TownReporter found,” only when it resolves to a published source URL and a specific captured version
-- Corrections
+The paper’s clock uses the timezone saved in **Paper setup**. If dates look a day off, check it there.
 
-Homepages are not stand-ins for documents. Disappeared sources say so.
-
-The paper’s clock uses the IANA timezone saved in **Paper setup**. A local Wednesday evening does not print as Thursday UTC just because the host uses UTC.
-
-Overlapping printed headlines collapse; the longer body stays. Quiet-zone ×2 and survey ×2 drop. Distinct sessions (Airport Vision vs the Boulder County joint session) stay side by side. Search and live archive URLs are unchanged.
-
-How we report, in public: `/how-we-report`.
+Search and archive addresses do not change when a story is edited. How the paper describes itself to readers is at `/how-we-report`. The reader’s side of all this is in [reader.md](reader.md).
 
 ---
 
 ## Common trouble
 
-| You see                                           | Likely                                                                                  | What to do                                                                                                                                             |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Automatic says no model is ready                  | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                              |
-| Codex is missing or signed out                    | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                             |
-| Claude is missing or signed out                   | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                 |
-| An Opinion row says Failed with no draft          | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Claude after fixing its error, or explicitly choose Local model; nothing was filed or published                       |
-| Scan fetched, filed nothing                       | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                             |
-| Draft with AI ran, form still empty               | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                              |
-| Redraft shows a sign-in / setCookie error         | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                   |
-| Start digging does nothing                        | The card was hidden after a failed open (fixed in 0.3.8)                                | Reload. The card should be back. Click again — it stays until the file exists.                                                                         |
-| Draft is a rewrite of the Leader                  | The pass never opened the company page                                                  | Pull the still-to-pull line for their press release, then redraft.                                                                                     |
-| Meeting has no transcript                         | Livestream hasn’t ended, or Playwright missing                                          | Wait for the 6-hour recheck, or operator installs Chromium                                                                                             |
-| Names in a draft are wrong                        | Auto-captions                                                                           | Check the packet. Fix the draft. Do not publish the caption.                                                                                           |
-| Dates look a day ahead                            | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper identity (Paper setup panel) and save the correct IANA timezone.                                                                                   |
-| Two nearly identical headlines on the paper       | Same news, two drafts published                                                         | The paper collapses overlapping headlines and keeps the longer body.                                                                                   |
-| Second person gets 403                            | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                |
-| Editorial says Failed with a timeout              | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                  |
-| Editorial never starts, says no voice             | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere                                    | Operator: set it to an absolute path outside the repo                                                                                                  |
-| A public address is down but the local desk works | Public hosting or routing may have failed                                               | Ask the operator to check the public host/tunnel. The Windows package has no tunnel or automatic repair; legacy controls require configured ownership. |
-| An editorial has no Edit button                   | It has not finished, or it failed                                                       | Only a finished piece can be edited. A failed row can still be deleted.                                                                                |
-| Desk wants sign-in again                          | Session expired                                                                         | `/login`                                                                                                                                               |
-| Notebook language on the paper                    | Strip failed or you pasted it                                                           | Edit the story. Kill if needed. Tell the operator.                                                                                                     |
+| You see | Likely cause | What to do |
+|---|---|---|
+| A draft fails with “sign in” | A Claude Code, Codex or Gemini login lapsed | Press the **Sign in** button on the error, or go to **Models → Connections** ([Signing in to a writing model](#signing-in-to-a-writing-model)) |
+| A model shows “Sign in needed”, “Not installed” or “Turned off” | The program is missing, signed out or turned off | Owner: fix it on **Models**; or pick another model in the picker |
+| Automatic says no model is ready | Every model on the ladder failed its readiness check | Open **Models** and read the reason after each name; sign in or load a local model |
+| A model times out on a long document pack | The wait is shorter than the read | Owner: raise **Time per call** under **Server → Time budgets** |
+| An Opinion row says Failed with no draft | The provider errored, declined or returned something that was not a full editorial | Read the message on the row. Use **Restore saved material** to put your subject back in the form. Nothing was filed or published |
+| A scan fetched and filed nothing | Nothing new, or the model declined | Read the summary on **Scan history**. It is not automatically a bug |
+| Dark Desk stopped partway | A research round is a short batch, then a stop | Normal. Remaining pages stay on the file; press **Keep investigating** |
+| A draft spells a name oddly | Auto-captions or speech-to-text | Check the packet or the tape. Fix the draft. Never publish a caption’s spelling |
+| A meeting has no transcript | The livestream has not ended, or no captions exist | The desk rechecks. With TextFlowKit installed, the next meeting pass can transcribe the audio |
+| Dates look a day off | The paper’s timezone is wrong | Owner: **Server → Paper setup**, save the right timezone |
+| An invited editor cannot join | The link was used, expired (seven days) or opened with another email | Owner: make a fresh link under **Server → Editors & access → Invite an editor** |
+| A public address is down but the desk works | Public hosting or routing failed | Ask the operator to check the public host. The Windows package has no tunnel or automatic repair |
+| The desk asks you to sign in again | The session expired | Sign in at `/login` |
+| Notebook language on the paper | A draft was published with working notes in it | Edit the story or take it off, and tell the operator |
 
 ---
 
 ## What this desk will not do for you
 
-- It will not decide if something is worth printing. You will.
-- It will not file a CORA request.
-- It will not be your lawyer. First Amendment copy in related tools is not legal advice; this desk does not even ship that prompt.
-- It will not invent a city's sources. The owner supplies them in Paper setup and can maintain them under Sources.
+- It will not decide whether something is worth printing. You will.
+- It will not file a public-records request for you.
+- It will not be your lawyer.
+- It will not invent a city’s sources. The owner supplies them in Paper setup and keeps them under Sources & scan.
+- It will not publish an ordinary story without a person pressing **Publish**.
 
-You are the publisher. The software is the library, the tape machine, and a very fast intern who still has to be edited.
-
-
-### Import a transcript or document packet
-
-Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
-
-Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.
-
-## Astra editor desk (0.6.39)
-
-The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats available, with Dark Desk and Follow-ups alongside them. On a phone, use the navigation button in the top bar. Find anything (Ctrl+K) searches newsroom leads and screen names. Appearance is in the top bar; Normal/Large text remains in the sidebar.
-
-**Start a story:** choose New story, then Add documents or drag files into the document area. Paste URLs or source text in the large text area, give the angle, and choose Write it. Existing document limits, OCR, URL/YouTube ingestion, section and research options, and writing models remain available. Recent drafts sit at the top of Desk; opening one shows its progress or saved draft.
-
-**Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
-
-**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Suggested sources and Dropped groups. Server has twelve panels, in this order: Writing models, Custom connections, Daily scan, Meeting capture, YouTube, Routine notices, Paper identity, Sections, Named outlets, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
-
-
-### Recheck a draft against uploaded documents
-
-In the story workspace, use **Check draft against evidence**. The check reads the retained extracted text of every attached document, alongside any saved web captures. Private files are cited by filename and page or character location; they do not need a public URL. Long packets are read in sections, and exact supporting or conflicting passages are checked against the retained text before the editing pass. The progress card remains visible while the job is queued and running. A successful check saves a new draft version, loads it in the editor and opens a before-and-after comparison. Verification findings remain visible even when the reporting memo is already filled. Incomplete reading, excessive relevant evidence for a single edit, or files changed during the check preserve the previous draft and show an explanation. The check does not independently authenticate a document or verify OCR/transcript name spellings.
-
-## Current Opinion document and review workflow
-
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
-
-## 0.6.52: model and document boundaries
-
-The 0.6.52 model picker offers only the reasoning-effort levels supported by the selected Codex or Claude runtime. The selected runtime and effort are retained with the job. A technical failure — unavailable service, sign-in, quota, timeout, network failure, or no output — may move the unfinished call to the next ready runtime and records that move. A content refusal is terminal: it does not route around the refusal or turn into a draft.
-
-After a Queue batch completes, use **Redraft** to select a runtime and produce a new draft for review. The batch remains non-publishing. The Server page lets an owner edit daily time, runtime, effort, selected accepted sources, and a 1–12 source cap; scheduled scans still file leads only.
-
-Story and Opinion intake reads all extractable PDF pages within the 20-million-character document-text cap. Generic captures and Dark Desk scans initially use a bounded OCR batch; **Read entire PDF** checkpoints consecutive 12-page batches until every page is retained or explicitly reported unread. Page-only vision fallback handles pages without a readable text layer. The [0.6.52 release guide](releases/0.6.52.md) lists evidence boundaries.
+You are the publisher. The software is the library, the tape machine and a very fast intern who still has to be edited.

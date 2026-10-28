@@ -11,6 +11,19 @@ database name before it drops anything. It cannot reach `townreporter` (the
 live database) or port 3000 (the live paper) even by mistake in its own
 argument list.
 
+## Where staging sits: Dev, Test and production
+
+A change passes through three places, in this order, and only then through
+`ops\promote.ps1` (see [SELF-HOSTING.md](../SELF-HOSTING.md#updating-this-installation)):
+
+| Tier | Port and database | What it is for |
+| ---- | ----------------- | -------------- |
+| **Dev** (this page) | 3100, `townreporter_dev` on Postgres 5433, restored from the newest backup by `ops\stage.ps1` | Walk the changed screens against a copy of real data. Never port 3000, never the live database. |
+| **Test** | 3400, `townreporter_test_<yyyyMMdd_HHmmss>` on Postgres 5547, role `tr_test_admin` | A fuller throwaway server: complete walks including **Publish** all the way to the public page, and the [nightly proof](nightly-proof.md). `scripts/nightly-proof-config.mjs` accepts only this shape. The scripts in this repository do not create the Test server (unverified how it is built). |
+| **Production** | 3000 behind the tunnel, `townreporter` on Postgres 5433 | The paper readers see. Nothing is built, migrated or tested here while it serves. |
+
+The Windows package has none of these tiers; it is one local installation.
+
 ## The command
 
 ```

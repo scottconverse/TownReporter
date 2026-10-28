@@ -52,7 +52,8 @@ function routePath(file) {
   // no-control-regex correctly rejects a NUL expression, while this keeps the
   // escape-and-restore trick unambiguous before route dots are normalized.
   const escaped = name.replace(/\[\.\]/g, "\uE000");
-  const path = "/" + escaped.replace(/^index$/, "").replace(/\.index$/, "").replace(/\./g, "/");
+  // A trailing "_" (desk.ops_.$card) opts out of nesting; it is not in the URL.
+  const path = "/" + escaped.replace(/^index$/, "").replace(/\.index$/, "").replace(/_(?=\.|$)/g, "").replace(/\./g, "/");
   return (path.replace(/\uE000/g, ".").replace(/\/$/, "") || "/").replace(/\/(\$|:)\w+/g, "/:id");
 }
 
@@ -87,7 +88,12 @@ test("every URL the documentation names is a route the app serves", () => {
     if (path.endsWith("/")) continue;                 // a section prefix, not a URL
     if (NOT_A_FILE_ROUTE.test(path)) continue;        // served by the server, or a feed
     const normalized = path.replace(/\/(\$|:)\w+/g, "/:id");
-    if (!routes.has(normalized)) unresolved.push(`${path}  (${where})`);
+    // A literal segment such as /desk/ops/writing-models fills a :id route.
+    const fills = (route) => {
+      const a = route.split("/"), b = normalized.split("/");
+      return a.length === b.length && a.every((seg, i) => seg === b[i] || seg === ":id");
+    };
+    if (!routes.has(normalized) && ![...routes].some(fills)) unresolved.push(`${path}  (${where})`);
   }
 
   console.log(`doc routes: ${routes.size} routes, ${named.size} documented paths, ${unresolved.length} unresolved`);

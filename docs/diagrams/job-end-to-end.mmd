@@ -1,21 +1,31 @@
 sequenceDiagram
     participant E as Editor
+    participant C as Clock (5 min and 20 s)
     participant F as Server function
     participant J as desk_jobs
-    participant W as Worker
+    participant W as Worker (one per lane slot)
     participant M as Model
     participant DB as Database
 
     E->>F: Run scan / Draft / Keep digging / Write an editorial
-    F->>J: insert (kind, subject, queued)
-    F-->>E: returns at once — nothing waits on the model
+    F->>F: resolve the model now (Automatic becomes the first ready rung)
+    F->>J: insert (kind, lane, model choice, queued)
+    F-->>E: returns at once, nothing waits on the model
+    C->>J: scheduled scans, routine editions and follow-ups insert rows
+    C->>W: every 20 s, drain queued rows into their lanes
     W->>J: claim with a token
     loop while running
-        W->>J: heartbeat
+        W->>J: heartbeat every 30 s
     end
     W->>M: call (budget from the provider)
-    M-->>W: result
+    alt recoverable failure
+        M-->>W: quota, timeout, login lapse or unavailable
+        W->>M: retry only the unfinished call on the next ready rung
+        W->>J: write failover_note
+    else answered
+        M-->>W: result
+    end
     W->>DB: file leads / draft / signals / editorial
-    W->>J: finished
+    W->>J: finished, with the run receipt in result_json
     E->>F: page polls
     F-->>E: the work, when it lands
