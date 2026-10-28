@@ -32,6 +32,7 @@ import {
   headlineFromUrl,
   humanFrontierLabel,
   darkJobActive,
+  darkKeepControl,
   observedDarkJobFinished,
   organizationFromUrl,
   editorTitle,
@@ -803,15 +804,26 @@ function DarkPage() {
    * workspace's busy state and the Stop control are both drawn from, so the
    * button cannot offer to stop a run the page has already given up on.
    */
-  const digRunning = (digging || inv?.status === "investigating") && !stalled;
+  const keepControl = darkKeepControl({
+    jobStatus: currentDarkJob?.status,
+    investigationStatus: inv?.status,
+    stalled,
+    starting: advance.isPending,
+    stopRequested: stopRequestedFor != null && stopRequestedFor === currentDarkJob?.id,
+  });
+  const digRunning = keepControl.running;
   useEffect(() => {
-    const now = inv?.status === "investigating" || digging;
+    const now = digRunning;
     if (wasInvestigating.current && !now) clearPhase();
-    wasInvestigating.current = Boolean(now);
-  }, [inv?.status, digging]);
+    wasInvestigating.current = now;
+  }, [digRunning]);
   const liveLine = progressLine({
-    running: digging || inv?.status === "investigating",
-    status: inv?.status ?? (digging ? "investigating" : "open"),
+    running: digRunning,
+    status: digRunning
+      ? (inv?.status ?? "investigating")
+      : inv?.status === "investigating"
+        ? "paused"
+        : (inv?.status ?? "open"),
     hops: inv?.hops ?? 0,
     budget: inv?.budget ?? 5,
     // Unit DD1, item 6: the whole file's captures, not the page's sixty rows,
@@ -1227,6 +1239,7 @@ function DarkPage() {
               pending={detail.isPending && !detail.data}
               digging={digRunning}
               keepDisabled={digRunning || !detail.data || detail.data.investigation.id !== openId}
+              keepPendingLabel={keepControl.pendingLabel}
               stalled={stalled}
               darkJobError={
                 detail.data?.darkJob?.status === "failed"
@@ -1279,6 +1292,7 @@ function DarkPage() {
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
               modelChoice={modelChoice}
+              modelChoiceExplicit={fileModelExplicitFor.current === openId}
               onModelChoice={(choice) => {
                 fileModelTouchedFor.current = openId;
                 fileModelExplicitFor.current = openId;
@@ -1552,6 +1566,7 @@ function InvestigationWorkspace({
   pending,
   digging,
   keepDisabled,
+  keepPendingLabel,
   stalled,
   darkJobError,
   phase,
@@ -1576,6 +1591,7 @@ function InvestigationWorkspace({
   onWriteBrief,
   briefPending,
   modelChoice,
+  modelChoiceExplicit,
   onModelChoice,
   modelEffort,
   onModelEffort,
@@ -1589,6 +1605,7 @@ function InvestigationWorkspace({
   pending: boolean;
   digging: boolean;
   keepDisabled: boolean;
+  keepPendingLabel: string | null;
   stalled: boolean;
   darkJobError: string | null;
   phase: string;
@@ -1613,6 +1630,7 @@ function InvestigationWorkspace({
   onWriteBrief: () => void;
   briefPending: boolean;
   modelChoice: StoryModelChoice;
+  modelChoiceExplicit: boolean;
   onModelChoice: (choice: StoryModelChoice) => void;
   modelEffort: ModelEffort | null;
   onModelEffort: (effort: ModelEffort | null) => void;
@@ -2007,6 +2025,9 @@ function InvestigationWorkspace({
           onStop={onStopDig}
           onOpen={onOpenFile}
           stopDisabled={stopControl.disabled}
+          modelChoice={modelChoice}
+          modelEffort={modelEffort}
+          modelChoiceExplicit={modelChoiceExplicit}
         />
       ) : null}
 
@@ -2186,7 +2207,7 @@ function InvestigationWorkspace({
         </div>
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
         <div className="astra-panel-acts" aria-label="File decisions">
-          <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
+          <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
             Keep investigating
           </InkButton>
           {digging && inv ? <InkButton tone="ghost" onClick={onKeepDigging}>Use selected model</InkButton> : null}
@@ -2484,12 +2505,36 @@ function darkJobStepLine(step: string): string {
   return "Working on the case file";
 }
 
-function DarkResearchCard({ job, onStop, onOpen, stopDisabled }: { job: JobProgressView; onStop: () => void; onOpen: () => void; stopDisabled: boolean }) {
+function DarkResearchCard({
+  job,
+  onStop,
+  onOpen,
+  stopDisabled,
+  modelChoice,
+  modelEffort,
+  modelChoiceExplicit,
+}: {
+  job: JobProgressView;
+  onStop: () => void;
+  onOpen: () => void;
+  stopDisabled: boolean;
+  modelChoice: StoryModelChoice;
+  modelEffort: ModelEffort | null;
+  modelChoiceExplicit: boolean;
+}) {
   const qc = useQueryClient();
   const [retryNote, setRetryNote] = useState("");
   const [retryAfterStop, setRetryAfterStop] = useState(false);
   const retry = useMutation({
-    mutationFn: (nextModel: boolean) => retryDarkRound({ data: { jobId: job.id, nextModel } }),
+    mutationFn: (nextModel: boolean) => retryDarkRound({
+      data: {
+        jobId: job.id,
+        nextModel,
+        modelChoice,
+        modelEffort,
+        modelChoiceExplicit,
+      },
+    }),
     onSuccess: (result) => {
       if (!result.ok) {
         setRetryNote(editorError(result.error ?? "") || "Could not retry this round.");

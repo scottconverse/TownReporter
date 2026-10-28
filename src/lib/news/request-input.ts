@@ -1618,6 +1618,9 @@ export const darkSignalInput = z.preprocess(
 export const darkRetryInput = z.object({ override: z.array(z.string()).optional(),
   jobId: rowId,
   nextModel: z.boolean().optional().default(false),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
 });
 
 /** `dark.ts:3232` fileRedditTip (`fileRedditTipFor` reads these five). */
