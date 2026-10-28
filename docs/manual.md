@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.84 · publication and deployment are recorded separately**
+**Version 0.6.85 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.84 release guide and evidence boundaries](releases/0.6.84.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.85 release guide and evidence boundaries](releases/0.6.85.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.84 does.**
+**What TownReporter 0.6.85 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads, spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.84](releases/0.6.84.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.85](releases/0.6.85.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -123,7 +123,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.84, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.85, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -227,7 +227,7 @@ Every “anyway” you press is saved in an audit record with your name. Pressin
 
 ### Messages and undo
 
-Every press ends with a short message at the bottom left of the screen (top left on a phone). Successes stay about five seconds, failures twelve, and a Kill message fifteen. Kill, Hold and Release messages carry **Undo**.
+Every press ends with a short message at the bottom left of the screen (top left on a phone). Successes stay about five seconds, failures twelve, and the Kill strip eight. On a phone the Kill strip leaves a 16 px gap on each side. Kill, Hold and Release messages carry **Undo**.
 
 ## The desk
 
@@ -241,7 +241,7 @@ Read it top to bottom:
 4. **Running now.** Cards for what is running, each with **Cancel** and an open button such as **Open your story** or **Open the scan**.
 5. **Tonight’s edition.** Stories that are through writing. Each row has the section, the headline and one chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**, **… Checking facts**, or **Writing · 2:18** / **Queued**. The button changes with the state: **Watch**, **Retry**, **Check**, **Continue**, **Start story**, **Review**. A story prints only when you press Publish on its page; this list prints nothing.
 6. **In progress.** Up to five stories you have started, each with **View progress** or **Open draft**. Nothing here prints until you press Publish.
-7. **New leads.** The best leads from the last finished scan, best first. Two buttons switch between **Open · N** and **Held · N**. Each row shows a score out of 20, chips, the headline, the why-line, evidence squares, the section and age. Buttons: **Start story** (S), **Hold** (H), **Kill** (X). A **Model for Start story** picker sits above the list. Kill and Hold show a message with **Undo**; Kill also offers one-tap reasons (**Not news**, **Not local**, **Old**, **Duplicate**, **Thin**, **Other**). A held lead shows **Release**; a killed lead shows **Undo**. **All leads in the Queue →** goes to the Queue.
+7. **New leads.** The best leads from the last finished scan, best first. Two buttons switch between **Open · N** and **Held · N**. Each row shows a score out of 20, chips, the headline, the why-line, evidence squares, the section and age. Buttons: **Start story** (S), **Hold** (H), **Kill** (X). A **Model for Start story** picker sits above the list. Kill shows one line, **Lead killed.**, with **Undo** for 8 seconds. Hold shows a message with **Undo**. A held lead shows **Release**; a killed lead shows **Undo**. **All leads in the Queue →** goes to the Queue.
 8. **The right rail.**
    - **AI follow-ups**: the latest findings, with **Review finding** and **All follow-ups**.
    - **Dark Desk**: counts of **Open files**, **Signals to review** and **Waiting on an AI follow-up**, and **Open Dark Desk →**.
@@ -406,8 +406,8 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 ### Kill, hold, release and bring back
 
-- **Kill** is one press. The lead moves to Killed and a message offers **Undo** and one-tap reasons (**Not news**, **Not local**, **Old**, **Duplicate**, **Thin**, **Other**). It stays on screen for 15 seconds. Kill is not delete: the lead stays under Killed.
-- **Kill with a reason** asks for a quick fill (**Not news**, **Already printed**, **Outside our area**, **Bad source or unreadable**), your own words and an optional link.
+- **Kill** is one press. The lead moves to Killed and a small strip at the bottom says **Lead killed.** with **Undo** for 8 seconds. It shows no reason chips and does not move when the mouse is on it. On a phone it leaves a 16 px gap on each side. Kill is not delete: the lead stays under Killed.
+- **Kill with a reason** (More ▾) and **Kill this lead** on the story page open the full **Kill this lead** dialog with quick fills (**Not news**, **Already printed**, **Outside our area**, **Bad source or unreadable**), your own words and an optional link. **Kill as duplicate** remains in the More ▾ menu.
 - **Hold with a reason** lets you say **Waiting on a record or date**, **Waiting on an AI follow-up** or **Not now, maybe later**, plus a note. A held lead waits under Held until you press **Release**.
 - If a lead has a draft or a published story, Kill and Hold warn first with **Kill anyway** or **Hold anyway**. The draft and the story are kept.
 - **Bring back** returns a killed lead to the Queue, and a drafted lead comes back as Drafted.
@@ -415,16 +415,21 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 ### Came back, and possible duplicates
 
-The scanner never throws a lead away. If a new lead is confidently the same as one already on the desk, it does not file a copy. It marks the old row **Came back N times** (with the date) instead. On the Killed tab a line explains: “the scanner found this story again after you killed it. It was not refiled. Back returns it to New.”
+The scanner never throws a lead away. When the word rule finds nothing in a scan batch, the desk makes one extra model call. It compares every new lead with recent desk leads from the last 30 days (at most 300; killed leads are included), printed stories from the last 30 days (at most 150), and earlier leads of the same scan. If the call fails, the scan files leads as before.
 
-If a new lead only looks similar, it is filed with a chip: **Possible duplicate · compare**. If it is a killed story that returned with new facts, it is filed under **Held** with **New facts · compare** and a line beginning “Developing: new facts on a story you killed”. Press the chip to open the story page, where **Compare these two leads** shows both side by side. The buttons are **Not a duplicate — move to New**, **Same story — kill this one**, and **Newer facts — reopen the old one**. The desk also asks its model one short yes-or-no question per scan about borderline pairs. Nothing is merged or hidden without you.
+- **Same story, no new fact:** the old lead is marked **Came back N times** (with the date), and nothing new is filed. A lead killed as a duplicate stays killed.
+- **Same story with a new fact:** the new lead is filed as **Held** and linked to the old lead as **Possible duplicate**.
+- **Same as an earlier lead of the same scan:** the new lead is merged into it, and the source links are joined.
+- **Matches a printed story:** the new lead is filed as **Held**, not Open.
+
+An AI duplicate never lands in Open. When a linked lead needs your decision, press its **Possible duplicate** chip to open the story page, where **Compare these two leads** shows both side by side. The buttons are **Not a duplicate — move to New**, **Same story — kill this one**, and **Newer facts — reopen the old one**. On the Killed tab a line explains: “the scanner found this story again after you killed it. It was not refiled. Back returns it to New.”
 
 ### Select several leads
 
 Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
 
 - **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away.
-- **Kill** on several leads asks “Why?” once, writes the reason on all of them and shows **Undo**.
+- **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
 
@@ -964,10 +969,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.84 that is
-`TownReporter-0.6.84-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.85 that is
+`TownReporter-0.6.85-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.84
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.85
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
