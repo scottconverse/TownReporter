@@ -2925,6 +2925,9 @@ export async function retryDarkRoundFor(
   nextModel = false,
   deps: DarkRoundRetryDeps = {},
   override?: string[],
+  modelChoice?: string,
+  modelEffort?: unknown,
+  modelChoiceExplicit = false,
 ) {
   await ensureDarkSchema();
   await ensureJobsSchema();
@@ -2944,6 +2947,8 @@ export async function retryDarkRoundFor(
   if (file[0].status === "closed") return { ok: false as const, error: "Pull the file back before retrying." };
 
   let choice = effectiveStoryModelChoice(job.model_choice);
+  let effort = savedJobEffort(job);
+  let explicit = false;
   if (nextModel) {
     const failure = job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
       ? job.error
@@ -2958,8 +2963,19 @@ export async function retryDarkRoundFor(
     if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." ,
       };
     choice = planned;
+  } else if (modelChoice) {
+    choice = effectiveStoryModelChoice(modelChoice);
+    effort = validatedModelEffort(choice, modelEffort);
+    explicit = modelChoiceExplicit;
   }
-  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job), override,
+  const result = await (deps.start ?? startDarkRound)(
+    context,
+    job.subject_id,
+    choice,
+    effort,
+    override,
+    {},
+    explicit,
   );
   if (!result.ok) return result;
   return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
@@ -2972,7 +2988,16 @@ export const retryDarkRound = createServerFn({ method: "POST" })
     const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "retry this research round",
     );
     if (notSetUp) return notSetUp;
-    return retryDarkRoundFor(context, data.jobId, data.nextModel, {}, data.override);
+    return retryDarkRoundFor(
+      context,
+      data.jobId,
+      data.nextModel,
+      {},
+      data.override,
+      data.modelChoice,
+      data.modelEffort,
+      data.modelChoiceExplicit,
+    );
   });
 
 export async function queueInvestigationChallengeFor(

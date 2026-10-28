@@ -3,7 +3,7 @@ const window = installDom();
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
 const h = React.createElement;
-const calls = { keep: [], draft: [], refetch: 0 };
+const calls = { keep: [], draft: [], retry: [], refetch: 0 };
 globalThis.__darkFlow = { calls };
 
 const stub = (source) => transpileToUrl(source, "dark-flow-stub.js", {});
@@ -47,12 +47,12 @@ const darkStub = stub(`
   export const parkInvestigation = async () => ({ ok: true }); export const queueInvestigation = async () => ({ ok: true });
   export const queuePacket = async () => null; export const closeInvestigation = async () => ({ ok: true });
   export const queueArtifactOcr = async () => ({ ok: true }); export const refreshBrief = async () => ({ ok: true });
-  export const reopenParkedInvestigation = async () => ({ ok: true }); export const retryDarkRound = async () => ({ ok: true });
+  export const reopenParkedInvestigation = async () => ({ ok: true }); export const retryDarkRound = async ({ data }) => { globalThis.__darkFlow.calls.retry.push(data); return { ok: true, model: "DeepSeek v4.1 Flash 1017" }; };
   export const scanTipSubreddit = async () => ({ ok: true }); export const getTipSubreddit = async () => ({ subreddit: "longmont" });
 `);
 const copyStub = stub(`
   export const DIG_STOP_ACK = "Stop requested.";
-  export { blockedDigBannerText } from ${JSON.stringify(new URL("../src/lib/news/desk-copy.ts", import.meta.url).href)}; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null; export const editorPauseIsPageFailure = () => false;
+  export { blockedDigBannerText, darkKeepControl } from ${JSON.stringify(new URL("../src/lib/news/desk-copy.ts", import.meta.url).href)}; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null; export const editorPauseIsPageFailure = () => false;
   export const editorKindLabel = () => "Record"; export const elapsedLabel = () => ""; export const excerptForEditor = (v) => String(v ?? "");
   export const headlineFromUrl = () => ""; export const humanFrontierLabel = (v) => String(v ?? "");
   export const darkJobActive = () => false; export const observedDarkJobFinished = () => false;
@@ -67,7 +67,7 @@ const copyStub = stub(`
 `);
 const modelPickerStub = stub(`
   import { createElement } from "react";
-  export function ModelPicker(props) { return createElement("div", { className: "model-picker-stub", "data-value": props.value, "data-scope": props.scope, "data-effort": String(Boolean(props.onEffortChange)) }, createElement("span", null, props.label ?? "Digging model"), createElement("button", { type: "button", onClick: () => props.onChange("claude-sonnet") }, "Choose Claude Sonnet")); }
+  export function ModelPicker(props) { return createElement("div", { className: "model-picker-stub", "data-value": props.value, "data-scope": props.scope, "data-effort": String(Boolean(props.onEffortChange)) }, createElement("span", null, props.label ?? "Digging model"), createElement("button", { type: "button", onClick: () => props.onChange("claude-sonnet") }, "Choose Claude Sonnet"), createElement("button", { type: "button", onClick: () => props.onChange("deepseek-flash") }, "Choose DeepSeek")); }
 `);
 const darkRailStub = stub(`
   export const newestTouchedFile = (rows) => rows.slice().sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
@@ -84,7 +84,7 @@ const imports = {
   "@/components/states": statesStub,
   "@/lib/news/dark": darkStub,
   "@/lib/news/job-progress": stub(`export const cancelStoryJob = async () => ({ ok: true });`),
-  "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: [], isPending: false, isError: false });`),
+  "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: globalThis.__darkFlow.fixtures.jobs ?? [], isPending: false, isError: false });`),
   "@/components/JobCard": stub(`export const DeskJobCard = () => null; export function JobCard() { return null; }`),
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
   "@/components/PaperSetupGateNote": nullComponents,

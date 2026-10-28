@@ -97,6 +97,7 @@ export async function screenModuleUrl(path, overrides = {}, real = [], fixture =
             usePaper: `() => ({city:"Longmont",timezone:"America/Denver"})`,
             useAreaLabels: `() => ({})`,
             useDeskJobs: `() => ({jobs:[], activeJobs:[]})`,
+            darkKeepControl: `() => ({running:false,disabled:false,pendingLabel:null})`,
             resolveJobModel: `() => ({providerId:"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
             usePaperSetupGate: `() => ({blocked:false})`,
             // recent-kill.ts: no row was just killed while a screen renders here.

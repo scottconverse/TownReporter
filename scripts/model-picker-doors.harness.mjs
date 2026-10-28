@@ -70,6 +70,7 @@ const overrides = {
   darkScreenText: `x=>x`,
   dedupeFactLines: `()=>[]`,
   darkScreenData: `x=>x`,
+  darkKeepControl: `()=>({running:false,disabled:false,pendingLabel:null})`,
   editionReadiness: `()=>({readyToCheck:[],needsWork:[],readyToPrint:[],printed:[]})`,
   MODEL_ASSIGNMENTS_QUERY_KEY: `["model-assignments"]`,
   PROVIDER_AVAILABILITY_QUERY_KEY: `["provider-availability"]`,

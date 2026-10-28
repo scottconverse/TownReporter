@@ -552,6 +552,37 @@ export function darkJobActive(status: string | null | undefined): boolean {
 }
 
 /**
+ * Whether the open file's next research round is already in flight.
+ *
+ * A settled Dark Desk job is authoritative. The investigation row can still say
+ * "investigating" for a poll after the editor's Stop has already made the job
+ * failed; treating that stale status as a live round kept "Keep investigating"
+ * disabled and could leave the desk reading as though the stopped run were
+ * still in progress.
+ */
+export function darkKeepControl(state: {
+  jobStatus: string | null | undefined;
+  investigationStatus: string | null | undefined;
+  stalled: boolean;
+  starting: boolean;
+  stopRequested: boolean;
+}): { running: boolean; disabled: boolean; pendingLabel: string | null } {
+  if (state.starting) {
+    return { running: true, disabled: true, pendingLabel: "Reading…" };
+  }
+  const liveJob = darkJobActive(state.jobStatus);
+  const settledJob = state.jobStatus != null && !liveJob;
+  const running =
+    !state.stalled &&
+    (liveJob || (!settledJob && state.investigationStatus === "investigating"));
+  return {
+    running,
+    disabled: running,
+    pendingLabel: running ? (state.stopRequested ? "Stopping…" : "Reading…") : null,
+  };
+}
+
+/**
  * The sentence the desk owes an editor who presses Stop this dig.
  *
  * Unit DD1, item 3. The press only writes a flag; the worker reads it at its
