@@ -1,5 +1,5 @@
 /**
- * The fast kill — one press on the row, and the reason one tap later.
+ * The fast kill — one press on the row, with a short Undo strip.
  *
  * Owner, 2026-10-03: "killing a lead takes about half a dozen clicks … after
  * twenty leads I often skipped the reason." The drawn kill was More ▾ → "Kill
@@ -9,19 +9,13 @@
  * record needs.
  *
  * So the kill is ONE press on the row itself (`desk-leads.tsx`, the drawn
- * LeadRow's own inline Start story / Hold / Kill cell) and the reason is offered
- * AFTERWARDS, as the chips in `KILL_REASON_CHIPS`. Nothing about the reason is
- * required, which is the whole point: a press that demands a reason before it
- * will kill is the press the editor was skipping.
+ * LeadRow's own inline Start story / Hold / Kill cell). The toast that follows
+ * is now a short Undo strip: a killed row leaves Open immediately, so the way
+ * back has to stay on screen without asking a second question.
  *
- * WHY THE CHIPS ARE IN THE TOAST AND NOT ON THE ROW. A killed lead leaves the
- * Open tab — `openLeads` (`desk-copy.ts`) drops it, and the optimistic patch
- * (`desk-lead-status.ts`) takes its row out of the cached Open page in the same
- * paint as the press. A row that has left the screen cannot be the place a
- * follow-up press lands. The toast that reports the kill is the one surface
- * still on screen, still attached to that lead, and it is where the desk already
- * keeps the Undo for the same press ("the same pattern the Held Release + Undo
- * uses on the Queue").
+ * The explicit "Kill with a reason" dialog in the More menu still records a
+ * reason. `KillReasonChips` remains exported for callers that choose to use the
+ * one-tap reason control; the live kill paths no longer render it.
  *
  * WHY THE PRESSES ARE VALUES AND NOT JUST HANDLERS. `killPress` and
  * `killUndoPress` are the two writes as DATA, so the round trip they drive can
@@ -243,13 +237,11 @@ export function killReasonKept(chip: KillReasonChip): string {
 /**
  * How long the kill toast lives, in milliseconds.
  *
- * Longer than `DESK_TOAST_OK_MS` (5s) because this is the one toast that asks a
- * question: the editor has to read it, decide whether to say why, and reach for
- * a chip. It is not longer than the error life (12s) plus a little, because the
- * chips are an offer and not a form — a toast that outstays its welcome is a
- * toast that covers the next row. Undo stays on it for the whole life.
+ * Longer than `DESK_TOAST_OK_MS` (5s) because the editor needs time to notice
+ * and reach for Undo, but short enough that a one-line strip does not cover the
+ * next row. It asks no reason question now; Undo stays for the whole life.
  */
-export const KILL_TOAST_MS = 15_000;
+export const KILL_TOAST_MS = 8_000;
 
 /*
   The name a Queue toast is raised under (TNB-3). A kill and a hold on one lead
@@ -273,14 +265,12 @@ export function leadStatusToastName(input: { id: number; status: string }): stri
 export const KILL_CHIPS_ASK = "Say why, if you want to:";
 
 /**
- * The one-tap reason chips, drawn on the kill toast under its sentence.
+ * The optional one-tap reason control, retained for callers that want it.
  *
- * Stateless apart from which chip was taken: once one is, the row of chips is
- * replaced by the sentence that says so, in the toast that reported the kill.
- * That is deliberate on two counts — the six chips stop inviting a second
- * answer to a question that has been answered, and the toast itself (and with
- * it the Undo for the kill) is left exactly where it was rather than being
- * replaced by a fresh toast that would drop it.
+ * The live fast-kill paths no longer render these chips: a kill now shows a
+ * short Undo strip and nothing else. The component stays exported because the
+ * reason dialog and any later explicit caller may still use the same words and
+ * presses.
  *
  * `save` is the screen's own mutation, handed in rather than imported: this
  * module owns the WORDS and the PRESS, and the screen owns the write, the

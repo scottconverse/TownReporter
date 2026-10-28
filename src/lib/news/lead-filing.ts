@@ -6,6 +6,7 @@ import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
   matchStrength,
+  MATCHABLE_STATUSES,
   newFactsIn,
   normalizeSourceUrl,
   sameStoryForMerge,
@@ -260,6 +261,12 @@ export async function fileScanLeads(
    * scan's own arithmetic still adds up: these file as plain new leads.
    * Always 0 when no check ran. */
   dupCheckCleared: number;
+  /** Candidates filed HELD because the same-story finder matched a printed
+   * story (or the old pair check's printed verdict did). Included in
+   * `leadsCreated`; kept separate from `possibleMatched` and
+   * `developingFiled` so each filed row contributes to exactly one of the
+   * summary's non-new categories. */
+  dupCheckHeld: number;
   /** Candidates dropped as standing pages by the cheap rules in
    * ./lead-newsworthiness.ts (an obituaries index, a directory/index, a
    * projects index, an events listing) -- a page that exists, not an event.
@@ -290,6 +297,7 @@ export async function fileScanLeads(
   let developingFiled = 0;
   let mergedSameScan = 0;
   let dupCheckCleared = 0;
+  let dupCheckHeld = 0;
   let standingPageDropped = 0;
   let noEventDropped = 0;
   let firstDiscardedHeadline: string | undefined;
@@ -298,6 +306,12 @@ export async function fileScanLeads(
    * into one of these -- see sameStoryForMerge's doc comment for why a row an
    * editor has already seen is never touched. */
   const insertedThisRun: MatchCandidateLead[] = [];
+  /* The row each candidate of THIS call became: an inserted row, or the row
+   * an earlier candidate was merged into. The same-story finder's N<ref> is
+   * only useful if the later candidate can find that row again. A candidate
+   * that was stamped, cleared or dropped has no entry, so an N ref to it is
+   * never guessed. */
+  const filedByCandidate = new Map<number, MatchCandidateLead>();
   /* Unit U28: this candidate's 0-based position in `aiLeads`, which is how the
    * duplicate check keys its verdicts (dup-check.ts's `collectDupPairs` numbers
    * the same list the same way). Counted at the top of the loop, before every
@@ -393,6 +407,7 @@ export async function fileScanLeads(
       // Same object as the one in `existing`: keeping it in step means a third
       // sighting later in this run sees the union, not the first URL list.
       sibling.source_urls = merged;
+      filedByCandidate.set(candidateIndex, sibling);
       mergedSameScan += 1;
       continue;
     }
@@ -402,9 +417,65 @@ export async function fileScanLeads(
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
     let dupKind: "possible" | "developing" | null = null;
+    /* The one non-new bucket this row belongs to. The summary subtracts each
+     * bucket once; a row can carry both a lead link and a printed verdict, so
+     * the first (word-rule / developing) reason owns the count rather than
+     * letting one row make `filedNew` go negative. */
+    let filedCategory: "possible" | "developing" | "printed" | null = null;
     // The headline this candidate actually matched, kept for the verdict
     // lookup below (`matched` itself does not outlive the block).
     let matchedHeadline: string | null = null;
+
+    /*
+      The direct same-story finder is additive. A word-rule match always wins;
+      only a candidate the word rule left entirely unmatched can use an L ref
+      or an N ref. P refs are handled after the old printed verdict below, so
+      an existing yes/no remains the answer when one exists.
+    */
+    const sameStory = dupCheck?.sameStory?.get(candidateIndex) ?? null;
+    if (matchId == null && sameStory?.kind === "new") {
+      const target = filedByCandidate.get(sameStory.candidate);
+      if (target) {
+        const merged = mergeSourceUrls(target.source_urls, candidateUrls);
+        await sql`
+            update leads set source_urls = ${JSON.stringify(merged)}
+            where id = ${target.id} and newsroom_id = ${newsroomId}
+          `;
+        target.source_urls = merged;
+        filedByCandidate.set(candidateIndex, target);
+        mergedSameScan += 1;
+        continue;
+      }
+    }
+    const directLead =
+      matchId == null && sameStory?.kind === "lead"
+        ? existing.find((lead) => lead.id === sameStory.leadId && MATCHABLE_STATUSES.has(lead.status)) ?? null
+        : null;
+    if (directLead) {
+      if (!newFactsIn({ headline, why, evidence }, directLead, place)) {
+        /* The same story with no new fact is a resurfacing, whether the lead
+         * was killed as a duplicate or is still open. Stamp the existing row
+         * and file nothing; this is what keeps a duplicate kill dead. */
+        await sql`
+            update leads
+            set resurfaced_count = resurfaced_count + 1,
+                last_resurfaced_at = now(),
+                last_resurfaced_scan_run_id = ${runId}
+            where id = ${directLead.id} and newsroom_id = ${newsroomId}
+          `;
+        if (directLead.status === "killed") resurfacedKilled += 1;
+        else resurfacedOpen += 1;
+        firstDiscardedHeadline ??= headline;
+        continue;
+      }
+      /* The story developed. Keep a recoverable row, held and linked to the
+       * lead it develops, instead of putting the same story back in Open. */
+      possibleDuplicateOf = directLead.id;
+      initialStatus = "held";
+      dupKind = directLead.status === "killed" ? "developing" : "possible";
+      filedCategory = directLead.status === "killed" ? "developing" : "possible";
+    }
+
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
       matchedHeadline = matched.headline;
@@ -430,10 +501,10 @@ export async function fileScanLeads(
             where id = ${matchId} and newsroom_id = ${newsroomId}
           `;
         if (killedWithNewFacts) {
-          developingFiled += 1;
           possibleDuplicateOf = matchId;
           initialStatus = "held";
           dupKind = "developing";
+          filedCategory = "developing";
         } else {
           if (matched.status === "killed") resurfacedKilled += 1;
           else resurfacedOpen += 1;
@@ -518,9 +589,9 @@ export async function fileScanLeads(
           continue;
         } else {
           possibleDuplicateOf = matchId;
-          if (matched.status === "killed") initialStatus = "held";
+          if (matched.status === "killed" || verdict?.same) initialStatus = "held";
           dupKind = "possible";
-          possibleMatched += 1;
+          filedCategory = "possible";
         }
       }
     }
@@ -545,8 +616,21 @@ export async function fileScanLeads(
     const leadAnswer = decision?.lead ?? null;
     const leadVerdict = leadAnswer && leadAnswer.headline === matchedHeadline ? leadAnswer.verdict : null;
     const printedVerdict = decision?.printed?.verdict ?? null;
-    const aiModel = decision ? (dupCheck?.model ?? null) : null;
-    const aiCheckedAt = decision ? new Date().toISOString() : null;
+    const directLeadAnswer = directLead && sameStory?.kind === "lead" ? sameStory : null;
+    const directPrintedAnswer =
+      printedVerdict == null && sameStory?.kind === "printed" ? sameStory : null;
+
+    /* A printed match is a hold, never an Open-list duplicate. This applies to
+     * the old pair check's yes and to the direct finder when the old check did
+     * not answer. The old no still wins: it is an existing verdict, not a gap
+     * for the new call to overwrite. */
+    if (printedVerdict?.same === true || directPrintedAnswer) {
+      initialStatus = "held";
+      filedCategory ??= "printed";
+    }
+
+    const aiModel = decision || directLeadAnswer || directPrintedAnswer ? (dupCheck?.model ?? null) : null;
+    const aiCheckedAt = decision || directLeadAnswer || directPrintedAnswer ? new Date().toISOString() : null;
 
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
@@ -565,18 +649,21 @@ export async function fileScanLeads(
           ${possibleDuplicateOf},
           ${lead.topicUnchosen === true},
           ${dupKind},
-          ${leadVerdict ? leadVerdict.same : null},
-          ${leadVerdict ? storableText(leadVerdict.why).slice(0, 400) || null : null},
-          ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : null},
-          ${printedVerdict ? printedVerdict.same : null},
-          ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : null},
-          ${decision?.printed?.slug ?? null},
+          ${leadVerdict ? leadVerdict.same : directLeadAnswer ? true : null},
+          ${leadVerdict ? storableText(leadVerdict.why).slice(0, 400) || null : directLeadAnswer ? storableText(directLeadAnswer.why).slice(0, 400) || null : null},
+          ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : directLeadAnswer ? storableText(directLead!.headline).slice(0, 180) || null : null},
+          ${printedVerdict ? printedVerdict.same : directPrintedAnswer ? true : null},
+          ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : directPrintedAnswer ? storableText(directPrintedAnswer.why).slice(0, 400) || null : null},
+          ${decision?.printed?.slug ?? directPrintedAnswer?.slug ?? null},
           ${aiModel ? storableText(aiModel).slice(0, 120) : null},
           ${aiCheckedAt}
         )
         returning id, status, headline
       `;
     leadsCreated += 1;
+    if (filedCategory === "possible") possibleMatched += 1;
+    else if (filedCategory === "developing") developingFiled += 1;
+    else if (filedCategory === "printed") dupCheckHeld += 1;
     const sourceId = readSources ? leadSourceId(candidateUrls, readSources) : null;
     if (sourceId != null) {
       await sql`update leads set source_id = ${sourceId} where id = ${inserted[0]!.id}`;
@@ -600,6 +687,7 @@ export async function fileScanLeads(
     existing.push(insertedRow);
     insertedThisRun.push(insertedRow);
     insertedEarlier?.push(insertedRow);
+    filedByCandidate.set(candidateIndex, insertedRow);
   }
 
   return {
@@ -610,6 +698,7 @@ export async function fileScanLeads(
     developingFiled,
     mergedSameScan,
     dupCheckCleared,
+    dupCheckHeld,
     firstDiscardedHeadline,
     standingPageDropped,
     noEventDropped,
@@ -632,6 +721,7 @@ export function emptyScanFilingCounts(): ScanFilingCounts {
     developingFiled: 0,
     mergedSameScan: 0,
     dupCheckCleared: 0,
+    dupCheckHeld: 0,
     firstDiscardedHeadline: undefined,
     standingPageDropped: 0,
     noEventDropped: 0,
@@ -654,6 +744,7 @@ export function addScanFilingCounts(a: ScanFilingCounts, b: ScanFilingCounts): S
     developingFiled: a.developingFiled + b.developingFiled,
     mergedSameScan: a.mergedSameScan + b.mergedSameScan,
     dupCheckCleared: a.dupCheckCleared + b.dupCheckCleared,
+    dupCheckHeld: a.dupCheckHeld + b.dupCheckHeld,
     firstDiscardedHeadline: a.firstDiscardedHeadline ?? b.firstDiscardedHeadline,
     standingPageDropped: a.standingPageDropped + b.standingPageDropped,
     noEventDropped: a.noEventDropped + b.noEventDropped,

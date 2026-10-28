@@ -33,7 +33,7 @@ import {
   leadOrigin,
 } from "@/components/desk-chrome-utils";
 import { useDeskMutation } from "@/components/desk-action";
-import { killPress, killUndoPress, restoreStatus, KillReasonChips, KILL_TOAST_MS, type KillUndoPress, type RestoreStatus } from "@/components/fast-kill";
+import { killPress, killUndoPress, restoreStatus, KILL_TOAST_MS, type KillUndoPress, type RestoreStatus } from "@/components/fast-kill";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
@@ -387,9 +387,7 @@ function DeskHome() {
           ? "Undone: the lead is back on the Queue."
           : input.status === "held"
             ? "The lead is on hold, off the Queue until you release it."
-            : input.headline?.trim()
-              ? `Killed ${input.headline.trim()}.`
-              : "The lead moved to Killed, and its row keeps an Undo.",
+            : "Lead killed.",
     /*
       L4 of the batch-6 pre-merge audit. The Kill sentence above names an Undo,
       and a killed row is exactly the one that may not be on screen to offer it
@@ -407,7 +405,6 @@ function DeskHome() {
               else await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
             },
           },
-    chips: (_result, input) => input.status === "killed" ? <KillReasonChips leadId={input.id} save={(request) => setStatus.mutate({ ...request.data, override: input.override, restore: input.restore, headline: input.headline })} /> : null,
     duration: (_result, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
     failedLead: "Could not change that lead. ",
   });

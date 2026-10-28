@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { fileScanLeads, type SqlTag } from "./lead-filing.ts";
-import { collectDupPairs, runDupCheck, type DupCheckChat, type DupCheckOutcome } from "./dup-check.ts";
+import { collectDupPairs, runDupCheck, runSameStoryCheck, type DupCheckChat, type DupCheckOutcome, type SameStoryAnswer } from "./dup-check.ts";
 import { printedDupChip } from "./desk-copy.ts";
 
 /*
@@ -280,6 +280,7 @@ describe("U28: the duplicate check settles the link the matcher only guessed at"
       assert.equal(result.possibleMatched, 1, "a yes leaves the word rule's link alone");
       assert.equal(result.dupCheckCleared, 0);
       const [filed] = (await filedRows(sql)).filter((r) => r.id !== seeded[0]!.id);
+      assert.equal(filed!.status, "held", "a same verdict is recoverable from Held, not back on Open");
       assert.equal(filed!.possible_duplicate_of, seeded[0]!.id);
       assert.equal(filed!.dup_ai_same, true);
       assert.equal(filed!.dup_ai_why, "same two executive sessions, same Sept. 22 and Sept. 29 dates");
@@ -554,3 +555,243 @@ it("duplicate checking and filing agree when stories belong to different section
     await db.close();
   }
 });
+
+
+describe("the direct same-story answer files by what the row would become", () => {
+  function sameStoryOutcome(entries: [number, SameStoryAnswer][], model = "deepseek-v4.1-flash:cloud"): DupCheckOutcome {
+    return {
+      decisions: new Map(),
+      model,
+      failure: null,
+      asked: entries.length,
+      skipped: 0,
+      sameStory: new Map(entries),
+    };
+  }
+
+  it("merges a reworded same-scan N pair into the row the earlier candidate filed", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const first = {
+        headline: "Boulder County union protests second straight year of layoffs as commissioners near 2027 budget",
+        why: "Union members protested outside the county building.",
+        topic: "news",
+        source_urls: ["https://example.com/union-protest"],
+      };
+      const second = {
+        headline: "County workers rally again over 2027 budget job cuts",
+        why: "Workers gathered to oppose the proposed cuts.",
+        topic: "news",
+        source_urls: ["https://example.org/county-rally"],
+      };
+      const result = await fileScanLeads(
+        sql,
+        { userId: "u" },
+        1,
+        910,
+        [first, second],
+        [],
+        PLACE,
+        sameStoryOutcome([[1, { kind: "new", candidate: 0, why: "same rally and budget fight" }]]),
+      );
+
+      assert.equal(result.leadsCreated, 1);
+      assert.equal(result.mergedSameScan, 1);
+      const rows = await sql<{ headline: string; source_urls: string }>`
+        select headline, source_urls from leads order by id
+      `;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.headline, first.headline);
+      assert.deepEqual(JSON.parse(rows[0]!.source_urls).sort(), [first.source_urls[0], second.source_urls[0]].sort());
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("stamps a reworded match to a KILLED lead and files nothing when there is no new fact", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const killed = {
+        headline: "Sheriff announces arrest of 39-year-old Longmont man on sexual exploitation charges",
+        why: "The sheriff announced the arrest.",
+        topic: "news",
+        source_urls: ["https://example.com/arrest"],
+      };
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${killed.headline}, ${killed.why}, ${killed.topic}, ${"killed"},
+                ${JSON.stringify(killed.source_urls)}, 6)
+        returning id
+      `;
+      const existing = [{ ...killed, id: seeded[0]!.id, status: "killed" }];
+      const candidate = {
+        headline: "Deputies take suspect into custody in child exploitation case",
+        why: "A suspect was taken into custody.",
+        topic: "news",
+        source_urls: ["https://example.org/custody"],
+      };
+      const result = await fileScanLeads(
+        sql,
+        { userId: "u" },
+        1,
+        911,
+        [candidate],
+        existing,
+        PLACE,
+        sameStoryOutcome([[0, { kind: "lead", leadId: seeded[0]!.id, why: "same arrest, reworded" }]]),
+      );
+
+      assert.equal(result.leadsCreated, 0, "no new fact means no second row");
+      assert.equal(result.resurfacedKilled, 1);
+      assert.equal(result.firstDiscardedHeadline, candidate.headline);
+      const rows = await filedRows(sql);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.resurfaced_count, 1);
+      assert.equal(rows[0]!.last_resurfaced_scan_run_id, 911);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("files a reworded KILLED match HELD and linked when it carries a new fact", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const killed = {
+        headline: "Sheriff announces arrest of 39-year-old Longmont man on sexual exploitation charges",
+        why: "The sheriff announced the arrest.",
+        topic: "news",
+        source_urls: ["https://example.com/arrest"],
+      };
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${killed.headline}, ${killed.why}, ${killed.topic}, ${"killed"},
+                ${JSON.stringify(killed.source_urls)}, 6)
+        returning id
+      `;
+      const existing = [{ ...killed, id: seeded[0]!.id, status: "killed" }];
+      const candidate = {
+        headline: "Deputies take suspect into custody in child exploitation case on Oct. 28",
+        why: "A suspect was taken into custody.",
+        topic: "news",
+        source_urls: ["https://example.org/custody"],
+      };
+      const result = await fileScanLeads(
+        sql,
+        { userId: "u" },
+        1,
+        912,
+        [candidate],
+        existing,
+        PLACE,
+        sameStoryOutcome([[0, { kind: "lead", leadId: seeded[0]!.id, why: "same case, new court date" }]]),
+      );
+
+      assert.equal(result.leadsCreated, 1);
+      assert.equal(result.developingFiled, 1);
+      const [filed] = (await filedRows(sql)).filter((row) => row.id !== seeded[0]!.id);
+      assert.equal(filed!.status, "held");
+      assert.equal(filed!.possible_duplicate_of, seeded[0]!.id);
+      assert.equal(filed!.dup_kind, "developing");
+      assert.equal(filed!.dup_ai_same, true);
+      assert.equal(filed!.dup_ai_why, "same case, new court date");
+      assert.equal(filed!.dup_ai_target, killed.headline);
+      assert.equal(filed!.dup_ai_model, "deepseek-v4.1-flash:cloud");
+      assert.ok(filed!.dup_ai_checked_at);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("files a printed P match HELD and records why and which story", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const candidate = {
+        headline: "HOPE for Longmont sets Nov. 14 fundraiser",
+        why: "The fundraiser is set for Nov. 14.",
+        topic: "news",
+        source_urls: ["https://example.com/hope"],
+      };
+      const result = await fileScanLeads(
+        sql,
+        { userId: "u" },
+        1,
+        913,
+        [candidate],
+        [],
+        PLACE,
+        sameStoryOutcome([[0, { kind: "printed", slug: "hope-fundraiser", why: "same fundraiser and date" }]]),
+      );
+
+      assert.equal(result.leadsCreated, 1);
+      assert.equal(result.dupCheckHeld, 1);
+      assert.equal(result.possibleMatched, 0);
+      const [filed] = await filedRows(sql);
+      assert.equal(filed!.status, "held");
+      assert.equal(filed!.possible_duplicate_of, null);
+      assert.equal(filed!.dup_ai_printed_same, true);
+      assert.equal(filed!.dup_ai_printed_why, "same fundraiser and date");
+      assert.equal(filed!.dup_ai_printed_slug, "hope-fundraiser");
+      assert.equal(filed!.dup_ai_model, "deepseek-v4.1-flash:cloud");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("a failed direct call leaves the same two reworded items filing as today", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const candidates = [
+        { headline: "Boulder County union protests layoffs", why: "Workers protested.", topic: "news", source_urls: ["https://example.com/a"] },
+        { headline: "County workers rally over budget cuts", why: "Workers rallied.", topic: "news", source_urls: ["https://example.com/b"] },
+      ];
+      const failed = await runSameStoryCheck({
+        candidates,
+        existing: [],
+        printed: [],
+        chat: async () => ({ ok: false, error: "timed out after 90000ms" }),
+      });
+      assert.equal(failed.sameStory?.size, 0);
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 914, candidates, [], PLACE, failed);
+      assert.equal(result.leadsCreated, 2, "without an answer the word rule files both exactly as before");
+      assert.equal(result.mergedSameScan, 0);
+      assert.equal(result.dupCheckHeld, 0);
+    } finally {
+      await db.close();
+    }
+  });
+  it("ignores an unknown model ref and files the candidate as it does today", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const candidate = {
+        headline: "Council approves the 2027 budget",
+        why: "The council voted on the budget.",
+        topic: "news",
+        source_urls: ["https://example.com/budget"],
+      };
+      const checked = await runSameStoryCheck({
+        candidates: [candidate],
+        existing: [],
+        printed: [],
+        chat: async () => ({
+          ok: true as const,
+          text: JSON.stringify([{ n: 1, same_as: "L999", why: "unknown desk lead" }]),
+        }),
+      });
+      assert.equal(checked.sameStory?.size, 0, "an unknown ref is not guessed into a match");
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 915, [candidate], [], PLACE, checked);
+      assert.equal(result.leadsCreated, 1);
+      assert.equal(result.dupCheckHeld, 0);
+      const [filed] = await filedRows(sql);
+      assert.equal(filed!.status, "new");
+      assert.equal(filed!.possible_duplicate_of, null);
+      assert.equal(filed!.dup_ai_same, null);
+    } finally {
+      await db.close();
+    }
+  });});

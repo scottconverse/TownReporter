@@ -126,6 +126,14 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
         codex: async () => {
           codexCalls += 1;
           /*
+            The scan's first model call returns the batch. The duplicate check's
+            same-story finder makes one additional call per batch; its empty
+            answer changes nothing about this NUL-persistence test.
+          */
+          if (codexCalls > 1) {
+            return { ok: true as const, text: "[]", provider: "codex" as const, model: "selected-terra" };
+          }
+          /*
             The fetched page is not the only place a NUL arrives from. A model
             writing prose can emit one too, and it lands in a different set of
             columns -- `leads.headline/why/topic/evidence` and
@@ -160,7 +168,7 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
     else process.env.ANTHROPIC_API_KEY = oldAnthropic;
   }
 
-  assert.equal(codexCalls, 1);
+  assert.equal(codexCalls, 2, "one scan call plus one same-story check");
   assert.equal(
     (await sql.query("select 1 from snapshots where source_id=$1", [source.id])).length,
     1,
