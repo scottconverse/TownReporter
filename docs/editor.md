@@ -144,7 +144,7 @@ Every “anyway” you press is saved in an audit record with your name. Pressin
 
 ### Messages and undo
 
-Every press ends with a short message. Successes stay about five seconds, failures twelve, and the Kill strip eight. The fast Kill strip sits at the bottom of the screen and leaves a 16 px gap on each side on a phone. Kill, Hold and Release messages carry **Undo**.
+Every press ends with a short message at the bottom left of the screen (top left on a phone). Successes stay about five seconds, failures twelve, and the Kill strip eight. On a phone the Kill strip leaves a 16 px gap on each side. Kill, Hold and Release messages carry **Undo**.
 
 ---
 
