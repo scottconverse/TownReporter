@@ -13,6 +13,7 @@ import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
+import { mergeRecentlyKilled, recentlyKilledForTab, useRecentlyKilledRows } from "@/components/recent-kill";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import {
@@ -201,6 +202,12 @@ function QueuePage() {
   */
   const killedFrom = useRef(new Map<number, RestoreStatus>());
   /*
+    The row message from the same press. Unlike `killedFrom`, this one is drawn:
+    it keeps the lead in its old place while the optimistic Open page has already
+    removed it, and it carries the way back. The timer is KILL_TOAST_MS.
+  */
+  const recentlyKilled = useRecentlyKilledRows<LeadRow>();
+  /*
     TIA-2: the same memory, for the same reason, on the OTHER press. A Hold has
     no `RestoreStatus` of its own worth remembering (a held lead is on hold and
     that IS the answer, so `heldFrom` holds only the ids this screen has held and
@@ -236,12 +243,12 @@ function QueuePage() {
     the U key sends cannot disagree about what a press is.
   */
   const lastPress = useRef<(LastPress & { bulk?: true }) | null>(null);
-  const killLead = (lead: { id: number; status: string }) => {
+  const killLead = (lead: LeadRow, index: number) => {
     const restore = restoreStatus(lead.status);
     killedFrom.current.set(lead.id, restore);
     lastKill.current = { id: lead.id, restore };
     lastPress.current = { kind: "kill", id: lead.id, restore };
-    return killPress(lead.id, restore);
+    return { ...killPress(lead.id, restore), recentRow: lead, recentIndex: index };
   };
   /*
     TIA-2: the Hold, as a press that carries where it goes back to -- the same
@@ -349,7 +356,10 @@ function QueuePage() {
         dismissDeskToast(restoringId);
       }
     },
-    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    optimistic: async (press: KillUndoPress) => {
+      recentlyKilled.clearKilled(press.id);
+      return undoOptimistic.optimistic(undoMove(press));
+    },
     rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…",
@@ -369,6 +379,7 @@ function QueuePage() {
     rows held silently"). The shared action family reports the refusal with the
     server's own reason, so a partial failure is at least said out loud.
   */
+  const statusOptimistic = leadStatusOptimistic(qc);
   const [releasedId, setReleasedId] = useState<number | null>(null);
   const setStatus = useDeskMutation({
     mutationFn: (input: {
@@ -378,6 +389,8 @@ function QueuePage() {
       killReasonUrl?: string;
       override?: string[];
       release?: boolean;
+      recentRow?: LeadRow;
+      recentIndex?: number;
       /*
         Carried by a kill press only, and never sent from here: it is the status
         the kill's own Undo will restore (`killPress`), read by the `undo` copy
@@ -406,7 +419,16 @@ function QueuePage() {
       concurrent presses safe: the undo is per LEAD, not a snapshot of the whole
       cache, so one failure cannot put back eleven successes.
     */
-    ...leadStatusOptimistic(qc),
+    optimistic: async (input) => {
+      if (input.status === "killed" && input.recentRow) {
+        recentlyKilled.markKilled(input.recentRow, input.recentIndex ?? 0, input.restore ?? restoreStatus(input.recentRow.status));
+      }
+      return statusOptimistic.optimistic(input);
+    },
+    rollback: (context: unknown, input?: { id: number; status: "held" | "killed" | "new"; recentRow?: LeadRow }) => {
+      if (input?.status === "killed" && input.recentRow) recentlyKilled.clearKilled(input.id);
+      statusOptimistic.rollback(context, input);
+    },
     after: async (_result, input) => {
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (input.release) setReleasedId(input.id);
@@ -931,7 +953,11 @@ function QueuePage() {
     the other side of the wire, because a window cut before the filter pages the
     unfiltered list and shows the wrong leads.
   */
-  const shown = leads;
+  const recentForFilter =
+    filter === "open" || filter === "held"
+      ? recentlyKilledForTab(recentlyKilled.recent, filter)
+      : null;
+  const shown = recentForFilter ? mergeRecentlyKilled(leads, recentForFilter) : leads;
   /*
     THE TRIAGE KEYS (FB6, item 4; README "Interactions & behavior").
 
@@ -1008,8 +1034,13 @@ function QueuePage() {
         */
         // THT-8: X on a focused row Kill button kills that row (`rowId`), not the cursor row.
         {
-          const target = action.rowId == null ? lead : shown.find((l) => String(l.id) === action.rowId);
-          if (target) setStatus.mutate(killLead(target));
+          const targetIndex = action.rowId == null
+            ? movedIndex(cursor, 0, shown.length)
+            : shown.findIndex((l) => String(l.id) === action.rowId);
+          const target = targetIndex >= 0 ? shown[targetIndex] : undefined;
+          if (target && !recentlyKilled.recent.has(target.id)) {
+            setStatus.mutate(killLead(target, targetIndex));
+          }
         }
         break;
       case "undo": {
@@ -1212,7 +1243,8 @@ function QueuePage() {
     reported in one sentence under one id.
   */
   type BulkPress = { ids: number[]; status: "held" | "killed"; killReason?: string;
-    overrideById?: Record<number, string[]>; completedIds?: number[]; previousFailures?: string[]; restores?: Record<number, RestoreStatus> };
+    overrideById?: Record<number, string[]>; completedIds?: number[]; previousFailures?: string[]; restores?: Record<number, RestoreStatus>;
+    recentRows?: Record<number, LeadRow>; recentIndexes?: Record<number, number> };
   const [bulkWarnings, setBulkWarnings] = useState<{ warnings: BulkDeskWarning[]; press: BulkPress } | null>(null);
   const bulkStatus = useMutation({
     mutationFn: async (input: BulkPress) => {
@@ -1226,7 +1258,7 @@ function QueuePage() {
         const sendAll = (ids: readonly number[], overrideById: Record<number, string[]>) =>
           Promise.allSettled(
             ids.map((id) =>
-              setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: overrideById[id], restore: input.restores?.[id] }),
+              setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: overrideById[id], restore: input.restores?.[id], recentRow: input.recentRows?.[id], recentIndex: input.recentIndexes?.[id] }),
             ),
           );
         // D2-a: a Kill answers its written-draft warnings inside this press, so no lead is left waiting on one.
@@ -1337,6 +1369,8 @@ function QueuePage() {
     const ids = selectedLeads.map((lead) => lead.id);
     if (ids.length === 0) return;
     const restores = Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)]));
+    const recentRows = Object.fromEntries(selectedLeads.map(l => [l.id, l]));
+    const recentIndexes = Object.fromEntries(selectedLeads.map(l => [l.id, shown.findIndex((row) => row.id === l.id)]));
     if (status === "killed") {
       /*
         THU-4: the same Undo toast the row Kill shows, at the press and not
@@ -1357,7 +1391,7 @@ function QueuePage() {
       });
     }
     bulkStatus.mutate({
-      ids, status, restores,
+      ids, status, restores, recentRows, recentIndexes,
       ...(status === "killed" && reason !== undefined && reason.trim() ? { killReason: reason.trim() } : {}),
     });
   };
@@ -2078,7 +2112,10 @@ function QueuePage() {
                     "Kill with a reason" above stays for the editor who wants to
                     write the sentence before killing.
                   */
-                  onKillNow={() => setStatus.mutate(killLead(l))}
+                  onKillNow={() => setStatus.mutate(killLead(l, index))}
+                  killedRecently={recentlyKilled.recent.has(l.id)}
+                  undoKillPending={undoKill.isPending && undoKill.variables?.id === l.id}
+                  onUndoKill={() => void undoKill.mutate(killUndoPress(l.id, recentlyKilled.recent.get(l.id)?.restore))}
                   /*
                     Only THIS row's kill is pending. A hold on the same lead (or a
                     kill on another) must not put "Killing…" on this button.

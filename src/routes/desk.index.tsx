@@ -35,9 +35,11 @@ import {
 import { useDeskMutation } from "@/components/desk-action";
 import { killPress, killUndoPress, restoreStatus, KILL_TOAST_MS, type KillUndoPress, type RestoreStatus } from "@/components/fast-kill";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
+import { mergeRecentlyKilled, recentlyKilledForTab, useRecentlyKilledRows } from "@/components/recent-kill";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
-import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
+import { KilledRowNotice, LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
+import type { LeadRow } from "@/lib/news/types";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus, setLeadStatus, restoreKilledLead } from "@/lib/news/desk";
@@ -354,17 +356,28 @@ function DeskHome() {
     (`{ok:false}`) is reported rather than passing as a success.
   */
   /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
+  const recentlyKilled = useRecentlyKilledRows<LeadRow>();
   const undoOptimistic = leadStatusOptimistic(qc);
   const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
     mutationFn: (input: KillUndoPress) => restoreKilledLead({ data: input }),
-    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    optimistic: async (press: KillUndoPress) => {
+      recentlyKilled.clearKilled(press.id);
+      return undoOptimistic.optimistic(undoMove(press));
+    },
     rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…", done: () => "Undone: the lead is back on the Queue.",
   });
+  const statusOptimistic = leadStatusOptimistic(qc);
+  const fastKillLead = (lead: LeadRow, index: number) => ({
+    ...killPress(lead.id, restoreStatus(lead.status)),
+    recentRow: lead,
+    recentIndex: index,
+    headline: lead.headline,
+  });
   const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string; headline?: string }) =>
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string; headline?: string; recentRow?: LeadRow; recentIndex?: number }) =>
       setLeadStatus({ data: { id: input.id, status: input.status, override: input.override, killReason: input.killReason, killReasonUrl: input.killReasonUrl } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
@@ -372,7 +385,20 @@ function DeskHome() {
       the way back is the lead's own previous status rather than a snapshot of
       the whole cache.
     */
-    ...leadStatusOptimistic(qc),
+    optimistic: async (input) => {
+      if (input.status === "killed" && input.recentRow) {
+        recentlyKilled.markKilled(
+          input.recentRow,
+          input.recentIndex ?? 0,
+          input.restore ?? restoreStatus(input.recentRow.status),
+        );
+      }
+      return statusOptimistic.optimistic(input);
+    },
+    rollback: (context: unknown, input?: { id: number; status: "held" | "killed" | "new"; recentRow?: LeadRow }) => {
+      if (input?.status === "killed" && input.recentRow) recentlyKilled.clearKilled(input.id);
+      statusOptimistic.rollback(context, input);
+    },
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
@@ -675,8 +701,13 @@ function DeskHome() {
 
   const src = sources.data ?? [];
   const allLeads = leads.data ?? [];
-  const queue = openLeads(allLeads).sort(
-    (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+  const openRecent = recentlyKilledForTab(recentlyKilled.recent, "open");
+  const heldRecent = recentlyKilledForTab(recentlyKilled.recent, "held");
+  const queue = mergeRecentlyKilled(
+    openLeads(allLeads).sort(
+      (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+    ),
+    openRecent,
   );
   const publishedCount = allLeads.filter((l) => l.status === "published").length;
   const accepted = src.filter((s) => s.status === "accepted");
@@ -1043,7 +1074,7 @@ function DeskHome() {
     and the held one from `workingLeads` (held is still ON the desk, which is
     what gives the second segment any rows at all).
   */
-  const heldQueue = workingLeads(allLeads).filter((l) => l.status === "held");
+  const heldQueue = mergeRecentlyKilled(workingLeads(allLeads).filter((l) => l.status === "held"), heldRecent);
   const newLeads = (leadSeg === "held" ? heldQueue : queue).slice(0, 8);
 
   const [cursor, setCursor] = useState(0);
@@ -1080,10 +1111,17 @@ function DeskHome() {
         // H is the row's Hold press, including its explicit warning retry.
         if (lead) setStatus.mutate({ id: lead.id, status: "held" });
         break;
-      case "kill":
+      case "kill": {
         // X is the row's fast Kill, with Undo and optional reason chips.
-        if (lead) setStatus.mutate({ ...killPress(lead.id, restoreStatus(lead.status)), headline: lead.headline });
+        const targetIndex = action.rowId == null
+          ? movedIndex(cursor, 0, newLeads.length)
+          : newLeads.findIndex((l) => String(l.id) === action.rowId);
+        const target = targetIndex >= 0 ? newLeads[targetIndex] : undefined;
+        if (target && !recentlyKilled.recent.has(target.id)) {
+          setStatus.mutate(fastKillLead(target, targetIndex));
+        }
         break;
+      }
       case "undo":
         if (lead) setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
         break;
@@ -2130,6 +2168,9 @@ function DeskHome() {
                         "Starting…" on all eight the moment any one was pressed.
                       */
                       const startingThis = startDraft.isPending && startDraft.variables === l.id;
+                      const rowUndoPending =
+                        undoKill.isPending && undoKill.variables?.id === l.id;
+                      const killedRecently = recentlyKilled.recent.has(l.id);
                       const undoingThis =
                         setStatus.isPending &&
                         setStatus.variables?.id === l.id &&
@@ -2145,10 +2186,17 @@ function DeskHome() {
                       */
                         <div
                           className={
-                            "today-lead" + (index === cursor ? " sel" : "") + (done ? " acted" : "")
+                            "today-lead" + (index === cursor ? " sel" : "") + (done ? " acted" : "") + (killedRecently ? " recent-kill-row" : "")
                           }
                           key={l.id}
                         >
+                          {killedRecently ? (
+                            <KilledRowNotice
+                              headline={l.headline}
+                              pending={rowUndoPending}
+                              onUndo={() => void undoKill.mutate(killUndoPress(l.id, recentlyKilled.recent.get(l.id)?.restore))}
+                            />
+                          ) : null}
                           <Score v={l.newsworthiness ?? 0} />
                           <div className="today-lead-main">
                             {/*
@@ -2238,7 +2286,7 @@ function DeskHome() {
                                   */
                                   <InkButton
                                     tone="quiet-danger"
-                                    onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
+                                    onClick={() => setStatus.mutate(fastKillLead(l, index))}
                                   >
                                     Kill <kbd>X</kbd>
                                   </InkButton>
@@ -2275,7 +2323,7 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
+                                  onClick={() => setStatus.mutate(fastKillLead(l, index))}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>
