@@ -204,9 +204,9 @@ describe("THU-4: the bulk Kill's Undo waits for the batch and puts back every le
  * one-lead words".
  */
 describe("the bulk Kill confirm (TMA-2)", () => {
-  it("asks first for ONE lead too", () => {
-    assert.equal(bulkKillNeedsConfirm(1), true);
-    assert.equal(bulkKillNeedsConfirm(3), true);
+  it("kills at once with no Why? question, one lead or many (G27-KILL-3)", () => {
+    assert.equal(bulkKillNeedsConfirm(1), false);
+    assert.equal(bulkKillNeedsConfirm(3), false);
   });
   it("asks nothing when no lead is ticked", () => {
     assert.equal(bulkKillNeedsConfirm(0), false);

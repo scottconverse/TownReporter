@@ -8548,6 +8548,19 @@
 */
 
 /*
+   G27-KILL-2 (Oct 28 2026): at 600px and under, sonner's own CSS gives the
+   stack `left: 16px; right: 16px; width: 100%`. The width wins, so the stack is
+   the full viewport wide but starts 16px in: at 390px the Undo button and the
+   close box sat past the right edge. `width: auto` lets left/right decide, so
+   the card keeps a 16px gutter on both sides.
+*/
+@media (max-width: 600px) {
+  .desk-ltr .desk-toaster[data-sonner-toaster] {
+    width: auto;
+  }
+}
+
+/*
    Reduced motion: `.desk-ltr.astra *` (above) already sets `animation: none`
    and `transition: none` for everyone who asks for it, and sonner's visible
    state is carried by `[data-mounted=true] { opacity: 1 }` rather than by an

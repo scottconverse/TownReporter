@@ -214,12 +214,14 @@ export function bulkDeleteReasonLines(
 }
 
 /**
- * TMA-2: a bulk Kill asks for its one shared reason before it takes, for one
- * lead as well as for several. Only the bulk strip asks; the row's own Kill and
- * the K key stay instant, with their Undo toast.
+ * G27-KILL-3 (owner, Oct 27 2026: "remove the reason pop-up. Kill shows only a
+ * small Undo strip"): a bulk Kill no longer asks "Why?". It kills at once and
+ * shows the one Undo strip, like the row's own Kill and the K key. The AI finds
+ * duplicates itself, so no reason is needed. The confirm words stay below for
+ * the day the owner wants the question back.
  */
-export function bulkKillNeedsConfirm(count: number): boolean {
-  return count > 0;
+export function bulkKillNeedsConfirm(_count: number): boolean {
+  return false;
 }
 
 /** The words of that confirm, for one lead or for several (TMA-2). */
