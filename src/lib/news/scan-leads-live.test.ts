@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getSql, withTransaction } from "../db.ts";
 import type { DeskJob } from "./jobs.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+import { DUP_CHECK_SYSTEM, SAME_STORY_SYSTEM } from "./dup-check.ts";
 
 /*
   D162 (Scott, Oct 19 2026: "why don't you update the queue live while it's
@@ -87,6 +88,9 @@ async function seedManualScan(user: string, room: number) {
 
 function fakeModel(runId: number) {
   let calls = 0;
+  // The AI duplicate checks (same-story finder, pair check) are counted apart
+  // from the scan's reading batches and answer "no duplicates".
+  let dupCalls = 0;
   let leadsOnQueueWhenBatchTwoSent: number | null = null;
   return {
     get calls() {
@@ -95,7 +99,14 @@ function fakeModel(runId: number) {
     get leadsOnQueueWhenBatchTwoSent() {
       return leadsOnQueueWhenBatchTwoSent;
     },
-    grokChat: async () => {
+    get dupCalls() {
+      return dupCalls;
+    },
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM) {
+        dupCalls += 1;
+        return { ok: true as const, text: "[]" };
+      }
       calls += 1;
       if (calls === 2) {
         const sql = await getSql();
@@ -127,6 +138,7 @@ it("a manual scan's first batch of leads is on the Queue before the second batch
   });
   const sql = await getSql();
   assert.equal(model.calls, 2, "the fixture must make exactly two model batches");
+  assert.ok(model.dupCalls > 0, "the AI duplicate check reads the new leads before they are filed");
   assert.equal(model.leadsOnQueueWhenBatchTwoSent, 2, "batch one's two leads are filed before batch two is read");
   const filed = await sql<{ headline: string }>`select headline from leads where scan_run_id = ${runId} order by id`;
   assert.deepEqual(
@@ -155,6 +167,7 @@ it("a scheduled scan still files nothing before its one commit", async () => {
   });
   const sql = await getSql();
   assert.equal(model.calls, 2, "the fixture must make exactly two model batches");
+  assert.ok(model.dupCalls > 0, "the AI duplicate check reads the new leads before the commit");
   assert.equal(model.leadsOnQueueWhenBatchTwoSent, 0, "the scheduled lane files nothing early");
   const filed = await sql<{ n: number }>`select count(*)::int as n from leads where scan_run_id = ${runId}`;
   assert.equal(filed[0]!.n, 3, "the one commit files all three stories");

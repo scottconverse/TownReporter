@@ -277,9 +277,12 @@ describe("newsletter mailbox poll (integration)", () => {
     let modelInput = "";
     try {
       const { performScanWork } = await import("./desk.ts");
+      const { DUP_CHECK_SYSTEM, SAME_STORY_SYSTEM } = await import("./dup-check.ts");
       await performScanWork(job as DeskJob, {
         ingestUrl: async () => { throw new Error("Fixture website unavailable"); },
-        grokChat: async (_system, input) => {
+        grokChat: async (system, input) => {
+          // The AI duplicate checks answer "no duplicates"; only the scan's reading call is recorded.
+          if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM) return { ok: true, text: "[]" };
           modelInput = input;
           return { ok: true, text: JSON.stringify({ leads: [{ headline: "Council funds the neighborhood garden",
             why: "Public funds support a neighborhood garden.", evidence: "The council approved $20,000 on Tuesday.",
