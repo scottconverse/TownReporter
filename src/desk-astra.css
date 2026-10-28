@@ -4846,21 +4846,19 @@
   The stack is `bottom-left` and fixed (`DESK_TOASTER_OFFSET`), lifted 96px off
   the floor to clear the workbench's publish bar -- but on the Queue there is no
   publish bar, so the lift put the card straight over the last rows of the list.
-  A kill's toast is the one that is READ and ANSWERED rather than merely seen
-  (the reason chips, and an Undo that has to be pressed within its 15s), so a
-  toast over the rows it is about is a toast covering the editor's next press.
+  The kill strip is now one readable line with Undo and close, so the reserve
+  only has to clear that strip rather than the old multi-line chip card.
 
-  The reserve is the lift plus the tallest a chip card gets, so the toast stands
-  over empty paper instead of over a row. It is padding on the LIST, not a change
-  to the stack: nothing moves on screen except the foot of the page, and the
-  toast that was over row 20 now sits under it.
+  It is padding on the LIST, not a change to the stack: nothing moves on screen
+  except the foot of the page, and the strip sits under the last row instead of
+  over it.
 
   `queue-toast-room` is a class on the queue's OWN list (desk.queue.tsx) rather
   than `roomy` alone, because the draft-batch results list shares `roomy` and has
   no kill toast to make room for.
 */
 .desk-ltr.astra .lead-list.roomy.queue-toast-room {
-  padding-bottom: calc(300px * var(--ts));
+  padding-bottom: calc(180px * var(--ts));
 }
 /* The Held badge rides inside an ink-filled tab when Held is active, so it
    only keeps its own weight -- the segment's color already carries the fill. */
@@ -8317,7 +8315,11 @@
   pointer-events: none;
 }
 
-/* The card. Sonner positions and animates the <li>; everything visible is here. */
+/*
+   The card. Sonner positions and animates the <li>; everything visible is here.
+   `DeskToaster` sets `expand`, so hover cannot re-layout the stack or move the
+   close button out from under the pointer.
+*/
 .desk-ltr .desk-toaster [data-sonner-toast] {
   display: flex;
   flex-wrap: wrap;
@@ -8511,6 +8513,9 @@
   line-height: 1;
   cursor: pointer;
   transform: none;
+  /* Sonner's close control fades its background; it must never animate a
+     transform while the editor is aiming at it. */
+  transition: background-color 0.1s ease, border-color 0.1s ease;
 }
 .desk-ltr .desk-toaster [data-close-button]:hover {
   background: rgba(17, 17, 17, 0.08);

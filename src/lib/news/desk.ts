@@ -254,7 +254,9 @@ import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { addScanFilingCounts, emptyScanFilingCounts, fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
   collectDupPairs,
+  combineDupCheckOutcomes,
   runDupCheck,
+  runSameStoryCheck,
   DUP_CHECK_TIMEOUT_MS,
   type DupCheckOutcome,
   type DupCheckPrinted,
@@ -2816,12 +2818,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     /*
     U28 (2026-09-30): the owner's "double check. worth it."
 
-    For the pairs the word rules can only rate BORDERLINE -- the matcher's
-    "possible" tier, and a "Looks already printed" chip candidate -- the desk
-    asks its own model one short question, batched: are these the same news
-    story? See ./dup-check.ts for what that decides (a chip, and only a chip)
-    and what it deliberately does not. D162: a manual scan asks it once per
-    batch it files; a scheduled scan still asks once, before its one commit.
+    The desk asks two bounded questions per batch. The pair check reads the
+    pairs the word rules can only rate BORDERLINE -- the matcher's "possible"
+    tier and a "Looks already printed" chip candidate. The same-story finder
+    reads every new item against the recent desk and paper, so a reworded pair
+    the word rule misses still reaches the model. D162: a manual scan asks once
+    per batch it files; a scheduled scan asks once, before its one commit.
 
     The duplicate check uses the scan's current pinned provider, reasoning
     effort and local model snapshot. A separate lead-scoring assignment cannot
@@ -2849,7 +2851,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           printed,
           place: scanPlace,
         });
-        if (collected.pairs.length > 0) {
+        if (candidates.length > 0) {
           /*
             `scheduledCommit` is this function's own test for "am I the scheduled
             lane" (it is what the commit below branches on), and the scheduled
@@ -2859,17 +2861,28 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             re-resolution.
           */
           const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
-          outcome = await runDupCheck({
-            pairs: collected.pairs,
-            skipped: collected.skipped,
-            chat: scanDuplicateChat({
-              modelChoice: job.model_choice,
-              reasoningEffort: effortFromJob(job),
-              newsroomId: job.newsroom_id,
-              localModel: scanLocalModel,
-              timeoutMs: dupTimeoutMs,
-            }, runChat),
-          });
+          const chat = scanDuplicateChat({
+            modelChoice: job.model_choice,
+            reasoningEffort: effortFromJob(job),
+            newsroomId: job.newsroom_id,
+            localModel: scanLocalModel,
+            timeoutMs: dupTimeoutMs,
+          }, runChat);
+          /*
+            Two independent questions, one batch: the old pair check still only
+            reads the pairs the word rule flagged, while the same-story finder
+            reads every new item against the recent desk and paper. They share a
+            provider binding and timeout, and a failure in either leaves the
+            other's answer intact.
+          */
+          const pairCheck: Promise<DupCheckOutcome | null> = collected.pairs.length > 0
+            ? runDupCheck({ pairs: collected.pairs, skipped: collected.skipped, chat })
+            : Promise.resolve(null);
+          const [pairOutcome, sameStoryOutcome] = await Promise.all([
+            pairCheck,
+            runSameStoryCheck({ candidates, existing, printed, chat }),
+          ]);
+          outcome = combineDupCheckOutcomes(pairOutcome, sameStoryOutcome);
         }
       } catch (error) {
         if (error instanceof JobCancelledError) throw error;
@@ -3287,6 +3300,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      dupCheckHeld,
       filedHeadlines,
       standingPageDropped,
       noEventDropped,
@@ -3384,7 +3398,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       // Unit AK item 2: a developing finding is filed too, but it is not a
       // brand-new story for the desk -- it is an old one that came back -- so
       // it is named by its own bit rather than counted as "filed as new".
-      filedNew: leadsCreated - possibleMatched - developingFiled,
+      filedNew: leadsCreated - possibleMatched - developingFiled - dupCheckHeld,
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,

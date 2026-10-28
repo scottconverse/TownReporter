@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   collectDupPairs,
+  collectSameStoryPromptData,
   dupCheckPromptUser,
   leadPairKey,
   parseDupCheckReply,
+  parseSameStoryReply,
   printedPairKey,
   runDupCheck,
+  runSameStoryCheck,
   DUP_CHECK_MAX_PAIRS,
   type DupCheckChat,
   type DupCheckOutcome,
@@ -473,5 +476,125 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
     assert.deepEqual(JSON.parse(prompt), [
       { id: 1, a: { headline: "A", why: "a-why" }, b: { headline: "B", why: "b-why" } },
     ]);
+  });
+});
+
+
+describe("the direct same-story finder", () => {
+  const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+  const existing = [
+    { id: 41, status: "new", headline: "Newest desk lead", source_urls: [], created_at: recent, why: "Newest why." },
+    { id: 42, status: "killed", headline: "Killed desk lead", source_urls: [], created_at: recent, why: "Killed why." },
+    { id: 43, status: "held", headline: "Held desk lead", source_urls: [], created_at: recent, why: "Held why." },
+    { id: 44, status: "drafted", headline: "Drafted desk lead", source_urls: [], created_at: recent, why: "Drafted why." },
+    { id: 45, status: "published", headline: "Published is not a desk lead", source_urls: [], created_at: recent, why: "Not offered." },
+    { id: 46, status: "new", headline: "Too old to offer", source_urls: [], created_at: old, why: "Old why." },
+  ];
+  const printed = [
+    { slug: "newest-printed", headline: "Newest printed", dek: "Newest dek.", topic: "news", published_at: recent },
+    { slug: "second-printed", headline: "Second printed", dek: "Second dek.", topic: "news", published_at: recent },
+    { slug: "too-old-printed", headline: "Old printed", dek: "Old dek.", topic: "news", published_at: old },
+  ];
+  const candidates = [
+    { headline: "First new item", why: "First why.", topic: "news", source_urls: [] },
+    { headline: "Second new item", why: "Second why.", topic: "news", source_urls: [] },
+  ];
+
+  it("offers the batch, matchable recent leads and printed stories with stable short refs", () => {
+    const data = collectSameStoryPromptData({
+      candidates,
+      existing,
+      printed,
+      maxLeads: 4,
+      maxPrinted: 2,
+    });
+    assert.deepEqual(data.items.map((item) => [item.n, item.headline]), [
+      [1, "First new item"],
+      [2, "Second new item"],
+    ]);
+    assert.deepEqual(data.leads.map((lead) => lead.ref).sort(), ["L41", "L42", "L43", "L44"]);
+    assert.ok(!data.leads.some((lead) => lead.id === 45), "published rows are not desk leads");
+    assert.ok(!data.leads.some((lead) => lead.id === 46), "the prompt looks back only 30 days");
+    assert.ok(data.leads.length <= 4, "the cap bounds the prompt");
+    assert.deepEqual(data.printed.map((story) => story.ref), ["P1", "P2"]);
+    assert.ok(!data.printed.some((story) => story.slug === "too-old-printed"));
+  });
+
+  it("takes the newest leads and printed stories before the cap", () => {
+    const minute = 60 * 1000;
+    const rows = [
+      { id: 101, status: "new", headline: "Oldest lead", source_urls: [], created_at: new Date(Date.now() - 3 * minute).toISOString() },
+      { id: 102, status: "new", headline: "Newest lead", source_urls: [], created_at: new Date(Date.now() - minute).toISOString() },
+      { id: 103, status: "new", headline: "Middle lead", source_urls: [], created_at: new Date(Date.now() - 2 * minute).toISOString() },
+    ];
+    const stories = [
+      { slug: "oldest-print", headline: "Oldest printed", dek: "Old.", published_at: new Date(Date.now() - 3 * minute).toISOString() },
+      { slug: "newest-print", headline: "Newest printed", dek: "New.", published_at: new Date(Date.now() - minute).toISOString() },
+      { slug: "middle-print", headline: "Middle printed", dek: "Middle.", published_at: new Date(Date.now() - 2 * minute).toISOString() },
+    ];
+    const data = collectSameStoryPromptData({
+      candidates: [candidates[0]!],
+      existing: rows,
+      printed: stories,
+      maxLeads: 2,
+      maxPrinted: 2,
+    });
+    assert.deepEqual(data.leads.map((lead) => lead.id), [102, 103]);
+    assert.deepEqual(data.printed.map((story) => story.slug), ["newest-print", "middle-print"]);
+  });
+  it("accepts only refs that were sent, and only an EARLIER N ref", () => {
+    const data = collectSameStoryPromptData({
+      candidates,
+      existing: [existing[1]!],
+      printed: [printed[0]!],
+    });
+    const parsed = parseSameStoryReply(JSON.stringify([
+      { n: 1, same_as: "L42", why: "same arrest" },
+      { n: 2, same_as: "N1", why: "same fundraiser" },
+    ]), data);
+    assert.deepEqual(parsed.get(0), { kind: "lead", leadId: 42, why: "same arrest" });
+    assert.deepEqual(parsed.get(1), { kind: "new", candidate: 0, why: "same fundraiser" });
+
+    const invalid = parseSameStoryReply(JSON.stringify([
+      { n: 1, same_as: "N1", why: "itself" },
+      { n: 2, same_as: "N3", why: "later item" },
+      { n: 1, same_as: "L999", why: "unknown lead" },
+      { n: 2, same_as: "P99", why: "unknown printed" },
+      { n: 1, same_as: { ref: "L42" }, why: "unreadable ref" },
+    ]), data);
+    assert.equal(invalid.size, 0, "an unknown, later or malformed ref is never guessed");
+  });
+
+  it("makes one call, records the model, and never throws when the model fails", async () => {
+    let calls = 0;
+    const failed = await runSameStoryCheck({
+      candidates,
+      existing,
+      printed,
+      chat: async () => {
+        calls += 1;
+        return { ok: false, error: "timed out after 90000ms" };
+      },
+    });
+    assert.equal(calls, 1, "one same-story call per batch");
+    assert.equal(failed.sameStory?.size, 0);
+    assert.match(String(failed.failure), /timed out/);
+
+    const answered = await runSameStoryCheck({
+      candidates,
+      existing,
+      printed,
+      chat: async (_system, user) => {
+        const data = JSON.parse(user) as { items: { n: number }[] };
+        return {
+          ok: true as const,
+          text: JSON.stringify(data.items.map((item) => ({ n: item.n, same_as: null, why: "different story" }))),
+          model: "deepseek-v4.1-flash:cloud",
+        };
+      },
+    });
+    assert.equal(answered.model, "deepseek-v4.1-flash:cloud");
+    assert.equal(answered.sameStory?.size, 0, "null is a valid answer, not an entry to apply");
   });
 });

@@ -44,6 +44,10 @@
  *  - `closeButton`. Every toast can be dismissed. The alternative is a failure
  *    carrying the real reason disappearing on a timer while it is being read,
  *    which is the same silence in a different shape.
+ *  - `expand`. Sonner's collapsed stack expands when the pointer enters and
+ *    re-spaces every card, which moved the close box while an editor was aiming
+ *    at it. Keeping the stack expanded all the time gives every card stable
+ *    geometry, so hover changes no transform and no target moves.
  *  - `aria-live` is sonner's own container region, and is why `announceToDesk`
  *    does not also write `#desk-announcer` while this host is mounted.
  */
@@ -95,6 +99,7 @@ export function DeskToaster() {
         mobileOffset={DESK_TOASTER_MOBILE_OFFSET}
         gap={10}
         visibleToasts={3}
+        expand
         duration={DESK_TOAST_OK_MS}
         closeButton
         containerAriaLabel="Desk messages"

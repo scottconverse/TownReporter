@@ -55,6 +55,7 @@ import { nearDuplicate } from "./desk-copy.ts";
 import {
   findMatchingLead,
   matchStrength,
+  MATCHABLE_STATUSES,
   type MatchCandidateLead,
   type NewsroomPlace,
 } from "./lead-match.ts";
@@ -138,6 +139,13 @@ export type DupCheckOutcome = {
   asked: number;
   /** Pairs the word rule flagged that the cap left out -- they keep the rule. */
   skipped: number;
+  /**
+   * The separate same-story finder's answers, keyed by the scan candidate's
+   * 0-based index. Optional so every caller and outcome written before this
+   * check existed remains valid. Absent and empty both mean no AI answer was
+   * applied; neither is ever read as "not a duplicate".
+   */
+  sameStory?: ReadonlyMap<number, SameStoryAnswer>;
 };
 
 /**
@@ -151,6 +159,42 @@ export type DupCheckChat = (
   user: string,
   maxTokens: number,
 ) => Promise<{ ok: true; text: string; model?: string | null } | { ok: false; error: string }>;
+
+/** How far back the same-story finder offers desk leads and printed stories. */
+export const SAME_STORY_LOOKBACK_DAYS = 30;
+/** A bounded prompt on a busy desk; the newest rows win. */
+export const SAME_STORY_MAX_LEADS = 300;
+export const SAME_STORY_MAX_PRINTED = 150;
+
+/**
+ * One valid answer from the same-story finder. `kind` is the parsed form of
+ * the model's short ref, so filing never has to re-parse or guess at a ref.
+ */
+export type SameStoryAnswer =
+  | { kind: "lead"; leadId: number; why: string }
+  | { kind: "printed"; slug: string; why: string }
+  | { kind: "new"; candidate: number; why: string };
+
+/** A batch candidate as the same-story finder shows it to the model. */
+export type SameStoryItem = { n: number; headline: string; why: string };
+export type SameStoryLeadRef = {
+  ref: string;
+  id: number;
+  headline: string;
+  why: string;
+};
+export type SameStoryPrintedRef = {
+  ref: string;
+  n: number;
+  slug: string;
+  headline: string;
+  dek: string;
+};
+export type SameStoryPromptData = {
+  items: SameStoryItem[];
+  leads: SameStoryLeadRef[];
+  printed: SameStoryPrintedRef[];
+};
 
 /** A published story, as `nearDuplicate` reads it plus the dek the model is
  * shown. The dek is the published side's `why`: a headline alone does not say
@@ -206,11 +250,9 @@ export type DupCheckCandidate = {
  * that is counted in `skipped` and keeps the word rule.
  *
  * Deliberately NOT included: a candidate against another candidate filed by
- * the SAME scan run. `fileScanLeads` merges same-run pairs by
- * `sameStoryForMerge` before matching, and that decision happens inside the
- * commit -- after this runs, on a row that does not exist yet. Those pairs
- * keep today's rule, which is the honest thing to do with a pair this step
- * cannot see.
+ * the SAME scan run. The separate `runSameStoryCheck` below asks the model
+ * directly about those pairs; this collector remains only the word-rule
+ * borderline set.
  */
 export function collectDupPairs(input: {
   candidates: readonly DupCheckCandidate[];
@@ -284,6 +326,197 @@ export function collectDupPairs(input: {
   });
 
   return { pairs, skipped };
+}
+
+/** Is a timestamp absent or no older than `days`? The SQL callers already put
+ * the main bound on the query; this keeps the same-story prompt bounded too. */
+function withinLookback(value: string | null | undefined, days: number): boolean {
+  if (!value) return true;
+  const time = Date.parse(value);
+  return !Number.isFinite(time) || time >= Date.now() - days * 24 * 60 * 60 * 1000;
+}
+
+function newestFirst<T>(rows: readonly T[], date: (row: T) => string | null | undefined): T[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(date(a) ?? "");
+    const tb = Date.parse(date(b) ?? "");
+    return (Number.isFinite(tb) ? tb : -Infinity) - (Number.isFinite(ta) ? ta : -Infinity);
+  });
+}
+
+/**
+ * Build the bounded prompt data for the desk's direct same-story question.
+ * Candidate positions are 1-based in the prompt (`n`) because the model is
+ * asked to echo a short human-readable number; the answer parser converts them
+ * back to the 0-based candidate indexes the filing loop already uses.
+ */
+export function collectSameStoryPromptData(input: {
+  candidates: readonly DupCheckCandidate[];
+  existing: readonly MatchCandidateLead[];
+  printed: readonly DupCheckPrinted[];
+  maxLeads?: number;
+  maxPrinted?: number;
+}): SameStoryPromptData {
+  const items = input.candidates.flatMap((candidate, index) => {
+    const headline = String(candidate.headline ?? "").trim();
+    if (!headline) return [];
+    return [{
+      n: index + 1,
+      headline,
+      why: String(candidate.why ?? "").trim(),
+    }];
+  });
+  const leads = newestFirst(
+    input.existing
+      .filter((lead) => MATCHABLE_STATUSES.has(lead.status))
+      .filter((lead) => withinLookback(lead.created_at, SAME_STORY_LOOKBACK_DAYS)),
+    (lead) => lead.created_at,
+  ).slice(0, input.maxLeads ?? SAME_STORY_MAX_LEADS).map((lead) => ({
+    ref: `L${lead.id}`,
+    id: lead.id,
+    headline: String(lead.headline ?? "").trim(),
+    why: String(lead.why ?? "").trim(),
+  })).filter((lead) => lead.headline.length > 0);
+  const printed = newestFirst(
+    input.printed
+      .filter((story) => withinLookback(story.published_at, SAME_STORY_LOOKBACK_DAYS)),
+    (story) => story.published_at,
+  ).slice(0, input.maxPrinted ?? SAME_STORY_MAX_PRINTED).map((story, index) => ({
+    ref: `P${index + 1}`,
+    n: index + 1,
+    slug: story.slug,
+    headline: String(story.headline ?? "").trim(),
+    dek: String(story.dek ?? "").trim(),
+  })).filter((story) => story.headline.length > 0);
+  return { items, leads, printed };
+}
+
+/** The same-story question, using the same bar as `DUP_CHECK_SYSTEM`. */
+export const SAME_STORY_SYSTEM = [
+  "You are the copy desk's same-story finder for a local news site.",
+  "For each new item, choose the single item it is the SAME news story as, if any.",
+  "Same story means a reader who had read one would learn nothing new from the other.",
+  "It is NOT enough that they share a topic, a place, a section, a meeting, a body or a month.",
+  "Use L<id> for a desk lead, P<n> for a printed story, or N<n> for an EARLIER new item in this batch (lower n only).",
+  "Choose at most one ref. If none is the same story, use null.",
+  "Answer once for every new item you were given, echoing its n.",
+  "For each answer write one short sentence naming the fact that decides it.",
+  'Reply with JSON only, and nothing outside it: [{"n": <item n>, "same_as": "L812" | "P4" | "N1" | null, "why": "<one short sentence>"}]',
+].join(" ");
+
+/** The user half: new items, desk leads and printed stories, one JSON list. */
+export function sameStoryPromptUser(data: SameStoryPromptData): string {
+  return JSON.stringify(data);
+}
+
+/**
+ * Read the same-story reply strictly. The item `n` must be one the desk sent;
+ * L and P refs must name an item that was sent; an N ref must be positive and
+ * strictly earlier than its item. Anything else is omitted, never guessed.
+ */
+export function parseSameStoryReply(
+  text: string,
+  data: SameStoryPromptData,
+): Map<number, SameStoryAnswer> {
+  const out = new Map<number, SameStoryAnswer>();
+  const entries = jsonArrayIn(text);
+  if (!entries) return out;
+  const itemPositions = new Map(data.items.map((item) => [item.n, item.n - 1]));
+  const leadRefs = new Map(data.leads.map((lead) => [lead.ref, lead]));
+  const printedRefs = new Map(data.printed.map((story) => [story.ref, story]));
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const rawN = row.n;
+    const n = typeof rawN === "number"
+      ? rawN
+      : typeof rawN === "string" && /^\d+$/.test(rawN.trim()) ? Number(rawN.trim()) : null;
+    if (n == null || !Number.isInteger(n)) continue;
+    const candidate = itemPositions.get(n);
+    if (candidate == null || out.has(candidate)) continue;
+    const ref = typeof row.same_as === "string" ? row.same_as.trim() : row.same_as;
+    if (ref == null) continue;
+    if (typeof ref !== "string") continue;
+    const why = readReason(row.why ?? row.reason ?? row.answer) || "same story";
+    const lead = leadRefs.get(ref);
+    if (lead) {
+      out.set(candidate, { kind: "lead", leadId: lead.id, why });
+      continue;
+    }
+    const printed = printedRefs.get(ref);
+    if (printed) {
+      out.set(candidate, { kind: "printed", slug: printed.slug, why });
+      continue;
+    }
+    const earlier = /^N(\d+)$/.exec(ref);
+    if (!earlier) continue;
+    const targetN = Number(earlier[1]);
+    if (!Number.isInteger(targetN) || targetN < 1 || targetN >= n) continue;
+    if (!itemPositions.has(targetN)) continue;
+    out.set(candidate, { kind: "new", candidate: targetN - 1, why });
+  }
+  return out;
+}
+
+/**
+ * Ask the desk's model directly whether each new item is the same news story
+ * as a recent lead, a printed story or an earlier item in this batch. Never
+ * throws; no candidates means no call at all.
+ */
+export async function runSameStoryCheck(input: {
+  candidates: readonly DupCheckCandidate[];
+  existing: readonly MatchCandidateLead[];
+  printed: readonly DupCheckPrinted[];
+  chat: DupCheckChat;
+  maxLeads?: number;
+  maxPrinted?: number;
+}): Promise<DupCheckOutcome> {
+  const data = collectSameStoryPromptData(input);
+  const empty = (failure: string | null, model: string | null = null): DupCheckOutcome => ({
+    decisions: new Map(),
+    model,
+    failure,
+    asked: data.items.length,
+    skipped: 0,
+    sameStory: new Map(),
+  });
+  if (data.items.length === 0) return empty(null);
+
+  let reply: Awaited<ReturnType<DupCheckChat>>;
+  try {
+    reply = await input.chat(SAME_STORY_SYSTEM, sameStoryPromptUser(data), DUP_CHECK_MAX_TOKENS);
+  } catch (error) {
+    return empty(`same-story check could not reach a model: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!reply.ok) return empty(`same-story check failed: ${reply.error}`);
+  return {
+    decisions: new Map(),
+    model: reply.model ?? null,
+    failure: null,
+    asked: data.items.length,
+    skipped: 0,
+    sameStory: parseSameStoryReply(reply.text, data),
+  };
+}
+
+/** Join the pair check and the same-story check without losing either half. */
+export function combineDupCheckOutcomes(
+  pairCheck: DupCheckOutcome | null | undefined,
+  sameStoryCheck: DupCheckOutcome | null | undefined,
+): DupCheckOutcome | null {
+  if (!pairCheck && !sameStoryCheck) return null;
+  const failures = [pairCheck?.failure, sameStoryCheck?.failure].filter(
+    (failure): failure is string => Boolean(failure),
+  );
+  const sameStory = sameStoryCheck?.sameStory ?? pairCheck?.sameStory;
+  return {
+    decisions: pairCheck?.decisions ?? new Map(),
+    model: pairCheck?.model ?? sameStoryCheck?.model ?? null,
+    failure: failures.length ? failures.join("; ") : null,
+    asked: (pairCheck?.asked ?? 0) + (sameStoryCheck?.asked ?? 0),
+    skipped: pairCheck?.skipped ?? 0,
+    ...(sameStory ? { sameStory } : {}),
+  };
 }
 
 /**

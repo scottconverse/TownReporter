@@ -157,6 +157,23 @@ test("announceToDesk shows a visible bar, with the desk's own class on it", asyn
   });
 });
 
+test("the expanded stack stays put when the pointer enters, so close targets do not move", async () => {
+  await withDesk(async (scope) => {
+    await say("Lead killed.");
+    const { bars } = scope.redraw();
+    const stack = scope.container.querySelector("[data-sonner-toaster]");
+    assert.ok(stack);
+    assert.equal(bars[0].getAttribute("data-expanded"), "true");
+    await React.act(async () => {
+      stack.dispatchEvent(new Event("mouseover", { bubbles: true }));
+    });
+    await flush();
+    const after = scope.redraw().bars[0];
+    assert.equal(after.getAttribute("data-expanded"), "true", "hover did not change the stack geometry");
+    assert.equal(after.getAttribute("data-front"), bars[0].getAttribute("data-front"));
+  });
+});
+
 test("a failure is drawn as a failure: the danger class, the mark, and the real reason", async () => {
   await withDesk(async (scope) => {
     await say("Could not change that lead. The desk lost the connection.", "err");
