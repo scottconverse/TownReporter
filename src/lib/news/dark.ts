@@ -2271,16 +2271,21 @@ async function runVerificationStage(
         newsroomId,
         localModel: overrides?.["local-model"]?.localModel,
         reasoningEffort: snapshot.modelEffort,
+        timeoutMs: darkVerificationTimeoutMs(
+          snapshot.modelChoice,
+          overrides,
+          runBudget?.remainingMs(),
+        ),
       }),
       probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       resolve: async (candidate) => ({
         modelChoice: candidate,
-        modelEffort: effortForChoice(candidate, active.modelEffort),
+        modelEffort: darkFailoverEffort(candidate),
       }),
       onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
         if (job) {
           const resolvedChoice = effectiveStoryModelChoice(nextChoice);
-          const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+          const nextEffort = darkFailoverEffort(resolvedChoice);
           onModelChange?.(resolvedChoice);
           await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
           await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
@@ -2429,6 +2434,25 @@ function effortForChoice(choice: EffectiveProviderChoice, saved: ModelEffort | n
   return saved == null ? null : validatedModelEffort(choice, saved);
 }
 
+/** The runtime a Dark verification call uses after a provider switch. */
+export function darkFailoverEffort(choice: EffectiveProviderChoice): ModelEffort | null {
+  // A failover chooses the destination model's own default. The failed
+  // model's effort is not portable: Claude's default high is still a legal
+  // DeepSeek level, but a direct DeepSeek pick runs at none.
+  return validatedModelEffort(choice, null);
+}
+
+/** A Dark verification call gets the destination rung's budget, not grokChat's
+ * 45-second fallback. The run budget may shorten it but can never lengthen it. */
+export function darkVerificationTimeoutMs(
+  choice: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+  remainingMs?: number,
+): number {
+  const callMs = providerBudget(choice, overrides ?? undefined).callMs;
+  return Math.max(1, Math.min(callMs, remainingMs ?? callMs));
+}
+
 async function markInvestigationPaused(userId: string, investigationId: number, error: string) {
   const sql = await getSql();
   await sql`
@@ -2515,8 +2539,14 @@ async function executeDarkRun(
     // tier answered.
     const where = await readDarkPlace(newsroomId).catch(() => null);
     let activeChoice = choice!;
-    const research = (on: EffectiveProviderChoice) => {
+    let activeEffort = opts.modelEffort ?? null;
+    const activate = (on: EffectiveProviderChoice) => {
+      if (on !== activeChoice) activeEffort = darkFailoverEffort(on);
       activeChoice = on;
+      return effortForChoice(on, activeEffort);
+    };
+    const research = (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
       return runDarkResearchWithRememberedChoice(investigationId, on, {
         remember: rememberLastModelChoice,
         run: (remembered) => researchLoop({
@@ -2535,12 +2565,12 @@ async function executeDarkRun(
           runBudget,
           researchReserveMs,
           onUsage: saveUsage,
-          reasoningEffort: effortForChoice(remembered, opts.modelEffort ?? null),
+          reasoningEffort: effortForChoice(remembered, effort),
         }),
       });
     };
     const synthesize = (on: EffectiveProviderChoice) => {
-      activeChoice = on;
+      const effort = activate(on);
       return synthesizeSignals(
         userId,
         runId,
@@ -2553,7 +2583,7 @@ async function executeDarkRun(
         snapshot.preferences,
         runBudget,
         saveUsage,
-        effortForChoice(on, opts.modelEffort ?? null),
+        effortForChoice(on, effort),
       );
     };
     const checkpointed = await runCheckpointedDarkStages({
@@ -2591,7 +2621,7 @@ async function executeDarkRun(
       runBudget,
       saveUsage,
       undefined,
-      effortForChoice(activeChoice, opts.modelEffort ?? null),
+      effortForChoice(activeChoice, activeEffort),
     );
     const stopReason: DarkRunStopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
     await persistDarkRunUsage(runId, newsroomId, runBudget.snapshot(), stopReason);
@@ -3552,6 +3582,7 @@ export async function performDarkRound(job: DeskJob) {
   */
   let choice = effectiveStoryModelChoice(job.model_choice);
   const modelEffort = savedJobEffort(job);
+  let activeEffort = modelEffort;
   const overrides = applyJobLocalModelSnapshot(
     job,
     await readProviderOverrides(owned(context), "dark").catch(() => ({})),
@@ -3598,8 +3629,15 @@ export async function performDarkRound(job: DeskJob) {
       row and a sliding bar.
     */
     const reportRound = progressReporterFor(job);
-    const research = async (on: EffectiveProviderChoice) =>
-      runDarkResearchWithRememberedChoice(id, on, {
+    let activeChoice = choice;
+    const activate = (on: EffectiveProviderChoice) => {
+      if (on !== activeChoice) activeEffort = darkFailoverEffort(on);
+      activeChoice = on;
+      return effortForChoice(on, activeEffort);
+    };
+    const research = async (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
+      return runDarkResearchWithRememberedChoice(id, on, {
         remember: rememberLastModelChoice,
         run: (rememberedChoice) => researchLoop({
           userId: context.userId,
@@ -3631,7 +3669,7 @@ export async function performDarkRound(job: DeskJob) {
             label,
             run,
           }),
-          reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
+          reasoningEffort: effortForChoice(rememberedChoice, effort),
           // Unit U25, B4: the editor's Stop, read fresh at each hop and each
           // search. Before this a dig could only end at its own hop, time or
           // call limit -- a 2-to-13-minute wait with no way out, which the
@@ -3640,7 +3678,9 @@ export async function performDarkRound(job: DeskJob) {
           throwIfCancelled: () => throwIfJobCancelled(job.id),
         }),
       });
+    };
     const synthesize = async (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
       await throwIfJobCancelled(job.id);
       await reportRound("Synthesizing signals", 45);
       await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
@@ -3659,7 +3699,7 @@ export async function performDarkRound(job: DeskJob) {
           snapshot.preferences,
           runBudget,
           saveUsage,
-          effortForChoice(on, modelEffort),
+          effortForChoice(on, effort),
         ),
       });
     };
@@ -3711,7 +3751,7 @@ export async function performDarkRound(job: DeskJob) {
           runBudget,
           saveUsage,
           (stage) => reportRound(stage),
-          effortForChoice(choice, modelEffort),
+          effortForChoice(choice, activeEffort),
           job,
           (nextChoice) => { verificationChoice = nextChoice; },
         ),
@@ -3767,7 +3807,7 @@ export async function performDarkRound(job: DeskJob) {
           onUsage: saveUsage,
           onStage: (stage) => reportRound(stage),
         },
-        effortForChoice(choice, modelEffort),
+        effortForChoice(choice, activeEffort),
       );
       if (!briefResult.ok) briefError = briefResult.error;
     } catch (error) {
@@ -5116,11 +5156,11 @@ export async function performBriefWork(job: DeskJob) {
       probe: (choice) => probeProvider(choice, newsroomId, undefined, "dark"),
       resolve: async (choice) => ({
         modelChoice: choice,
-        modelEffort: effortForChoice(choice, active.modelEffort),
+        modelEffort: darkFailoverEffort(choice),
       }),
       onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
         const resolvedChoice = effectiveStoryModelChoice(nextChoice);
-        const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+        const nextEffort = darkFailoverEffort(resolvedChoice);
         briefLabel = nextLabel;
         await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
         await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
