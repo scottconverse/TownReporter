@@ -39,6 +39,7 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
     export async function cancelStoryJob() { throw new Error("not pressed in a render test"); }
     export async function retryStoryJob() { throw new Error("not pressed in a render test"); }
     export async function listDeskJobs() { return []; }
+    export async function previewStoryNextModel() { return null; }
   `);
   const reactQuery = inline(`
     export function useQuery() { return { data: undefined, state: { data: undefined } }; }
