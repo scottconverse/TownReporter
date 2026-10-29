@@ -2602,6 +2602,11 @@ function QueuePage() {
             } catch {
               /* Dark Desk will choose its newest file if storage is unavailable. */
             }
+            // The shell keeps `["investigations"]` for the Dark Desk count, so
+            // this cached list predates the file just written. Mark it stale
+            // before navigating; Dark Desk also waits for its post-mount list
+            // when the requested row is not present in the cache yet.
+            void qc.invalidateQueries({ queryKey: ["investigations"] });
             void navigate({ to: "/desk/dark" });
           }}
         />

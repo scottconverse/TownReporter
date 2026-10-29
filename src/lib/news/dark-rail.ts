@@ -26,6 +26,28 @@ export function darkFileToOpen<T extends { id: number; updated_at: string }>(
 }
 
 /**
+ * Whether the list can make the handoff choice final.
+ *
+ * A requested file may have been created after the cached list in the shell
+ * navigation was read. While it is absent, the first cached list is not enough
+ * evidence to fall back to another row: wait for a fetch made after Dark Desk
+ * mounted. Once that fetch arrives, an absent request means the file is gone,
+ * and the ordinary current-or-newest fallback applies. A request already in
+ * the list can be opened without another round trip.
+ */
+export function darkFilePickIsFinal<T extends { id: number }>(
+  rows: readonly T[],
+  requestedId: number | null,
+  fetchedAfterMount: boolean,
+): boolean {
+  // An empty cached list has not supplied a file to open yet. Wait for the
+  // post-mount fetch even when this visit has no handoff request.
+  if (!fetchedAfterMount && rows.length === 0) return false;
+  if (requestedId == null) return true;
+  return fetchedAfterMount || rows.some((row) => row.id === requestedId);
+}
+
+/**
  * How many characters of the pasted question `openInvestigationForEditor`
  * (dark-open.ts) keeps as a file's title.
  *
