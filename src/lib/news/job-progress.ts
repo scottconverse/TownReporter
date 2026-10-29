@@ -1,5 +1,6 @@
 import { CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { z } from "zod";
+import { jobIdInput } from "./request-input.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
@@ -667,11 +668,7 @@ async function planStoryNextModel(row: DeskJob, newsroomId: number) {
  */
 export const previewStoryNextModel = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((input: unknown) => {
-    const jobId = Number((input as { jobId?: unknown } | null)?.jobId);
-    if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
-    return { jobId };
-  })
+  .validator((input: unknown) => jobIdInput.parse(input))
   .handler(async ({ context, data }): Promise<{ modelChoice: StoryModelChoice; label: string } | null> => {
     const newsroomId = context.newsroomId ?? 1;
     const sql = await getSql();

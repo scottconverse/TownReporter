@@ -11,6 +11,7 @@ import {
   darkRetryInput,
   darkSignalInput,
   darkStepInput,
+  jobIdInput,
   redditTipInput,
   rowId,
 } from "./request-input.ts";
@@ -3078,11 +3079,7 @@ function darkRetryFailure(job: DeskJob): string {
  */
 export const previewNextDarkRoundModel = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((raw: unknown) => {
-    const jobId = Number((raw as { jobId?: unknown } | null)?.jobId);
-    if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
-    return { jobId };
-  })
+  .validator((raw: unknown) => jobIdInput.parse(raw))
   .handler(async ({ context, data }): Promise<{ modelChoice: StoryModelChoice; label: string } | null> => {
     await ensureDarkSchema();
     await ensureJobsSchema();
