@@ -297,9 +297,9 @@ test("a running scan shows its live count on a determinate bar", () => {
 });
 
 test("a scan whose worker has gone quiet offers the stall box and Cancel", () => {
-  const html = render({ job: scanJob({ beatAt: at(74), step: "Reading sources — 6 of 8" }) });
+  const html = render({ job: scanJob({ beatAt: at(150), step: "Reading sources — 6 of 8" }) });
   assert.match(html, /job-card state-stalled/);
-  assert.match(html, /No activity for 1:14\./);
+  assert.match(html, /No activity for 2:30\./);
   assert.match(html, />Keep waiting</);
   assert.match(html, />Cancel</);
 });

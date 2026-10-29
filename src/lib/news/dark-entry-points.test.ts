@@ -9,6 +9,7 @@ import {
   saveDarkFilePrefill,
   takeDarkFilePrefill,
 } from "./dark-seed.ts";
+import { darkFileToOpen } from "./dark-rail.ts";
 
 describe("Dark Desk entry handoffs", () => {
   it("opens from Today with the tip and no invented question", () => {
@@ -35,9 +36,19 @@ describe("Dark Desk entry handoffs", () => {
   });
 
   it("opens the file from a completed run", () => {
-    const kept = new Map<string, string>();
+    const kept = new Map<string, string>([["townreporter.dark.openId", "9"]]);
     const storage = { setItem: (key: string, value: string) => void kept.set(key, value) };
     assert.equal(rememberDarkJobFile(storage, 42), true);
-    assert.equal(kept.get(DARK_OPEN_KEY), "42");
+    assert.equal(kept.get(DARK_OPEN_KEY), "42", "a new handoff replaces the remembered old file");
+  });
+
+  it("opens the requested file ahead of the current or newest file", () => {
+    const rows = [
+      { id: 9, updated_at: "2026-10-27T12:00:00Z" },
+      { id: 11, updated_at: "2026-10-28T12:00:00Z" },
+    ];
+    assert.equal(darkFileToOpen(rows, 9, 11), 11);
+    assert.equal(darkFileToOpen(rows, 9, null), 9);
+    assert.equal(darkFileToOpen(rows, 99, null), 11);
   });
 });

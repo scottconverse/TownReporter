@@ -3,7 +3,7 @@ const window = installDom();
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
 const h = React.createElement;
-const calls = { keep: [], draft: [], retry: [], refetch: 0 };
+const calls = { keep: [], draft: [], retry: [], stop: [], refetch: 0 };
 globalThis.__darkFlow = { calls };
 
 const stub = (source) => transpileToUrl(source, "dark-flow-stub.js", {});
@@ -71,6 +71,7 @@ const modelPickerStub = stub(`
 `);
 const darkRailStub = stub(`
   export const newestTouchedFile = (rows) => rows.slice().sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
+  export const darkFileToOpen = (rows, currentId, requestedId) => rows.some((row) => row.id === requestedId) ? requestedId : rows.some((row) => row.id === currentId) ? currentId : newestTouchedFile(rows)?.id ?? null;
   export const fullFileQuestion = (title) => title; export const signalCounts = () => ({ total: 0, covered: 0, toReview: 0 });
 `);
 const nullComponents = stub(`import { createElement } from "react"; export const DarkDialsPanel = () => null; export const PageWatchPanel = () => null; export function DarkFileDialog({ open, prefill, shared, onClose, onOpened }) { return open ? createElement("div", { role: "dialog", "data-question": prefill?.question ?? "", "data-tip": prefill?.tip ?? "", "data-explanation": prefill?.explanation ?? "", "data-model": shared?.model ?? "" }, shared ? [createElement("button", { key: "pick", type: "button", onClick: () => shared.onModelChoice("claude-sonnet") }, "Pick Claude Sonnet"), createElement("button", { key: "cancel", type: "button", onClick: () => onClose() }, "Cancel"), createElement("button", { key: "open", type: "button", onClick: () => { onOpened?.(2, { modelChoice: "claude-sonnet", modelEffort: null, modelChoiceExplicit: true }); onClose(); } }, "Open the file")] : null) : null; } export function Dialog({ open, children, primaryLabel, onPrimary }) { return open ? createElement("div", { role: "dialog" }, children, createElement("button", { onClick: onPrimary }, primaryLabel)) : null; } export function FollowUpDialog({ initial, onSubmit }) { return createElement("div", { role: "dialog", "aria-label": "New AI follow-up" }, initial.what, createElement("button", { onClick: () => onSubmit({ ...initial, schedule: "daily" }) }, "Start follow-up")); } export const InvestigationBriefCard = () => null; export const SectionTldr = () => null; export const SearchTrailEntry = () => null; export const ProviderSignInButton = () => null; export const PaperSetupGateNote = () => null;`);
@@ -83,7 +84,7 @@ const imports = {
   "@/components/desk-chrome": chromeStub,
   "@/components/states": statesStub,
   "@/lib/news/dark": darkStub,
-  "@/lib/news/job-progress": stub(`export const cancelStoryJob = async () => ({ ok: true });`),
+  "@/lib/news/job-progress": stub(`export const cancelStoryJob = async ({ data }) => { globalThis.__darkFlow.calls.stop.push(data); return { ok: true }; };`),
   "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: globalThis.__darkFlow.fixtures.jobs ?? [], isPending: false, isError: false });`),
   "@/components/JobCard": stub(`export const DeskJobCard = () => null; export function JobCard() { return null; }`),
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
@@ -125,7 +126,7 @@ const imports = {
   "@/components/follow-up-dialog": nullComponents,
   "@/lib/news/desk": stub(`export const createAiFollowUp = async () => ({ ok: true }); export const listFollowUpStoryOptions = async () => [];`),
   "@/lib/news/page-watch-actions": stub(`export const checkPageWatch = async () => ({ ok: true }); export const createPageWatch = async () => ({ ok: true, id: 1 });`),
-  "@/lib/news/model-choice": stub(`export const darkModelChoice = (v) => v === "codex-sol" || v === "claude-sonnet" || v === "claude-haiku" ? v : "auto"; export const modelChoiceLabel = () => "Automatic"; export const shouldHydrateDarkModel = (selected, id, last, status) => selected === id && (last != null || status !== "investigating");`),
+  "@/lib/news/model-choice": stub(`export const darkModelChoice = (v) => v === "codex-sol" || v === "claude-sonnet" || v === "claude-haiku" ? v : "auto"; export const modelChoiceLabel = () => "Automatic"; export const ocrReaderModelChoice = (v) => v === "deepseek-flash" ? { choice: "auto", fallbackFrom: v, note: "DeepSeek cannot read page images. Automatic will be used." } : { choice: v, fallbackFrom: null, note: null }; export const shouldHydrateDarkModel = (selected, id, last, status) => selected === id && (last != null || status !== "investigating");`),
   "@/lib/news/provider-registry": stub(`export const defaultModelEffort = () => null; export const modelEffort = (_choice, effort) => effort ?? null;`),
 };
 const routeUrl = await (async () => {

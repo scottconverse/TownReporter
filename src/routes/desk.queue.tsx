@@ -63,7 +63,7 @@ import {
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
-import { darkLeadPrefill } from "@/lib/news/dark-seed";
+import { darkLeadPrefill, rememberDarkJobFile } from "@/lib/news/dark-seed";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { createLeadWrites } from "@/lib/lead-writes-in-flight";
@@ -2591,7 +2591,19 @@ function QueuePage() {
           open
           prefill={darkPrefill(darkFor)}
           onClose={() => setDarkFor(null)}
-          onOpened={() => void navigate({ to: "/desk/dark" })}
+          onOpened={(id) => {
+            /*
+              The new file is the handoff. Rewriting the one-use key here also
+              replaces any older file remembered on this tab, so Dark Desk
+              cannot open yesterday's completed run instead of this file.
+            */
+            try {
+              rememberDarkJobFile(sessionStorage, id);
+            } catch {
+              /* Dark Desk will choose its newest file if storage is unavailable. */
+            }
+            void navigate({ to: "/desk/dark" });
+          }}
         />
       ) : null}
       {/*
