@@ -38,7 +38,7 @@ export function JobCard({
   compact,
   title,
   failoverNote = true,
-  stallSeconds = 60,
+  stallSeconds = 150,
   now,
   onCancel,
   onOpen,

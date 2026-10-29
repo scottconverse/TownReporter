@@ -552,7 +552,7 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
         requested: choice,
         resolved: plan.next,
         reason: failoverReasonPhrase(previousLabel, plan.reason),
-        note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+        note: failoverNoteSentence(plan.label, previousLabel, plan.reason, "round"),
         stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
       },
     };
@@ -2254,6 +2254,7 @@ async function runVerificationStage(
   onStage?: (stage: string) => Promise<unknown>,
   reasoningEffort?: ModelEffort | null,
   job?: DeskJob,
+  onModelChange?: (choice: EffectiveProviderChoice) => void,
 ): Promise<string> {
   const { place, official, press } = await readDarkPlace(newsroomId);
   let active = {
@@ -2280,14 +2281,16 @@ async function runVerificationStage(
         if (job) {
           const resolvedChoice = effectiveStoryModelChoice(nextChoice);
           const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+          onModelChange?.(resolvedChoice);
           await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
           await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
           );
-          await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+          await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"));
         }
       },
     });
     active = attempted.snapshot;
+    onModelChange?.(effectiveStoryModelChoice(active.modelChoice));
     if (!attempted.result.ok) throw new Error(attempted.result.error);
     return attempted.result.text;
   };
@@ -3488,7 +3491,7 @@ export async function performArtifactOcrWork(
             await setJobModelRuntime(job.id, nextChoice, nextEffort);
             await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
             );
-            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason),
+            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"),
             );
             ocrChoice = nextChoice;
             ocrEffort = nextEffort;
@@ -3683,9 +3686,10 @@ export async function performDarkRound(job: DeskJob) {
       polls Cancel on the same tick, so the editor's Stop lands inside the call
       rather than after it.
     */
+    let verificationChoice = choice;
     const verifySummary = await waitForModel({
       jobId: job.id,
-      label: () => modelChoiceLabel(choice),
+      label: () => modelChoiceLabel(verificationChoice),
       run: () =>
         runVerificationStage(
           context.userId,
@@ -3700,6 +3704,7 @@ export async function performDarkRound(job: DeskJob) {
           (stage) => reportRound(stage),
           effortForChoice(choice, modelEffort),
           job,
+          (nextChoice) => { verificationChoice = nextChoice; },
         ),
     });
     // Stage 2 is the longest single model call of the round and it is not part
@@ -5111,7 +5116,7 @@ export async function performBriefWork(job: DeskJob) {
         await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
         await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
         );
-        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"));
       },
     });
     active = attempted.snapshot;

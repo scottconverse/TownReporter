@@ -2580,7 +2580,6 @@ function DarkResearchCard({
       <JobCard
         job={displayJob}
         cancelLabel="Stop"
-        failoverNote={false}
         onCancel={onStop}
         onOpen={onOpen}
         onRetryNext={job.status === "running" ? retryOnNextModel : undefined}

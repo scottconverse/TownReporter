@@ -420,6 +420,11 @@ export function editorError(raw: string | null | undefined, what = "continue wit
   ) {
     return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep investigating to continue.";
   }
+  const modelTimeout = /^(.+?)\s+request\s+timed\s+out\b/i.exec(t)?.[1]?.trim();
+  if (modelTimeout) {
+    const who = modelTimeout === "Codex" ? "Codex Sol 6.1" : modelTimeout;
+    return `${who} did not answer in time. What was already found is still here.`;
+  }
   if (/timeout|timed out|network/i.test(t)) {
     return "A search or page load timed out. What was already found is still here.";
   }

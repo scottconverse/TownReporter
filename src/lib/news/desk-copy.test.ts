@@ -1413,8 +1413,28 @@ describe("a lapsed provider login is a sign-in problem, not a retry", () => {
   it("still calls a Dark Desk timeout a timeout even when the text mentions auth", () => {
     const msg = editorError("Claude Code request timed out after 150s, 0 bytes out — waiting for auth");
     assert.ok(msg);
-    assert.match(msg!, /timed out|timeout/i);
+    assert.match(msg!, /Claude Code did not answer in time/i);
     assert.doesNotMatch(msg!, /sign in again/);
+  });
+});
+
+describe("Dark Desk timeout words name what timed out", () => {
+  it("names a model timeout instead of blaming search or page loading", () => {
+    assert.equal(
+      editorError("Codex request timed out"),
+      "Codex Sol 6.1 did not answer in time. What was already found is still here.",
+    );
+    assert.equal(
+      editorError("DeepSeek v4.1 Flash 1017 request timed out after 45s"),
+      "DeepSeek v4.1 Flash 1017 did not answer in time. What was already found is still here.",
+    );
+  });
+
+  it("keeps the search/page sentence for a search or page timeout", () => {
+    assert.equal(
+      editorError("Search timed out while reading the county page"),
+      "A search or page load timed out. What was already found is still here.",
+    );
   });
 });
 

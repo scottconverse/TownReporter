@@ -93,21 +93,21 @@ test("a job with no percentage draws the indeterminate bar", () => {
   assert.match(html, /Now: Waiting on Codex Sol 6\.1 · 42s/);
 });
 
-test("the stall box appears at 60s of quiet and not at 59s", () => {
-  const quiet59 = render({ job: job({ beatAt: at(59) }) });
-  assert.doesNotMatch(quiet59, /Keep waiting/);
-  assert.match(quiet59, /state-running/);
-  assert.match(quiet59, /Last activity 0:59 ago/);
+test("the stall box appears at 150s of quiet and not at 149s", () => {
+  const quiet149 = render({ job: job({ beatAt: at(149) }) });
+  assert.doesNotMatch(quiet149, /Keep waiting/);
+  assert.match(quiet149, /state-running/);
+  assert.match(quiet149, /Last activity 2:29 ago/);
 
-  const quiet60 = render({ job: job({ beatAt: at(60) }) });
-  assert.match(quiet60, /state-stalled/);
-  assert.match(quiet60, /No activity for 1:00\. The model may be slow, or it may have stalled\./);
-  assert.match(quiet60, />Keep waiting</);
-  assert.match(quiet60, />Retry on next model</);
+  const quiet150 = render({ job: job({ beatAt: at(150) }) });
+  assert.match(quiet150, /state-stalled/);
+  assert.match(quiet150, /No activity for 2:30\. The model may be slow, or it may have stalled\./);
+  assert.match(quiet150, />Keep waiting</);
+  assert.match(quiet150, />Retry on next model</);
   // The design's stalled card still offers Cancel and still shows where the
   // job got to; a stall is not a failure and the editor has not lost anything.
-  assert.match(quiet60, />Cancel</);
-  assert.match(quiet60, /Now: Writing the draft/);
+  assert.match(quiet150, />Cancel</);
+  assert.match(quiet150, /Now: Writing the draft/);
 });
 
 test("a job that never reported is not stalled, however long it has been", () => {

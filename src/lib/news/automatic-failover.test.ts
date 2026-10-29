@@ -357,6 +357,13 @@ describe("failoverNoteSentence", () => {
       "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus sign-in lapsed",
     );
   });
+
+  it("calls a Dark Desk switch a round, not a draft", () => {
+    assert.equal(
+      failoverNoteSentence("Codex Sol 6.1 (balanced)", "DeepSeek v4.1 Flash 1017", "timeout", "round"),
+      "This round moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash 1017 timed out",
+    );
+  });
 });
 
 describe("an empty draft moves to the next model and says why", () => {
