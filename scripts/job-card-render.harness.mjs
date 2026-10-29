@@ -43,6 +43,7 @@ const inlineModule = (source) =>
 const jobProgressStub = inlineModule(`
   export async function cancelStoryJob() { throw new Error("not used in a render test"); }
   export async function listDeskJobs() { return []; }
+  export async function previewStoryNextModel() { return null; }
   export async function retryStoryJob() { throw new Error("not used in a render test"); }
 `);
 

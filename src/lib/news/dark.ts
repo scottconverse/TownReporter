@@ -27,7 +27,7 @@ import {
   probeProvider,
   type EffectiveProviderChoice,
 } from "./ai.ts";
-import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice ,
+import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice, type StoryModelChoice ,
 } from "./model-choice.ts";
 import { isOfferedForJob } from "./model-assignments.ts";
 import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase ,
@@ -3036,9 +3036,7 @@ export async function retryDarkRoundFor(
   let effort = savedJobEffort(job);
   let explicit = false;
   if (nextModel) {
-    const failure = job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
-      ? job.error
-      : "the previous model timed out with no output";
+    const failure = darkRetryFailure(job);
     const planned = deps.nextModel
       ? await deps.nextModel(job, failure)
       : ((
@@ -3066,6 +3064,44 @@ export async function retryDarkRoundFor(
   if (!result.ok) return result;
   return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
 }
+
+function darkRetryFailure(job: DeskJob): string {
+  return job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
+    ? job.error
+    : "the previous model timed out with no output";
+}
+
+/**
+ * Resolve the exact ready rung a "Retry on next model" press would use. The
+ * card asks before rendering the action, then sends this choice back, so a
+ * displayed model name cannot be a merely guessed ladder neighbour.
+ */
+export const previewNextDarkRoundModel = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => {
+    const jobId = Number((raw as { jobId?: unknown } | null)?.jobId);
+    if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
+    return { jobId };
+  })
+  .handler(async ({ context, data }): Promise<{ modelChoice: StoryModelChoice; label: string } | null> => {
+    await ensureDarkSchema();
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const [job] = await sql<DeskJob>`
+      select * from desk_jobs
+      where id = ${data.jobId} and newsroom_id = ${owned(context)} and kind = 'dark'
+      limit 1
+    `;
+    if (!job) return null;
+    const plan = await planAutomaticFailover({
+      source: job.model_choice_source ?? "editor",
+      current: job.model_choice,
+      error: darkRetryFailure(job),
+      probe: (candidate) => probeProvider(candidate, owned(context), undefined, "dark"),
+      ladder: DARK_AUTOMATIC_LADDER,
+    });
+    return plan ? { modelChoice: plan.next, label: plan.label } : null;
+  });
 
 export const retryDarkRound = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

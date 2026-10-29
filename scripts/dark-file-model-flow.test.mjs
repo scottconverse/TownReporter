@@ -88,6 +88,45 @@ test("Retry sends the file picker's model to a stopped round", async () => {
 });
 
 
+test("Dark failed-round retry names and uses the previewed next model", async () => {
+  calls.retry.length = 0;
+  globalThis.__darkFlow.fixtures.jobs = [{
+    id: 488,
+    kind: "dark",
+    subjectId: 1,
+    status: "failed",
+    error: "The provider timed out",
+    stageIndex: 1,
+    step: "Reading records",
+    doneText: "Could not finish",
+    cancelRequested: false,
+  }];
+  globalThis.__darkFlow.fixtures["retry-next-model"] = {
+    modelChoice: "claude-sonnet",
+    label: "Claude Sonnet 5.5",
+  };
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await React.act(async () => root.render(h(Route.component)));
+  try {
+    const workspace = container.querySelector("#investigation-workspace");
+    const next = [...workspace.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Retry on next model (Claude Sonnet 5.5)");
+    assert.ok(next, [...workspace.querySelectorAll("button")].map((button) => button.textContent).join(" | "));
+    await React.act(async () => next.dispatchEvent(new window.Event("click", { bubbles: true })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.retry[0]?.jobId, 488);
+    assert.equal(calls.retry[0]?.nextModel, false);
+    assert.equal(calls.retry[0]?.modelChoice, "claude-sonnet");
+  } finally {
+    await React.act(async () => root.unmount());
+    container.remove();
+    delete globalThis.__darkFlow.fixtures.jobs;
+    delete globalThis.__darkFlow.fixtures["retry-next-model"];
+  }
+});
+
 test("Use selected model restarts on the picker model when the round completes first", async () => {
   calls.keep.length = 0;
   calls.retry.length = 0;

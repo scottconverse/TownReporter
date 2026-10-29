@@ -112,6 +112,14 @@ test("the stall box appears at 150s of quiet and not at 149s", () => {
   assert.match(quiet150, /Now: Writing the draft/);
 });
 
+test("a stalled card names the already-probed next model", () => {
+  const named = render({ job: job({ beatAt: at(150) }), nextModelLabel: "Claude Sonnet 5.5" });
+  assert.match(named, />Retry on next model \(Claude Sonnet 5\.5\)</);
+  const unknown = render({ job: job({ beatAt: at(150) }) });
+  assert.match(unknown, />Retry on next model</);
+  assert.doesNotMatch(unknown, /Retry on next model \(/);
+});
+
 test("a job that never reported is not stalled, however long it has been", () => {
   // Null `beat_at` is "no evidence", not "very quiet": a queued job, or one
   // whose worker has not reached its first boundary, must not be offered a

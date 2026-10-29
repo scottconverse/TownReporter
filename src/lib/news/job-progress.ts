@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
-import { effectiveStoryModelChoice, modelChoiceLabel, pastRunModelName, storyModelChoice } from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel, pastRunModelName, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { recordedActualModelId } from "./writer-bar.ts";
 import type { ModelEffort } from "./provider-registry.ts";
 import {
@@ -640,6 +640,50 @@ export const cancelStoryJob = createServerFn({ method: "POST" })
  * the call reports that instead of quietly retrying the model that just failed,
  * because a button that does nothing visible is worse than one that says why.
  */
+async function planStoryNextModel(row: DeskJob, newsroomId: number) {
+  const [{ planAutomaticFailover }, { probeProvider }] = await Promise.all([
+    import("./automatic-failover.ts"),
+    import("./ai.ts"),
+  ]);
+  return planAutomaticFailover({
+    source: row.model_choice_source ?? "editor",
+    current: row.model_choice,
+    /*
+      The failure that stopped this job is the reason to move on. A row with
+      no error (a cancel) still gets a plan: the editor pressing "Retry on
+      another model" IS the reason, and `planAutomaticFailover` only refuses
+      when the error itself is not a technical failure it knows how to answer.
+    */
+    error: row.error || "the previous model did not answer",
+    probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "story"),
+  });
+}
+
+/**
+ * The same one-hop probe `retryStoryJob(nextModel)` performs, run before the
+ * press so the card can name the rung. The returned choice is the exact choice
+ * the caller then passes back as an explicit retry, rather than a guessed
+ * ladder neighbour that may be unavailable.
+ */
+export const previewStoryNextModel = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => {
+    const jobId = Number((input as { jobId?: unknown } | null)?.jobId);
+    if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
+    return { jobId };
+  })
+  .handler(async ({ context, data }): Promise<{ modelChoice: StoryModelChoice; label: string } | null> => {
+    const newsroomId = context.newsroomId ?? 1;
+    const sql = await getSql();
+    const [row] = await sql<DeskJob>`
+      select * from desk_jobs
+      where id = ${data.jobId} and newsroom_id = ${newsroomId}
+    `;
+    if (!row || (row.kind !== "draft" && row.kind !== "reconcile")) return null;
+    const plan = await planStoryNextModel(row, newsroomId);
+    return plan ? { modelChoice: plan.next, label: plan.label } : null;
+  });
+
 export const retryStoryJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => {
@@ -663,23 +707,7 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     let choice = data.modelChoice ?? storyModelChoice(row.model_choice);
     let label = modelChoiceLabel(effectiveStoryModelChoice(choice));
     if (data.nextModel) {
-      const [{ planAutomaticFailover }, { probeProvider }] = await Promise.all([
-        import("./automatic-failover.ts"),
-        import("./ai.ts"),
-      ]);
-      const plan = await planAutomaticFailover({
-        source: row.model_choice_source ?? "editor",
-        current: row.model_choice,
-        /*
-          The failure that stopped this job is the reason to move on. A row with
-          no error (a cancel) still gets a plan: the editor pressing "Retry on
-          another model" IS the reason, and `planAutomaticFailover` only refuses
-          when the error itself is not a technical failure it knows how to
-          answer.
-        */
-        error: row.error || "the previous model did not answer",
-        probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "story"),
-      });
+      const plan = await planStoryNextModel(row, newsroomId);
       if (!plan) {
         throw new Error(
           "No other model is available to try for this job. Pick one on the story's Model & research panel.",
