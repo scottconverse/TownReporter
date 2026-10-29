@@ -468,6 +468,7 @@ function DarkPage() {
     which "Stopping…" stops being true.
   */
   const [stopRequestedFor, setStopRequestedFor] = useState<number | null>(null);
+  const [restartOnSelectedAfterStopFor, setRestartOnSelectedAfterStopFor] = useState<number | null>(null);
   const stop = useMutation({
     mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
     onSuccess: () => {
@@ -480,9 +481,54 @@ function DarkPage() {
         "Could not stop the run";
       // The press did not land, so the desk must stop claiming it did.
       setStopRequestedFor(null);
+      setRestartOnSelectedAfterStopFor(null);
       showNotice(msg, false);
     },
   });
+  const retrySelected = useMutation({
+    mutationFn: () => {
+      if (currentDarkJob?.id == null) throw new Error("There is no running round to restart.");
+      return retryDarkRound({
+        data: {
+          jobId: currentDarkJob.id,
+          nextModel: false,
+          modelChoice,
+          modelEffort,
+          modelChoiceExplicit: fileModelExplicitFor.current === openId,
+        },
+      });
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        showNotice(editorError(result.error ?? "") || "Could not restart this round.");
+        return;
+      }
+      showNotice(`Restarted on ${result.model}.`, true);
+      invalidateDeskJobs(qc);
+      if (openId != null) void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+      void qc.invalidateQueries({ queryKey: ["investigations"] });
+    },
+    onError: (error) => {
+      showNotice(editorError(error instanceof Error ? error.message : "") || "Could not restart this round.");
+    },
+  });
+  /*
+    Use selected model is the running-round counterpart of Retry: stop the old
+    round, then use the same retryDarkRound path once that job has settled. A
+    normal continueInvestigation call cannot do this because it correctly
+    refuses to queue a second round over a live one.
+  */
+  const retrySelectedRound = retrySelected.mutate;
+  useEffect(() => {
+    if (
+      restartOnSelectedAfterStopFor == null ||
+      currentDarkJob?.id !== restartOnSelectedAfterStopFor ||
+      currentDarkJob.status !== "failed"
+    ) return;
+    setRestartOnSelectedAfterStopFor(null);
+    retrySelectedRound();
+  }, [restartOnSelectedAfterStopFor, currentDarkJob?.id, currentDarkJob?.status, retrySelectedRound]);
+
   const advance = useMutation({
     mutationFn: (id: number) => {
       const picked = firstRoundPick.current;
@@ -1277,6 +1323,13 @@ function DarkPage() {
                 beginDigPhase();
                 advance.mutate(openId);
               }}
+              onUseSelectedModel={() => {
+                if (currentDarkJob?.id == null) return;
+                setNotice(null);
+                setRestartOnSelectedAfterStopFor(currentDarkJob.id);
+                setStopRequestedFor(currentDarkJob.id);
+                stop.mutate(currentDarkJob.id);
+              }}
               onQueue={(preview) => toQueue.mutate({ id: openId, preview })}
               onPark={() => park.mutate(openId)}
               onPullBack={() => pullBack.mutate(openId)}
@@ -1576,6 +1629,7 @@ function InvestigationWorkspace({
   stopControl,
   onStopDig,
   onKeepDigging,
+  onUseSelectedModel,
   onQueue,
   onCloseWithoutFinding,
   closePending,
@@ -1615,6 +1669,7 @@ function InvestigationWorkspace({
   stopControl: { visible: boolean; label: string; disabled: boolean; line: string | null };
   onStopDig: () => void;
   onKeepDigging: () => void;
+  onUseSelectedModel: () => void;
   onQueue: (preview: InvestigationQueuePacket) => void;
   onCloseWithoutFinding: (note: string) => void;
   closePending: boolean;
@@ -2206,7 +2261,7 @@ function InvestigationWorkspace({
           <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
             Keep investigating
           </InkButton>
-          {digging && inv ? <InkButton tone="ghost" onClick={onKeepDigging}>Use selected model</InkButton> : null}
+          {digging && inv ? <InkButton tone="ghost" onClick={onUseSelectedModel}>Use selected model</InkButton> : null}
           <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
             Start an AI follow-up
           </InkButton>

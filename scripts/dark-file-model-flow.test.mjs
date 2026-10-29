@@ -88,6 +88,66 @@ test("Retry sends the file picker's model to a stopped round", async () => {
 });
 
 
+test("Use selected model stops a running round and restarts on the picker model", async () => {
+  calls.keep.length = 0;
+  calls.retry.length = 0;
+  calls.stop.length = 0;
+  detail.investigation.status = "investigating";
+  detail.darkJob = { id: 487, status: "running", stage: "Reading records", error: null };
+  globalThis.__darkFlow.fixtures.jobs = [{
+    id: 487,
+    kind: "dark",
+    subjectId: 1,
+    status: "running",
+    error: null,
+    stageIndex: 1,
+    step: "Reading records",
+    doneText: "Working",
+    cancelRequested: false,
+  }];
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await React.act(async () => root.render(h(Route.component)));
+  try {
+    const workspace = container.querySelector("#investigation-workspace");
+    const deepSeek = [...workspace.querySelectorAll("button")]
+      .find((button) => button.textContent === "Choose DeepSeek");
+    assert.ok(deepSeek);
+    await React.act(async () => deepSeek.dispatchEvent(new window.Event("click", { bubbles: true })));
+    const useSelected = [...workspace.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Use selected model");
+    assert.ok(useSelected);
+    await React.act(async () => useSelected.dispatchEvent(new window.Event("click", { bubbles: true })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.stop, [{ jobId: 487 }]);
+
+    detail.darkJob = { id: 487, status: "failed", stage: "Cancelled", error: "Cancelled by the editor" };
+    globalThis.__darkFlow.fixtures.jobs = [{
+      ...globalThis.__darkFlow.fixtures.jobs[0],
+      status: "failed",
+      error: "Cancelled by the editor",
+      cancelRequested: true,
+    }];
+    await React.act(async () => root.render(h(Route.component)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.retry, [{
+      jobId: 487,
+      nextModel: false,
+      modelChoice: "deepseek-flash",
+      modelEffort: "none",
+      modelChoiceExplicit: true,
+    }]);
+  } finally {
+    detail.investigation.status = "open";
+    delete detail.darkJob;
+    await React.act(async () => root.unmount());
+    container.remove();
+    delete globalThis.__darkFlow.fixtures.jobs;
+  }
+});
+
+
 test("Keep investigating starts on the picker model after a stopped job settles", async () => {
   calls.keep.length = 0;
   detail.investigation.status = "investigating";

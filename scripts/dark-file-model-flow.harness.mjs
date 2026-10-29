@@ -3,7 +3,7 @@ const window = installDom();
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
 const h = React.createElement;
-const calls = { keep: [], draft: [], retry: [], refetch: 0 };
+const calls = { keep: [], draft: [], retry: [], stop: [], refetch: 0 };
 globalThis.__darkFlow = { calls };
 
 const stub = (source) => transpileToUrl(source, "dark-flow-stub.js", {});
@@ -84,7 +84,7 @@ const imports = {
   "@/components/desk-chrome": chromeStub,
   "@/components/states": statesStub,
   "@/lib/news/dark": darkStub,
-  "@/lib/news/job-progress": stub(`export const cancelStoryJob = async () => ({ ok: true });`),
+  "@/lib/news/job-progress": stub(`export const cancelStoryJob = async ({ data }) => { globalThis.__darkFlow.calls.stop.push(data); return { ok: true }; };`),
   "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: globalThis.__darkFlow.fixtures.jobs ?? [], isPending: false, isError: false });`),
   "@/components/JobCard": stub(`export const DeskJobCard = () => null; export function JobCard() { return null; }`),
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
