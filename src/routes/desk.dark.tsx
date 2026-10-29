@@ -261,7 +261,7 @@ function DarkPage() {
   const autoOpened = useRef(false);
   useEffect(() => {
     const rows = investigations.data;
-    if (autoOpened.current || !rows) return;
+    if (autoOpened.current || !rows?.length) return;
     if (!darkFilePickIsFinal(rows, requestedOpenId.current, investigations.isFetchedAfterMount)) return;
     autoOpened.current = true;
     setOpenId((current) => darkFileToOpen(rows, current, requestedOpenId.current));
