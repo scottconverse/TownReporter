@@ -1,8 +1,8 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.86**
+Repository documentation version: **0.6.87**
 
-Release baseline: **0.6.86**, released 2026-10-28 (tag `v0.6.86`). As of 2026-10-28 the live paper runs source commit `5fc56705`, the 0.6.86 source. The release assets are `TownReporter-0.6.86-windows-x64.zip`, its `.zip.json` metadata and its `.zip.sha256` sidecar. See the [release guides](docs/releases/README.md) for each release's recorded source and package evidence. Publication does not establish production deployment.
+Release baseline: **0.6.87**, released 2026-10-29 (tag `v0.6.87`). As of 2026-10-29 the live paper runs source commit `d3209334`, the 0.6.87 source. The release assets are `TownReporter-0.6.87-windows-x64.zip`, its `.zip.json` metadata and its `.zip.sha256` sidecar. See the [release guides](docs/releases/README.md) for each release's recorded source and package evidence. Publication does not establish production deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 

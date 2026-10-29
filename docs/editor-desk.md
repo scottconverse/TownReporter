@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.86](releases/0.6.86.md). This page is the short version: the desk in one pass, the way an editor uses it. The screen-by-screen tour is [Part 2 of the manual](manual.md#part-2--the-desk-screen-by-screen); the longer working guide is the [editor’s manual](editor.md).
+For [TownReporter 0.6.87](releases/0.6.87.md). This page is the short version: the desk in one pass, the way an editor uses it. The screen-by-screen tour is [Part 2 of the manual](manual.md#part-2--the-desk-screen-by-screen); the longer working guide is the [editor’s manual](editor.md).
 
 ## The desk at a glance
 
