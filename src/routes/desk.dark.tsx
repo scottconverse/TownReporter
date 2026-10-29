@@ -1,7 +1,7 @@
 import { challengeInvestigation, retryDarkRound } from "@/components/scoped-actions";
 import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
-import { darkFileToOpen, fullFileQuestion } from "@/lib/news/dark-rail";
+import { darkFilePickIsFinal, darkFileToOpen, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -254,13 +254,18 @@ function DarkPage() {
     investigations.data?.length === 0 && !investigations.isPending && !investigations.isError,
   );
   // Open the most recently touched file once, when the list first arrives.
+  // A handoff can name a file newer than the shell's cached navigation list.
+  // Do not spend the one automatic pick on that stale list: wait until the
+  // requested row appears or a fetch made after this screen mounted proves it
+  // is absent, then choose the requested file or the ordinary fallback.
   const autoOpened = useRef(false);
   useEffect(() => {
     const rows = investigations.data;
     if (autoOpened.current || !rows?.length) return;
+    if (!darkFilePickIsFinal(rows, requestedOpenId.current, investigations.isFetchedAfterMount)) return;
     autoOpened.current = true;
     setOpenId((current) => darkFileToOpen(rows, current, requestedOpenId.current));
-  }, [investigations.data]);
+  }, [investigations.data, investigations.isFetchedAfterMount]);
 
   /*
     Which model digs (0.6.2).
