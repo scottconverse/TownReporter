@@ -1,6 +1,6 @@
 # Reading TownReporter
 
-For TownReporter 0.6.85. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
+For TownReporter 0.6.86. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
 ![The front page: the lead story, the This week box, the story grid and the Opinion panel](images/01-front-page.png)
 

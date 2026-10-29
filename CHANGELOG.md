@@ -1,8 +1,27 @@
 # Changelog
 
-Current software version: **0.6.85** (released 2026-10-28). Publication state is recorded by GitHub: [release v0.6.85](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.85).
+Current software version: **0.6.86** (released 2026-10-28). Publication state is recorded by GitHub: [release v0.6.86](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.86).
 
 ## Unreleased
+
+## 0.6.86 — 2026-10-28
+
+This release covers the two product changes after 0.6.85 (#339 and #340). The release guide is [docs/releases/0.6.86.md](docs/releases/0.6.86.md). Changes are grouped by area; the number after a change is the pull request that made it.
+
+### Desk
+
+- **A killed lead stays in place with its own Undo.** After fast Kill from the row **Kill** button, the **X** key, Today's row **Kill**, or bulk **Kill**, the row stays where it was and shows **Killed.**, the lead's headline and **Undo**. The row stays about 10 seconds, then leaves the list. Undo brings the lead back at once, the same as the bottom strip's Undo (#339).
+- **Bulk Kill keeps every row's Undo and the bottom strip.** Each killed row shows its own **Killed.** line with its own **Undo**. The **Lead killed.** strip and its **Undo** remain. Undo is at least 44 px tall on a phone, with no sideways scroll at 390 px (#339).
+- **The full Kill paths remain.** More -> **Kill with a reason** and the story page's **Kill this lead** dialog are unchanged (#339).
+
+### Dark Desk
+
+- **A new round uses the model in the file's picker.** After **Stop**, the round ends as **Cancelled by the editor** and **Keep investigating** works again. The next round starts on the model shown in **Digging model for this file** (#340).
+- **Retry uses the picker.** On a stopped round, **Retry** uses the model and thinking effort shown in the picker, not the stopped round's model. Its note names the queued model, for example **Retry queued on DeepSeek v4.1 Flash 1017.** **Retry on next model** is kept (#340).
+
+### Release check
+
+- The Test walks on 2026-10-28 passed: kill row, all kill doors, phone and Publish; Dark Desk Stop, Keep investigating, Retry after a model change, phone and Publish. The live paper received both changes on 2026-10-28.
 
 ## 0.6.85 — 2026-10-28
 

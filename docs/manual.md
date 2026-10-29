@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.85 · publication and deployment are recorded separately**
+**Version 0.6.86 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.85 release guide and evidence boundaries](releases/0.6.85.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.86 release guide and evidence boundaries](releases/0.6.86.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.85 does.**
+**What TownReporter 0.6.86 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads, spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.85](releases/0.6.85.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.86](releases/0.6.86.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -123,7 +123,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.85, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.86, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -241,7 +241,7 @@ Read it top to bottom:
 4. **Running now.** Cards for what is running, each with **Cancel** and an open button such as **Open your story** or **Open the scan**.
 5. **Tonight’s edition.** Stories that are through writing. Each row has the section, the headline and one chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**, **… Checking facts**, or **Writing · 2:18** / **Queued**. The button changes with the state: **Watch**, **Retry**, **Check**, **Continue**, **Start story**, **Review**. A story prints only when you press Publish on its page; this list prints nothing.
 6. **In progress.** Up to five stories you have started, each with **View progress** or **Open draft**. Nothing here prints until you press Publish.
-7. **New leads.** The best leads from the last finished scan, best first. Two buttons switch between **Open · N** and **Held · N**. Each row shows a score out of 20, chips, the headline, the why-line, evidence squares, the section and age. Buttons: **Start story** (S), **Hold** (H), **Kill** (X). A **Model for Start story** picker sits above the list. Kill shows one line, **Lead killed.**, with **Undo** for 8 seconds. Hold shows a message with **Undo**. A held lead shows **Release**; a killed lead shows **Undo**. **All leads in the Queue →** goes to the Queue.
+7. **New leads.** The best leads from the last finished scan, best first. Two buttons switch between **Open · N** and **Held · N**. Each row shows a score out of 20, chips, the headline, the why-line, evidence squares, the section and age. Buttons: **Start story** (S), **Hold** (H), **Kill** (X). A **Model for Start story** picker sits above the list. Kill keeps the row in place for about 10 seconds with **Killed.**, the headline and **Undo**; the bottom strip still says **Lead killed.** with **Undo**. Hold shows a message with **Undo**. A held lead shows **Release**; a killed lead shows **Undo**. **All leads in the Queue →** goes to the Queue.
 8. **The right rail.**
    - **AI follow-ups**: the latest findings, with **Review finding** and **All follow-ups**.
    - **Dark Desk**: counts of **Open files**, **Signals to review** and **Waiting on an AI follow-up**, and **Open Dark Desk →**.
@@ -406,7 +406,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 ### Kill, hold, release and bring back
 
-- **Kill** is one press. The lead moves to Killed and a small strip at the bottom says **Lead killed.** with **Undo** for 8 seconds. It shows no reason chips and does not move when the mouse is on it. On a phone it leaves a 16 px gap on each side. Kill is not delete: the lead stays under Killed.
+- **Kill** is one press. The lead moves to Killed, and its row stays in place for about 10 seconds with **Killed.**, the headline and **Undo**. A bulk Kill gives each killed row its own **Undo**. The bottom strip still says **Lead killed.** with **Undo**. It shows no reason chips and does not move when the mouse is on it. On a phone **Undo** is at least 44 px tall, with no sideways scroll at 390 px. Kill is not delete: the lead stays under Killed.
 - **Kill with a reason** (More ▾) and **Kill this lead** on the story page open the full **Kill this lead** dialog with quick fills (**Not news**, **Already printed**, **Outside our area**, **Bad source or unreadable**), your own words and an optional link. **Kill as duplicate** remains in the More ▾ menu.
 - **Hold with a reason** lets you say **Waiting on a record or date**, **Waiting on an AI follow-up** or **Not now, maybe later**, plus a note. A held lead waits under Held until you press **Release**.
 - If a lead has a draft or a published story, Kill and Hold warn first with **Kill anyway** or **Hold anyway**. The draft and the story are kept.
@@ -684,13 +684,13 @@ At the foot of the rail, **Check r/<name> for signals** reads the paper’s Redd
 Top to bottom:
 
 1. **The question** as a heading, and **More file actions**: **Set aside**, **Pull back** (on a closed file), **Start another AI follow-up**.
-2. The **ordinary explanation to rule out**, if you gave one, and the **Digging model for this file**. Changing it affects the next round; the file remembers the last model used.
-3. While a round runs, a card with four stages (**Question**, **Gather**, **Case file**, **Challenge**), a **Now:** line, and a red **Stop**. If the round fails you get **Retry** and **Retry on next model**.
+2. The **ordinary explanation to rule out**, if you gave one, and the **Digging model for this file**. Changing it affects the next round, including after **Stop** or **Retry**.
+3. While a round runs, a card with four stages (**Question**, **Gather**, **Case file**, **Challenge**), a **Now:** line, and a red **Stop**. **Stop** ends the round as **Cancelled by the editor**. When a round is stopped or fails, you get **Retry** and **Retry on next model**.
 4. Notes about the file: a round stopped by an app restart (nothing lost), a mostly-blocked warning (“This dig is mostly hitting walls…”), a batch stop (“Dark Desk opened a batch of records, then stopped so it would not run all night … That is normal — not an error”), or the reason a file is paused.
 5. Boxes **Scope**, **Depth** and **Limit**, read-only: the area searched, and the limit chosen at the start.
 6. **Activity** (time-stamped plain lines; **Show earlier**) beside the **Case file**: **Findings**, **Contradictions**, **Unanswered** and **AI follow-ups running**. A **More** link shows the brief — **Read this first**, **The hypothesis**, **What points at it**, **The boring explanation that also fits**, **What would settle it**, **Do this next** and a percent supported — with **Rewrite the brief**. **Challenge the case** has the desk argue against its own file; it needs at least one sourced finding.
 7. **Decide**:
-   - **Keep investigating** — start the next round. Dark Desk works in short batches and then stops. A stop with pages still unread is not a failure and not “too many leads”; press this to read the next batch. Lower-priority trails stay visible as deferred work and are picked up again when the active set is done.
+   - **Keep investigating** — start the next round on the model and thinking effort shown in **Digging model for this file**. Dark Desk works in short batches and then stops. A stop with pages still unread is not a failure and not “too many leads”; press this to read the next batch. Lower-priority trails stay visible as deferred work and are picked up again when the active set is done.
    - **Start an AI follow-up** — an agent keeps looking for an answer and reports on Follow-ups.
    - **Wait and watch** — pick captured public pages to watch; the file moves to Waiting.
    - **Send to the queue** — shows a packet for review (**Suggested headline**, **Evidence**, **Uncertainties**, **Contradictions**, **What would kill the story**); press **Send to the queue** to file a lead. An **Undo** is offered for ten seconds. Publication remains an editorial decision.
@@ -701,7 +701,7 @@ Do not send yourself to the public `/evidence/…` pages for unpublished capture
 
 ### Models and warnings on Dark Desk
 
-The **Digging model** picker is the shared picker (see [Models](#models)). Automatic here tries DeepSeek v4.1 Flash 1017, then a loaded Local model, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; if synthesis times out, only that stage moves on, and completed searches are not repeated. A model you name is tried first; a content refusal stops the run. If no model is ready, the round does not start and nothing is spent.
+The **Digging model** picker is the shared picker (see [Models](#models)). Automatic here tries DeepSeek v4.1 Flash 1017, then a loaded Local model, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5; if synthesis times out, only that stage moves on, and completed searches are not repeated. A model you name is tried first; a content refusal stops the run. If no model is ready, the round does not start and nothing is spent. After a stop, **Keep investigating** and **Retry** use the model and thinking effort currently shown in **Digging model for this file**. The retry note names the queued model, for example **Retry queued on DeepSeek v4.1 Flash 1017.** **Retry on next model** remains available.
 
 Warnings arrive as **Before you continue** with an “anyway” button: the paper is not set up (**Open this investigation anyway**), a round is running on another model (**Stop and restart with <model>**), or more than 8 rounds an hour (**Run anyway**). The Reddit check is capped at 6 an hour with no override.
 
@@ -969,10 +969,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.85 that is
-`TownReporter-0.6.85-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.86 that is
+`TownReporter-0.6.86-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.85
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.86
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need

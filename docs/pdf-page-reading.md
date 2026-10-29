@@ -1,6 +1,6 @@
 # Read retained PDF pages
 
-Introduced in [TownReporter 0.6.44](releases/0.6.44.md) and unchanged in 0.6.85. This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
+Introduced in [TownReporter 0.6.44](releases/0.6.44.md) and unchanged in 0.6.86. This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
 
 ## Use it from Dark Desk
 
