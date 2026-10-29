@@ -68,6 +68,7 @@ import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { DARK_OPEN_KEY, takeDarkFilePrefill, takeDarkSeed } from "@/lib/news/dark-seed";
+import { shouldRestartDarkRoundOnSelectedModel } from "./dark-use-selected-restart";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -468,6 +469,7 @@ function DarkPage() {
   */
   const [stopRequestedFor, setStopRequestedFor] = useState<number | null>(null);
   const [restartOnSelectedAfterStopFor, setRestartOnSelectedAfterStopFor] = useState<number | null>(null);
+  const restartedSelectedFor = useRef<number | null>(null);
   const stop = useMutation({
     mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
     onSuccess: () => {
@@ -481,6 +483,7 @@ function DarkPage() {
       // The press did not land, so the desk must stop claiming it did.
       setStopRequestedFor(null);
       setRestartOnSelectedAfterStopFor(null);
+      restartedSelectedFor.current = null;
       showNotice(msg, false);
     },
   });
@@ -519,14 +522,19 @@ function DarkPage() {
   */
   const retrySelectedRound = retrySelected.mutate;
   useEffect(() => {
-    if (
-      restartOnSelectedAfterStopFor == null ||
-      currentDarkJob?.id !== restartOnSelectedAfterStopFor ||
-      currentDarkJob.status !== "failed"
-    ) return;
+    const pendingJobId = restartOnSelectedAfterStopFor;
+    if (!shouldRestartDarkRoundOnSelectedModel(
+      pendingJobId,
+      currentDarkJob,
+      restartedSelectedFor.current === pendingJobId,
+    )) return;
+    // The stop can lose its race with a round that finishes first. The helper
+    // treats every finished state as the same safe restart point, and this ref
+    // makes the replacement launch exactly once even if another poll lands.
+    restartedSelectedFor.current = pendingJobId;
     setRestartOnSelectedAfterStopFor(null);
     retrySelectedRound();
-  }, [restartOnSelectedAfterStopFor, currentDarkJob?.id, currentDarkJob?.status, retrySelectedRound]);
+  }, [restartOnSelectedAfterStopFor, currentDarkJob, retrySelectedRound]);
 
   const advance = useMutation({
     mutationFn: (id: number) => {
@@ -1325,6 +1333,7 @@ function DarkPage() {
               onUseSelectedModel={() => {
                 if (currentDarkJob?.id == null) return;
                 setNotice(null);
+                restartedSelectedFor.current = null;
                 setRestartOnSelectedAfterStopFor(currentDarkJob.id);
                 setStopRequestedFor(currentDarkJob.id);
                 stop.mutate(currentDarkJob.id);

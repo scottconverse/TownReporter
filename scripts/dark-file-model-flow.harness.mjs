@@ -78,6 +78,7 @@ const nullComponents = stub(`import { createElement } from "react"; export const
 const { ModelPicker: RealPicker } = await import("./model-picker-render.harness.mjs");
 const imports = {
   "@/lib/news/dark-screen-copy": await moduleUrl("src/lib/news/dark-screen-copy.ts"),
+  "./dark-use-selected-restart": await moduleUrl("src/routes/dark-use-selected-restart.ts"),
   "@/lib/news/dark-rail": darkRailStub,
   "@tanstack/react-router": routerStub,
   "@tanstack/react-query": queryStub,

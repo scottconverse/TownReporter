@@ -88,7 +88,7 @@ test("Retry sends the file picker's model to a stopped round", async () => {
 });
 
 
-test("Use selected model stops a running round and restarts on the picker model", async () => {
+test("Use selected model restarts on the picker model when the round completes first", async () => {
   calls.keep.length = 0;
   calls.retry.length = 0;
   calls.stop.length = 0;
@@ -122,11 +122,13 @@ test("Use selected model stops a running round and restarts on the picker model"
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepEqual(calls.stop, [{ jobId: 487 }]);
 
-    detail.darkJob = { id: 487, status: "failed", stage: "Cancelled", error: "Cancelled by the editor" };
+    // The stop request can arrive after the round has already finished. A
+    // completed old job is still a safe point to launch its replacement.
+    detail.darkJob = { id: 487, status: "completed", stage: "Done", error: null };
     globalThis.__darkFlow.fixtures.jobs = [{
       ...globalThis.__darkFlow.fixtures.jobs[0],
-      status: "failed",
-      error: "Cancelled by the editor",
+      status: "completed",
+      error: null,
       cancelRequested: true,
     }];
     await React.act(async () => root.render(h(Route.component)));

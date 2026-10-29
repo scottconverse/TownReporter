@@ -2991,7 +2991,15 @@ export async function retryDarkRoundFor(
   `;
   const job = rows[0];
   if (!job) return { ok: false as const, error: "Research round not found." };
-  if (job.status !== "failed") return { ok: false as const, error: "Only a stopped round can be retried." };
+  // Retry itself remains a stopped-round action. "Use selected model" is
+  // different: it may race with a round that reaches completed (or another
+  // terminal state) after the stop press, so its explicit picker choice is the
+  // signal that any finished selected job is safe to replace.
+  const restartFinishedWithSelected =
+    Boolean(modelChoice) && ["failed", "stopped", "cancelled", "completed"].includes(job.status);
+  if (job.status !== "failed" && !restartFinishedWithSelected) {
+    return { ok: false as const, error: "Only a stopped round can be retried." };
+  }
   const file = await sql<{ status: string }>`
     select status from investigations where id = ${job.subject_id} and newsroom_id = ${owned(context)} limit 1
   `;
