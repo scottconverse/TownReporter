@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.85](docs/releases/0.6.85.md)** (2026-10-28). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.85) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.6.86](docs/releases/0.6.86.md)** (2026-10-28). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.86) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,13 +14,17 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.6.85
+## What is new in 0.6.86
 
-Two pull requests since 0.6.84. The short list; the long list is in the [changelog](CHANGELOG.md#0685--2026-10-28) and the [release guide](docs/releases/0.6.85.md).
+Two pull requests since 0.6.85. The short list; the long list is in the [changelog](CHANGELOG.md#0686--2026-10-28) and the [release guide](docs/releases/0.6.86.md).
 
-- **The AI finds duplicate leads itself.** When the word rule finds nothing, one extra model call per scan batch checks recent desk leads, printed stories and earlier leads in the same scan. An AI duplicate never lands in Open: it comes back on the old lead, is merged, or is filed as Held.
-- **Fast Kill is a small Undo strip.** The row Kill button, X key and Today row Kill show **Lead killed.** with **Undo** for 8 seconds, with no reason chips. Bulk Kill kills at once and shows **Killed N leads.** with **Undo**. The full **Kill this lead** dialog remains under **Kill with a reason**, and on the story page.
-- `ops/promote.ps1` no longer crashes while writing its verify log.
+- **Killed. Undo on the lead's own row.** After fast Kill, the row stays in place for about 10 seconds with **Killed.**, its headline and **Undo**. Bulk Kill gives every row its own Undo, and the bottom **Lead killed.** strip stays. The button is full-size on a phone, with no sideways scroll at 390 px.
+- **Dark Desk uses the file's picked model for the next round.** After **Stop**, **Keep investigating** and **Retry** start on the model and thinking effort shown in **Digging model for this file**. The retry note names the queued model. **Retry on next model** is kept.
+- The 2026-10-28 Test walks passed both changes, phone and Publish. The live paper received both on 2026-10-28.
+
+## What was new in 0.6.85
+
+The 0.6.85 change is kept in the [changelog](CHANGELOG.md#0685--2026-10-28) and the [release guide](docs/releases/0.6.85.md). It added duplicate detection and a fast-Kill Undo strip; `ops/promote.ps1` also stopped crashing while writing its verify log.
 
 ---
 
@@ -218,7 +222,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.85](docs/releases/0.6.85.md)           |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.86](docs/releases/0.6.86.md)           |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -232,9 +236,9 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.85](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.85) carries three files: `TownReporter-0.6.85-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.86](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.86) carries three files: `TownReporter-0.6.86-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
-CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.85, and no fresh-machine human acceptance of it is claimed here.
+CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.86, and no fresh-machine human acceptance of it is claimed here.
 
 Follow the [Windows installation guide](docs/windows-install.md) for setup, start and stop, private data and troubleshooting. Public hosting and AI provider setup are separate from local installation.
 
@@ -509,7 +513,8 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-- **[0.6.85](docs/releases/0.6.85.md)** (2026-10-28), the current version. The AI finds duplicate leads itself, and fast Kill is a small Undo strip with no reason chips. `ops/promote.ps1` no longer crashes while writing its verify log.
+- **[0.6.86](docs/releases/0.6.86.md)** (2026-10-28), the current version. A killed lead stays in its row with **Killed.** and **Undo** for about 10 seconds, while the bottom strip remains. Dark Desk **Keep investigating** and **Retry** use the model and thinking effort in the file's picker after a stop or model change.
+- **[0.6.85](docs/releases/0.6.85.md)** (2026-10-28). Duplicate detection and a fast-Kill Undo strip; `ops/promote.ps1` no longer crashes while writing its verify log.
 - **[0.6.84](docs/releases/0.6.84.md)** (2026-10-27). One shared model picker and the Automatic ladder (DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Claude Sonnet 5.5); Find evidence and search by meaning on the editor desk; the Today in town list; warn-never-block with audited "anyway" buttons; a rebuilt Dark Desk; newsletters; Excel, PowerPoint and LibreOffice reading; three-day backups on D: from the ops script.
 - **[0.6.83](docs/releases/0.6.83.md)** (2026-10-06). Assignment-scoped reporting packages, private evidence review, sourced corrections and targeted follow-ups, whole-meeting coverage with an action ledger, and reviewable source discovery.
 - **[0.6.82](docs/releases/0.6.82.md)** (2026-09-28). Fixes from the 0.6.81 live walk.

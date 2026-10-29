@@ -1,6 +1,6 @@
 # Stats and saved reports
 
-**Status:** shipped since 0.6.73 and part of 0.6.85. The server checks for
+**Status:** shipped since 0.6.73 and part of 0.6.86. The server checks for
 new reports from its own clock (see below); the hourly task is
 `tickStatsReports` in `src/lib/news/stats-reports.server.ts`.
 
