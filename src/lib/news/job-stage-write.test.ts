@@ -88,7 +88,7 @@ describe("a stage boundary on a job that has a stage list", () => {
       "This round moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash 1017 timed out",
     );
     const [row] = await sql<DeskJob>`select * from desk_jobs where id = ${job.id}`;
-    assert.equal(row!.step_text, "Waiting on Codex Sol 6.1 (balanced) · 12s");
+    assert.equal(row!.step_text, "Waiting on Codex Sol 6.1 · 12s");
     assert.match(row!.failover_note, /^This round moved to Codex Sol 6\.1/);
     await sql`delete from desk_jobs where id = ${job.id}`;
   });

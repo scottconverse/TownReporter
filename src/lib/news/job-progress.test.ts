@@ -70,12 +70,12 @@ describe("structured job progress", () => {
     const sql = await getSql();
     const id = freshSubject();
     const job = await enqueueDraft("progress-fields", id);
-    // A claimed job whose worker last spoke 90s ago: stalled by the rule below.
+    // A claimed job whose worker last spoke 200s ago: past the 150 s stall line.
     // `running` because that is the state a claim produces, and the one the
     // stall rule applies to.
     await sql`
       update desk_jobs
-      set status = 'running', beat_at = now() - make_interval(secs => 90),
+      set status = 'running', beat_at = now() - make_interval(secs => 200),
           pct = 7, stage_index = 3, step_text = 'an older sentence'
       where id = ${job.id} and newsroom_id = ${NEWSROOM}
     `;
