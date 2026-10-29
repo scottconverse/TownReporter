@@ -6,8 +6,11 @@ import { grokChat, type GrokChatAdapters } from "./ai.ts";
 import { claudeCodeChat, resetClaudeCliCache } from "./ai-claude-code.server.ts";
 import { darkFailoverEffort, darkVerificationTimeoutMs } from "./dark.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
-import { modelChoiceLabel } from "./model-choice.ts";
-import { modelEffort as validatedModelEffort } from "./provider-registry.ts";
+import { modelChoiceLabel, type EffectiveStoryModelChoice } from "./model-choice.ts";
+import { modelEffort as validatedModelEffort, type ModelEffort } from "./provider-registry.ts";
+
+type RunSnapshot = { modelChoice: EffectiveStoryModelChoice; modelEffort: ModelEffort | null };
+type ChatResult = Awaited<ReturnType<typeof grokChat>>;
 
 const DEEPSEEK_MODEL = "deepseek-v4.1-flash:1017-cloud";
 const fake = fileURLToPath(new URL("../../../scripts/fakes/fake-deepseek-claude-cli.mjs", import.meta.url));
@@ -81,13 +84,13 @@ it("a Dark failover to DeepSeek uses the same runtime as a direct DeepSeek pick"
       }, adapters);
       assert.equal(direct.ok, true);
 
-      const attempted = await runPinnedCallWithFailover({
+      const attempted = await runPinnedCallWithFailover<RunSnapshot, ChatResult>({
         snapshot: { modelChoice: "claude-frontier", modelEffort: "high" },
         source: "editor",
         ladder: ["deepseek-flash", "qwen-local"],
         run: async (snapshot) => {
           if (snapshot.modelChoice === "claude-frontier") {
-            return { ok: false as const, error: "Claude Code request timed out after 45s, 0 bytes out" };
+            return { ok: false, error: "Claude Code request timed out after 45s, 0 bytes out" } as ChatResult;
           }
           return grokChat("S", "U", 10, {
             choice: snapshot.modelChoice,
