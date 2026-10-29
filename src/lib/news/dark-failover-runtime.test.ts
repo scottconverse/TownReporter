@@ -64,6 +64,9 @@ it("a Dark failover to DeepSeek uses the same runtime as a direct DeepSeek pick"
   };
   try {
     await withEnv({
+      // CI disables this provider globally to prevent real calls. This test
+      // supplies its own fake CLI and must leave the DeepSeek rung enabled.
+      TOWNREPORTER_CLAUDE_CODE: "1",
       CLAUDE_CLI_PATH: fake,
       FAKE_D153_RELAY: "1",
       FAKE_D153_EXPECTED_TOKEN: "fixture-rung",
@@ -77,6 +80,7 @@ it("a Dark failover to DeepSeek uses the same runtime as a direct DeepSeek pick"
       TOWNREPORTER_DEEPSEEK_MODEL: DEEPSEEK_MODEL,
     }, async () => {
       const directEffort = validatedModelEffort("deepseek-flash", null);
+      assert.equal(directEffort, "none");
       const direct = await grokChat("S", "U", 10, {
         choice: "deepseek-flash",
         reasoningEffort: directEffort,
@@ -112,9 +116,9 @@ it("a Dark failover to DeepSeek uses the same runtime as a direct DeepSeek pick"
       assert.equal(attempted.result.ok, true);
 
       assert.equal(calls.length, 2);
-      assert.equal(calls[1]!.model, calls[0]!.model);
+      assert.deepEqual(calls.map((call) => call.model), [DEEPSEEK_MODEL, DEEPSEEK_MODEL]);
       assert.equal(new URL(calls[1]!.deepSeek!.baseUrl).origin, new URL(calls[0]!.deepSeek!.baseUrl).origin);
-      assert.equal(calls[1]!.deepSeek!.effort, calls[0]!.deepSeek!.effort);
+      assert.deepEqual(calls.map((call) => call.deepSeek!.effort), ["none", "none"]);
       assert.equal(calls[1]!.timeoutMs, calls[0]!.timeoutMs);
       assert.equal(calls[1]!.timeoutMs, darkVerificationTimeoutMs("deepseek-flash", {}));
 
