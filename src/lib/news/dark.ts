@@ -3626,6 +3626,11 @@ export async function performDarkRound(job: DeskJob) {
             jobs on the desk.
           */
           onStage: (stage, pct) => reportRound(stage, pct),
+          onLongOperation: (label, run) => waitForModel({
+            jobId: job.id,
+            label,
+            run,
+          }),
           reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
           // Unit U25, B4: the editor's Stop, read fresh at each hop and each
           // search. Before this a dig could only end at its own hop, time or
@@ -3639,20 +3644,24 @@ export async function performDarkRound(job: DeskJob) {
       await throwIfJobCancelled(job.id);
       await reportRound("Synthesizing signals", 45);
       await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
-      return synthesizeSignals(
-        context.userId,
-        runId,
-        id,
-        "",
-        dials,
-        on,
-        overrides,
-        owned(context),
-        snapshot.preferences,
-        runBudget,
-        saveUsage,
-        effortForChoice(on, modelEffort),
-      );
+      return waitForModel({
+        jobId: job.id,
+        label: () => `Synthesizing signals with ${modelChoiceLabel(on)}`,
+        run: () => synthesizeSignals(
+          context.userId,
+          runId,
+          id,
+          "",
+          dials,
+          on,
+          overrides,
+          owned(context),
+          snapshot.preferences,
+          runBudget,
+          saveUsage,
+          effortForChoice(on, modelEffort),
+        ),
+      });
     };
 
     await reportRound("Researching the file");

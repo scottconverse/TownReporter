@@ -824,6 +824,34 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
     assert.deepEqual(JSON.parse(row.queries_tried), [], "pending planner actions are not searches already tried");
   });
 
+  it("routes every slow research operation through one progress seam", async () => {
+    const user = `loop-long-operation-${Date.now()}`;
+    const { id } = await bootInv(user, "Long operation progress");
+    const labels: string[] = [];
+    await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 1,
+      planner: async () => ({
+        ...emptyPlan(),
+        searches: ["Longmont water report"],
+        fetch_urls: [PAGE_A],
+      }),
+      search: async () => [],
+      fetch: fetchDoc,
+      archives: async () => [],
+      onLongOperation: async (label, run) => {
+        labels.push(label);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return run();
+      },
+    });
+    assert.ok(labels.includes("Planning hop 1/1"), labels.join(" | "));
+    assert.ok(labels.includes("Searching 1/1 on hop 1"), labels.join(" | "));
+    assert.ok(labels.includes("Reading page 1 of 4 on hop 1"), labels.join(" | "));
+    assert.ok(labels.includes("Saving page 1 of 4 on hop 1"), labels.join(" | "));
+  });
+
   it("merges later planner frontier queries into an existing row without falsely trying them", async () => {
     const user = `loop-pending-existing-${Date.now()}`;
     const { sql, id } = await bootInv(user, "Avery Candidate records");

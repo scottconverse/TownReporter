@@ -1038,7 +1038,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
    */
   const beat = setInterval(() => {
     void sql`
-      update desk_jobs set updated_at = now(), beat_at = now()
+      update desk_jobs set updated_at = now()
       where id = ${job.id} and claim_token = ${token}
     `.catch(() => undefined);
   }, HEARTBEAT_MS);
