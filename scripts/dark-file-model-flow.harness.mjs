@@ -126,7 +126,7 @@ const imports = {
   "@/components/follow-up-dialog": nullComponents,
   "@/lib/news/desk": stub(`export const createAiFollowUp = async () => ({ ok: true }); export const listFollowUpStoryOptions = async () => [];`),
   "@/lib/news/page-watch-actions": stub(`export const checkPageWatch = async () => ({ ok: true }); export const createPageWatch = async () => ({ ok: true, id: 1 });`),
-  "@/lib/news/model-choice": stub(`export const darkModelChoice = (v) => v === "codex-sol" || v === "claude-sonnet" || v === "claude-haiku" ? v : "auto"; export const modelChoiceLabel = () => "Automatic"; export const shouldHydrateDarkModel = (selected, id, last, status) => selected === id && (last != null || status !== "investigating");`),
+  "@/lib/news/model-choice": stub(`export const darkModelChoice = (v) => v === "codex-sol" || v === "claude-sonnet" || v === "claude-haiku" ? v : "auto"; export const modelChoiceLabel = () => "Automatic"; export const ocrReaderModelChoice = (v) => v === "deepseek-flash" ? { choice: "auto", fallbackFrom: v, note: "DeepSeek cannot read page images. Automatic will be used." } : { choice: v, fallbackFrom: null, note: null }; export const shouldHydrateDarkModel = (selected, id, last, status) => selected === id && (last != null || status !== "investigating");`),
   "@/lib/news/provider-registry": stub(`export const defaultModelEffort = () => null; export const modelEffort = (_choice, effort) => effort ?? null;`),
 };
 const routeUrl = await (async () => {

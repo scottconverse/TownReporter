@@ -81,6 +81,7 @@ import { checkPageWatch, createPageWatch } from "@/lib/news/page-watch-actions";
 import {
   darkModelChoice,
   modelChoiceLabel,
+  ocrReaderModelChoice,
   shouldHydrateDarkModel,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
@@ -278,8 +279,6 @@ function DarkPage() {
     touched: modelChoiceTouched,
     assignment: darkAssignment,
   } = useDarkModelChoice();
-  const ocrModelChoice = useFirstRunPickerDefault("ocr") ?? "auto";
-  const ocrModelEffort = defaultModelEffort(ocrModelChoice);
   const darkDefaultModel = useFirstRunPickerDefault("dark");
   useFirstRunPickerSeed({
     surface: "dark",
@@ -1352,8 +1351,6 @@ function DarkPage() {
                 fileModelTouchedFor.current = openId;
                 setModelEffort(effort);
               }}
-              ocrModelChoice={ocrModelChoice}
-              ocrModelEffort={ocrModelEffort}
             />
           ) : null}
 
@@ -1645,8 +1642,6 @@ function InvestigationWorkspace({
   onModelChoice,
   modelEffort,
   onModelEffort,
-  ocrModelChoice,
-  ocrModelEffort,
 }: {
   openId: number;
   onOpenFile: () => void;
@@ -1685,8 +1680,6 @@ function InvestigationWorkspace({
   onModelChoice: (choice: StoryModelChoice) => void;
   modelEffort: ModelEffort | null;
   onModelEffort: (effort: ModelEffort | null) => void;
-  ocrModelChoice: StoryModelChoice;
-  ocrModelEffort: ModelEffort | null;
 }) {
   const { formatListDateTime, formatListDate, formatClockTime } = usePaperDateFormatters();
   const qc = useQueryClient();
@@ -2389,8 +2382,8 @@ function InvestigationWorkspace({
         {artifacts.length > 0 ? (
           <OpenedRecords
             artifacts={artifacts}
-            modelChoice={ocrModelChoice}
-            modelEffort={ocrModelEffort}
+            modelChoice={modelChoice}
+            modelEffort={modelEffort}
           />
         ) : digging ? (
           <p className="meta">Opening pages now. They land on the file as they are read…</p>
@@ -2740,6 +2733,27 @@ function OpenedRecords({
   const selected = ordered.find((a) => a.id === openId) ?? ordered[0];
   const idx = selected ? ordered.findIndex((a) => a.id === selected.id) : -1;
   /*
+    The reader has its own picker, but its default is the open file's picker.
+    Until the editor touches the reader, follow that file choice and effort as
+    the file screen hydrates. A text-only file model is named in the fallback
+    warning, while the picker and job receipt show Automatic, which is the
+    model path that actually runs.
+  */
+  const [readerPick, setReaderPick] = useState<{
+    choice: StoryModelChoice;
+    effort: ModelEffort | null;
+  }>(() => ({ choice: modelChoice, effort: modelEffort }));
+  const readerTouchedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (readerTouchedFor.current === selected?.id) return;
+    setReaderPick({ choice: modelChoice, effort: modelEffort });
+  }, [selected?.id, modelChoice, modelEffort]);
+  const readerModel = ocrReaderModelChoice(readerPick.choice);
+  const ocrModelChoice = readerModel.choice;
+  const ocrModelEffort = readerModel.choice === readerPick.choice
+    ? readerPick.effort
+    : defaultModelEffort(readerModel.choice);
+  /*
     FB7, item 2. The retained-PDF read's own card, for THIS capture.
 
     An `artifact-ocr` job's subject is the ARTIFACT, not the file, so this is
@@ -2907,6 +2921,23 @@ function OpenedRecords({
             </button>
           </p>
           {body.data?.retained_pdf ? <>
+          <ModelPicker
+            scope="ocr"
+            label="PDF reader model"
+            layout="stacked"
+            value={ocrModelChoice}
+            onChange={(choice) => {
+              readerTouchedFor.current = selected.id;
+              setReaderPick({ choice, effort: defaultModelEffort(choice) });
+            }}
+            effort={ocrModelEffort}
+            onEffortChange={(effort) => {
+              readerTouchedFor.current = selected.id;
+              setReaderPick((current) => ({ ...current, effort }));
+            }}
+            showSelectedValue
+          />
+          {readerModel.note ? <p className="note" role="status">{readerModel.note}</p> : null}
           <form
             className="read-acts"
             onSubmit={(event) => {
@@ -2946,7 +2977,7 @@ function OpenedRecords({
             >
               Read entire PDF
             </button>
-            <span className="np-meta">Uses {modelChoiceLabel(modelChoice, "forced")} · the entire packet is saved in batches of up to 12 pages · original retained PDF only</span>
+            <span className="np-meta">Uses {modelChoiceLabel(ocrModelChoice, "ocr")} · the entire packet is saved in batches of up to 12 pages · original retained PDF only</span>
           </form>
           </> : null}
           {ocrJob ? (
