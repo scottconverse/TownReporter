@@ -1,7 +1,7 @@
 import { challengeInvestigation, retryDarkRound } from "@/components/scoped-actions";
 import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
-import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
+import { darkFileToOpen, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -257,11 +257,7 @@ function DarkPage() {
     const rows = investigations.data;
     if (autoOpened.current || !rows?.length) return;
     autoOpened.current = true;
-    setOpenId((current) => {
-      if (current != null && rows.some((row) => row.id === current)) return current;
-      const handedOff = rows.find((row) => row.id === requestedOpenId.current);
-      return handedOff?.id ?? newestTouchedFile(rows)?.id ?? null;
-    });
+    setOpenId((current) => darkFileToOpen(rows, current, requestedOpenId.current));
   }, [investigations.data]);
 
   /*
