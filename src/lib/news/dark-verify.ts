@@ -113,6 +113,7 @@ export async function verifyRunSignals(opts: {
   runBudget?: DarkRunBudget;
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
   onStage?: (stage: string) => Promise<unknown>;
+  onModelCall?: () => Promise<unknown>;
   reasoningEffort?: ModelEffort | null;
 }): Promise<{
   eligible: number | null;
@@ -123,6 +124,7 @@ export async function verifyRunSignals(opts: {
   unverified: number;
   searches: AdversarialRecord[];
   summary: string;
+  modelRan: boolean;
 }> {
   const sql = await getSql();
   const official = opts.officialDomains ?? [];
@@ -187,6 +189,7 @@ export async function verifyRunSignals(opts: {
       searches: [],
       summary:
         "Verification could not read the signals. No verification result was established; retry the round.",
+      modelRan: false,
     };
 
   if (rows.length === 0 && opts.caseBrief) {
@@ -230,6 +233,7 @@ export async function verifyRunSignals(opts: {
   const limit = opts.preferences?.verificationLimit ?? VERIFY_PER_ROUND;
   const selected = rows.slice(0, limit);
   let deferred = rows.length - selected.length;
+  let modelRan = false;
 
   signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
     const sig = selected[signalIndex]!;
@@ -482,6 +486,8 @@ export async function verifyRunSignals(opts: {
       break;
     }
     if (modelCall) await opts.onUsage?.(opts.runBudget!.snapshot());
+    modelRan = true;
+    await opts.onModelCall?.();
     try {
       if (opts.deps?.model) {
         text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack, opts.reasoningEffort);
@@ -617,5 +623,6 @@ export async function verifyRunSignals(opts: {
         ? ` ${unsaved} review result(s) could not be saved; retry the review.`
         : "") +
       (!runSaved ? " The round search summary could not be saved." : ""),
+    modelRan,
   };
 }
