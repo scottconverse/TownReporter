@@ -37,7 +37,7 @@ it("stores a challenge result beside its file and job", async () => {
     }),
     verify: async (options) => {
       verifiedRunId = options.runId;
-      return expected;
+      return { ...expected, modelRan: true };
     },
   });
   const rows = await sql<{
@@ -175,7 +175,7 @@ it("challenges the prior findings with the challenge job's model", async () => {
     readPlace: async () => ({ place: { city: "Longmont", state: "Colorado", county: null }, official: [], press: [] }),
     verify: async (options) => {
       choice = options.choice;
-      return { checked: 0, eligible: 0, deferred: 0, failed: 0, verified: 0, unverified: 0, searches: [], summary: "Saved" };
+      return { checked: 0, eligible: 0, deferred: 0, failed: 0, verified: 0, unverified: 0, searches: [], summary: "Saved", modelRan: true };
     },
   });
   assert.equal(choice, "codex-balanced");
@@ -185,6 +185,52 @@ it("challenges the prior findings with the challenge job's model", async () => {
   const runtime = JSON.parse(receipt?.result_json ?? "{}") as Record<string, unknown>;
   assert.equal(runtime.actualRuntime, "codex-balanced");
   assert.equal("actualModelId" in runtime, false, "verifyRunSignals reports no served model id");
+});
+
+// guards: a challenge with a saved run but no eligible signal must not claim a model ran
+it("records no runtime when verification finds no eligible signals", async () => {
+  const sql = await getSql();
+  const job = await enqueueJob({
+    userId: "challenge-no-signals",
+    newsroomId: 98128,
+    kind: "challenge",
+    subjectId: 726,
+    modelChoice: "deepseek-flash",
+    kick: false,
+  });
+  await sql`
+    insert into dark_runs (user_id, newsroom_id, investigation_id, model_choice)
+    values ('challenge-no-signals', 98128, 726, 'deepseek-flash')
+  `;
+  let modelCalls = 0;
+  await performChallengeWork(job, {
+    readPlace: async () => ({
+      place: { city: "Longmont", state: "Colorado", county: null },
+      official: [],
+      press: [],
+    }),
+    verify: async (options) => verifyRunSignals({
+      ...options,
+      deps: {
+        search: async () => [],
+        model: async () => {
+          modelCalls += 1;
+          return null;
+        },
+      },
+    }),
+  });
+  assert.equal(modelCalls, 0, "a round with no eligible signal must not call a model");
+  const [receipt] = await sql<{ result_json: string }>`
+    select result_json from desk_jobs where id = ${job.id}
+  `;
+  const jobReceipt = JSON.parse(receipt?.result_json ?? "{}") as Record<string, unknown>;
+  assert.equal("actualRuntime" in jobReceipt, false);
+  assert.equal(jobReceipt.noModelRan, true);
+  const [storedJob] = await sql<DeskJob>`
+    select * from desk_jobs where id = ${job.id}
+  `;
+  assert.equal(jobProgressView(storedJob!, 0, null).noModelRan, true);
 });
 
 // guards: a challenge with nothing saved to challenge must not claim that a model ran

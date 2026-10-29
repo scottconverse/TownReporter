@@ -2319,6 +2319,33 @@ async function runVerificationStage(
     return out.summary;
 }
 
+async function recordChallengeModelRuntime(
+  jobId: number,
+  choice: EffectiveProviderChoice,
+  modelEffort: ModelEffort | null,
+) {
+  await setJobModelRuntime(jobId, choice, modelEffort);
+  const sql = await getSql();
+  await sql`
+    update desk_jobs
+    set result_json = ((coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb) - 'noModelRan'))::text,
+        updated_at = now()
+    where id = ${jobId}
+  `;
+}
+
+async function recordChallengeNoModelRan(jobId: number) {
+  const sql = await getSql();
+  await sql`
+    update desk_jobs
+    set result_json = ((
+      coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb) - 'actualRuntime'
+    ) || ${JSON.stringify({ noModelRan: true })}::jsonb)::text,
+        updated_at = now()
+    where id = ${jobId}
+  `;
+}
+
 export async function performChallengeWork(
   job: DeskJob,
   deps: { verify?: typeof verifyRunSignals; readPlace?: typeof readDarkPlace } = {},
@@ -2365,6 +2392,8 @@ export async function performChallengeWork(
   }
   const report = progressReporterFor(job);
   await report("Challenging the case", pctFor(0, 1));
+  const modelEffort = savedJobEffort(job);
+  let modelRuntimeRecorded = false;
   let result: Awaited<ReturnType<typeof verifyRunSignals>> = {
     checked: 0,
     eligible: 0,
@@ -2376,55 +2405,52 @@ export async function performChallengeWork(
     summary: caseBrief
       ? "The saved case brief was challenged."
       : "No saved case brief or research round to challenge.",
+    modelRan: false,
   };
   if (run || caseBrief) {
     const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
     const verify = deps.verify ?? verifyRunSignals;
-    const modelEffort = savedJobEffort(job);
     result = await waitForModel({
       jobId: job.id,
       label: () => modelChoiceLabel(choice),
-      run: async () => {
-        // The challenge can be created from a saved run, but the model call is
-        // made now by this job. Record that actual runtime before asking it.
-        await setJobModelRuntime(job.id, choice, modelEffort);
-        return verify({
-          userId: job.user_id,
-          newsroomId: job.newsroom_id,
-          runId: run?.id ?? null,
-          investigationId,
-          caseBrief,
-          place: place.place,
-          officialDomains: place.official,
-          pressDomains: place.press,
-          choice,
-          overrides,
-          preferences,
-          reasoningEffort: modelEffort,
-        });
-      },
+      run: () => verify({
+        userId: job.user_id,
+        newsroomId: job.newsroom_id,
+        runId: run?.id ?? null,
+        investigationId,
+        caseBrief,
+        place: place.place,
+        officialDomains: place.official,
+        pressDomains: place.press,
+        choice,
+        overrides,
+        preferences,
+        reasoningEffort: modelEffort,
+        onModelCall: async () => {
+          await recordChallengeModelRuntime(job.id, choice, modelEffort);
+          modelRuntimeRecorded = true;
+        },
+      }),
     });
+  }
+  if (result.modelRan) {
+    if (!modelRuntimeRecorded) {
+      await recordChallengeModelRuntime(job.id, choice, modelEffort);
+    }
   } else {
-    // This branch writes the empty challenge summary without asking a model.
-    // Record that fact on the job itself so the card cannot name a model that
-    // never ran; `setJobModelRuntime` is deliberately not called here.
-    await sql`
-      update desk_jobs
-      set result_json = (
-        coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb)
-        || ${JSON.stringify({ noModelRan: true })}::jsonb
-      )::text,
-      updated_at = now()
-      where id = ${job.id}
-    `;
+    // `verifyRunSignals` only sets modelRan after a call is admitted. A round
+    // with no selected signal, an unreadable signal query, or a search/model
+    // budget stop therefore clears any stale runtime and says no model ran.
+    await recordChallengeNoModelRan(job.id);
   }
   await throwIfJobCancelled(job.id);
+  const { modelRan: _modelRan, ...challengeResult } = result;
   await sql`
     insert into investigation_challenges (
       newsroom_id, investigation_id, job_id, run_id, summary, result_json
     ) values (
       ${job.newsroom_id}, ${investigationId}, ${job.id}, ${run?.id ?? null},
-      ${result.summary.slice(0, 4000)}, ${JSON.stringify(result)}
+      ${result.summary.slice(0, 4000)}, ${JSON.stringify(challengeResult)}
     )
     on conflict (newsroom_id, job_id) do update set
       run_id = excluded.run_id, summary = excluded.summary,
