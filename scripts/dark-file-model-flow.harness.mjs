@@ -47,7 +47,7 @@ const darkStub = stub(`
   export const parkInvestigation = async () => ({ ok: true }); export const queueInvestigation = async () => ({ ok: true });
   export const queuePacket = async () => null; export const closeInvestigation = async () => ({ ok: true });
   export const queueArtifactOcr = async () => ({ ok: true }); export const refreshBrief = async () => ({ ok: true });
-  export const reopenParkedInvestigation = async () => ({ ok: true }); export const retryDarkRound = async ({ data }) => { globalThis.__darkFlow.calls.retry.push(data); return { ok: true, model: "DeepSeek v4.1 Flash 1017" }; };
+  export const reopenParkedInvestigation = async () => ({ ok: true }); export const previewNextDarkRoundModel = async () => null; export const retryDarkRound = async ({ data }) => { globalThis.__darkFlow.calls.retry.push(data); return { ok: true, model: "DeepSeek v4.1 Flash 1017" }; };
   export const scanTipSubreddit = async () => ({ ok: true }); export const getTipSubreddit = async () => ({ subreddit: "longmont" });
 `);
 const copyStub = stub(`
@@ -82,6 +82,7 @@ const imports = {
   "./dark-use-selected-restart": await moduleUrl("src/routes/dark-use-selected-restart.ts"),
   "@/lib/news/dark-rail": darkRailStub,
   "@/lib/news/dark-closed-file": await moduleUrl("src/lib/news/dark-closed-file.ts"),
+  "@/lib/news/dark-card-behavior": stub(`export const darkInvestigationPollMs = () => false; export const darkJobStepLine = (value) => String(value ?? ""); export const darkRestartNoteVisible = () => false;`),
   "@tanstack/react-router": routerStub,
   "@tanstack/react-query": queryStub,
   "@/components/desk-chrome": chromeStub,

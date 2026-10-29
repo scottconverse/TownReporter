@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
 import { darkFilePickIsFinal, darkFileToOpen, fullFileQuestion } from "@/lib/news/dark-rail";
 import { darkDecidePanelChoice } from "@/lib/news/dark-closed-file";
+import { darkInvestigationPollMs, darkJobStepLine, darkRestartNoteVisible } from "@/lib/news/dark-card-behavior";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { fileRedditTip, getInvestigation, getArtifact, getArtifactOcrJob, listInvestigations, listWorthALook, parkInvestigation, queuePacket, closeInvestigation, queueArtifactOcr, reopenParkedInvestigation, getTipSubreddit, investigationActivity, type InvestigationQueuePacket, type InvestigationRow } from "@/lib/news/dark";
+import { fileRedditTip, getInvestigation, getArtifact, getArtifactOcrJob, listInvestigations, listWorthALook, parkInvestigation, previewNextDarkRoundModel, queuePacket, closeInvestigation, queueArtifactOcr, reopenParkedInvestigation, getTipSubreddit, investigationActivity, type InvestigationQueuePacket, type InvestigationRow } from "@/lib/news/dark";
 import {
   refreshBrief,
   continueInvestigation,
@@ -249,6 +250,10 @@ function DarkPage() {
   const investigations = useQuery({
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
+    // The file row's "Reading - N of M records" line is built from this
+    // query. Poll it with the running card so captures and open records move
+    // while a round is active; three seconds stays inside the card's limit.
+    refetchInterval: (q) => darkInvestigationPollMs(q.state.data),
   });
   const darkSettings = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
   const noFiles = Boolean(
@@ -2088,12 +2093,13 @@ function InvestigationWorkspace({
           modelChoice={modelChoice}
           modelEffort={modelEffort}
           modelChoiceExplicit={modelChoiceExplicit}
+          stalled={stalled}
         />
       ) : null}
 
       {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
       <div className="astra-notices">
-        {stalled && !digJob ? (
+        {stalled && !digJob && darkRestartNoteVisible(stalled, detail?.run?.stopReason, detail?.darkJob?.status) ? (
           <p className="note err" role="status">
             {stalledRunCopy("dark")}
           </p>
@@ -2554,20 +2560,6 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   return describeExtractionMethod(raw);
 }
 
-function darkJobStepLine(step: string): string {
-  const value = step.trim();
-  const pass = value.match(/^Researching hop (\d+)\/(\d+)$/i);
-  if (pass) return `Reading public records · pass ${pass[1]} of up to ${pass[2]}`;
-  const search = value.match(/^Searching (\d+)\/(\d+) on hop (\d+)$/i);
-  if (search) return `Checking public pages · search ${search[1]} of ${search[2]}`;
-  if (/^Researching the file$/i.test(value)) return "Starting to read public records";
-  if (/^Synthesizing signals/i.test(value)) return "Putting the case file together";
-  if (/^Testing explanations$/i.test(value)) return "Checking ordinary explanations";
-  if (/^Writing editor brief$/i.test(value)) return "Finishing the case file";
-  if (/^Switched to /i.test(value)) return "Changing models to keep the work moving";
-  return "Working on the case file";
-}
-
 function DarkResearchCard({
   job,
   onStop,
@@ -2576,6 +2568,7 @@ function DarkResearchCard({
   modelChoice,
   modelEffort,
   modelChoiceExplicit,
+  stalled,
 }: {
   job: JobProgressView;
   onStop: () => void;
@@ -2584,17 +2577,25 @@ function DarkResearchCard({
   modelChoice: StoryModelChoice;
   modelEffort: ModelEffort | null;
   modelChoiceExplicit: boolean;
+  stalled: boolean;
 }) {
   const qc = useQueryClient();
   const [retryNote, setRetryNote] = useState("");
-  const [retryAfterStop, setRetryAfterStop] = useState(false);
+  const [retryAfterStop, setRetryAfterStop] = useState<{ modelChoice: StoryModelChoice | null } | null>(null);
+  const retryPreview = useQuery({
+    queryKey: ["retry-next-model", "dark", job.id],
+    queryFn: () => previewNextDarkRoundModel({ data: { jobId: job.id } }),
+    enabled: job.status === "failed" || (job.status === "running" && stalled),
+    staleTime: 30_000,
+    retry: false,
+  });
   const retry = useMutation({
-    mutationFn: (nextModel: boolean) => retryDarkRound({
+    mutationFn: (request: { nextModel: boolean; modelChoice?: StoryModelChoice; modelEffort?: ModelEffort | null }) => retryDarkRound({
       data: {
         jobId: job.id,
-        nextModel,
-        modelChoice,
-        modelEffort,
+        nextModel: request.nextModel,
+        modelChoice: request.modelChoice ?? modelChoice,
+        modelEffort: request.modelEffort === undefined ? modelEffort : request.modelEffort,
         modelChoiceExplicit,
       },
     }),
@@ -2613,8 +2614,11 @@ function DarkResearchCard({
   const retryRound = retry.mutate;
   useEffect(() => {
     if (!retryAfterStop || job.status !== "failed") return;
-    setRetryAfterStop(false);
-    retryRound(true);
+    const request = retryAfterStop;
+    setRetryAfterStop(null);
+    retryRound(request.modelChoice
+      ? { nextModel: false, modelChoice: request.modelChoice, modelEffort: null }
+      : { nextModel: true });
   }, [retryAfterStop, job.status, job.id, retryRound]);
   const displayJob: JobProgressView = {
     ...job,
@@ -2634,10 +2638,13 @@ function DarkResearchCard({
   };
   const retryOnNextModel = () => {
     if (stopDisabled || retryAfterStop) return;
-    setRetryAfterStop(true);
+    setRetryAfterStop({ modelChoice: retryPreview.data?.modelChoice ?? null });
     setRetryNote("Stopping this run before retrying on another model.");
     onStop();
   };
+  const retryNextLabel = retryPreview.data?.label
+    ? `Retry on next model (${retryPreview.data.label})`
+    : "Retry on next model";
   return (
     <div>
       <JobCard
@@ -2646,11 +2653,21 @@ function DarkResearchCard({
         onCancel={onStop}
         onOpen={onOpen}
         onRetryNext={job.status === "running" ? retryOnNextModel : undefined}
+        nextModelLabel={retryPreview.data?.label}
       />
       {job.status === "failed" ? (
         <div className="astra-panel-acts">
-          <InkButton pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(false)}>Retry</InkButton>
-          <InkButton tone="quiet" pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(true)}>Retry on next model</InkButton>
+          <InkButton pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate({ nextModel: false })}>Retry</InkButton>
+          <InkButton
+            tone="quiet"
+            pending={retry.isPending}
+            pendingLabel="Retrying…"
+            onClick={() => retryPreview.data
+              ? retry.mutate({ nextModel: false, modelChoice: retryPreview.data.modelChoice, modelEffort: null })
+              : retry.mutate({ nextModel: true })}
+          >
+            {retryNextLabel}
+          </InkButton>
         </div>
       ) : null}
       {retryNote ? <p className="meta" role="status">{retryNote}</p> : null}

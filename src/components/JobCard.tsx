@@ -2,8 +2,8 @@ import { ModelPicker } from "@/components/model-picker";
 import { type StoryModelChoice } from "@/lib/news/model-choice";
 import { retryStoryJob } from "@/components/scoped-actions";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { cancelStoryJob, type JobProgressView } from "@/lib/news/job-progress";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cancelStoryJob, previewStoryNextModel, type JobProgressView } from "@/lib/news/job-progress";
 import { jobCardState, useDeskJobs } from "./job-card-state";
 import { plainServerWords } from "@/lib/news/server-answer-words";
 
@@ -48,6 +48,7 @@ export function JobCard({
   onRetry,
   onRetryNext,
   onKeepWaiting,
+  nextModelLabel,
 }: {
   job: JobProgressView;
   compact?: boolean;
@@ -90,6 +91,8 @@ export function JobCard({
   onRetry?: () => void;
   onRetryNext?: () => void;
   onKeepWaiting?: () => void;
+  /** The already-probed next rung, when the caller has one. */
+  nextModelLabel?: string | null;
 }) {
   // Stored jobs retain their worker vocabulary. Present the same case stages
   // on Today, the sidebar and the full job card, including older saved runs.
@@ -259,7 +262,7 @@ export function JobCard({
             </button>
             {onRetryNext ? (
               <button type="button" className="btn solid" onClick={onRetryNext}>
-                Retry on next model
+                Retry on next model{nextModelLabel ? ` (${nextModelLabel})` : ""}
               </button>
             ) : null}
           </div>
@@ -347,6 +350,16 @@ export function DeskJobCard({
   });
   const failure = cancel.error ?? retry.error;
   const busy = cancel.isPending || retry.isPending;
+  const canRetry = job.canRetry && !busy;
+  const stalledNow = job.status === "running" && job.beatAt != null
+    && Date.now() - job.beatAt >= 150_000;
+  const retryPreview = useQuery({
+    queryKey: ["retry-next-model", "story", job.id],
+    queryFn: () => previewStoryNextModel({ data: { jobId: job.id } }),
+    enabled: canRetry && stalledNow,
+    staleTime: 30_000,
+    retry: false,
+  });
   const go = busy || !onNavigate ? undefined : () => onNavigate(job);
   /*
     Retry is offered only where the server says the row describes its own
@@ -354,7 +367,6 @@ export function DeskJobCard({
     gate is here so that a kind added to the query later gets a Retry it can
     actually honor, instead of one that re-runs something else.
   */
-  const canRetry = job.canRetry && !busy;
   return (
     <div>
       <JobCard
@@ -368,7 +380,8 @@ export function DeskJobCard({
         onOpen={go}
         onCancel={busy ? undefined : () => cancel.mutate()}
         onRetry={canRetry ? () => retry.mutate(false) : undefined}
-        onRetryNext={canRetry ? () => retry.mutate(true) : undefined}
+        onRetryNext={canRetry ? () => retry.mutate(retryPreview.data?.modelChoice ?? true) : undefined}
+        nextModelLabel={retryPreview.data?.label}
       />
       {job.kind === "draft" && job.status === "queued" ? (
         <div className="job-card-quiet">

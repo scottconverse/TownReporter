@@ -20,7 +20,7 @@ test("FB16: story progress and Health expose the wait and shared model picker", 
   });
   const stubs = {
     "@tanstack/react-query": `import React from 'react'; export function useQuery({queryKey}){return {data:queryKey[0]==='desk-jobs'?[window.waitingDraft]:queryKey[0]==='custom-ai-connections'?[]:undefined};} export function useMutation(options){const [data,setData]=React.useState(null); return {data,isPending:false,mutate:async value=>{const result=await options.mutationFn(value);setData(result);options.onSettled?.();}};} export function useQueryClient(){return {invalidateQueries(){}};}`,
-    "@/lib/news/job-progress": "export const listDeskJobs=()=>[],cancelStoryJob=()=>{};",
+    "@/lib/news/job-progress": "export const listDeskJobs=()=>[],cancelStoryJob=()=>{},previewStoryNextModel=()=>null;",
     "@/components/scoped-actions":
       'export async function retryStoryJob(args){window.lastRetry=args.data;return {ok:true,model:"Gemini"};}',
     "@/lib/news/provider-availability":
