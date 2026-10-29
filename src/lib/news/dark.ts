@@ -2380,23 +2380,29 @@ export async function performChallengeWork(
   if (run || caseBrief) {
     const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
     const verify = deps.verify ?? verifyRunSignals;
+    const modelEffort = savedJobEffort(job);
     result = await waitForModel({
       jobId: job.id,
       label: () => modelChoiceLabel(choice),
-      run: () => verify({
-        userId: job.user_id,
-        newsroomId: job.newsroom_id,
-        runId: run?.id ?? null,
-        investigationId,
-        caseBrief,
-        place: place.place,
-        officialDomains: place.official,
-        pressDomains: place.press,
-        choice,
-        overrides,
-        preferences,
-        reasoningEffort: savedJobEffort(job),
-      }),
+      run: async () => {
+        // The challenge can be created from a saved run, but the model call is
+        // made now by this job. Record that actual runtime before asking it.
+        await setJobModelRuntime(job.id, choice, modelEffort);
+        return verify({
+          userId: job.user_id,
+          newsroomId: job.newsroom_id,
+          runId: run?.id ?? null,
+          investigationId,
+          caseBrief,
+          place: place.place,
+          officialDomains: place.official,
+          pressDomains: place.press,
+          choice,
+          overrides,
+          preferences,
+          reasoningEffort: modelEffort,
+        });
+      },
     });
   }
   await throwIfJobCancelled(job.id);
@@ -3753,7 +3759,11 @@ export async function performDarkRound(job: DeskJob) {
           (stage) => reportRound(stage),
           effortForChoice(choice, activeEffort),
           job,
-          (nextChoice) => { verificationChoice = nextChoice; },
+          (nextChoice) => {
+            choice = nextChoice;
+            verificationChoice = nextChoice;
+            activate(nextChoice);
+          },
         ),
     });
     // Stage 2 is the longest single model call of the round and it is not part

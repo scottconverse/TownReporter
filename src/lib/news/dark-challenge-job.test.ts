@@ -178,4 +178,50 @@ it("challenges the prior findings with the challenge job's model", async () => {
     },
   });
   assert.equal(choice, "codex-balanced");
+  const [receipt] = await sql<{ result_json: string }>`
+    select result_json from desk_jobs where id = ${job.id}
+  `;
+  const runtime = JSON.parse(receipt?.result_json ?? "{}") as Record<string, unknown>;
+  assert.equal(runtime.actualRuntime, "codex-balanced");
+  assert.equal("actualModelId" in runtime, false, "verifyRunSignals reports no served model id");
+});
+
+// guards: a challenge with nothing saved to challenge must not claim that a model ran
+it("records no runtime when there is no saved run or case brief to challenge", async () => {
+  const sql = await getSql();
+  const job = await enqueueJob({
+    userId: "challenge-empty",
+    newsroomId: 98127,
+    kind: "challenge",
+    subjectId: 725,
+    modelChoice: "deepseek-flash",
+    kick: false,
+  });
+  let verifyCalls = 0;
+  await performChallengeWork(job, {
+    verify: async () => {
+      verifyCalls += 1;
+      throw new Error("a challenge with no saved material must not call a model");
+    },
+  });
+  assert.equal(verifyCalls, 0);
+  const [saved] = await sql<{ summary: string; result_json: string }>`
+    select summary, result_json from investigation_challenges
+    where newsroom_id = 98127 and job_id = ${job.id}
+  `;
+  assert.equal(saved?.summary, "No saved case brief or research round to challenge.");
+  assert.deepEqual(JSON.parse(saved?.result_json ?? "{}"), {
+    checked: 0,
+    eligible: 0,
+    deferred: 0,
+    failed: 0,
+    verified: 0,
+    unverified: 0,
+    searches: [],
+    summary: "No saved case brief or research round to challenge.",
+  });
+  const [receipt] = await sql<{ result_json: string }>`
+    select result_json from desk_jobs where id = ${job.id}
+  `;
+  assert.equal("actualRuntime" in JSON.parse(receipt?.result_json ?? "{}"), false);
 });
