@@ -1,8 +1,34 @@
 # Changelog
 
-Current software version: **0.6.86** (released 2026-10-28). Publication state is recorded by GitHub: [release v0.6.86](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.86).
+Current software version: **0.6.87** (released 2026-10-29). Publication state is recorded by GitHub: [release v0.6.87](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.87).
 
 ## Unreleased
+
+## 0.6.87 — 2026-10-29
+
+This release covers the five product changes after 0.6.86 (#342 through #346). The release guide is [docs/releases/0.6.87.md](docs/releases/0.6.87.md). Changes are grouped by area; the number after a change is the pull request that made it.
+
+### Dark Desk
+
+- **The stuck box waits for 150 seconds of quiet.** Long research steps send real progress, so **This round looks stuck** does not appear while work continues (#342).
+- **A model switch is clean.** When a round moves to DeepSeek after another model fails, DeepSeek gets its own thinking effort and time limit. The old 45-second limit no longer follows the switch (#342).
+- **The round card tells the truth about a switch.** It shows **This round moved ...** and the waiting line names the new model. A model timeout says the model did not answer (#342).
+- **Use selected model restarts on the picker's model.** It stops the round and starts a new one on that model. It also does this when the old round ends first (#342).
+- **Challenge the case records the model that ran.** If no model ran, the card says **No model ran**. With nothing new to check, it finishes without a model call (#342, #343).
+- **PDF reads use the file's model.** If that model cannot read pages, the reader uses the automatic order and says so on screen (#342).
+- **Closed files explain the controls.** On a closed file, the Decide panel says **Keep investigating** is grey because: **This file is closed. To open it again, use Pull back under More file actions.** **Close: no finding** says **Already closed**, and no control was removed (#345).
+- **Dark Desk controls fit a phone.** At 640 px wide or less, buttons, selects, toggles and button links are at least 44 px tall with text at least 14 px. The desktop layout did not change (#345).
+
+### Desk
+
+- **Send to Dark Desk opens the new file.** The desk screen opens the file made from the lead, not an older file (#344).
+- **Job cards stay current.** Each card's **Now:** line shows the worker's own words for the step instead of sticking on **Working on the case file**. The open-file list line **Reading · N of M records** updates every 3 seconds while a file is being investigated (#346).
+- **Retry on next model names the model.** The button shows the model it will use, for example **Retry on next model (DeepSeek v4.1 Flash 1017)**, and that model runs (#346).
+- **Stop no longer adds a false restart note.** After the editor presses **Stop**, the card does not also say the app restarted (#346).
+
+### Release check
+
+- The Test server walk on 2026-10-29 passed with a real Publish. The live paper received all five changes on 2026-10-29 at 9:30 AM Mountain.
 
 ## 0.6.86 — 2026-10-28
 

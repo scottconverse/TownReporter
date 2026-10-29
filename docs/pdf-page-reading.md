@@ -1,13 +1,13 @@
 # Read retained PDF pages
 
-Introduced in [TownReporter 0.6.44](releases/0.6.44.md) and unchanged in 0.6.86. This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
+Introduced in [TownReporter 0.6.44](releases/0.6.44.md) and changed in 0.6.87. This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
 
 ## Use it from Dark Desk
 
 Open a captured PDF artifact in **Dark Desk**. The original captured PDF remains
-unchanged. Choose an explicit model for the page-reading action; **Automatic**
-is not accepted for this action. Then choose **Read entire PDF** or enter a
-1-based, inclusive page range:
+unchanged. Page reads use the file's model. If that model cannot read pages, the
+reader uses the automatic order and says so on screen. Then choose **Read entire
+PDF** or enter a 1-based, inclusive page range:
 
 - **First page** and **last page** must be whole-number page numbers.
 - The range can contain no more than 12 pages.
@@ -33,7 +33,7 @@ document.
 
 ## Provider and cost boundary
 
-The selected model controls where the pages are sent. If the picker visibly
+The file's model controls where the pages are sent. If it cannot read pages and the automatic order is used, the model that actually runs controls the destination, and the screen says when the fallback starts. If the file's model visibly
 shows a cloud provider, the selected pages leave the TownReporter machine and
 that provider's normal usage charges, retention, and privacy terms may apply.
 Review the provider choice before queuing a read. A local model keeps the page
