@@ -2,6 +2,7 @@ import { challengeInvestigation, retryDarkRound } from "@/components/scoped-acti
 import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
 import { darkFilePickIsFinal, darkFileToOpen, fullFileQuestion } from "@/lib/news/dark-rail";
+import { darkDecidePanelChoice } from "@/lib/news/dark-closed-file";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -1936,6 +1937,7 @@ function InvestigationWorkspace({
   const leftover = nextDeduped.length;
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
+  const decide = darkDecidePanelChoice(inv?.status);
 
   const activityAll = darkScreenData(activityQuery.data ?? []).map((entry) => ({
     ...entry, text: darkStoredDates(entry.text, formatListDateTime, formatListDate),
@@ -2053,7 +2055,7 @@ function InvestigationWorkspace({
           <summary>More file actions</summary>
           <div className="astra-panel-acts">
             <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
-            {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
+            {decide.pullBackLabel ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>{decide.pullBackLabel}</InkButton> : null}
             {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
           </div>
         </details>
@@ -2265,9 +2267,12 @@ function InvestigationWorkspace({
         </div>
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
         <div className="astra-panel-acts" aria-label="File decisions">
-          <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
-            Keep investigating
-          </InkButton>
+          <div className="astra-decision-keep">
+            <InkButton tone="ghost" disabled={keepDisabled || decide.keepDisabled} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
+              Keep investigating
+            </InkButton>
+            {decide.keepNote ? <p className="astra-decision-why">{decide.keepNote}</p> : null}
+          </div>
           {digging && inv ? <InkButton tone="ghost" onClick={onUseSelectedModel}>Use selected model</InkButton> : null}
           <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
             Start an AI follow-up
@@ -2278,8 +2283,8 @@ function InvestigationWorkspace({
           <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
             {queuePending ? "Sending…" : "Send to the queue"}
           </InkButton>
-          <InkButton tone="quiet" disabled={keepDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
-            Close: no finding
+          <InkButton tone="quiet" disabled={keepDisabled || decide.closeDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
+            {decide.closeLabel}
           </InkButton>
         </div>
         {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}

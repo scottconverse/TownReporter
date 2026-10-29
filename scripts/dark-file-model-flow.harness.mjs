@@ -81,6 +81,7 @@ const imports = {
   "@/lib/news/dark-screen-copy": await moduleUrl("src/lib/news/dark-screen-copy.ts"),
   "./dark-use-selected-restart": await moduleUrl("src/routes/dark-use-selected-restart.ts"),
   "@/lib/news/dark-rail": darkRailStub,
+  "@/lib/news/dark-closed-file": await moduleUrl("src/lib/news/dark-closed-file.ts"),
   "@tanstack/react-router": routerStub,
   "@tanstack/react-query": queryStub,
   "@/components/desk-chrome": chromeStub,

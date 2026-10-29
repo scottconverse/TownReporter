@@ -6512,6 +6512,22 @@
   gap: 8px;
   padding-top: 6px;
 }
+.desk-ltr.astra .astra-decision-keep {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-decision-why {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--fg);
+  font-size: calc(1rem * var(--ts));
+  font-weight: 500;
+  line-height: 1.45;
+}
 
 /* --- key/value rows inside a panel (drawing: flex, space-between, 15px) ----- */
 .desk-ltr.astra .astra-kv {
@@ -8878,4 +8894,40 @@
   .trash-entry > div { flex-direction: column; align-items: stretch; }
   .trash-entry > div > span { width: 100%; }
   .trash-entry .row-acts { justify-content: flex-start; flex-wrap: wrap; }
+}
+/* ===========================================================================
+   G28-DW-10: DARK DESK PHONE TAP TARGETS.
+
+   At 390 x 844 the Dark Desk still measured controls under 44px: plain
+   buttons outside .btn, inline links styled as actions, and the case/file
+   disclosures. This narrow-screen pass gives every such press the same tap
+   height without changing any desktop geometry. Padding is set with the
+   floor so a wrapped two-line label still has a real target; the font floor
+   keeps the control words at 14px or larger for old eyes.
+--------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .desk-ltr.astra[data-desk-page="dark"] :is(button, select, summary) {
+    min-height: 44px;
+    padding-block: 10px;
+    font-size: max(14px, calc(14px * var(--ts)));
+  }
+
+  .desk-ltr.astra[data-desk-page="dark"]
+    :is(
+      a.btn,
+      a.document-add-button,
+      a.inline-link,
+      a.np-link,
+      a.astra-paper-link,
+      a.astra-brand-bar,
+      a.astra-foot-paper,
+      a.astra-nav,
+      a.astra-search-result
+    ) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-block: 10px;
+    font-size: max(14px, calc(14px * var(--ts)));
+  }
 }
