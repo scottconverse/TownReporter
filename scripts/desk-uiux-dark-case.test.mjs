@@ -5,7 +5,7 @@ import { auditDarkDeskHtml, waitForDarkDeskAudit } from "./desk-uiux-dark-case.m
 
 const settings = `<button aria-expanded="false">Settings</button>
 <section id="dark-settings" hidden><h2>Dark Desk settings</h2><h3>How hard to dig</h3><h3>Watched pages</h3><button>Close</button></section>`;
-const names = [
+const openNames = [
   "Start an AI follow-up",
   "Keep investigating",
   "Wait and watch",
@@ -14,7 +14,7 @@ const names = [
 ];
 const groups = ["Open files", "Signals to review", "Waiting on an AI follow-up", "Set aside"];
 
-function fileFixture(railGroups = groups, decisions = names) {
+function fileFixture(railGroups = groups, decisions = openNames) {
   return settings +
     `<div class="astra-piles">${railGroups.map((name) => `<div class="astra-pile"><div class="astra-pile-h"><span>${name}</span><span>1</span></div></div>`).join("")}</div>
       <h2 class="astra-question">A synthetic investigation</h2>
@@ -38,12 +38,31 @@ test("open file, current Decide labels and all four rail groups pass", () => {
   assert.deepEqual(auditDarkDeskHtml(fileFixture()).groups, groups);
 });
 
+test("closed file requires Already closed and still rejects the open-file close label", () => {
+  const closedNames = openNames.map((name) =>
+    name === "Close: no finding" ? "Already closed" : name,
+  );
+
+  assert.deepEqual(
+    auditDarkDeskHtml(fileFixture(groups, closedNames), { fileStatus: "closed" }),
+    { state: "file", fileStatus: "closed", groups },
+  );
+  assert.throws(
+    () => auditDarkDeskHtml(fileFixture(groups, closedNames), { fileStatus: "open" }),
+    /missing Decide control: Close: no finding/,
+  );
+  assert.throws(
+    () => auditDarkDeskHtml(fileFixture(groups, openNames), { fileStatus: "closed" }),
+    /missing Decide control: Already closed/,
+  );
+});
+
 test("empty rail groups may be omitted in spec order", () => {
   assert.deepEqual(auditDarkDeskHtml(fileFixture(["Open files", "Set aside"])).groups, ["Open files", "Set aside"]);
 });
 
 test("old Decide labels are rejected", () => {
-  const old = names.map((name) => name === "Keep investigating" ? "Keep digging" : name);
+  const old = openNames.map((name) => name === "Keep investigating" ? "Keep digging" : name);
   assert.throws(() => auditDarkDeskHtml(fileFixture(groups, old)), /missing Decide control: Keep investigating/);
 });
 
