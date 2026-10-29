@@ -38,7 +38,7 @@ export function JobCard({
   compact,
   title,
   failoverNote = true,
-  stallSeconds = 60,
+  stallSeconds = 150,
   now,
   onCancel,
   onOpen,
@@ -147,6 +147,12 @@ export function JobCard({
   */
   const errorWords = state === "failed" && job.error ? plainServerWords(job.error) : null;
   const noteWords = job.failoverNote ? plainServerWords(job.failoverNote) : null;
+  // The model line is the card's promise about what actually ran. A finished
+  // receipt that says no model was called replaces the whole line, including
+  // effort; a running job always keeps its current model and effort.
+  const modelLine = !running && job.noModelRan
+    ? "No model ran"
+    : `${job.model}${job.modelEffort ? ` · ${job.modelEffort}` : ""}${job.pct != null && running ? ` · ${job.pct}%` : ""}`;
 
   return (
     <div data-job-id={job.id} className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
@@ -169,11 +175,7 @@ export function JobCard({
           <span className="job-card-dot" aria-hidden="true" />
           <span className="job-card-id-text">
             <b className="job-card-title">{title ?? job.title}</b>
-            <span className="job-card-model">
-              {job.model}
-              {job.modelEffort ? ` · ${job.modelEffort}` : ""}
-              {job.pct != null && running ? ` · ${job.pct}%` : ""}
-            </span>
+            <span className="job-card-model">{modelLine}</span>
           </span>
         </div>
         <b className="job-card-elapsed">

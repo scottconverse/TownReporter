@@ -171,15 +171,13 @@ export type DeskJob = {
 };
 
 /**
- * The stall threshold the design locks: a running job with no word from its
- * worker for this many seconds is shown as stalled, not as working. It is
- * deliberately much shorter than `STALE_RUNNING_SECONDS` (120): the reclaim
- * window decides when the SYSTEM may take the job away from a dead process,
- * this decides when the EDITOR should be offered a choice. A job can be
- * legitimately stalled-looking at 60s and still be perfectly claimable at
- * 119s, and those are different questions.
+ * The stall threshold: a running job with no word from its worker for this many
+ * seconds is shown as stalled, not as working. Dark Desk rounds can spend
+ * longer than a minute in local search/page work between provider calls, so the
+ * editor-facing warning waits 150 seconds. `STALE_RUNNING_SECONDS` remains the
+ * separate decision about when the SYSTEM may reclaim a dead worker.
  */
-export const JOB_STALL_SECONDS = 60;
+export const JOB_STALL_SECONDS = 150;
 
 /** Five open jobs fit the default ten-connection pool. Local work has one admission slot across lanes. */
 const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2, draft: 2 };
@@ -674,7 +672,8 @@ export async function setJobFailoverNote(id: number, note: string) {
     `;
     if (!job) return;
     const history = job.kind === "draft" ? appendStoryFailoverNote(job.failover_note, note) : note;
-    const step = job.kind === "draft" && job.step_text?.startsWith("Waiting on ")
+    const waitsOnModel = ["draft", "dark", "challenge", "brief"].includes(job.kind);
+    const step = waitsOnModel && job.step_text?.startsWith("Waiting on ")
       ? `Waiting on ${modelChoiceLabel(job.model_choice)}${job.step_text.match(/ · \d+s$/)?.[0] ?? ""}`
       : job.step_text;
     await sql`update desk_jobs set failover_note=${history}, step_text=${step}, updated_at=now() where id=${id}`;

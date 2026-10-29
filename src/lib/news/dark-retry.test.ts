@@ -72,6 +72,52 @@ it("retries a stopped round on the model now shown by the file picker", async ()
   assert.equal(result.model, modelChoiceLabel("deepseek-flash"));
 });
 
+it("restarts a completed round when Use selected model supplies the picker choice", async () => {
+  const sql = await getSql();
+  const context = { userId: `dark-retry-completed-${Date.now()}`, newsroomId: 98234 };
+  const file = await openInvestigationForEditor(
+    context.userId,
+    { paste: "Check the completed public notice.", title: "Did the finished round miss it?" },
+    context.newsroomId,
+  );
+  const job = await enqueueJob({
+    userId: context.userId,
+    newsroomId: context.newsroomId,
+    kind: "dark" as JobKind,
+    subjectId: file.investigationId,
+    modelChoice: "codex-frontier",
+    kick: false,
+  });
+  await sql`update desk_jobs set status = 'completed', finished_at = now() where id = ${job.id}`;
+  let started: { choice: string; effort: unknown; explicit: boolean } | null = null;
+  const effort = defaultModelEffort("deepseek-flash");
+
+  const result = await retryDarkRoundFor(
+    context,
+    job.id,
+    false,
+    {
+      start: async (_context, id, choice, savedEffort, _override, _deps, explicit) => {
+        started = { choice: choice ?? "auto", effort: savedEffort, explicit: explicit === true };
+        return {
+          ok: true,
+          pending: true,
+          jobId: 996,
+          investigationId: id,
+          modelChoice: effectiveStoryModelChoice(choice),
+        };
+      },
+    },
+    undefined,
+    "deepseek-flash",
+    effort,
+    true,
+  );
+
+  assert.deepEqual(started, { choice: "deepseek-flash", effort, explicit: true });
+  assert.equal(result.ok, true);
+});
+
 it("retries with the stopped round's own model when the caller sends no picker choice", async () => {
   const context = { userId: `dark-retry-own-${Date.now()}`, newsroomId: 98232 };
   const { file, job } = await stoppedJob(context.userId, context.newsroomId, "codex-frontier");

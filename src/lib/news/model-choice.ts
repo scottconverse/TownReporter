@@ -261,6 +261,48 @@ export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesF
  */
 export const DARK_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("dark");
 export const OCR_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("ocr");
+
+/**
+ * Whether a picker choice names a reader OCR can actually try.
+ *
+ * The shared picker deliberately keeps every model visible, including text
+ * providers such as DeepSeek. The Dark Desk's PDF reader used to hand that
+ * visible file choice to OCR anyway, where the server refused it, or printed
+ * "Automatic" although the file picker showed a named model. This is the one
+ * pure answer both the reader's initial choice and its warning use.
+ */
+export function ocrModelCanReadImages(value: unknown): boolean {
+  if (value === "auto") return true;
+  if (isCustomModelChoice(value)) return true;
+  const row = pickerRowValue(String(value ?? ""));
+  return providersFor("ocr").some((entry) => entry.id === row);
+}
+
+export type OcrReaderModelChoice = {
+  /** The choice the reader will actually send. */
+  choice: StoryModelChoice;
+  /** The unsupported pick that caused the Automatic fallback, if any. */
+  fallbackFrom: StoryModelChoice | null;
+  /** A full sentence for the screen, or null when the choice can read pages. */
+  note: string | null;
+};
+
+/**
+ * The Dark Desk PDF reader's default: use the file's picker model when it can
+ * read page images. A text-only file model remains clearly named, but the
+ * reader sends Automatic instead and names OCR's own fallback order on screen.
+ */
+export function ocrReaderModelChoice(value: unknown): OcrReaderModelChoice {
+  const requested = storyModelChoice(value);
+  if (ocrModelCanReadImages(requested)) {
+    return { choice: requested, fallbackFrom: null, note: null };
+  }
+  return {
+    choice: "auto",
+    fallbackFrom: requested,
+    note: `${modelChoiceLabel(requested, "ocr")} cannot read page images. This PDF reader will use Automatic instead: ${ladderSentence(OCR_AUTOMATIC_ORDER)}, then a local vision model if one is available.`,
+  };
+}
 /**
  * Automatic is offered for every model work surface, including batch and OCR.
  * The run records the ladder rung it actually reaches.
@@ -530,6 +572,20 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
       : "auto";
   const selected = options.find((choice) => choice.value === normalized) ?? options[0];
   if (!selected) return "No model is available for this surface.";
+  /*
+    OCR is a page-image job, not a writing job. Its named choices need their
+    own words; otherwise the picker described a reader as a writer and said a
+    technical failure could move an unfinished call to another writing model.
+  */
+  if (scope === "ocr") {
+    if (selected.value === "auto") {
+      return `Uses ${ladderSentence(OCR_AUTOMATIC_ORDER)} first, then the selected local vision model if one is available. If a provider cannot read the page, OCR moves to the next ready reader.`;
+    }
+    if (selected.value === "local-model") {
+      return `Uses the selected Ollama or on-device model to read page images when it is marked vision. If it cannot read the page, this reader falls back to Automatic: ${ladderSentence(OCR_AUTOMATIC_ORDER)}, then another local vision model if one is available.`;
+    }
+    return `Uses ${selected.label} to read page images. If it cannot read a page, OCR moves to the next ready reader.`;
+  }
   if (selected.value === "local-model") {
     return "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.";
   }
@@ -564,9 +620,6 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   }
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}.${loadedRungNote(DARK_AUTOMATIC_LADDER)} Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
-  }
-  if (scope === "ocr") {
-    return `Uses ${ladderSentence(OCR_AUTOMATIC_ORDER)} first, then the selected local vision model if one is available. If a provider cannot read the page, OCR moves to the next ready reader.`;
   }
   /*
     0.6.64 (Unit AA) item 2: the Scan picker offers Automatic now, and a

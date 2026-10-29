@@ -6,6 +6,26 @@ export function newestTouchedFile<T extends { id: number; updated_at: string }>(
 }
 
 /**
+ * Pick the file the Dark Desk opens once its list arrives.
+ *
+ * A handoff from Send to Dark Desk or Open file is explicit and wins over both
+ * the file already on screen and the newest row. A current file is kept only
+ * while it is still in the list; otherwise the newest valid file is the safe
+ * fallback. Keeping this choice pure makes the precedence testable without a
+ * browser or a server.
+ */
+export function darkFileToOpen<T extends { id: number; updated_at: string }>(
+  rows: readonly T[],
+  currentId: number | null,
+  requestedId: number | null,
+): number | null {
+  const requested = requestedId == null ? undefined : rows.find((row) => row.id === requestedId);
+  if (requested) return requested.id;
+  const current = currentId == null ? undefined : rows.find((row) => row.id === currentId);
+  return current?.id ?? newestTouchedFile(rows)?.id ?? null;
+}
+
+/**
  * How many characters of the pasted question `openInvestigationForEditor`
  * (dark-open.ts) keeps as a file's title.
  *

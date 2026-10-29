@@ -552,7 +552,7 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
         requested: choice,
         resolved: plan.next,
         reason: failoverReasonPhrase(previousLabel, plan.reason),
-        note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+        note: failoverNoteSentence(plan.label, previousLabel, plan.reason, "round"),
         stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
       },
     };
@@ -2254,6 +2254,7 @@ async function runVerificationStage(
   onStage?: (stage: string) => Promise<unknown>,
   reasoningEffort?: ModelEffort | null,
   job?: DeskJob,
+  onModelChange?: (choice: EffectiveProviderChoice) => void,
 ): Promise<string> {
   const { place, official, press } = await readDarkPlace(newsroomId);
   let active = {
@@ -2270,24 +2271,31 @@ async function runVerificationStage(
         newsroomId,
         localModel: overrides?.["local-model"]?.localModel,
         reasoningEffort: snapshot.modelEffort,
+        timeoutMs: darkVerificationTimeoutMs(
+          snapshot.modelChoice,
+          overrides,
+          runBudget?.remainingMs(),
+        ),
       }),
       probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       resolve: async (candidate) => ({
         modelChoice: candidate,
-        modelEffort: effortForChoice(candidate, active.modelEffort),
+        modelEffort: darkFailoverEffort(candidate),
       }),
       onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
         if (job) {
           const resolvedChoice = effectiveStoryModelChoice(nextChoice);
-          const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+          const nextEffort = darkFailoverEffort(resolvedChoice);
+          onModelChange?.(resolvedChoice);
           await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
           await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
           );
-          await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+          await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"));
         }
       },
     });
     active = attempted.snapshot;
+    onModelChange?.(effectiveStoryModelChoice(active.modelChoice));
     if (!attempted.result.ok) throw new Error(attempted.result.error);
     return attempted.result.text;
   };
@@ -2372,24 +2380,43 @@ export async function performChallengeWork(
   if (run || caseBrief) {
     const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
     const verify = deps.verify ?? verifyRunSignals;
+    const modelEffort = savedJobEffort(job);
     result = await waitForModel({
       jobId: job.id,
       label: () => modelChoiceLabel(choice),
-      run: () => verify({
-        userId: job.user_id,
-        newsroomId: job.newsroom_id,
-        runId: run?.id ?? null,
-        investigationId,
-        caseBrief,
-        place: place.place,
-        officialDomains: place.official,
-        pressDomains: place.press,
-        choice,
-        overrides,
-        preferences,
-        reasoningEffort: savedJobEffort(job),
-      }),
+      run: async () => {
+        // The challenge can be created from a saved run, but the model call is
+        // made now by this job. Record that actual runtime before asking it.
+        await setJobModelRuntime(job.id, choice, modelEffort);
+        return verify({
+          userId: job.user_id,
+          newsroomId: job.newsroom_id,
+          runId: run?.id ?? null,
+          investigationId,
+          caseBrief,
+          place: place.place,
+          officialDomains: place.official,
+          pressDomains: place.press,
+          choice,
+          overrides,
+          preferences,
+          reasoningEffort: modelEffort,
+        });
+      },
     });
+  } else {
+    // This branch writes the empty challenge summary without asking a model.
+    // Record that fact on the job itself so the card cannot name a model that
+    // never ran; `setJobModelRuntime` is deliberately not called here.
+    await sql`
+      update desk_jobs
+      set result_json = (
+        coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb)
+        || ${JSON.stringify({ noModelRan: true })}::jsonb
+      )::text,
+      updated_at = now()
+      where id = ${job.id}
+    `;
   }
   await throwIfJobCancelled(job.id);
   await sql`
@@ -2424,6 +2451,25 @@ function savedJobEffort(job: Pick<DeskJob, "model_choice" | "result_json">): Mod
 function effortForChoice(choice: EffectiveProviderChoice, saved: ModelEffort | null,
 ): ModelEffort | null {
   return saved == null ? null : validatedModelEffort(choice, saved);
+}
+
+/** The runtime a Dark verification call uses after a provider switch. */
+export function darkFailoverEffort(choice: EffectiveProviderChoice): ModelEffort | null {
+  // A failover chooses the destination model's own default. The failed
+  // model's effort is not portable: Claude's default high is still a legal
+  // DeepSeek level, but a direct DeepSeek pick runs at none.
+  return validatedModelEffort(choice, null);
+}
+
+/** A Dark verification call gets the destination rung's budget, not grokChat's
+ * 45-second fallback. The run budget may shorten it but can never lengthen it. */
+export function darkVerificationTimeoutMs(
+  choice: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+  remainingMs?: number,
+): number {
+  const callMs = providerBudget(choice, overrides ?? undefined).callMs;
+  return Math.max(1, Math.min(callMs, remainingMs ?? callMs));
 }
 
 async function markInvestigationPaused(userId: string, investigationId: number, error: string) {
@@ -2512,8 +2558,14 @@ async function executeDarkRun(
     // tier answered.
     const where = await readDarkPlace(newsroomId).catch(() => null);
     let activeChoice = choice!;
-    const research = (on: EffectiveProviderChoice) => {
+    let activeEffort = opts.modelEffort ?? null;
+    const activate = (on: EffectiveProviderChoice) => {
+      if (on !== activeChoice) activeEffort = darkFailoverEffort(on);
       activeChoice = on;
+      return effortForChoice(on, activeEffort);
+    };
+    const research = (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
       return runDarkResearchWithRememberedChoice(investigationId, on, {
         remember: rememberLastModelChoice,
         run: (remembered) => researchLoop({
@@ -2532,12 +2584,12 @@ async function executeDarkRun(
           runBudget,
           researchReserveMs,
           onUsage: saveUsage,
-          reasoningEffort: effortForChoice(remembered, opts.modelEffort ?? null),
+          reasoningEffort: effortForChoice(remembered, effort),
         }),
       });
     };
     const synthesize = (on: EffectiveProviderChoice) => {
-      activeChoice = on;
+      const effort = activate(on);
       return synthesizeSignals(
         userId,
         runId,
@@ -2550,7 +2602,7 @@ async function executeDarkRun(
         snapshot.preferences,
         runBudget,
         saveUsage,
-        effortForChoice(on, opts.modelEffort ?? null),
+        effortForChoice(on, effort),
       );
     };
     const checkpointed = await runCheckpointedDarkStages({
@@ -2588,7 +2640,7 @@ async function executeDarkRun(
       runBudget,
       saveUsage,
       undefined,
-      effortForChoice(activeChoice, opts.modelEffort ?? null),
+      effortForChoice(activeChoice, activeEffort),
     );
     const stopReason: DarkRunStopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
     await persistDarkRunUsage(runId, newsroomId, runBudget.snapshot(), stopReason);
@@ -2939,7 +2991,15 @@ export async function retryDarkRoundFor(
   `;
   const job = rows[0];
   if (!job) return { ok: false as const, error: "Research round not found." };
-  if (job.status !== "failed") return { ok: false as const, error: "Only a stopped round can be retried." };
+  // Retry itself remains a stopped-round action. "Use selected model" is
+  // different: it may race with a round that reaches completed (or another
+  // terminal state) after the stop press, so its explicit picker choice is the
+  // signal that any finished selected job is safe to replace.
+  const restartFinishedWithSelected =
+    Boolean(modelChoice) && ["failed", "stopped", "cancelled", "completed"].includes(job.status);
+  if (job.status !== "failed" && !restartFinishedWithSelected) {
+    return { ok: false as const, error: "Only a stopped round can be retried." };
+  }
   const file = await sql<{ status: string }>`
     select status from investigations where id = ${job.subject_id} and newsroom_id = ${owned(context)} limit 1
   `;
@@ -3488,7 +3548,7 @@ export async function performArtifactOcrWork(
             await setJobModelRuntime(job.id, nextChoice, nextEffort);
             await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
             );
-            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason),
+            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"),
             );
             ocrChoice = nextChoice;
             ocrEffort = nextEffort;
@@ -3549,6 +3609,7 @@ export async function performDarkRound(job: DeskJob) {
   */
   let choice = effectiveStoryModelChoice(job.model_choice);
   const modelEffort = savedJobEffort(job);
+  let activeEffort = modelEffort;
   const overrides = applyJobLocalModelSnapshot(
     job,
     await readProviderOverrides(owned(context), "dark").catch(() => ({})),
@@ -3595,8 +3656,15 @@ export async function performDarkRound(job: DeskJob) {
       row and a sliding bar.
     */
     const reportRound = progressReporterFor(job);
-    const research = async (on: EffectiveProviderChoice) =>
-      runDarkResearchWithRememberedChoice(id, on, {
+    let activeChoice = choice;
+    const activate = (on: EffectiveProviderChoice) => {
+      if (on !== activeChoice) activeEffort = darkFailoverEffort(on);
+      activeChoice = on;
+      return effortForChoice(on, activeEffort);
+    };
+    const research = async (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
+      return runDarkResearchWithRememberedChoice(id, on, {
         remember: rememberLastModelChoice,
         run: (rememberedChoice) => researchLoop({
           userId: context.userId,
@@ -3623,7 +3691,12 @@ export async function performDarkRound(job: DeskJob) {
             jobs on the desk.
           */
           onStage: (stage, pct) => reportRound(stage, pct),
-          reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
+          onLongOperation: (label, run) => waitForModel({
+            jobId: job.id,
+            label,
+            run,
+          }),
+          reasoningEffort: effortForChoice(rememberedChoice, effort),
           // Unit U25, B4: the editor's Stop, read fresh at each hop and each
           // search. Before this a dig could only end at its own hop, time or
           // call limit -- a 2-to-13-minute wait with no way out, which the
@@ -3632,24 +3705,30 @@ export async function performDarkRound(job: DeskJob) {
           throwIfCancelled: () => throwIfJobCancelled(job.id),
         }),
       });
+    };
     const synthesize = async (on: EffectiveProviderChoice) => {
+      const effort = activate(on);
       await throwIfJobCancelled(job.id);
       await reportRound("Synthesizing signals", 45);
       await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
-      return synthesizeSignals(
-        context.userId,
-        runId,
-        id,
-        "",
-        dials,
-        on,
-        overrides,
-        owned(context),
-        snapshot.preferences,
-        runBudget,
-        saveUsage,
-        effortForChoice(on, modelEffort),
-      );
+      return waitForModel({
+        jobId: job.id,
+        label: () => `Synthesizing signals with ${modelChoiceLabel(on)}`,
+        run: () => synthesizeSignals(
+          context.userId,
+          runId,
+          id,
+          "",
+          dials,
+          on,
+          overrides,
+          owned(context),
+          snapshot.preferences,
+          runBudget,
+          saveUsage,
+          effortForChoice(on, effort),
+        ),
+      });
     };
 
     await reportRound("Researching the file");
@@ -3683,9 +3762,10 @@ export async function performDarkRound(job: DeskJob) {
       polls Cancel on the same tick, so the editor's Stop lands inside the call
       rather than after it.
     */
+    let verificationChoice = choice;
     const verifySummary = await waitForModel({
       jobId: job.id,
-      label: () => modelChoiceLabel(choice),
+      label: () => modelChoiceLabel(verificationChoice),
       run: () =>
         runVerificationStage(
           context.userId,
@@ -3698,8 +3778,13 @@ export async function performDarkRound(job: DeskJob) {
           runBudget,
           saveUsage,
           (stage) => reportRound(stage),
-          effortForChoice(choice, modelEffort),
+          effortForChoice(choice, activeEffort),
           job,
+          (nextChoice) => {
+            choice = nextChoice;
+            verificationChoice = nextChoice;
+            activate(nextChoice);
+          },
         ),
     });
     // Stage 2 is the longest single model call of the round and it is not part
@@ -3753,7 +3838,7 @@ export async function performDarkRound(job: DeskJob) {
           onUsage: saveUsage,
           onStage: (stage) => reportRound(stage),
         },
-        effortForChoice(choice, modelEffort),
+        effortForChoice(choice, activeEffort),
       );
       if (!briefResult.ok) briefError = briefResult.error;
     } catch (error) {
@@ -5102,16 +5187,16 @@ export async function performBriefWork(job: DeskJob) {
       probe: (choice) => probeProvider(choice, newsroomId, undefined, "dark"),
       resolve: async (choice) => ({
         modelChoice: choice,
-        modelEffort: effortForChoice(choice, active.modelEffort),
+        modelEffort: darkFailoverEffort(choice),
       }),
       onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
         const resolvedChoice = effectiveStoryModelChoice(nextChoice);
-        const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+        const nextEffort = darkFailoverEffort(resolvedChoice);
         briefLabel = nextLabel;
         await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
         await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
         );
-        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason, "round"));
       },
     });
     active = attempted.snapshot;

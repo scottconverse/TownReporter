@@ -234,16 +234,17 @@ export function failoverReasonPhrase(
 }
 
 /**
- * The durable sentence 0.6.8 writes to `desk_jobs.failover_note` when a
- * Story draft switches providers: "This draft moved to <new label> because
- * <previous label> <reason>."
+ * The durable sentence written to `desk_jobs.failover_note` when a run switches
+ * providers: "This draft moved..." on Story, "This round moved..." on Dark
+ * Desk. The surface is explicit so the card names the work the editor started.
  */
 export function failoverNoteSentence(
   newLabel: string,
   previousLabel: string,
   reason: AutomaticFailoverReason,
+  subject: "draft" | "round" = "draft",
 ): string {
-  return `This draft moved to ${newLabel} because ${failoverReasonPhrase(previousLabel, reason)}`;
+  return `This ${subject} moved to ${newLabel} because ${failoverReasonPhrase(previousLabel, reason)}`;
 }
 
 /** Preserve each Story switch, accepting the durable wording from older runs. */

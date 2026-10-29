@@ -78,6 +78,12 @@ export type JobProgressView = {
   model: string;
   /** Saved reasoning effort for a Dark Desk research run, when present. */
   modelEffort: ModelEffort | null;
+  /**
+   * The worker's own receipt says it finished without calling a model. The
+   * card uses this only for a finished row, so a running job that carries an
+   * older marker still names the model it is using now.
+   */
+  noModelRan: boolean;
   stages: string[] | null;
   stageIndex: number | null;
   pct: number | null;
@@ -236,7 +242,12 @@ function darkJobEffort(row: Pick<DeskJob, "kind" | "result_json">): ModelEffort 
 
 function progressShape(row: DeskJob, model: string): ProgressShape {
   let customLabel: string | undefined;
-  try { const receipt = JSON.parse(row.result_json ?? "{}"); customLabel = receipt.customModelLabel || receipt.requestedCustomModelLabel; } catch { /* Legacy receipt. */ }
+  let noModelRan = false;
+  try {
+    const receipt = JSON.parse(row.result_json ?? "{}");
+    customLabel = receipt.customModelLabel || receipt.requestedCustomModelLabel;
+    noModelRan = receipt.noModelRan === true;
+  } catch { /* Legacy receipt. */ }
   const named = (text: string) => customLabel ? text.replaceAll("Custom API connection", customLabel) : text;
   return {
     id: row.id,
@@ -245,6 +256,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
     status: row.status,
     model,
     modelEffort: darkJobEffort(row),
+    noModelRan,
     stages: jobStages(row),
     stageIndex: row.stage_index ?? null,
     pct: row.pct ?? null,

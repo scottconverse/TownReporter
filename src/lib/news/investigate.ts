@@ -366,6 +366,13 @@ export type ResearchLoopOptions = {
    * stub -- keeps compiling and keeps working unchanged.
    */
   onStage?: (stage: string, pct?: number | null) => Promise<unknown>;
+  /**
+   * Bridge for one genuinely slow await that has no natural stage boundary.
+   * Production wires this to `waitForModel`, whose existing ticker beats the
+   * job while the operation is still running. Tests can observe the real
+   * operation labels without reading source text.
+   */
+  onLongOperation?: <T>(label: string, run: () => Promise<T>) => Promise<T>;
   /** Internal one-operation adapter marker; callers should not set this. */
   _responsiveOperation?: "search" | "read" | "follow";
 };
@@ -2858,6 +2865,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       /* progress text is best-effort; durable research remains authoritative */
     }
   };
+  const longOperation = <T>(label: string, run: () => Promise<T>): Promise<T> =>
+    opts.onLongOperation ? opts.onLongOperation(label, run) : run();
   /*
     FB1: a percentage for the round, from the only numbers research has.
 
@@ -2890,7 +2899,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     }
   }
 
-  async function runSearch(q: string): Promise<SearchAttempt> {
+  async function runSearch(
+    q: string,
+    progressLabel: string,
+  ): Promise<SearchAttempt> {
     if (opts.searchAttempt) return opts.searchAttempt(q);
     if (opts.search) {
       try {
@@ -2909,10 +2921,22 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         };
       }
     }
-    return searchWithFallback(q, undefined, {
-      officialDomains: officialDomainList,
-      localityStopwords: [place.city, place.state, place.county ?? ""],
-    });
+    return searchWithFallback(
+      q,
+      undefined,
+      {
+        officialDomains: officialDomainList,
+        localityStopwords: [place.city, place.state, place.county ?? ""],
+      },
+      async ({ provider, phase, state }) => {
+        const detail = phase === "started"
+          ? `via ${provider}`
+          : phase === "finished"
+            ? `${provider}: ${state ?? "finished"}`
+            : `${provider} skipped`;
+        await setStage(`${progressLabel} - ${detail}`);
+      },
+    );
   }
 
   type ActiveFrontierRow = {
@@ -3028,9 +3052,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     ].join("\n\n").slice(0, PLANNER_INPUT_CAP);
 
     let plan: HopPlan;
-    if (planner) plan = await planner(pack);
+    const plannerLabel = `Planning hop ${hop + 1}/${hopsBudget}`;
+    await setStage(plannerLabel);
+    if (planner) plan = await longOperation(plannerLabel, () => planner(pack));
     else {
-      const grok = await grokPlanner(
+      const grok = await longOperation(plannerLabel, () => grokPlanner(
         pack,
         opts.choice,
         opts.providerOverrides,
@@ -3040,7 +3066,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         `planning hop ${hop + 1}`,
         opts.onUsage,
         opts.reasoningEffort,
-      );
+      ));
       /*
         Unit U25, B2: what the keyword fallback is allowed to read.
 
@@ -3318,12 +3344,13 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
+      const searchLabel = `Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`;
       await setStage(
-        `Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`,
+        searchLabel,
         researchPct(hop, queryIndex + 1, pctStepsThisHop),
       );
       tried.add(queryFingerprint(q));
-      const attempt = await runSearch(q);
+      const attempt = await longOperation(searchLabel, () => runSearch(q, searchLabel));
       if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
       const selected = attempt.hits.slice(0, 6).map((h) => h.url);
       selectedThisHop.push(...selected);
@@ -3493,11 +3520,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     if (readSelector && currentSearchHits.size > 0 && !reserveHeld) {
       const hitContext = [...currentSearchHits].slice(0, 6).map((url) => `SEARCH RESULT URL: ${url}`).join("\n");
       try {
-        postSearchPlan = await readSelector([
-          await retrievePack(opts.userId, opts.investigationId, terms),
-          `POST-SEARCH RESULTS (untrusted candidates; read before citing):\n${hitContext}`,
-          "Choose only the next URLs worth reading from these available results. Do not treat result titles or snippets as factual proof. Return no searches; existing search and fetch caps remain in force.",
-        ].join("\n\n"));
+        const selectorLabel = `Choosing sources to read on hop ${hop + 1}/${hopsBudget}`;
+        await setStage(selectorLabel);
+        postSearchPlan = await longOperation(selectorLabel, async () => {
+          const packForSelector = await retrievePack(opts.userId, opts.investigationId, terms);
+          return readSelector([
+            packForSelector,
+            `POST-SEARCH RESULTS (untrusted candidates; read before citing):\n${hitContext}`,
+            "Choose only the next URLs worth reading from these available results. Do not treat result titles or snippets as factual proof. Return no searches; existing search and fetch caps remain in force.",
+          ].join("\n\n"));
+        });
         if (postSearchPlan.planner_error) {
           postSearchFailure = postSearchPlan.planner_error;
           selectorFailures.push(postSearchFailure);
@@ -3606,8 +3638,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
+      const readLabel = `Reading page ${fetchedThisHop.length} of ${fetchLimit} on hop ${hop + 1}`;
       await setStage(
-        `Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`,
+        readLabel,
         researchPct(hop, queries.length + fetchedThisHop.length, pctStepsThisHop),
       );
 
@@ -3638,7 +3671,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
             order by id desc limit 1
           `
         )[0];
-      const got = asFetched(await fetchDoc(url), url);
+      const got = asFetched(await longOperation(readLabel, () => fetchDoc(url)), url);
       if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
       const hash = got.ok ? await sha256(got.text) : "missing";
       const classified = classifyFetchedPage({
@@ -3650,7 +3683,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         newHash: hash,
       });
       const outcome: FetchOutcome = got.outcome === "needs-ocr" ? "needs-ocr" : classified;
-      await rememberCapture({
+      const captureLabel = `Saving page ${fetchedThisHop.length} of ${fetchLimit} on hop ${hop + 1}`;
+      await setStage(captureLabel);
+      await longOperation(captureLabel, () => rememberCapture({
         userId: opts.userId,
         investigationId: opts.investigationId,
         url,
@@ -3667,7 +3702,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         rawBytes: got.rawBytes,
         classification: got.classification ?? "discovered",
         newsroomId,
-      });
+      }));
 
       if (outcome === "unchanged") {
         repeatedSourcesThisHop += 1;
@@ -3701,7 +3736,12 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
             });
           }
           try {
-            const copies = opts.archives ? await opts.archives(url) : await waybackCopies(url);
+            const archiveLabel = `Looking for an archived copy of page ${fetchedThisHop.length} of ${fetchLimit}`;
+            await setStage(archiveLabel);
+            const copies = await longOperation(
+              archiveLabel,
+              () => opts.archives ? opts.archives(url) : waybackCopies(url),
+            );
             for (const c of copies.slice(0, 3)) {
               toFetch.add(c);
               await persistDiscovery(opts.userId, opts.investigationId, {
@@ -4065,7 +4105,11 @@ async function responsiveResearchLoop(
     });
     let action: ResearchAction;
     try {
-      action = await choose(context);
+      const decideLabel = `Choosing research action ${decision}/${limit}`;
+      await opts.onStage?.(decideLabel).catch(() => undefined);
+      action = opts.onLongOperation
+        ? await opts.onLongOperation(decideLabel, () => choose(context))
+        : await choose(context);
     } catch (err) {
       const detail = err instanceof Error ? err.message : "responsive action selection failed";
       receipts.push({ decision, action: { type: "finish", summary: detail, findings: [] }, outcome: "decision-failed", detail, links: [] });

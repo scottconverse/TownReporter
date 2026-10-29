@@ -30,6 +30,8 @@ function job(over = {}) {
     status: "running",
     title: "Drafting story",
     model: "Codex Sol 6.1",
+    modelEffort: null,
+    noModelRan: false,
     stages: ["Planning the reporting", "Writing the draft", "Checking the draft against the evidence"],
     stageIndex: 1,
     pct: 42,
@@ -93,21 +95,21 @@ test("a job with no percentage draws the indeterminate bar", () => {
   assert.match(html, /Now: Waiting on Codex Sol 6\.1 · 42s/);
 });
 
-test("the stall box appears at 60s of quiet and not at 59s", () => {
-  const quiet59 = render({ job: job({ beatAt: at(59) }) });
-  assert.doesNotMatch(quiet59, /Keep waiting/);
-  assert.match(quiet59, /state-running/);
-  assert.match(quiet59, /Last activity 0:59 ago/);
+test("the stall box appears at 150s of quiet and not at 149s", () => {
+  const quiet149 = render({ job: job({ beatAt: at(149) }) });
+  assert.doesNotMatch(quiet149, /Keep waiting/);
+  assert.match(quiet149, /state-running/);
+  assert.match(quiet149, /Last activity 2:29 ago/);
 
-  const quiet60 = render({ job: job({ beatAt: at(60) }) });
-  assert.match(quiet60, /state-stalled/);
-  assert.match(quiet60, /No activity for 1:00\. The model may be slow, or it may have stalled\./);
-  assert.match(quiet60, />Keep waiting</);
-  assert.match(quiet60, />Retry on next model</);
+  const quiet150 = render({ job: job({ beatAt: at(150) }) });
+  assert.match(quiet150, /state-stalled/);
+  assert.match(quiet150, /No activity for 2:30\. The model may be slow, or it may have stalled\./);
+  assert.match(quiet150, />Keep waiting</);
+  assert.match(quiet150, />Retry on next model</);
   // The design's stalled card still offers Cancel and still shows where the
   // job got to; a stall is not a failure and the editor has not lost anything.
-  assert.match(quiet60, />Cancel</);
-  assert.match(quiet60, /Now: Writing the draft/);
+  assert.match(quiet150, />Cancel</);
+  assert.match(quiet150, /Now: Writing the draft/);
 });
 
 test("a job that never reported is not stalled, however long it has been", () => {
@@ -142,6 +144,27 @@ test("a done job ticks every chip, fills the bar, and offers the server's href",
   assert.match(html, /Open the draft/);
   assert.doesNotMatch(html, />Retry</);
   assert.doesNotMatch(html, />Cancel</);
+});
+
+test("a finished job that called no model says No model ran", () => {
+  const html = render({
+    job: job({
+      status: "completed",
+      endedAt: NOW,
+      model: "DeepSeek v4.1 Flash 1017",
+      modelEffort: "none",
+      noModelRan: true,
+    }),
+  });
+  assert.match(html, /<span class="job-card-model">No model ran<\/span>/);
+  assert.doesNotMatch(html, /DeepSeek v4\.1 Flash 1017/);
+  assert.doesNotMatch(html, /· none/);
+
+  // The marker is about the completed job. A live row still names the model
+  // currently doing the work, even if an older receipt carries the marker.
+  const runningHtml = render({ job: job({ noModelRan: true }) });
+  assert.match(runningHtml, /Codex Sol 6\.1/);
+  assert.doesNotMatch(runningHtml, /No model ran/);
 });
 
 test("a failed job leads with the model's own reason, not a stack trace", () => {
@@ -297,9 +320,9 @@ test("a running scan shows its live count on a determinate bar", () => {
 });
 
 test("a scan whose worker has gone quiet offers the stall box and Cancel", () => {
-  const html = render({ job: scanJob({ beatAt: at(74), step: "Reading sources — 6 of 8" }) });
+  const html = render({ job: scanJob({ beatAt: at(150), step: "Reading sources — 6 of 8" }) });
   assert.match(html, /job-card state-stalled/);
-  assert.match(html, /No activity for 1:14\./);
+  assert.match(html, /No activity for 2:30\./);
   assert.match(html, />Keep waiting</);
   assert.match(html, />Cancel</);
 });

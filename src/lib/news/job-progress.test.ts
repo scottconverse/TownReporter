@@ -70,12 +70,12 @@ describe("structured job progress", () => {
     const sql = await getSql();
     const id = freshSubject();
     const job = await enqueueDraft("progress-fields", id);
-    // A claimed job whose worker last spoke 90s ago: stalled by the rule below.
+    // A claimed job whose worker last spoke 200s ago: past the 150 s stall line.
     // `running` because that is the state a claim produces, and the one the
     // stall rule applies to.
     await sql`
       update desk_jobs
-      set status = 'running', beat_at = now() - make_interval(secs => 90),
+      set status = 'running', beat_at = now() - make_interval(secs => 200),
           pct = 7, stage_index = 3, step_text = 'an older sentence'
       where id = ${job.id} and newsroom_id = ${NEWSROOM}
     `;
@@ -182,7 +182,7 @@ describe("structured job progress", () => {
     assert.equal(stageIndexFor(seen[0], JOB_STAGE_LISTS.draft![0]), 0);
   });
 
-  it("calls a job stalled at 60s of quiet and not at 59s", async () => {
+  it("calls a job stalled at 150s of quiet and not at 149s", async () => {
     const sql = await getSql();
     const id = freshSubject();
     const job = await enqueueDraft("progress-stall", id);
@@ -194,14 +194,13 @@ describe("structured job progress", () => {
       `;
       return (await stored(id))!;
     };
-    // 55, not 59: the beat is stamped by the database clock and judged later by
-    // this process's clock, and a slow CI runner can spend a second in between.
-    // The exact 59/60 boundary is asserted off the clock below.
-    assert.equal(jobProgressStalled(await quietFor(55)), false);
-    assert.equal(jobProgressStalled(await quietFor(60)), true);
+    // A few seconds short of the boundary leaves CI clock skew room. The exact
+    // 149/150 boundary is asserted off the clock below.
+    assert.equal(jobProgressStalled(await quietFor(145)), false);
+    assert.equal(jobProgressStalled(await quietFor(150)), true);
     // One second past the boundary stays stalled: the state is a threshold, not
     // a window.
-    assert.equal(jobProgressStalled(await quietFor(61)), true);
+    assert.equal(jobProgressStalled(await quietFor(151)), true);
 
     // A worker that never reported is not stalled: null is "no evidence", not
     // "very quiet", and the reclaim window is what deals with that job.
@@ -215,11 +214,11 @@ describe("structured job progress", () => {
     // "Retry on next model" for a job that is working perfectly.
     const now = Date.now();
     assert.equal(
-      jobProgressStalled({ status: "running", beat_at: new Date(now - 59_000).toISOString() }, now),
+      jobProgressStalled({ status: "running", beat_at: new Date(now - 149_000).toISOString() }, now),
       false,
     );
     assert.equal(
-      jobProgressStalled({ status: "running", beat_at: new Date(now - 60_000).toISOString() }, now),
+      jobProgressStalled({ status: "running", beat_at: new Date(now - 150_000).toISOString() }, now),
       true,
     );
     // Finished is not stalled, and queued has not started.
