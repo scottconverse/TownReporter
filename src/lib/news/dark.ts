@@ -2404,6 +2404,19 @@ export async function performChallengeWork(
         });
       },
     });
+  } else {
+    // This branch writes the empty challenge summary without asking a model.
+    // Record that fact on the job itself so the card cannot name a model that
+    // never ran; `setJobModelRuntime` is deliberately not called here.
+    await sql`
+      update desk_jobs
+      set result_json = (
+        coalesce(nullif(result_json, '')::jsonb, '{}'::jsonb)
+        || ${JSON.stringify({ noModelRan: true })}::jsonb
+      )::text,
+      updated_at = now()
+      where id = ${job.id}
+    `;
   }
   await throwIfJobCancelled(job.id);
   await sql`

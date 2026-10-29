@@ -30,6 +30,8 @@ function job(over = {}) {
     status: "running",
     title: "Drafting story",
     model: "Codex Sol 6.1",
+    modelEffort: null,
+    noModelRan: false,
     stages: ["Planning the reporting", "Writing the draft", "Checking the draft against the evidence"],
     stageIndex: 1,
     pct: 42,
@@ -142,6 +144,27 @@ test("a done job ticks every chip, fills the bar, and offers the server's href",
   assert.match(html, /Open the draft/);
   assert.doesNotMatch(html, />Retry</);
   assert.doesNotMatch(html, />Cancel</);
+});
+
+test("a finished job that called no model says No model ran", () => {
+  const html = render({
+    job: job({
+      status: "completed",
+      endedAt: NOW,
+      model: "DeepSeek v4.1 Flash 1017",
+      modelEffort: "none",
+      noModelRan: true,
+    }),
+  });
+  assert.match(html, /<span class="job-card-model">No model ran<\/span>/);
+  assert.doesNotMatch(html, /DeepSeek v4\.1 Flash 1017/);
+  assert.doesNotMatch(html, /· none/);
+
+  // The marker is about the completed job. A live row still names the model
+  // currently doing the work, even if an older receipt carries the marker.
+  const runningHtml = render({ job: job({ noModelRan: true }) });
+  assert.match(runningHtml, /Codex Sol 6\.1/);
+  assert.doesNotMatch(runningHtml, /No model ran/);
 });
 
 test("a failed job leads with the model's own reason, not a stack trace", () => {

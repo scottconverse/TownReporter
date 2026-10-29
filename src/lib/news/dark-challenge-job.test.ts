@@ -3,7 +3,8 @@ import { it } from "node:test";
 import assert from "node:assert/strict";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { getSql } from "../db.ts";
-import { enqueueJob, JOB_KINDS, JOB_STAGE_LISTS, type JobKind } from "./jobs.ts";
+import { enqueueJob, JOB_KINDS, JOB_STAGE_LISTS, type DeskJob, type JobKind } from "./jobs.ts";
+import { jobProgressView } from "./job-progress.ts";
 import { ensureDarkSchema, performChallengeWork, queueInvestigationChallengeFor, openInvestigationForEditor } from "./dark.ts";
 import { verifyRunSignals } from "./dark-verify.ts";
 
@@ -223,5 +224,11 @@ it("records no runtime when there is no saved run or case brief to challenge", a
   const [receipt] = await sql<{ result_json: string }>`
     select result_json from desk_jobs where id = ${job.id}
   `;
-  assert.equal("actualRuntime" in JSON.parse(receipt?.result_json ?? "{}"), false);
+  const jobReceipt = JSON.parse(receipt?.result_json ?? "{}") as Record<string, unknown>;
+  assert.equal("actualRuntime" in jobReceipt, false);
+  assert.equal(jobReceipt.noModelRan, true);
+  const [storedJob] = await sql<DeskJob>`
+    select * from desk_jobs where id = ${job.id}
+  `;
+  assert.equal(jobProgressView(storedJob!, 0, null).noModelRan, true);
 });
