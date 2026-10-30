@@ -5,6 +5,7 @@ import {
   type UnverifiedRoutineNoticeProvenance,
 } from "./routine-notice-types.ts";
 import type { RoutineExtractionResult } from "./routine-notice-extract.ts";
+import { extractIcsEvents, type IcsEventOptions } from "./routine-notice-ics-events.ts";
 
 type Base = Omit<UnverifiedRoutineNoticeProvenance, "externalId">;
 export type FeedResult = RoutineExtractionResult;
@@ -174,7 +175,7 @@ export function extractLibraryHours(
   return out;
 }
 
-type IcsKind = "waste" | "deadline";
+type IcsKind = "waste" | "deadline" | "event";
 function unfold(raw: string) {
   return raw.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
 }
@@ -198,8 +199,16 @@ function icsDate(value: string | null) {
 export function extractRoutineIcs(
   raw: string,
   kind: IcsKind,
-  context: { provenance: Base; issuer: string; locality: string; collectionArea?: string },
+  context: {
+    provenance: Base;
+    issuer: string;
+    locality: string;
+    collectionArea?: string;
+    timezone?: string;
+  },
+  options?: IcsEventOptions,
 ): FeedResult[] {
+  if (kind === "event") return extractIcsEvents(raw, context, options);
   if (Buffer.byteLength(raw, "utf8") > 512 * 1024)
     return [{ status: "refused", locator: "document", code: "malformed-json" }];
   const lines = unfold(raw),
