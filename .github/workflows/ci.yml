@@ -23,6 +23,12 @@ concurrency:
 permissions:
   contents: read
 
+# onnxruntime-node otherwise downloads non-bundled CUDA binaries from
+# api.nuget.org. CI has no GPU; skip those downloads and install the bundled CPU
+# runtime. The package documents ONNXRUNTIME_NODE_INSTALL=skip as the env form.
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+
 jobs:
   # Which of the not-required browser walks need to run on this change? A walk runs when its
   # own script (or scripts/lib/, or this workflow) changed. The nightly run and a manual run
