@@ -59,6 +59,17 @@ test("every event-week font size is at least 14px", () => {
   assert.deepEqual(undersized, []);
 });
 
+test("event-week head keeps the dark box background visible", () => {
+  const backgrounds = cssRules(CSS)
+    .filter((rule) => rule.selector === ".reader .eventweek-head")
+    .flatMap((rule) => declarations(rule.body, "background"));
+
+  assert.ok(
+    backgrounds.includes("transparent"),
+    ".reader .eventweek-head must set background: transparent",
+  );
+});
+
 test("event-week title links have a 44px tap target", () => {
   const heights = EVENTWEEK_RULES.filter((rule) =>
     rule.selector.split(",").some((selector) => selector.includes(".eventweek-title")),

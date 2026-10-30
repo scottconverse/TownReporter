@@ -2290,6 +2290,8 @@
   color: var(--blockInk);
 }
 .reader .eventweek-head {
+  background: transparent;
+  border-bottom: 0;
   padding: 22px 26px 18px;
 }
 .reader .eventweek-kicker {
