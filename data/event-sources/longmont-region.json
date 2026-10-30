@@ -1,0 +1,418 @@
+{
+  "sources": [
+    {
+      "town": "Longmont",
+      "name": "City of Longmont events",
+      "reader": "tribe",
+      "url": "https://longmontcolorado.gov/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-city-of-longmont-tribe-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 41 events on 7 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Firehouse Art Center",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/r5a1ofr4s6d7mvuicgvq36l6tc%40group.calendar.google.com/public/basic.ics",
+      "feedId": "f-firehouse-art-center-google-ics",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 21 events on 7 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Grossen Bart",
+      "reader": "tribe",
+      "url": "https://grossenbart.com/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-grossen-bart-tribe-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 9 events on 5 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Knuckle Puck Brewing",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/h5jurpaksepktjbia4m7b5pv1art4bi7%40import.calendar.google.com/public/basic.ics",
+      "feedId": "f-knuckle-puck-brewing-google-ics",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 4 events on 4 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Kuper Wine Bar",
+      "reader": "tribe",
+      "url": "https://www.kuperwinebar.com/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-kuper-wine-bar-tribe-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 4 events on 4 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Longmont Symphony Orchestra",
+      "reader": "squarespace",
+      "url": "https://longmontsymphony.org/season-concerts?format=json",
+      "feedId": "f-longmont-symphony-squarespace-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "OUR Center",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/calendarourcenter%40gmail.com/public/basic.ics",
+      "feedId": "f-our-center-google-ics-calendarourcenter",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 8 events on 4 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Parkway Food Hall",
+      "reader": "tribe",
+      "url": "https://parkwayfoodhall.com/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-parkway-food-hall-tribe-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 5 events on 5 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "Soundpost Sessions",
+      "reader": "squarespace",
+      "url": "https://www.soundpostsessions.com/shows?format=json",
+      "feedId": "f-soundpost-sessions-squarespace-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 1 events on 1 of 7 days"
+    },
+    {
+      "town": "Longmont",
+      "name": "St. Vrain Cidery",
+      "reader": "squarespace",
+      "url": "https://www.stvraincidery.com/events?format=json",
+      "feedId": "f-st-vrain-cidery-squarespace-json",
+      "batch": 1,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 3 events on 3 of 7 days"
+    },
+    {
+      "town": "Berthoud",
+      "name": "Berthoud Historical Society",
+      "reader": "ics",
+      "url": "https://berthoudhistoricalsociety.org/?post_type=tribe_events&ical=1&eventDisplay=list",
+      "feedId": "f-berthoud-historical-society-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Berthoud",
+      "name": "City Star Brewing live music",
+      "reader": "ics",
+      "url": "https://citystarbrewing.com/?post_type=tribe_events&tribe_events_cat=live-music&ical=1&eventDisplay=list",
+      "feedId": "f-city-star-live-music-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 2 events on 2 of 7 days"
+    },
+    {
+      "town": "Berthoud",
+      "name": "Inside Berthoud",
+      "reader": "ics",
+      "url": "https://insideberthoud.com/events/calendar.ics",
+      "feedId": "f-inside-berthoud-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 15 events on 6 of 7 days"
+    },
+    {
+      "town": "Berthoud",
+      "name": "Wildfire Arts Center",
+      "reader": "ics",
+      "url": "https://tockify.com/api/feeds/ics/wildfire",
+      "feedId": "f-wildfire-arts-center-tockify-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 20 events on 6 of 7 days"
+    },
+    {
+      "town": "Lyons",
+      "name": "Inside Lyons",
+      "reader": "ics",
+      "url": "https://insidelyons.com/events/calendar.ics",
+      "feedId": "f-inside-lyons-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 14 events on 6 of 7 days"
+    },
+    {
+      "town": "Lyons",
+      "name": "Lyons Middle Senior",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/c_2a55ijpsj3lakhj6u9p82cr5ns%40group.calendar.google.com/public/basic.ics",
+      "feedId": "f-lyons-middle-senior-google-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 3 events on 3 of 7 days"
+    },
+    {
+      "town": "Lyons",
+      "name": "Lyons Recorder",
+      "reader": "tribe",
+      "url": "https://lyonsrecorder.org/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-lyons-recorder-community-calendar-tribe-json",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 7 events on 6 of 7 days"
+    },
+    {
+      "town": "Niwot",
+      "name": "Inside Niwot",
+      "reader": "ics",
+      "url": "https://insideniwot.com/events/calendar.ics",
+      "feedId": "f-inside-niwot-ics",
+      "batch": 2,
+      "devCheckedAt": "2026-10-30T03:41:51-0600",
+      "devResult": "worked: 5 events on 3 of 7 days"
+    },
+    {
+      "town": "Frederick",
+      "name": "Town of Frederick calendar",
+      "reader": "civicplus",
+      "url": "https://www.frederickco.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "feedId": "f-town-of-frederick-civicplus-rss",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:41:15-0600",
+      "devResult": "worked: 4 events on 3 of 7 days"
+    },
+    {
+      "town": "Lafayette",
+      "name": "Center for Musical Arts",
+      "reader": "tribe",
+      "url": "https://centerformusicalarts.org/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-center-for-musical-arts-tribe-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Lafayette",
+      "name": "Lafayette Public Library",
+      "reader": "libcal",
+      "url": "https://lafayettepubliclibrary.libcal.com/rss.php?iid=4627&m=month&cid=10144",
+      "feedId": "f-lafayette-public-library-libcal-rss",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 23 events on 7 of 7 days"
+    },
+    {
+      "town": "Lafayette",
+      "name": "Liquid Mechanics Brewing",
+      "reader": "squarespace",
+      "url": "https://www.liquidmechanicsbrewing.com/events?format=json",
+      "feedId": "f-liquid-mechanics-squarespace-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Lafayette",
+      "name": "Odd13 Brewing",
+      "reader": "squarespace",
+      "url": "https://www.odd13brewing.com/events?format=json",
+      "feedId": "f-odd13-brewing-squarespace-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 2 events on 2 of 7 days"
+    },
+    {
+      "town": "Lafayette",
+      "name": "Old Town Lafayette",
+      "reader": "tribe",
+      "url": "https://oldtownlafayette.com/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-old-town-lafayette-tribe-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 8 events on 5 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Coal Creek Theater",
+      "reader": "squarespace",
+      "url": "https://www.cctlouisville.org/shows?format=json",
+      "feedId": "f-coal-creek-theater-squarespace-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 1 events on 1 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Gravity Brewing",
+      "reader": "ics",
+      "url": "https://thegravitybrewing.com/events.ics",
+      "feedId": "f-gravity-brewing-all-ics",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 21 events on 7 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Jasmine Bar / Courtyard",
+      "reader": "squarespace",
+      "url": "https://www.thejasminebar.com/events?format=json",
+      "feedId": "f-jasmine-bar-squarespace-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 1 events on 1 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Louisville Art Association",
+      "reader": "ics",
+      "url": "https://tockify.com/api/feeds/ics/laacalendar",
+      "feedId": "f-louisville-art-association-tockify-ics",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 1 events on 1 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Monarch Theatre",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/monarchtheatredept%40gmail.com/public/basic.ics",
+      "feedId": "f-monarch-high-theatre-google-ics",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 5 events on 5 of 7 days"
+    },
+    {
+      "town": "Louisville",
+      "name": "Relish Food Hall",
+      "reader": "squarespace",
+      "url": "https://www.visitrelish.com/events-calendar?format=json",
+      "feedId": "f-relish-food-hall-squarespace-json",
+      "batch": 3,
+      "devCheckedAt": "2026-10-30T03:43:50-0600",
+      "devResult": "worked: 3 events on 3 of 7 days"
+    },
+    {
+      "town": "Boulder",
+      "name": "BMoCA",
+      "reader": "squarespace",
+      "url": "https://www.bmoca.org/events?format=json",
+      "feedId": "f-bmoca-squarespace-json",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: 1 events on 1 of 7 days"
+    },
+    {
+      "town": "Boulder",
+      "name": "Colorado Chautauqua",
+      "reader": "tribe",
+      "url": "https://www.chautauqua.com/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-chautauqua-tribe-json",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: 3 events on 3 of 7 days"
+    },
+    {
+      "town": "Boulder",
+      "name": "Dairy Arts Center",
+      "reader": "tribe",
+      "url": "https://thedairy.org/wp-json/tribe/events/v1/events?per_page=50",
+      "feedId": "f-dairy-arts-center-tribe-json",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: 27 events on 6 of 7 days"
+    },
+    {
+      "town": "Boulder",
+      "name": "Fairview Performing Arts",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/c_aff1aad0c2e0e9d16d4f869f39aa708c6c2ad5d1c353ac8a632f094089f1e6df%40group.calendar.google.com/public/basic.ics",
+      "feedId": "f-fairview-high-google-ics",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: 5 events on 4 of 7 days"
+    },
+    {
+      "town": "Loveland",
+      "name": "High Plains Environmental Center",
+      "reader": "ics",
+      "url": "https://calendar.google.com/calendar/ical/c_9480b30ac34a2365781c3eff173890c0f47cba542a10921e450382f9786da2b4%40group.calendar.google.com/public/basic.ics",
+      "feedId": "f-high-plains-environmental-center-google-ics",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Loveland",
+      "name": "Loveland Orchestra",
+      "reader": "ics",
+      "url": "https://lovelandorchestra.org/wp-content/uploads/2026/08/The-Loveland-Orchestra-Concerts.ics",
+      "feedId": "f-loveland-orchestra-static-ics",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    },
+    {
+      "town": "Loveland",
+      "name": "MeadKrieger Meadery",
+      "reader": "squarespace",
+      "url": "https://www.meadkrieger.com/events?format=json",
+      "feedId": "f-meadkrieger-squarespace-json",
+      "batch": 4,
+      "devCheckedAt": "2026-10-30T03:45:44-0600",
+      "devResult": "worked: feed read, no events in the next 7 days"
+    }
+  ],
+  "skipped": [
+    {
+      "town": "Berthoud",
+      "name": "Berthoud Town Upcoming Events",
+      "url": "https://www.berthoud.org/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:41:51-0600"
+    },
+    {
+      "town": "Lyons",
+      "name": "Town of Lyons calendar",
+      "url": "https://www.townoflyons.com/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:41:51-0600"
+    },
+    {
+      "town": "Lyons",
+      "name": "Visit Lyons Community Calendar",
+      "url": "https://www.lyonscolorado.com/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:41:51-0600"
+    },
+    {
+      "town": "Erie",
+      "name": "Town of Erie calendar",
+      "url": "https://www.erieco.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:43:50-0600"
+    },
+    {
+      "town": "Firestone",
+      "name": "Town of Firestone calendar",
+      "url": "https://www.firestoneco.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:43:50-0600"
+    },
+    {
+      "town": "Lafayette",
+      "name": "City of Lafayette",
+      "url": "https://www.lafayetteco.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+      "reason": "timed out from the newsroom PC (Part 2 CivicPlus recheck)",
+      "checkedAt": "2026-10-30T03:43:50-0600"
+    }
+  ]
+}
