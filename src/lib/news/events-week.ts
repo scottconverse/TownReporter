@@ -34,7 +34,7 @@ export type EventColumnItem = {
   title: string;
   time: string;
   place: string;
-  href: string;
+  href: string | null;
   startMinutes: number | null;
   allDay: boolean;
 };
@@ -212,13 +212,23 @@ function columnFor(event: EventsWeekEvent): EventColumnKey {
   return "evening";
 }
 
+function httpHref(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function columnItem(event: EventsWeekEvent, column: EventColumnKey): EventColumnItem {
   return {
     matchKey: event.matchKey,
     title: event.title,
     time: eventTimeLabel(event),
     place: column === "nearby" ? event.town || event.place : event.place || event.town,
-    href: event.link || event.sourceUrl,
+    href: httpHref(event.link) ?? httpHref(event.sourceUrl),
     startMinutes: event.startMinutes,
     allDay: event.allDay,
   };

@@ -123,6 +123,19 @@ test("a compact column shows two lines and then reports the remaining count", ()
   );
 });
 
+test("event titles link only to absolute http(s) URLs", () => {
+  const href = (link: string | null, sourceUrl: string) =>
+    eventColumns([event("link-check", { link, sourceUrl })], true)[0]!.items[0]!.href;
+
+  assert.equal(
+    href("javascript:alert(1)", "https://source.example/event"),
+    "https://source.example/event",
+  );
+  assert.equal(href("/events/1", "https://source.example/event"), "https://source.example/event");
+  assert.equal(href("https://x.org/e", "https://source.example/event"), "https://x.org/e");
+  assert.equal(href("javascript:alert(1)", "/events/1"), null);
+});
+
 test("the strip counts seven days, and a paper's date words match the box's headings", () => {
   const dates = weekDates("2026-10-30");
   const days = buildEventsWeek(dates, [

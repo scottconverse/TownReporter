@@ -69,9 +69,13 @@ export function EventsWeekBox({ data }: { data: EventsWeekData }) {
                     {column.items.map((event) => (
                       <li className="eventweek-event" key={event.matchKey}>
                         <span className="eventweek-time">{event.time}</span>
-                        <a className="eventweek-title" href={event.href}>
-                          {event.title}
-                        </a>
+                        {event.href ? (
+                          <a className="eventweek-title" href={event.href}>
+                            {event.title}
+                          </a>
+                        ) : (
+                          <span className="eventweek-title">{event.title}</span>
+                        )}
                         {event.place ? (
                           <span className="eventweek-place">{event.place}</span>
                         ) : null}
