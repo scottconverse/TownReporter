@@ -11,7 +11,7 @@ import {
   readRoutineNoticeAutomationFor,
   saveRoutineNoticeAutomationFor,
 } from "./routine-notice-automation.ts";
-import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
+import { ensureJobsSchema, JobCancelledError, type DeskJob } from "./jobs.ts";
 import { checkRoutineNoticeSourceForOwner } from "./routine-notice-checks.server.ts";
 import type { IngestDocument } from "./ingest.ts";
 import {
@@ -933,4 +933,235 @@ test("a story printed in the old layout is corrected only for a real change of e
   const more = await again("layout-more", [notice(1, "Concert"), notice(2, "Poetry night"), notice(3, "Film night")]);
   assert.equal(more.corrections, 2);
   assert.match(more.content_fingerprint, /^v2:/);
+});
+
+async function activateThreeSourceFixture() {
+  const sql = await getSql();
+  const sources = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const [source] = await sql.query<{ id: number; url: string; title: string }>(
+      "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,$4,'accepted') returning id,url,title",
+      [owner, room, `https://events${index}.example/private/calendar?token=secret${index}`, `Source ${index}`],
+    );
+    sources.push(source!);
+  }
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 0,
+    paused: false,
+    approvals: sources.map((source) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      formatKey: "community-arts-event-logistics" as const,
+    })),
+  });
+  await saveRoutineNoticeAutomationFor(owner, room, {
+    expectedRevision: 0,
+    enabled: true,
+    timezone: "America/Denver",
+    localTime: "06:15",
+    sections: { today: "news", weekend: "events", deadlines: "deadlines" },
+    sources: sources.map((source, index) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      publicSourceUrl: `https://events${index + 1}.example/calendar`,
+      formatKey: "community-arts-event-logistics" as const,
+      issuer: `Issuer ${index + 1}`,
+      locality: "Longmont",
+      collectionArea: null,
+    })),
+  });
+  return sources;
+}
+
+function routineCheckForSource(
+  source: { id: number; url: string; title: string },
+  title: string,
+  state: "parsed" | "capture-failed" = "parsed",
+) {
+  return {
+    ok: true as const,
+    check: {
+      checkId: source.id,
+      source: { id: source.id, title: source.title, url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: runNow.toISOString(),
+      capture: state === "parsed"
+        ? { captureEventId: 100 + source.id, artifactVersionId: 200 + source.id, observedAt: runNow.toISOString(), evidenceHref: null, textAvailable: true }
+        : null,
+      state,
+      counts: { parsed: state === "parsed" ? 1 : 0, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates: state === "parsed"
+        ? [{
+            id: source.id,
+            externalIdHash: `event-${source.id}`,
+            formatKey: "community-arts-event-logistics" as const,
+            variant: "event",
+            fields: {
+              issuer: { value: "Arts Council", locator: "issuer" },
+              title: { value: title, locator: "title" },
+              start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+              venue: { value: "Park", locator: "venue" },
+            },
+            conflict: false,
+          }]
+        : [],
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  };
+}
+
+test("a throwing middle source is skipped while the other two produce the edition", async () => {
+  const sources = await activateThreeSourceFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='skip-middle' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  const seen: number[] = [];
+  const check = async (_actor: unknown, input: { sourceId: number }) => {
+    seen.push(input.sourceId);
+    if (input.sourceId === sources[1]!.id) throw new Error("middle source exploded");
+    const index = sources.findIndex((source) => source.id === input.sourceId);
+    return routineCheckForSource(sources[index]!, `Event from Source ${index + 1}`);
+  };
+
+  await performRoutineNoticeWorkWith(job as DeskJob, {
+    now: runNow,
+    check: check as any,
+    verifyCheck: async () => {},
+  });
+
+  assert.deepEqual(seen, sources.map((source) => source.id));
+  const [article] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  assert.match(article!.body, /Event from Source 1/);
+  assert.match(article!.body, /Event from Source 3/);
+  assert.doesNotMatch(article!.body, /Event from Source 2/);
+  const [run] = await sql.query<{ summary_json: string }>(
+    "select summary_json from routine_notice_runs where id=$1",
+    [job.subject_id],
+  );
+  const summary = JSON.parse(run!.summary_json);
+  assert.equal(summary.skipped.length, 1);
+  assert.equal(summary.skipped[0].sourceId, sources[1]!.id);
+  assert.equal(summary.skipped[0].name, "Source 2");
+  assert.match(summary.skipped[0].reason, /middle source exploded/);
+  const [finished] = await sql.query<{ step_text: string; status: string }>(
+    "select step_text,status from desk_jobs where id=$1",
+    [job.id],
+  );
+  assert.equal(finished!.status, "completed");
+  assert.equal(finished!.step_text, "Read 2 of 3 sources; skipped: Source 2");
+});
+
+test("a Cancel raised while a source is being read still stops the whole run", async () => {
+  const sources = await activateThreeSourceFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='cancel-inside-source' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  let checks = 0;
+  await assert.rejects(
+    performRoutineNoticeWork(job as DeskJob, {
+      now: runNow,
+      check: (async (_actor: unknown, input: { sourceId: number }) => {
+        checks += 1;
+        if (input.sourceId === sources[1]!.id)
+          throw new JobCancelledError("Cancelled by the editor during source read");
+        const index = sources.findIndex((source) => source.id === input.sourceId);
+        return routineCheckForSource(sources[index]!, `Event from Source ${index + 1}`);
+      }) as any,
+      verifyCheck: async () => {},
+    }),
+    (error: unknown) =>
+      error instanceof JobCancelledError && /during source read/.test(error.message),
+  );
+  assert.equal(checks, 2, "the third source was not read after Cancel");
+  const [state] = await sql.query<{ articles: number; status: string; summary_json: string }>(
+    "select (select count(*)::int from articles where newsroom_id=$1) articles,status,summary_json from routine_notice_runs where id=$2",
+    [room, job.subject_id],
+  );
+  assert.equal(state!.articles, 0);
+  assert.equal(state!.status, "failed");
+  assert.match(state!.summary_json, /Cancelled by the editor during source read/);
+  assert.doesNotMatch(state!.summary_json, /Every routine source was skipped/);
+});
+
+test("all skipped sources fail the run and name each one instead of filing an empty edition", async () => {
+  const sources = await activateThreeSourceFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='all-skipped' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  await assert.rejects(
+    performRoutineNoticeWork(job as DeskJob, {
+      now: runNow,
+      check: (async (_actor: unknown, input: { sourceId: number }) => {
+        if (input.sourceId === sources[0]!.id) throw new Error("first source failed");
+        if (input.sourceId === sources[1]!.id)
+          return { ok: false as const, code: "capture-failed" as const, error: "second source refused" };
+        return routineCheckForSource(sources[2]!, "Unused", "capture-failed");
+      }) as any,
+      verifyCheck: async () => {},
+    }),
+    /Every routine source was skipped: Source 1, Source 2, Source 3/,
+  );
+  const [state] = await sql.query<{ articles: number; status: string; summary_json: string }>(
+    "select (select count(*)::int from articles where newsroom_id=$1) articles,status,summary_json from routine_notice_runs where id=$2",
+    [room, job.subject_id],
+  );
+  assert.equal(state!.articles, 0);
+  assert.equal(state!.status, "failed");
+  const summary = JSON.parse(state!.summary_json);
+  assert.deepEqual(summary.skipped.map((item: any) => item.name), ["Source 1", "Source 2", "Source 3"]);
+  assert.match(summary.error, /Every routine source was skipped: Source 1, Source 2, Source 3/);
+});
+
+test("thirteen routine sources save under the default 150-source setting", async () => {
+  const sql = await getSql();
+  const sources = [];
+  for (let index = 1; index <= 13; index += 1) {
+    const [source] = await sql.query<{ id: number; url: string }>(
+      "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,$4,'accepted') returning id,url",
+      [owner, room, `https://thirteen${index}.example/calendar`, `Thirteen ${index}`],
+    );
+    sources.push(source!);
+  }
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 0,
+    paused: false,
+    approvals: sources.map((source) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      formatKey: "community-arts-event-logistics" as const,
+    })),
+  });
+  const saved = await saveRoutineNoticeAutomationFor(owner, room, {
+    expectedRevision: 0,
+    enabled: true,
+    timezone: "America/Denver",
+    localTime: "06:15",
+    sections: { today: "news", weekend: "events", deadlines: "deadlines" },
+    sources: sources.map((source, index) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      publicSourceUrl: `https://thirteen${index + 1}.example/calendar`,
+      formatKey: "community-arts-event-logistics" as const,
+      issuer: `Issuer ${index + 1}`,
+      locality: "Longmont",
+      collectionArea: null,
+    })),
+  });
+  assert.equal(saved.sources.length, 13);
+  assert.equal(saved.sourceLimit, 150);
 });

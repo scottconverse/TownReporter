@@ -3,6 +3,7 @@ import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { ROUTINE_NOTICE_FORMAT_KEYS, type RoutineNoticeFormatKey } from "./routine-notice-types.ts";
 import { cleanOrRaw, routineAutomationInput } from "./request-input.ts";
+import { routineNoticeSourceLimit } from "./routine-notice-source-limit.ts";
 
 export type RoutineEditionChannel = "today" | "weekend" | "deadlines";
 export type RoutineAutomationSource = {
@@ -36,6 +37,8 @@ export type RoutineNoticeAutomation = {
   localTime: string;
   sections: Record<RoutineEditionChannel, string>;
   sources: RoutineAutomationSource[];
+  /** Maximum active source rows for this deployment. */
+  sourceLimit: number;
   updatedAt: string | null;
   recentRuns: Array<{
     id: number;
@@ -50,6 +53,7 @@ export type RoutineNoticeAutomation = {
       error: string | null;
       /** Why the run's items need review, in plain words. Empty for runs saved before this was kept. */
       reviewReasons: Array<{ why: string; count: number; label?: string; source?: string }>;
+      skipped: Array<{ sourceId: number; sourceUrl: string; name?: string; reason: string }>;
     };
     createdAt: string;
     articles: Array<{ channel: RoutineEditionChannel; headline: string; href: string }>;
@@ -58,7 +62,7 @@ export type RoutineNoticeAutomation = {
 };
 export type SaveRoutineNoticeAutomationInput = Omit<
   RoutineNoticeAutomation,
-  "revision" | "updatedAt" | "recentRuns"
+  "revision" | "updatedAt" | "recentRuns" | "sourceLimit"
 > & { expectedRevision: number };
 export type RoutineNoticeAutomationResult =
   | { ok: true; automation: RoutineNoticeAutomation }
@@ -105,6 +109,29 @@ function routineReviewReasons(
       const source = short(row.source);
       return [{ why, count: Math.floor(count), ...(label ? { label } : {}), ...(source ? { source } : {}) }];
     });
+}
+function routineSkippedSources(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const row = raw as Record<string, unknown>;
+    if (
+      !Number.isSafeInteger(row.sourceId) ||
+      Number(row.sourceId) < 1 ||
+      typeof row.sourceUrl !== "string" ||
+      !row.sourceUrl.trim() ||
+      typeof row.reason !== "string" ||
+      !row.reason.trim()
+    )
+      return [];
+    const name = typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 300) : undefined;
+    return [{
+      sourceId: Number(row.sourceId),
+      sourceUrl: row.sourceUrl.trim().slice(0, 4000),
+      ...(name ? { name } : {}),
+      reason: row.reason.trim().slice(0, 300),
+    }];
+  });
 }
 function routineRunOutcomes(value: unknown): RoutineNoticeRunOutcome[] {
   if (!Array.isArray(value)) return [];
@@ -192,7 +219,7 @@ function clean(raw: unknown): SaveRoutineNoticeAutomationInput {
     !/^([01]\d|2[0-3]):[0-5]\d$/.test(x.localTime) ||
     !x.sections ||
     !Array.isArray(x.sources) ||
-    x.sources.length > 12
+    x.sources.length > routineNoticeSourceLimit()
   )
     throw new InputError("invalid-input", "Routine edition settings were malformed.");
   const sections = {
@@ -325,6 +352,7 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
         eligible: Number(summary.eligible) || 0,
         error: typeof summary.error === "string" ? summary.error : null,
         reviewReasons: routineReviewReasons(summary.reviewReasons),
+        skipped: routineSkippedSources(summary.skipped),
       },
       createdAt: String(row.created_at),
       notices: routineRunOutcomes(summary.notices),
@@ -348,6 +376,7 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
           weekend: r.weekend_section,
           deadlines: r.deadlines_section,
         },
+        sourceLimit: routineNoticeSourceLimit(),
         sources: sources.map((s) => ({
           sourceId: s.source_id,
           sourceUrl: s.source_url,
@@ -372,6 +401,7 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
             visibleSections.find((section) => /deadline|service/i.test(section.key))?.key ?? defaultSection,
         },
         sources: [],
+        sourceLimit: routineNoticeSourceLimit(),
         updatedAt: null,
         recentRuns,
       };

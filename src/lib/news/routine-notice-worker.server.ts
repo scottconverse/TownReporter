@@ -3,6 +3,7 @@ import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import {
   countedStep,
   ensureJobsSchema,
+  JobCancelledError,
   progressReporterFor,
   spanPct,
   throwIfJobCancelled,
@@ -23,10 +24,14 @@ import {
   routineNoticeLabel,
   type EligibleRoutineNotice,
 } from "./routine-notice-editions.ts";
-import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
+import type {
+  RoutineNoticeCheckGroup,
+  RoutineNoticeCheckResult,
+} from "./routine-notice-checks.ts";
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { sha256 } from "./fetch-url.ts";
 import { getPaperConfig } from "./paper-settings.ts";
+import { routineNoticeSourceLimit } from "./routine-notice-source-limit.ts";
 
 type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
 type RoutineReviewReason = { why: string; count: number; label?: string; source?: string };
@@ -130,7 +135,7 @@ export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ que
         "select count(*)::int n from routine_notice_automation_sources where newsroom_id=$1",
         [config.newsroom_id],
       );
-      if (member?.role !== "owner" || !policy || policy.paused || !count?.n || count.n > 12)
+      if (member?.role !== "owner" || !policy || policy.paused || !count?.n || count.n > routineNoticeSourceLimit())
         return false;
       const rows = await tx.query<{ id: number }>(
         "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,$2,$3,$4,'queued',$5) on conflict do nothing returning id",
@@ -148,7 +153,9 @@ export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ que
   return { queued };
 }
 
-type CheckFn = typeof checkRoutineNoticeSourceForOwner;
+type CheckFn = (
+  ...args: Parameters<typeof checkRoutineNoticeSourceForOwner>
+) => Promise<RoutineNoticeCheckResult>;
 async function assertRoutineRunCanContinue(job: DeskJob, run: {
   id: number;
   newsroom_id: number;
@@ -256,20 +263,26 @@ export async function performRoutineNoticeWorkWith(
   const now = () => typeof deps.now === "function" ? deps.now() : deps.now ?? new Date();
   if (localStamp(now(), run.timezone).date !== String(run.local_date).slice(0, 10))
     throw new Error("Routine edition run expired before publication; editor review is required.");
+  const sourceLimit = routineNoticeSourceLimit();
   const sources = await sql.query<{
     source_id: number;
     source_url: string;
     public_source_url: string;
+    source_title: string;
     issuer: string;
     locality: string;
     format_key: any;
   }>(
-    "select source_id,source_url,public_source_url,issuer,locality,format_key from routine_notice_automation_sources where newsroom_id=$1 order by source_id,format_key limit 13",
-    [run.newsroom_id],
+    `select x.source_id,x.source_url,x.public_source_url,x.issuer,x.locality,x.format_key,s.title source_title
+       from routine_notice_automation_sources x
+       join sources s on s.newsroom_id=x.newsroom_id and s.id=x.source_id
+      where x.newsroom_id=$1 order by x.source_id,x.format_key limit $2`,
+    [run.newsroom_id, sourceLimit + 1],
   );
-  if (!sources.length || sources.length > 12)
+  if (!sources.length || sources.length > sourceLimit)
     throw new Error("Routine edition source selection is unavailable.");
   const groups: RoutineNoticeCheckGroup[] = [];
+  const skipped: Array<{ sourceId: number; sourceUrl: string; name?: string; reason: string }> = [];
   const check = deps.check ?? checkRoutineNoticeSourceForOwner;
   /*
     FB1, unit 2: this worker used to say NOTHING at all while it ran.
@@ -277,8 +290,9 @@ export async function performRoutineNoticeWorkWith(
     No stage, no step, and -- because `beat_at` is only written by
     `reportProgress` -- no heartbeat either. Its card would have called a
     perfectly healthy routine edition "stalled" at sixty seconds and offered the
-    editor "Retry on next model" for a job that was mid-fetch. Twelve sources,
-    each one a real network read, is not instant and is not invisible any more.
+    editor "Retry on next model" for a job that was mid-fetch. A run can carry
+    many sources now, each one a real network read, so it is not instant and is
+    not invisible any more.
   */
   const report = progressReporterFor(job);
   await report("Reading the routine sources", spanPct(0, sources.length, 0, 60));
@@ -290,7 +304,7 @@ export async function performRoutineNoticeWorkWith(
       CANCEL. `assertRoutineRunCanContinue` is about AUTHORITY -- the claim, the
       automation revision, a paused policy, an owner who left -- and never about
       the editor's Cancel, so a Cancel pressed while a routine edition was
-      reading twelve sources was not noticed until the loop happened to end.
+      reading sources was not noticed until the loop happened to end.
       `throwIfJobCancelled` is the desk's own act, at the source boundary.
 
       HEARTBEAT. `report` speaks once per source, so the card was honest BETWEEN
@@ -301,30 +315,90 @@ export async function performRoutineNoticeWorkWith(
       read is in flight (so the row never goes quiet) and it reads Cancel on the
       same tick (so a Cancel lands mid-fetch rather than at the next source).
 
-      Its label is the counted step, so the ticker's "Waiting on …" sentence
-      names the source being read rather than a model that is not involved.
+      One failed source is recorded and skipped. Cancel and authority checks
+      remain outside that skip path so they still stop the whole run.
     */
     await throwIfJobCancelled(job.id);
     await report(
       countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
       spanPct(sourceIndex + 1, sources.length, 0, 60),
     );
-    const result = await waitForModel({
-      jobId: job.id,
-      label: () => countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
-      run: () =>
-        check(
-          { userId: run.actor, newsroomId: run.newsroom_id },
-          {
-            requestId: crypto.randomUUID(),
-            sourceId: source.source_id,
-            sourceUrl: source.source_url,
-            formatKey: source.format_key,
-            expectedPolicyRevision: run.policy_revision,
-          },
-        ),
-    });
+    let result;
+    try {
+      result = await waitForModel({
+        jobId: job.id,
+        label: () => countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
+        run: () =>
+          check(
+            { userId: run.actor, newsroomId: run.newsroom_id },
+            {
+              requestId: crypto.randomUUID(),
+              sourceId: source.source_id,
+              sourceUrl: source.source_url,
+              formatKey: source.format_key,
+              expectedPolicyRevision: run.policy_revision,
+            },
+          ),
+      });
+    } catch (error) {
+      if (error instanceof JobCancelledError) throw error;
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason:
+          error instanceof Error && error.message.trim()
+            ? error.message.trim().slice(0, 300)
+            : "the source check failed",
+      });
+      continue;
+    }
+    if (!result.ok) {
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason: `${result.code}: ${result.error}`.slice(0, 300),
+      });
+      continue;
+    }
+    if (result.check.state === "capture-failed") {
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason: "the source capture failed",
+      });
+      continue;
+    }
     groups.push(result.check);
+  }
+  const skippedNames = skipped.map(
+    (source) => source.name || sources.find((row) => row.source_id === source.sourceId)?.public_source_url || `source ${source.sourceId}`,
+  );
+  const sourceReadSummary = `Read ${sources.length - skipped.length} of ${sources.length} sources; skipped: ${
+    skippedNames.length ? skippedNames.join(", ") : "none"
+  }`;
+  if (skipped.length === sources.length) {
+    await report(sourceReadSummary);
+    await sql.query(
+      "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
+      [
+        run.id,
+        JSON.stringify({
+          published: 0,
+          corrected: 0,
+          needsReview: skipped.length,
+          eligible: 0,
+          deferred: 0,
+          notices: [],
+          reviewReasons: skipped.map((source) => ({ why: source.reason, count: 1 })),
+          skipped,
+        }),
+        run.newsroom_id,
+      ],
+    );
+    throw new Error(`Every routine source was skipped: ${skippedNames.join(", ")}.`);
   }
   await deps.beforeCommit?.();
   await report("Planning the edition", 70);
@@ -574,12 +648,14 @@ export async function performRoutineNoticeWorkWith(
     deferred: [...noticeStatuses.values()].filter((status) => status === "deferred").length,
     notices: noticeRows(),
     reviewReasons: capReviewReasons(reviewReasons),
+    skipped,
   });
   await sql.query(
     "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
     [run.id, JSON.stringify(summary(0, 0)), run.newsroom_id],
   );
   await report("Filing the notices", 90);
+  await report(sourceReadSummary);
   await withTransaction(async (tx) => {
     const [claim] = await tx.query<{ claim_token: string | null; status: string }>(
       "select claim_token,status from desk_jobs where id=$1 and newsroom_id=$2 for update",
