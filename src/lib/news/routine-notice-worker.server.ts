@@ -1041,6 +1041,11 @@ export async function performRoutineNoticeWorkWith(
       const bodyHash = await sha256(plan.body);
       const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
+      /*
+        A routine edition is the machine's own story, so a same-day change
+        updates its list and posts a short public note. A story changed or
+        taken down by an editor is still left alone for review.
+      */
       if (existing) {
         const existingKeys = [...(sameDayKeys.get(plan.channel) ?? [])];
         const keysAfterRun = [
@@ -1092,7 +1097,11 @@ export async function performRoutineNoticeWorkWith(
           console.info(
             `[routine-edition] ${plan.channel} ${localDate}: the layout changed and no correction was posted`,
           );
-        else
+        else {
+          await tx.query(
+            "update articles set body=$1, source_urls=$2 where id=$3 and newsroom_id=$4",
+            [plan.body, JSON.stringify(plan.sourceUrls), existing.article_id, run.newsroom_id],
+          );
           await tx.query(
             "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
             [
@@ -1102,9 +1111,16 @@ export async function performRoutineNoticeWorkWith(
               routineEditionUpdateNote(addedCount),
             ],
           );
+        }
         await tx.query(
-          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
-          [existing.id, run.id, fingerprint, JSON.stringify(keysAfterRun)],
+          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4,article_body_hash=$5 where id=$1",
+          [
+            existing.id,
+            run.id,
+            fingerprint,
+            JSON.stringify(keysAfterRun),
+            update === "correction" ? bodyHash : existing.article_body_hash,
+          ],
         );
         if (update === "correction") corrected += 1;
         markChannel(plan.channel, "published");
