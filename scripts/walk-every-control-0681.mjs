@@ -53,7 +53,7 @@
  *        the full 2x2 matrix is the default and is what the brief asks for.
  */
 import { spawn } from "node:child_process";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
@@ -742,13 +742,24 @@ async function seed(pg, userId) {
  * `$name` is a param, `$.` is a splat, and `[.]` is a literal dot.
  */
 async function collectRoutes() {
+  /*
+    `src/routes` also holds helpers and tests beside the screens. The generated
+    route tree is TanStack Router's declaration of which modules are routes, so
+    follow its imports instead of treating every TypeScript file as a page.
+  */
+  const routeTree = await readFile(join(REPO, "src", "routeTree.gen.ts"), "utf8");
+  const routeModules = new Set(
+    [...routeTree.matchAll(/from ['"]\.\/routes\/([^'"]+)['"]/g)].map((match) =>
+      match[1].replaceAll("\\", "/"),
+    ),
+  );
   const files = await readdir(join(REPO, "src", "routes"), { recursive: true });
   const routes = [];
   for (const file of files) {
     if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
     if (file.startsWith("api/") || file.startsWith("api\\")) continue; // API handlers, not screens
     const name = file.replace(/\.tsx?$/, "").split(/[\\/]/).join("/");
-    if (name === "__root") continue;
+    if (name === "__root" || !routeModules.has(name)) continue;
     /*
       `[.]` is a literal dot in the file name, but dots are also the segment
       separator, so the escape has to be hidden BEFORE the split and put back
@@ -1239,6 +1250,17 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
 
 /* ── 6. the job states, each on the screen that shows it ─────────────────── */
 {
+  /*
+    The button sweep really presses Publish on the first fixture lead. The app
+    correctly suppresses draft errors on a story already on the paper
+    (src/routes/desk.story.$leadId.tsx:2244 and :3606), so restore the seeded
+    lead states before re-creating the job-state fixtures below.
+  */
+  await pg.query("update leads set status = 'drafted' where id = $1", [seeded.leadId]);
+  await pg.query("update leads set status = 'new' where id = $1 or id = $2", [
+    seeded.leadId2,
+    seeded.leadId3,
+  ]);
   await seedJobStates(pg, ownerId, seeded);
   /*
     Each state is checked against what the desk ACTUALLY draws, which differs
@@ -1249,7 +1271,8 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
       the card's own two buttons;
     - a FAILED job gets no card at all (`StoryJobProgress` returns null) --
       the page turns `job.error` into one plain sentence next to the draft
-      controls through `editorDraftError` (src/routes/desk.story.$leadId.tsx:388-391).
+      controls through `editorDraftError` (src/routes/desk.story.$leadId.tsx:718-722), with the
+      notice draw gated for published stories at `:3606`.
       So the QUOTA row does not print the provider's 429 verbatim; it prints
       "The writing model's usage limit was reached. It resets …", and the next
       step it offers is the tail of that same sentence, not a button;
