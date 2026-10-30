@@ -16,6 +16,10 @@ import type { ModelEffort } from "./provider-registry.ts";
 import { TODO_DETAIL_MAX, TODO_TEXT_MAX, clipTodoText } from "./notes.ts";
 /* The four geography keys, owned by the paper's pills; this file only asks. */
 import { cleanStoryArea } from "../story-area.ts";
+import {
+  MAX_ROUTINE_NOTICE_SOURCE_LIMIT,
+  routineNoticeSourceLimit,
+} from "./routine-notice-source-limit.ts";
 
 /*
   Bounded input for the server functions this unit was scoped to: publish,
@@ -1867,7 +1871,10 @@ export const routineAutomationInput = z.looseObject({
   timezone: z.string().max(LIMITS.timezone).catch(""),
   localTime: z.string().max(40).catch(""),
   sections: z.record(z.string().max(LIMITS.sectionKey), z.string().max(LIMITS.modelId)),
-  sources: z.array(z.looseObject({})).max(LIMITS.caseRefList),
+  sources: z
+    .array(z.looseObject({}))
+    .max(MAX_ROUTINE_NOTICE_SOURCE_LIMIT)
+    .refine((sources) => sources.length <= routineNoticeSourceLimit()),
 });
 
 /* --- ops/dashboard.ts (1 row) ------------------------------------------- */

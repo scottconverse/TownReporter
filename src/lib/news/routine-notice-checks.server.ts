@@ -18,6 +18,10 @@ import {
   extractLibraryHours,
   extractRoutineIcs,
 } from "./routine-notice-feeds.ts";
+import {
+  extractCommunityEventFeed,
+  routineEventReaderKind,
+} from "./routine-notice-event-readers.ts";
 import type {
   CheckRoutineNoticeInput,
   RoutineNoticeCandidateView,
@@ -341,6 +345,18 @@ function adapterResults(
           timezone: ownerContext.timezone,
         })
       : missingContext();
+  if (input.formatKey === "community-arts-event-logistics") {
+    const kind = routineEventReaderKind(content);
+    if (kind && kind !== "ics")
+      return ownerContext
+        ? extractCommunityEventFeed(content, kind, {
+            provenance: base,
+            issuer: ownerContext.issuer,
+            locality: ownerContext.locality,
+            timezone: ownerContext.timezone,
+          })
+        : missingContext();
+  }
   if (input.formatKey === "public-meeting-logistics") {
     if (!ownerContext) return missingContext();
     let parsed: unknown;

@@ -159,7 +159,7 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
         ))}
       </div>
       <fieldset className="mt-5 border border-rule p-4">
-        <legend className="px-1 font-medium">Active structured sources (maximum 12)</legend>
+        <legend className="px-1 font-medium">Active structured sources (maximum {draft.sourceLimit})</legend>
         {available.map((a) => {
           const key = `${a.sourceId}:${a.formatKey}`,
             row = selected.get(key);
@@ -207,7 +207,7 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
       </fieldset>
       <RoutineNoticeAutomationPreview sources={draft.sources} />
       <InkButton
-        disabled={save.isPending || draft.sources.length > 12}
+        disabled={save.isPending || draft.sources.length > draft.sourceLimit}
         onClick={() => save.mutate()}
       >
         {save.isPending ? "Saving…" : draft.enabled ? "Save and activate" : "Save paused settings"}

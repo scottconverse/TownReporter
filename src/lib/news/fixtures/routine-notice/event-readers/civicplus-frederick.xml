@@ -1,0 +1,77 @@
+<?xml version="1.0"?><rss version="2.0" xmlns:calendarEvent="https://www.frederickco.gov/Calendar.aspx"><channel>
+	<title>Frederick, CO - Calendar</title>
+	<link>https://www.frederickco.gov/Calendar.aspx</link>
+	<lastBuildDate>Fri, 30 Oct 2026 00:28:39 -0700</lastBuildDate>
+	<description>Frederick, CO - Get the latest events</description>
+	<language>en-us</language>
+	<item>
+		<title>Neighborhood Meeting - 3766 Eureka Way Car Sales Conditional Use</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4404</link>
+		<pubDate>Fri, 23 Oct 2026 14:09:05 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 2, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;05:00 PM - 06:00 PM</description>
+		<calendarEvent:EventDates> November 2, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>05:00 PM - 06:00 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4404/639283685450000000</guid>
+	</item>
+	<item>
+		<title>Board of Trustees Work Session</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4311</link>
+		<pubDate>Fri, 23 Oct 2026 17:39:23 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 4, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;05:30 PM - 06:30 PM</description>
+		<calendarEvent:EventDates> November 4, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>05:30 PM - 06:30 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4311/639283811630000000</guid>
+	</item>
+	<item>
+		<title>Board of Trustees Regular Session</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4135</link>
+		<pubDate>Fri, 23 Oct 2026 17:39:07 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 4, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;07:00 PM - 08:00 PM</description>
+		<calendarEvent:EventDates> November 4, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>07:00 PM - 08:00 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4135/639283811470000000</guid>
+	</item>
+	<item>
+		<title>Planning Commission Meeting</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4264</link>
+		<pubDate>Fri, 29 May 2026 16:56:18 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 5, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;06:30 PM - 07:30 PM</description>
+		<calendarEvent:EventDates> November 5, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>06:30 PM - 07:30 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4264/639156777780000000</guid>
+	</item>
+	<item>
+		<title>Historic Preservation Committee Meeting</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4246</link>
+		<pubDate>Fri, 23 Jan 2026 13:23:47 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 10, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;02:30 PM - 03:30 PM</description>
+		<calendarEvent:EventDates> November 10, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>02:30 PM - 03:30 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4246/639047750270000000</guid>
+	</item>
+	<item>
+		<title>Frederick Arts Committee </title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4162</link>
+		<pubDate>Fri, 26 Dec 2025 09:18:03 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 10, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;04:30 PM - 05:30 PM</description>
+		<calendarEvent:EventDates> November 10, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>04:30 PM - 05:30 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4162/639023410830000000</guid>
+	</item>
+	<item>
+		<title>Parks, Recreation, Open Space &amp; Trails Commission Meeting</title>
+		<link>https://www.frederickco.gov/Calendar.aspx?EID=4381</link>
+		<pubDate>Wed, 05 Aug 2026 09:59:37 -0700</pubDate>
+		<description>&lt;strong&gt;Event date:&lt;/strong&gt; November 11, 2026 &lt;br&gt;&lt;strong&gt;Event Time: &lt;/strong&gt;06:30 PM - 07:30 PM</description>
+		<calendarEvent:EventDates> November 11, 2026 </calendarEvent:EventDates>
+		<calendarEvent:EventTimes>06:30 PM - 07:30 PM</calendarEvent:EventTimes>
+
+		<guid isPermaLink="false">https://www.frederickco.gov/Calendar.aspx?EID=4381/639215279770000000</guid>
+	</item>
+</channel></rss>
