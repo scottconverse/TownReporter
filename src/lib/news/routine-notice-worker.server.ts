@@ -1,5 +1,5 @@
 import { getSql, withTransaction } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
+import { routineEditionUpdateNote } from "./correction-origin.ts";
 import {
   countedStep,
   ensureJobsSchema,
@@ -1042,6 +1042,7 @@ export async function performRoutineNoticeWorkWith(
       const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
       if (existing) {
+        const existingKeys = [...(sameDayKeys.get(plan.channel) ?? [])];
         const keysAfterRun = [
           ...new Set([
             ...(sameDayKeys.get(plan.channel) ?? []),
@@ -1052,11 +1053,13 @@ export async function performRoutineNoticeWorkWith(
         ];
         const update = routineEditionUpdateKind({
           existingFingerprint: existing.content_fingerprint,
-          existingKeys: [...(sameDayKeys.get(plan.channel) ?? [])],
+          existingKeys,
           fingerprint,
           bodyHash,
           keysAfterRun,
         });
+        const existingKeySet = new Set(existingKeys);
+        const addedCount = keysAfterRun.filter((key) => !existingKeySet.has(key)).length;
         if (update === "unchanged") {
           markChannel(plan.channel, "published");
           continue;
@@ -1096,7 +1099,7 @@ export async function performRoutineNoticeWorkWith(
               run.actor,
               run.newsroom_id,
               existing.article_id,
-              `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
+              routineEditionUpdateNote(addedCount),
             ],
           );
         await tx.query(

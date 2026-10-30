@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { getSql } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX, routineEditionUpdateNote } from "./correction-origin.ts";
 import {
   ensureRoutineNoticePolicySchema,
   saveRoutineNoticePolicyFor,
@@ -272,6 +272,12 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     automatic!.body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX),
     `a machine-appended correction must open with the shared marker, got: ${automatic!.body.slice(0, 60)}`,
   );
+  assert.equal(
+    automatic!.body,
+    routineEditionUpdateNote(1),
+    "a same-day correction must be a short plain note, not a second copy of the story",
+  );
+  assert.equal(automatic!.body.includes("## "), false, "the correction must not carry story headings");
 
   await sql.query("update articles set body='Editor changed this edition.' where newsroom_id=$1", [room]);
   eventTitle = "Concert — final time";
