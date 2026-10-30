@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { getSql } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX, routineEditionUpdateNote } from "./correction-origin.ts";
+import { sha256 } from "./fetch-url.ts";
 import {
   ensureRoutineNoticePolicySchema,
   saveRoutineNoticePolicyFor,
@@ -256,6 +257,13 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   assert.equal(afterCorrection?.corrections, 1);
   assert.equal(afterCorrection?.articles, 2);
   assert.notDeepEqual(JSON.parse(afterCorrection!.candidate_keys_json), []);
+  const [correctedArticle] = await sql.query<{ body: string; dek: string; article_body_hash: string }>(
+    "select a.body,a.dek,p.article_body_hash from routine_notice_publications p join articles a on a.id=p.article_id where p.newsroom_id=$1 and p.channel='today'",
+    [room],
+  );
+  assert.match(correctedArticle!.body, /\n\n\*\*6 p\.m\.\*\*\nConcert — new time\nPark\n\n/);
+  assert.equal(correctedArticle!.dek, "1 event on Longmont's public calendars today.");
+  assert.equal(correctedArticle!.article_body_hash, await sha256(correctedArticle!.body));
   /*
     The correction the worker appended carries the mark the public page reads
     to tell an automatic row from an editor's (unit U14). Writer and reader
@@ -272,6 +280,12 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     automatic!.body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX),
     `a machine-appended correction must open with the shared marker, got: ${automatic!.body.slice(0, 60)}`,
   );
+  assert.equal(
+    automatic!.body,
+    routineEditionUpdateNote(1),
+    "a same-day correction must be a short plain note, not a second copy of the story",
+  );
+  assert.equal(automatic!.body.includes("## "), false, "the correction must not carry story headings");
 
   await sql.query("update articles set body='Editor changed this edition.' where newsroom_id=$1", [room]);
   eventTitle = "Concert — final time";
@@ -284,11 +298,19 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     check: fakeCheck as any,
     verifyCheck: async () => {},
   });
-  const [afterEdit] = await sql.query<{ corrections: number; needs_review: number }>(
-    "select (select count(*)::int from corrections where newsroom_id=$1) corrections,(summary_json::jsonb->>'needsReview')::int needs_review from routine_notice_runs where id=$2",
+  const [afterEdit] = await sql.query<{
+    corrections: number;
+    needs_review: number;
+    body: string;
+  }>(
+    "select (select count(*)::int from corrections where newsroom_id=$1) corrections,(summary_json::jsonb->>'needsReview')::int needs_review,(select body from articles where id=(select article_id from routine_notice_publications where newsroom_id=$1 and channel='today')) body from routine_notice_runs where id=$2",
     [room, job.subject_id],
   );
-  assert.deepEqual(afterEdit, { corrections: 1, needs_review: 1 });
+  assert.deepEqual(afterEdit, {
+    corrections: 1,
+    needs_review: 1,
+    body: "Editor changed this edition.",
+  });
 });
 
 test("revocation at the final boundary leaves no article, correction, audit, or completed run", async () => {

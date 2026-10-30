@@ -1,5 +1,5 @@
 import { getSql, withTransaction } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
+import { routineEditionUpdateNote } from "./correction-origin.ts";
 import {
   countedStep,
   ensureJobsSchema,
@@ -1041,7 +1041,13 @@ export async function performRoutineNoticeWorkWith(
       const bodyHash = await sha256(plan.body);
       const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
+      /*
+        A routine edition is the machine's own story, so a same-day change
+        updates its list and posts a short public note. A story changed or
+        taken down by an editor is still left alone for review.
+      */
       if (existing) {
+        const existingKeys = [...(sameDayKeys.get(plan.channel) ?? [])];
         const keysAfterRun = [
           ...new Set([
             ...(sameDayKeys.get(plan.channel) ?? []),
@@ -1052,11 +1058,13 @@ export async function performRoutineNoticeWorkWith(
         ];
         const update = routineEditionUpdateKind({
           existingFingerprint: existing.content_fingerprint,
-          existingKeys: [...(sameDayKeys.get(plan.channel) ?? [])],
+          existingKeys,
           fingerprint,
           bodyHash,
           keysAfterRun,
         });
+        const existingKeySet = new Set(existingKeys);
+        const addedCount = keysAfterRun.filter((key) => !existingKeySet.has(key)).length;
         if (update === "unchanged") {
           markChannel(plan.channel, "published");
           continue;
@@ -1089,19 +1097,36 @@ export async function performRoutineNoticeWorkWith(
           console.info(
             `[routine-edition] ${plan.channel} ${localDate}: the layout changed and no correction was posted`,
           );
-        else
+        else {
+          await tx.query(
+            "update articles set dek=$1, body=$2, source_urls=$3 where id=$4 and newsroom_id=$5",
+            [
+              plan.dek ?? "Logistics from approved public sources.",
+              plan.body,
+              JSON.stringify(plan.sourceUrls),
+              existing.article_id,
+              run.newsroom_id,
+            ],
+          );
           await tx.query(
             "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
             [
               run.actor,
               run.newsroom_id,
               existing.article_id,
-              `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
+              routineEditionUpdateNote(addedCount),
             ],
           );
+        }
         await tx.query(
-          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
-          [existing.id, run.id, fingerprint, JSON.stringify(keysAfterRun)],
+          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4,article_body_hash=$5 where id=$1",
+          [
+            existing.id,
+            run.id,
+            fingerprint,
+            JSON.stringify(keysAfterRun),
+            update === "correction" ? bodyHash : existing.article_body_hash,
+          ],
         );
         if (update === "correction") corrected += 1;
         markChannel(plan.channel, "published");
