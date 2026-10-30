@@ -53,7 +53,7 @@
  *        the full 2x2 matrix is the default and is what the brief asks for.
  */
 import { spawn } from "node:child_process";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
@@ -338,7 +338,7 @@ const SECOND_HEADLINE = "Council approves the pilot program";
 // The control sweep can enqueue newer drafts or cancel jobs. Re-create the
 // three state fixtures immediately before their separate assertions so that
 // latestJob reads the intended scenario, not a side effect of an earlier press.
-async function seedJobStates(pg, userId, { leadId, leadId2, leadId3 }) {
+async function seedJobStates(pg, userId, { leadId, leadId2, leadId3, quotaLeadId = leadId }) {
   const q = (sql, params) => pg.query(sql, params);
   /* ── jobs: one stalled, one failed on quota, one cancelled ────────────── */
   /*
@@ -366,7 +366,7 @@ async function seedJobStates(pg, userId, { leadId, leadId2, leadId3 }) {
      values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
              'DeepSeek API error 429: usage limit reached; resets 11:30pm (America/Denver).',
              '', $3, $4, $3, $4)`,
-    [userId, leadId, ago(40 * MIN), ago(38 * MIN)],
+    [userId, quotaLeadId, ago(40 * MIN), ago(38 * MIN)],
   );
   await q(
     `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
@@ -742,13 +742,24 @@ async function seed(pg, userId) {
  * `$name` is a param, `$.` is a splat, and `[.]` is a literal dot.
  */
 async function collectRoutes() {
+  /*
+    `src/routes` also holds helpers and tests beside the screens. The generated
+    route tree is TanStack Router's declaration of which modules are routes, so
+    follow its imports instead of treating every TypeScript file as a page.
+  */
+  const routeTree = await readFile(join(REPO, "src", "routeTree.gen.ts"), "utf8");
+  const routeModules = new Set(
+    [...routeTree.matchAll(/from ['"]\.\/routes\/([^'"]+)['"]/g)].map((match) =>
+      match[1].replaceAll("\\", "/"),
+    ),
+  );
   const files = await readdir(join(REPO, "src", "routes"), { recursive: true });
   const routes = [];
   for (const file of files) {
     if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
     if (file.startsWith("api/") || file.startsWith("api\\")) continue; // API handlers, not screens
     const name = file.replace(/\.tsx?$/, "").split(/[\\/]/).join("/");
-    if (name === "__root") continue;
+    if (name === "__root" || !routeModules.has(name)) continue;
     /*
       `[.]` is a literal dot in the file name, but dots are also the segment
       separator, so the escape has to be hidden BEFORE the split and put back
@@ -1239,7 +1250,28 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
 
 /* ── 6. the job states, each on the screen that shows it ─────────────────── */
 {
-  await seedJobStates(pg, ownerId, seeded);
+  /*
+    The button sweep really presses Publish on the first fixture lead, so the
+    app correctly suppresses draft errors there. Give the quota assertion its
+    own drafted lead that the sweep never touches; otherwise a published
+    article keeps `publishedSlug` set and hides the draft problem.
+  */
+  const quotaLead = await pg.query(
+    `insert into leads (user_id, newsroom_id, headline, why, topic, topic_unchosen, status,
+                        source_urls, evidence, newsworthiness, notes_json, created_at)
+     values ($1, 1, $2, $3, 'council', false, 'drafted', '[]', $4, 52, $5, $6)
+     returning id`,
+    [
+      ownerId,
+      "Quota fixture: the writing model hit its usage limit",
+      "A clean lead for the failed-on-quota state, not touched by the button sweep.",
+      "No draft was saved; the quota error is the only state on this lead.",
+      JSON.stringify({ todo: [], found: [], verify: [], opened: [], scratch: "" }),
+      ago(20 * MIN),
+    ],
+  );
+  const quotaLeadId = Number(quotaLead.rows[0].id);
+  await seedJobStates(pg, ownerId, { ...seeded, quotaLeadId });
   /*
     Each state is checked against what the desk ACTUALLY draws, which differs
     by state because the desk draws them in different places:
@@ -1249,7 +1281,8 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
       the card's own two buttons;
     - a FAILED job gets no card at all (`StoryJobProgress` returns null) --
       the page turns `job.error` into one plain sentence next to the draft
-      controls through `editorDraftError` (src/routes/desk.story.$leadId.tsx:388-391).
+      controls through `editorDraftError` (src/routes/desk.story.$leadId.tsx:718-722), with the
+      notice draw gated for published stories at `:3606`.
       So the QUOTA row does not print the provider's 429 verbatim; it prints
       "The writing model's usage limit was reached. It resets …", and the next
       step it offers is the tail of that same sentence, not a button;
@@ -1269,7 +1302,7 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
     },
     {
       state: "failed on quota",
-      lead: seeded.leadId,
+      lead: quotaLeadId,
       re: /The writing model's usage limit was reached\. It resets [^.]+\./,
       plain:
         "The writing model's usage limit was reached. It resets 11:30pm (America/Denver). " +

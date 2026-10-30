@@ -1,17 +1,26 @@
 import assert from "node:assert/strict";
 import { parseHTML } from "linkedom";
 
-const DECISIONS = [
+const OPEN_DECISIONS = [
   "Start an AI follow-up",
   "Keep investigating",
   "Wait and watch",
   "Send to the queue",
   "Close: no finding",
 ];
+const CLOSED_DECISIONS = OPEN_DECISIONS.map((name) =>
+  name === "Close: no finding" ? "Already closed" : name,
+);
+
+function decisionsFor(fileStatus) {
+  if (fileStatus === "open") return OPEN_DECISIONS;
+  if (fileStatus === "closed") return CLOSED_DECISIONS;
+  throw new Error(`unknown Dark Desk file status: ${fileStatus}`);
+}
 const RAIL_GROUPS = ["Open files", "Signals to review", "Waiting on an AI follow-up", "Set aside"];
 
 /** The DOM meaning checked by the browser walk, also usable without Chromium in unit shards. */
-export function auditDarkDeskHtml(html) {
+export function auditDarkDeskHtml(html, { fileStatus = "open" } = {}) {
   const { document } = parseHTML(html);
   const settingsButton = [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Settings");
   const settings = document.querySelector("#dark-settings");
@@ -35,7 +44,7 @@ export function auditDarkDeskHtml(html) {
     assert.ok([...document.querySelectorAll(".astra-pair .astra-label")].some((label) => label.textContent.trim() === name), `missing file section ${name}`);
   }
   const decisions = document.querySelector('[aria-label="File decisions"]');
-  for (const name of DECISIONS) {
+  for (const name of decisionsFor(fileStatus)) {
     assert.ok([...decisions?.querySelectorAll("button") ?? []].some((button) => button.textContent.trim() === name), `missing Decide control: ${name}`);
   }
   const groups = [...document.querySelectorAll(".astra-pile:not([hidden]) .astra-pile-h > span:first-child")]
@@ -45,15 +54,18 @@ export function auditDarkDeskHtml(html) {
     const rank = RAIL_GROUPS.indexOf(groups[index]);
     assert.ok(rank >= 0 && (index === 0 || rank > RAIL_GROUPS.indexOf(groups[index - 1])), `rail groups do not follow the spec: ${groups.join(", ")}`);
   }
-  return { state: "file", groups };
+  return { state: "file", fileStatus, groups };
 }
 
-export async function waitForDarkDeskAudit(readHtml, { timeout = 1000, interval = 5 } = {}) {
+export async function waitForDarkDeskAudit(
+  readHtml,
+  { timeout = 1000, interval = 5, fileStatus = "open" } = {},
+) {
   const deadline = Date.now() + timeout;
   let lastError;
   while (Date.now() < deadline) {
     try {
-      return auditDarkDeskHtml(await readHtml());
+      return auditDarkDeskHtml(await readHtml(), { fileStatus });
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, interval));
@@ -71,7 +83,7 @@ export async function assertDarkTapTargets(root) {
   }
 }
 
-export async function prepareDarkDeskCapture(page) {
+export async function prepareDarkDeskCapture(page, { fileStatus = "open" } = {}) {
   await page.waitForFunction(
     () => {
       const empty = document.querySelector(".astra-empty");
@@ -114,7 +126,7 @@ export async function prepareDarkDeskCapture(page) {
     await panel.getByRole("button", { name: "Close", exact: true }).click();
   }
   await panel.waitFor({ state: "hidden" });
-  auditDarkDeskHtml(await page.content());
+  auditDarkDeskHtml(await page.content(), { fileStatus });
   await assertDarkTapTargets(page);
 
   const empty = page.getByRole("heading", { name: "No investigations yet", exact: true });
@@ -133,13 +145,7 @@ export async function prepareDarkDeskCapture(page) {
       .waitFor();
   }
   const decisions = page.getByLabel("File decisions", { exact: true });
-  for (const name of [
-    "Start an AI follow-up",
-    "Keep investigating",
-    "Wait and watch",
-    "Send to the queue",
-    "Close: no finding",
-  ]) {
+  for (const name of decisionsFor(fileStatus)) {
     await decisions.getByRole("button", { name, exact: true }).waitFor();
   }
   const groups = await page

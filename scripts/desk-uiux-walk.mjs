@@ -953,7 +953,10 @@ async function captureSurface(page, scenario, surface) {
     if (process.argv.includes("--local")) await page.locator(".astra-question").waitFor({ timeout: 30000 });
     // A fresh desk hides the loading rail when its empty query resolves.
     // Settle that state before recording numeric control positions to scroll.
-    await prepareDarkDeskCapture(page);
+    // The local CI fixture's only file is closed (dark-ci-fixture.preload.mjs:14).
+    await prepareDarkDeskCapture(page, {
+      fileStatus: process.argv.includes("--local") ? "closed" : "open",
+    });
     await page.getByRole("button", { name: "+ Start a file", exact: true }).click();
     const startDialog = page.getByRole("dialog", { name: "Start a Dark Desk file", exact: true });
     await startDialog.waitFor();

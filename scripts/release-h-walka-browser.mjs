@@ -171,15 +171,12 @@ async function main() {
             .getByRole("button", { name: "Kill", exact: true })
             .click();
           /*
-            TMA-2 (ae6ff2a7): a bulk Kill asks for one reason first, even for a
-            single lead, so the kill is this press.
-            D2-a (settleBulkKill, queue-bulk.ts:144-172) answers the saved-draft
-            warning INSIDE that press -- the drafted leads are sent again with
-            their own draft override -- so no "Kill all anyway" is drawn after
-            it. What is left to prove is the outcome: the lead is killed and its
-            Undo brings the draft back.
+            G27-KILL-3 (owner, Oct 27 2026): a bulk Kill kills at once, with no
+            reason question or second confirmation. D2-a's drafted warning is
+            settled inside that press (settleBulkKill, queue-bulk.ts), so what is
+            left to prove is the outcome: the lead is killed and its Undo brings
+            the draft back.
           */
-          await page.getByRole("button", { name: "Yes, kill 1", exact: true }).click();
           for (let i = 0; i < 60; i++) {
             if ((await sql.query("select status from leads where id=$1", [id]))[0].status === "killed")
               break;
