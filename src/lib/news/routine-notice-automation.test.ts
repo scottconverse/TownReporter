@@ -12,7 +12,7 @@ import {
   saveRoutineNoticeAutomationFor,
 } from "./routine-notice-automation.ts";
 import { ensureJobsSchema, JobCancelledError, type DeskJob } from "./jobs.ts";
-import { checkRoutineNoticeSourceForOwner } from "./routine-notice-checks.server.ts";
+import { checkRoutineNoticeSourceForOwner, RoutineNoticeCheckError } from "./routine-notice-checks.server.ts";
 import type { IngestDocument } from "./ingest.ts";
 import {
   performRoutineNoticeWork,
@@ -935,10 +935,10 @@ test("a story printed in the old layout is corrected only for a real change of e
   assert.match(more.content_fingerprint, /^v2:/);
 });
 
-async function activateThreeSourceFixture() {
+async function activateSourceFixture(sourceCount: number) {
   const sql = await getSql();
   const sources = [];
-  for (let index = 1; index <= 3; index += 1) {
+  for (let index = 1; index <= sourceCount; index += 1) {
     const [source] = await sql.query<{ id: number; url: string; title: string }>(
       "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,$4,'accepted') returning id,url,title",
       [owner, room, `https://events${index}.example/private/calendar?token=secret${index}`, `Source ${index}`],
@@ -1014,7 +1014,7 @@ function routineCheckForSource(
 }
 
 test("a throwing middle source is skipped while the other two produce the edition", async () => {
-  const sources = await activateThreeSourceFixture();
+  const sources = await activateSourceFixture(3);
   await tickRoutineNoticeEditions(runNow);
   const sql = await getSql();
   const [job] = await sql.query<any>(
@@ -1060,8 +1060,41 @@ test("a throwing middle source is skipped while the other two produce the editio
   assert.equal(finished!.step_text, "Read 2 of 3 sources; skipped: Source 2");
 });
 
+test("authority paused by the last skipped source stops the run before filing", async () => {
+  const sources = await activateSourceFixture(2);
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='pause-on-last-source' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  const seen: number[] = [];
+  await assert.rejects(
+    performRoutineNoticeWorkWith(job as DeskJob, {
+      now: runNow,
+      check: (async (_actor: unknown, input: { sourceId: number }) => {
+        seen.push(input.sourceId);
+        const index = sources.findIndex((source) => source.id === input.sourceId);
+        if (input.sourceId === sources[1]!.id) {
+          await sql.query("update routine_notice_policies set paused=true where newsroom_id=$1", [room]);
+          throw new RoutineNoticeCheckError("policy-paused", "Routine notice checks are paused.");
+        }
+        return routineCheckForSource(sources[index]!, `Event from Source ${index + 1}`);
+      }) as any,
+      verifyCheck: async () => {},
+    }),
+    /Routine edition authority changed before source work\./,
+  );
+  assert.deepEqual(seen, sources.map((source) => source.id));
+  const [state] = await sql.query<{ articles: number; publications: number }>(
+    "select (select count(*)::int from articles where newsroom_id=$1) articles,(select count(*)::int from routine_notice_publications where newsroom_id=$1) publications",
+    [room],
+  );
+  assert.deepEqual(state, { articles: 0, publications: 0 });
+});
+
 test("a Cancel raised while a source is being read still stops the whole run", async () => {
-  const sources = await activateThreeSourceFixture();
+  const sources = await activateSourceFixture(3);
   await tickRoutineNoticeEditions(runNow);
   const sql = await getSql();
   const [job] = await sql.query<any>(
@@ -1096,7 +1129,7 @@ test("a Cancel raised while a source is being read still stops the whole run", a
 });
 
 test("all skipped sources fail the run and name each one instead of filing an empty edition", async () => {
-  const sources = await activateThreeSourceFixture();
+  const sources = await activateSourceFixture(3);
   await tickRoutineNoticeEditions(runNow);
   const sql = await getSql();
   const [job] = await sql.query<any>(

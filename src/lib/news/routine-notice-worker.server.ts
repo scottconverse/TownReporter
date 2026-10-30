@@ -373,6 +373,10 @@ export async function performRoutineNoticeWorkWith(
     }
     groups.push(result.check);
   }
+  if (skipped.length > 0) {
+    await throwIfJobCancelled(job.id);
+    await assertRoutineRunCanContinue(job, run);
+  }
   const skippedNames = skipped.map(
     (source) => source.name || sources.find((row) => row.source_id === source.sourceId)?.public_source_url || `source ${source.sourceId}`,
   );
