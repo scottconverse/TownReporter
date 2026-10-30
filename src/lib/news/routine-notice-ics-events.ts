@@ -164,17 +164,43 @@ function validCivil(year: number, month: number, day: number, hour = 0, minute =
   return day <= check.getUTCDate();
 }
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+const validTimeZones = new Map<string, boolean>();
+
+function formatterFor(timezone: string) {
+  let formatter = formatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    formatters.set(timezone, formatter);
+  }
+  return formatter;
+}
+
+function isValidTimeZone(timezone: string) {
+  let valid = validTimeZones.get(timezone);
+  if (valid === undefined) {
+    try {
+      formatterFor(timezone);
+      valid = true;
+    } catch {
+      valid = false;
+    }
+    validTimeZones.set(timezone, valid);
+  }
+  return valid;
+}
+
 function localParts(instant: number, timezone: string) {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = formatterFor(timezone);
   const parts = Object.fromEntries(
     formatter
       .formatToParts(new Date(instant))
@@ -194,11 +220,7 @@ function zonedWallToInstant(
   timezone: string,
 ): number | null {
   if (!validCivil(year, month, day, hour, minute, second)) return null;
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: timezone }).format();
-  } catch {
-    return null;
-  }
+  if (!isValidTimeZone(timezone)) return null;
   const center = Date.UTC(year, month - 1, day, hour, minute, second);
   const offsets = new Set<number>();
   for (let delta = -48; delta <= 48; delta += 3) {
@@ -836,11 +858,7 @@ export function extractIcsEvents(
     return [refused("content-too-large", "document")];
   }
   const timezone = options?.timezone ?? context.timezone ?? DEFAULT_TIMEZONE;
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: timezone }).format();
-  } catch {
-    return [refused("structurally-invalid", "timezone")];
-  }
+  if (!isValidTimeZone(timezone)) return [refused("structurally-invalid", "timezone")];
   const window = windowFor(options, timezone);
   if (!window) return [refused("structurally-invalid", "window")];
   const parsed = parseCalendar(raw);

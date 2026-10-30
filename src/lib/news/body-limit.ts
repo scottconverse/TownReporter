@@ -111,6 +111,7 @@ const READABLE_TYPES = new Set([
   "application/atom+xml",
   "application/json",
   "text/event-stream",
+  "text/calendar",
   "text/csv",
   "application/pdf",
 ]);
