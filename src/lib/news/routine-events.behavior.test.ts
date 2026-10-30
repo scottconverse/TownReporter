@@ -515,3 +515,68 @@ test("a skipped source keeps its stored cancelled event out of Today on the next
     "the skipped source row was retained",
   );
 });
+
+test("a Longmont source with a state stays in the Longmont part of Today", async () => {
+  const [longmontSource, lyonsSource] = await activate([
+    { title: "Longmont Events", issuer: "Longmont Arts", locality: "Longmont, Colorado" },
+    { title: "Lyons Events", issuer: "Lyons Arts", locality: "Lyons, Colorado" },
+  ]);
+  const sql = await getSql();
+  await sql.query(
+    "insert into paper_settings(newsroom_id,city) values($1,'Longmont') on conflict(newsroom_id) do update set city=excluded.city",
+    [room],
+  );
+  const job = await runningJob();
+  const fields: EventFieldMap = {
+    issuer: { value: longmontSource!.issuer, locator: "issuer" },
+    title: { value: "Longmont source event", locator: "title" },
+    start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup", locator: "venue" },
+  };
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === longmontSource!.id ? eventCheck(longmontSource!, fields) : eventCheck(lyonsSource!)) as any,
+    verifyCheck: async () => {},
+  });
+  const [article] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  assert.match(article!.body, /Longmont source event/);
+  assert.doesNotMatch(article!.body, /## Nearby/);
+});
+
+test("a venue in a known nearby town prints under Nearby as the town only", async () => {
+  const [longmontSource, lyonsSource] = await activate([
+    { title: "Longmont Events", issuer: "Longmont Arts", locality: "Longmont, Colorado" },
+    { title: "Lyons Events", issuer: "Lyons Arts", locality: "Lyons, Colorado" },
+  ]);
+  const sql = await getSql();
+  await sql.query(
+    "insert into paper_settings(newsroom_id,city) values($1,'Longmont') on conflict(newsroom_id) do update set city=excluded.city",
+    [room],
+  );
+  const job = await runningJob();
+  const fields: EventFieldMap = {
+    issuer: { value: longmontSource!.issuer, locator: "issuer" },
+    title: { value: "Stone Cup show", locator: "title" },
+    start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup, 442 High St, Lyons, CO", locator: "venue" },
+  };
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === longmontSource!.id ? eventCheck(longmontSource!, fields) : eventCheck(lyonsSource!)) as any,
+    verifyCheck: async () => {},
+  });
+  const [article] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  const nearbyAt = article!.body.indexOf("## Nearby");
+  const eventAt = article!.body.indexOf("Stone Cup show");
+  assert.ok(nearbyAt >= 0 && eventAt > nearbyAt, "the event is under the Nearby heading");
+  assert.match(article!.body, /Stone Cup show \(Lyons\)/);
+  assert.doesNotMatch(article!.body, /\(Lyons, Colorado\)/);
+});

@@ -5,6 +5,7 @@ import {
   eventArea,
   eventMatchKey,
   eventTown,
+  localityTown,
   rowsToRemove,
   type RoutineEventRow,
 } from "./routine-events.ts";
@@ -103,6 +104,14 @@ test("normalizes case, entities, punctuation and place for one event match key",
     }),
     "an empty place matches only another empty place",
   );
+});
+
+test("a source locality is reduced to its town, including when the paper city has a state", () => {
+  assert.equal(localityTown("Longmont, Colorado"), "Longmont");
+  assert.equal(localityTown(" Lyons "), "Lyons");
+  assert.equal(localityTown(""), "");
+  assert.equal(eventArea("Longmont, Colorado", "Longmont"), "longmont");
+  assert.equal(eventArea("Lyons, Colorado", "Longmont"), "nearby");
 });
 
 test("known venue town wins over the source locality, and area follows the paper city", () => {

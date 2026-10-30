@@ -29,7 +29,7 @@ import type {
   RoutineNoticeCheckResult,
 } from "./routine-notice-checks.ts";
 import type { RoutineField, StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
-import { collapseEvents, eventArea, eventMatchKey, eventTown, type CollapsedRoutineEvent } from "./routine-events.ts";
+import { collapseEvents, eventArea, eventMatchKey, eventTown, localityTown, type CollapsedRoutineEvent } from "./routine-events.ts";
 import { eventsForDay, recordSourceRead, type RoutineEventInput } from "./routine-events.server.ts";
 import { sha256 } from "./fetch-url.ts";
 import { getPaperConfig } from "./paper-settings.ts";
@@ -204,7 +204,7 @@ async function eventFromCandidate(
   const end = candidate.fields.end?.value?.trim();
   const endTiming = end ? eventTiming(end, timezone, allDay, candidate.fields.timezone?.value) : null;
   const venue = candidate.fields.venue?.value?.trim() ?? "";
-  const town = eventTown(venue, source.locality, knownTowns);
+  const town = eventTown(venue, localityTown(source.locality), knownTowns);
   return {
     eventKey: candidate.externalId?.trim() || candidate.externalIdHash,
     candidateKey: await routineCandidateKey(candidate),
@@ -454,7 +454,7 @@ export async function performRoutineNoticeWorkWith(
     (config) => config.city.trim(),
     () => "",
   );
-  const knownTowns = [...new Set(sources.map((source) => source.locality.trim()).filter(Boolean))];
+  const knownTowns = [...new Set(sources.map((source) => localityTown(source.locality)).filter(Boolean))];
   const groups: RoutineNoticeCheckGroup[] = [];
   const skipped: Array<{ sourceId: number; sourceUrl: string; name?: string; reason: string }> = [];
   const check = deps.check ?? checkRoutineNoticeSourceForOwner;

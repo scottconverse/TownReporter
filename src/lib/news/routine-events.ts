@@ -90,6 +90,11 @@ export function normalizeEventText(value: string | null | undefined): string {
     .trim();
 }
 
+/** A source locality names its town before the state: "Longmont, Colorado" -> "Longmont". */
+export function localityTown(locality: string): string {
+  return locality.split(",", 1)[0]!.trim();
+}
+
 /** The same event on two sites has one match key. Empty places match only empty places. */
 export function eventMatchKey(event: {
   title: string;
@@ -142,9 +147,9 @@ export function eventTown(place: string, sourceTown: string, knownTowns: readonl
 
 /** Home when the town is the paper's city; otherwise Nearby. No city keeps today's home behavior. */
 export function eventArea(town: string, paperCity: string): StoryArea {
-  const city = paperCity.trim();
+  const city = localityTown(paperCity);
   if (!city) return HOME_AREA;
-  return town.trim().toLowerCase() === city.toLowerCase() ? HOME_AREA : "nearby";
+  return localityTown(town).toLowerCase() === city.toLowerCase() ? HOME_AREA : "nearby";
 }
 
 function organizerNames(row: RoutineEventRow): string[] {
