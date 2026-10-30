@@ -6,6 +6,7 @@ import { ArrowRight, Search } from "lucide-react";
 import { PaperShell } from "@/components/paper-chrome";
 import { ReaderRow, SaveStory } from "@/components/reader-controls";
 import { DatesPanel } from "@/components/paper/dates-panel";
+import { EventsWeekBox } from "@/components/paper/events-week-box";
 import { GeoPills } from "@/components/paper/geo-pills";
 import { SectionTag } from "@/components/paper/section-tag";
 import { StoryCell, StoryGrid } from "@/components/paper/story-grid";
@@ -23,6 +24,7 @@ import { usePublicSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { topicReportingSentence } from "@/lib/paper-phrases";
 import { editionRiverQuery } from "@/lib/news/edition-river";
+import { frontEventsWeek } from "@/lib/news/events-week-public";
 
 /**
  * How many stories "Latest stories" prints.
@@ -135,7 +137,15 @@ export const Route = createFileRoute("/")({
         ...(listing ? {} : { notTopic: "opinion" }),
       },
     });
-    if (listing) return { listing: page, river: null, opinion: null, week: { stories: [], withinWeek: false }, region: [] };
+    if (listing)
+      return {
+        listing: page,
+        river: null,
+        opinion: null,
+        week: { stories: [], withinWeek: false },
+        region: [],
+        events: null,
+      };
     // The lead and the six cells: what is printed above the band and the river.
     const above = page.stories.slice(0, TOP_STORIES).map((s) => s.id);
     /*
@@ -151,6 +161,7 @@ export const Route = createFileRoute("/")({
       newest piece is never one the top has printed, and the exclusion has
       nothing left to exclude.
     */
+    const events = await frontEventsWeek();
     const opinion = await readerArticles({
       data: { topic: "opinion", page: 1, oldest: false, limit: 1 },
     });
@@ -182,7 +193,7 @@ export const Route = createFileRoute("/")({
         ],
       ),
     });
-    return { listing: page, river, opinion, week: newest, region };
+    return { listing: page, river, opinion, week: newest, region, events };
   },
   component: FrontPage,
 });
@@ -463,6 +474,7 @@ function Home() {
           <h1 className="vh">
             {paper.name} — {paper.location}
           </h1>
+          {initial.events ? <EventsWeekBox data={initial.events} /> : null}
           {lead ? (
             <>
               {/*
