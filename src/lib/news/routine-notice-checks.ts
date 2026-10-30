@@ -23,6 +23,8 @@ export type RoutineNoticeCheckState =
 
 export type RoutineNoticeCandidateView = {
   id: number;
+  /** The reader stable id, available on recomputed stored checks. Older callers may omit it. */
+  externalId?: string;
   externalIdHash: string;
   formatKey: RoutineNoticeFormatKey;
   variant: string;

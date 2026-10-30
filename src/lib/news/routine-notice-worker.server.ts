@@ -1,8 +1,9 @@
 import { getSql, withTransaction } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
+import { routineEditionUpdateNote } from "./correction-origin.ts";
 import {
   countedStep,
   ensureJobsSchema,
+  JobCancelledError,
   progressReporterFor,
   spanPct,
   throwIfJobCancelled,
@@ -23,10 +24,16 @@ import {
   routineNoticeLabel,
   type EligibleRoutineNotice,
 } from "./routine-notice-editions.ts";
-import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
-import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import type {
+  RoutineNoticeCheckGroup,
+  RoutineNoticeCheckResult,
+} from "./routine-notice-checks.ts";
+import type { RoutineField, StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import { collapseEvents, eventArea, eventMatchKey, eventTown, localityTown, type CollapsedRoutineEvent } from "./routine-events.ts";
+import { eventsForDay, recordSourceRead, type RoutineEventInput } from "./routine-events.server.ts";
 import { sha256 } from "./fetch-url.ts";
 import { getPaperConfig } from "./paper-settings.ts";
+import { routineNoticeSourceLimit } from "./routine-notice-source-limit.ts";
 
 type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
 type RoutineReviewReason = { why: string; count: number; label?: string; source?: string };
@@ -90,6 +97,189 @@ function localStamp(now: Date, timezone: string) {
     weekday: get("weekday"),
   };
 }
+function addDays(localDate: string, days: number) {
+  const instant = new Date(`${localDate}T12:00:00Z`);
+  instant.setUTCDate(instant.getUTCDate() + days);
+  return instant.toISOString().slice(0, 10);
+}
+function eventReadWindow(localDate: string) {
+  return { start: localDate, end: addDays(localDate, 7) };
+}
+function wallInstant(value: string, timezone: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const wanted = match.slice(1).map((part) => Number(part ?? 0));
+  const center = Date.UTC(wanted[0]!, wanted[1]! - 1, wanted[2]!, wanted[3]!, wanted[4]!, wanted[5]!);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let delta = -14 * 60; delta <= 14 * 60; delta += 15) {
+    const instant = center + delta * 60_000;
+    const parts = Object.fromEntries(
+      formatter
+        .formatToParts(new Date(instant))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    if ([parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second].every(
+      (part, index) => part === wanted[index],
+    ))
+      return new Date(instant);
+  }
+  return null;
+}
+function eventTiming(
+  value: string,
+  timezone: string,
+  allDay: boolean,
+  sourceTimezone?: string,
+) {
+  if (!value) return null;
+  if (allDay || /^\d{4}-\d{2}-\d{2}$/.test(value))
+    return { localDate: value.slice(0, 10), startMinutes: null, startsAt: null };
+  let instant: Date | null = null;
+  if (/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) instant = parsed;
+  } else {
+    instant = wallInstant(value, sourceTimezone || timezone);
+  }
+  if (!instant) {
+    const wall = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(value);
+    return wall
+      ? {
+          localDate: wall[1]!,
+          startMinutes: Number(wall[2]) * 60 + Number(wall[3]),
+          startsAt: null,
+        }
+      : null;
+  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    localDate: `${get("year")}-${get("month")}-${get("day")}`,
+    startMinutes: Number(get("hour")) * 60 + Number(get("minute")),
+    startsAt: instant.toISOString(),
+  };
+}
+function routineNoticeTodayMatchKey(item: EligibleRoutineNotice, timezone: string) {
+  const fields = item.notice.normalizedFields;
+  const title = fields.title ?? fields.program ?? fields.service;
+  const start = fields.start?.trim();
+  if (!title?.trim() || !start) return null;
+  const allDay = fields.allDay === "true" || /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const timing = eventTiming(start, timezone, allDay, fields.timezone);
+  if (!timing) return null;
+  const place = [fields.venue, fields.location, fields.branch].find((value) => value?.trim()) ?? "";
+  return eventMatchKey({
+    title,
+    localDate: item.occurrenceDate,
+    startMinutes: timing.startMinutes,
+    allDay,
+    place,
+  });
+}
+async function routineCandidateKey(candidate: RoutineNoticeCheckGroup["candidates"][number]) {
+  return `${candidate.externalIdHash}:${await sha256(
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(candidate.fields)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => [key, value.value]),
+      ),
+    ),
+  )}`;
+}
+async function eventFromCandidate(
+  candidate: RoutineNoticeCheckGroup["candidates"][number],
+  source: { source_id: number; source_url: string; public_source_url: string; source_title: string; issuer: string; locality: string },
+  timezone: string,
+  knownTowns: readonly string[],
+  paperCity: string,
+): Promise<RoutineEventInput | null> {
+  const start = candidate.fields.start?.value?.trim() ?? "";
+  if (!start) return null;
+  const allDay =
+    candidate.fields.allDay?.value === "true" || /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const timing = eventTiming(start, timezone, allDay, candidate.fields.timezone?.value);
+  if (!timing) return null;
+  const end = candidate.fields.end?.value?.trim();
+  const endTiming = end ? eventTiming(end, timezone, allDay, candidate.fields.timezone?.value) : null;
+  const venue = candidate.fields.venue?.value?.trim() ?? "";
+  const town = eventTown(venue, localityTown(source.locality), knownTowns);
+  return {
+    eventKey: candidate.externalId?.trim() || candidate.externalIdHash,
+    candidateKey: await routineCandidateKey(candidate),
+    matchKey: eventMatchKey({
+      title: candidate.fields.title?.value ?? "",
+      localDate: timing.localDate,
+      startMinutes: timing.startMinutes,
+      allDay,
+      place: venue,
+    }),
+    title: candidate.fields.title?.value ?? "",
+    startsAt: timing.startsAt,
+    endsAt: endTiming?.startsAt ?? null,
+    localDate: timing.localDate,
+    startMinutes: timing.startMinutes,
+    allDay,
+    place: venue,
+    town,
+    area: eventArea(town, paperCity),
+    link: candidate.fields.onlineUrl?.value?.trim() || null,
+    fields: candidate.fields,
+  };
+}
+function collapsedEventNotice(event: CollapsedRoutineEvent, run: {
+  newsroom_id: number;
+  policy_revision: number;
+}): StructurallyValidRoutineNotice {
+  const fields: Record<string, RoutineField> = { ...event.fields };
+  if (!fields.start)
+    fields.start = {
+      value:
+        event.allDay || event.startMinutes === null
+          ? event.localDate
+          : `${event.localDate}T${String(Math.floor(event.startMinutes / 60)).padStart(2, "0")}:${String(event.startMinutes % 60).padStart(2, "0")}:00`,
+      locator: "routine-events.start",
+    };
+  return {
+    formatKey: "community-arts-event-logistics",
+    variant: "event",
+    provenance: {
+      newsroomId: run.newsroom_id,
+      sourceId: event.sourceId,
+      sourceUrl: event.sourceUrl,
+      policyRevision: run.policy_revision,
+      captureEventId: 0,
+      artifactVersionId: 0,
+      contentHash: "routine-events",
+      externalId: event.candidateKey,
+    },
+    provenanceVerification: "unverified",
+    fields,
+    normalizedFields: Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, value.value]),
+    ),
+    fingerprintMaterial: event.candidateKey,
+  };
+}
+
 export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ queued: number }> {
   await ensureJobsSchema();
   await ensureRoutineNoticeAutomationSchema();
@@ -130,7 +320,7 @@ export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ que
         "select count(*)::int n from routine_notice_automation_sources where newsroom_id=$1",
         [config.newsroom_id],
       );
-      if (member?.role !== "owner" || !policy || policy.paused || !count?.n || count.n > 12)
+      if (member?.role !== "owner" || !policy || policy.paused || !count?.n || count.n > routineNoticeSourceLimit())
         return false;
       const rows = await tx.query<{ id: number }>(
         "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,$2,$3,$4,'queued',$5) on conflict do nothing returning id",
@@ -148,7 +338,9 @@ export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ que
   return { queued };
 }
 
-type CheckFn = typeof checkRoutineNoticeSourceForOwner;
+type CheckFn = (
+  ...args: Parameters<typeof checkRoutineNoticeSourceForOwner>
+) => Promise<RoutineNoticeCheckResult>;
 async function assertRoutineRunCanContinue(job: DeskJob, run: {
   id: number;
   newsroom_id: number;
@@ -253,23 +445,35 @@ export async function performRoutineNoticeWorkWith(
     [job.subject_id, job.newsroom_id],
   );
   if (!run) throw new Error("Routine edition run is missing.");
+  const localDate = String(run.local_date).slice(0, 10);
   const now = () => typeof deps.now === "function" ? deps.now() : deps.now ?? new Date();
   if (localStamp(now(), run.timezone).date !== String(run.local_date).slice(0, 10))
     throw new Error("Routine edition run expired before publication; editor review is required.");
+  const sourceLimit = routineNoticeSourceLimit();
   const sources = await sql.query<{
     source_id: number;
     source_url: string;
     public_source_url: string;
+    source_title: string;
     issuer: string;
     locality: string;
     format_key: any;
   }>(
-    "select source_id,source_url,public_source_url,issuer,locality,format_key from routine_notice_automation_sources where newsroom_id=$1 order by source_id,format_key limit 13",
-    [run.newsroom_id],
+    `select x.source_id,x.source_url,x.public_source_url,x.issuer,x.locality,x.format_key,s.title source_title
+       from routine_notice_automation_sources x
+       join sources s on s.newsroom_id=x.newsroom_id and s.id=x.source_id
+      where x.newsroom_id=$1 order by x.source_id,x.format_key limit $2`,
+    [run.newsroom_id, sourceLimit + 1],
   );
-  if (!sources.length || sources.length > 12)
+  if (!sources.length || sources.length > sourceLimit)
     throw new Error("Routine edition source selection is unavailable.");
+  const paperCity = await getPaperConfig(run.newsroom_id).then(
+    (config) => config.city.trim(),
+    () => "",
+  );
+  const knownTowns = [...new Set(sources.map((source) => localityTown(source.locality)).filter(Boolean))];
   const groups: RoutineNoticeCheckGroup[] = [];
+  const skipped: Array<{ sourceId: number; sourceUrl: string; name?: string; reason: string }> = [];
   const check = deps.check ?? checkRoutineNoticeSourceForOwner;
   /*
     FB1, unit 2: this worker used to say NOTHING at all while it ran.
@@ -277,8 +481,9 @@ export async function performRoutineNoticeWorkWith(
     No stage, no step, and -- because `beat_at` is only written by
     `reportProgress` -- no heartbeat either. Its card would have called a
     perfectly healthy routine edition "stalled" at sixty seconds and offered the
-    editor "Retry on next model" for a job that was mid-fetch. Twelve sources,
-    each one a real network read, is not instant and is not invisible any more.
+    editor "Retry on next model" for a job that was mid-fetch. A run can carry
+    many sources now, each one a real network read, so it is not instant and is
+    not invisible any more.
   */
   const report = progressReporterFor(job);
   await report("Reading the routine sources", spanPct(0, sources.length, 0, 60));
@@ -290,7 +495,7 @@ export async function performRoutineNoticeWorkWith(
       CANCEL. `assertRoutineRunCanContinue` is about AUTHORITY -- the claim, the
       automation revision, a paused policy, an owner who left -- and never about
       the editor's Cancel, so a Cancel pressed while a routine edition was
-      reading twelve sources was not noticed until the loop happened to end.
+      reading sources was not noticed until the loop happened to end.
       `throwIfJobCancelled` is the desk's own act, at the source boundary.
 
       HEARTBEAT. `report` speaks once per source, so the card was honest BETWEEN
@@ -301,32 +506,136 @@ export async function performRoutineNoticeWorkWith(
       read is in flight (so the row never goes quiet) and it reads Cancel on the
       same tick (so a Cancel lands mid-fetch rather than at the next source).
 
-      Its label is the counted step, so the ticker's "Waiting on …" sentence
-      names the source being read rather than a model that is not involved.
+      One failed source is recorded and skipped. Cancel and authority checks
+      remain outside that skip path so they still stop the whole run.
     */
     await throwIfJobCancelled(job.id);
     await report(
       countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
       spanPct(sourceIndex + 1, sources.length, 0, 60),
     );
-    const result = await waitForModel({
-      jobId: job.id,
-      label: () => countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
-      run: () =>
-        check(
-          { userId: run.actor, newsroomId: run.newsroom_id },
-          {
-            requestId: crypto.randomUUID(),
-            sourceId: source.source_id,
-            sourceUrl: source.source_url,
-            formatKey: source.format_key,
-            expectedPolicyRevision: run.policy_revision,
-          },
-        ),
-    });
+    let result;
+    try {
+      result = await waitForModel({
+        jobId: job.id,
+        label: () => countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
+        run: () =>
+          check(
+            { userId: run.actor, newsroomId: run.newsroom_id },
+            {
+              requestId: crypto.randomUUID(),
+              sourceId: source.source_id,
+              sourceUrl: source.source_url,
+              formatKey: source.format_key,
+              expectedPolicyRevision: run.policy_revision,
+            },
+          ),
+      });
+    } catch (error) {
+      if (error instanceof JobCancelledError) throw error;
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason:
+          error instanceof Error && error.message.trim()
+            ? error.message.trim().slice(0, 300)
+            : "the source check failed",
+      });
+      continue;
+    }
+    if (!result.ok) {
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason: `${result.code}: ${result.error}`.slice(0, 300),
+      });
+      continue;
+    }
+    if (result.check.state === "capture-failed") {
+      skipped.push({
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        ...(source.source_title?.trim() ? { name: source.source_title.trim() } : {}),
+        reason: "the source capture failed",
+      });
+      continue;
+    }
     groups.push(result.check);
   }
+  if (skipped.length > 0) {
+    await throwIfJobCancelled(job.id);
+    await assertRoutineRunCanContinue(job, run);
+  }
+  const skippedNames = skipped.map(
+    (source) => source.name || sources.find((row) => row.source_id === source.sourceId)?.public_source_url || `source ${source.sourceId}`,
+  );
+  const sourceReadSummary = `Read ${sources.length - skipped.length} of ${sources.length} sources; skipped: ${
+    skippedNames.length ? skippedNames.join(", ") : "none"
+  }`;
+  if (skipped.length === sources.length) {
+    await report(sourceReadSummary);
+    await sql.query(
+      "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
+      [
+        run.id,
+        JSON.stringify({
+          published: 0,
+          corrected: 0,
+          needsReview: skipped.length,
+          eligible: 0,
+          deferred: 0,
+          notices: [],
+          reviewReasons: skipped.map((source) => ({ why: source.reason, count: 1 })),
+          skipped,
+        }),
+        run.newsroom_id,
+      ],
+    );
+    throw new Error(`Every routine source was skipped: ${skippedNames.join(", ")}.`);
+  }
   await deps.beforeCommit?.();
+  /* The hook above may change authority. Check before committing table reads. */
+  await assertRoutineRunCanContinue(job, run);
+  const eventWindow = eventReadWindow(localDate);
+  const eventRows = await withTransaction(async (tx) => {
+    for (const group of groups) {
+      if (group.formatKey !== "community-arts-event-logistics") continue;
+      const source = sources.find(
+        (row) => row.source_id === group.source.id && row.format_key === group.formatKey,
+      );
+      if (!source) throw new Error("A routine event source disappeared before its table write.");
+      const events: RoutineEventInput[] = [];
+      for (const candidate of group.candidates) {
+        if (candidate.conflict) continue;
+        const event = await eventFromCandidate(
+          candidate,
+          source,
+          run.timezone,
+          knownTowns,
+          paperCity,
+        );
+        if (event) events.push(event);
+      }
+      await recordSourceRead(tx, {
+        newsroomId: run.newsroom_id,
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        sourceIssuer: source.issuer,
+        sourceTitle: source.source_title,
+        localDate,
+        window: eventWindow,
+        fullRead:
+          group.state === "parsed" &&
+          group.counts.refused === 0 &&
+          group.counts.conflicts === 0,
+        events,
+      });
+    }
+    return eventsForDay(tx, run.newsroom_id, localDate);
+  });
+  const collapsedTableEvents = collapseEvents(eventRows);
   await report("Planning the edition", 70);
   const notices: StructurallyValidRoutineNotice[] = [];
   for (const group of groups) {
@@ -372,8 +681,33 @@ export async function performRoutineNoticeWorkWith(
       });
     }
   }
-  const localDate = String(run.local_date).slice(0, 10);
+  const noticeBindings = new Map(
+    notices.map((notice) => [notice.provenance.externalId, notice.provenance]),
+  );
   const planned = eligibleRoutineNotices(notices, localDate, run.timezone);
+  const collapsedByCandidateKey = new Map(
+    collapsedTableEvents.map((event) => [event.candidateKey, event]),
+  );
+  const tableNotices = collapsedTableEvents.map((event) =>
+    collapsedEventNotice(event, run),
+  );
+  const tablePlanned = eligibleRoutineNotices(tableNotices, localDate, run.timezone);
+  const tableEligible = tablePlanned.eligible
+    .filter((item) => item.channel === "today")
+    .map((item) => {
+      const event = collapsedByCandidateKey.get(item.notice.provenance.externalId);
+      if (!event) return item;
+      const binding = noticeBindings.get(item.notice.provenance.externalId);
+      return {
+        ...item,
+        ...(binding
+          ? { notice: { ...item.notice, provenance: { ...item.notice.provenance, ...binding } } }
+          : {}),
+        area: event.area,
+        town: event.town,
+        sourceUrls: event.sourceUrls,
+      };
+    });
   const earlierDeadlineKeys = new Set<string>();
   let malformedDeadlineReceipt = false;
   for (const row of await sql.query<{ candidate_keys_json: string }>(
@@ -407,7 +741,15 @@ export async function performRoutineNoticeWorkWith(
       throw new Error("A same-day publication receipt is malformed; editor review is required.");
     sameDayKeys.set(row.channel, new Set(keys));
   }
-  const allEligible = planned.eligible.slice();
+  /* Event lines in Today come from the table; every other notice stays on its old path. */
+  const allEligible: EligibleRoutineNotice[] = [
+    ...planned.eligible.filter(
+      (item) =>
+        item.channel !== "today" ||
+        item.notice.formatKey !== "community-arts-event-logistics",
+    ),
+    ...tableEligible,
+  ];
   const alreadyPublished = new Set<string>();
   const schedulable = allEligible.filter((item) => {
     const externalId = item.notice.provenance.externalId ?? "";
@@ -476,17 +818,36 @@ export async function performRoutineNoticeWorkWith(
     by the name the desk already holds for it. A paper that cannot give its city
     just gets the wording without a town; it never gets a guessed one.
   */
-  const town = await getPaperConfig(run.newsroom_id).then(
-    (config) => config.city.trim(),
-    () => "",
-  );
+  const town = paperCity;
   const sourceNames = new Map<string, string>();
   for (const source of sources) {
-    const title = groups.find((group) => group.source.id === source.source_id)?.source.title;
-    if (title?.trim() && !sourceNames.has(source.public_source_url))
+    const title = source.source_title?.trim();
+    if (title && !sourceNames.has(source.public_source_url))
       sourceNames.set(source.public_source_url, title);
   }
-  let plans = planRoutineEditions(selectedEligible, localDate, {
+  /*
+    The same event can reach us as a library notice and as a table event. The
+    table line wins in Today, while retaining the notice's source credit. The
+    other channels and the run's status/receipt lists keep their existing
+    entries; only the rows handed to the Today edition are deduplicated.
+  */
+  const tableLineByMatchKey = new Map<string, EligibleRoutineNotice>();
+  for (const item of tableEligible) {
+    const event = collapsedByCandidateKey.get(item.notice.provenance.externalId);
+    if (event) tableLineByMatchKey.set(event.matchKey, item);
+  }
+  const editionEligible = selectedEligible.filter((item) => {
+    if (item.channel !== "today" || item.notice.formatKey === "community-arts-event-logistics")
+      return true;
+    const matchKey = routineNoticeTodayMatchKey(item, run.timezone);
+    const tableLine = matchKey ? tableLineByMatchKey.get(matchKey) : undefined;
+    if (!tableLine) return true;
+    tableLine.sourceUrls = [
+      ...new Set([...(tableLine.sourceUrls ?? [tableLine.sourceUrl]), item.sourceUrl]),
+    ];
+    return false;
+  });
+  let plans = planRoutineEditions(editionEligible, localDate, {
     timezone: run.timezone,
     town,
     sourceNames,
@@ -507,8 +868,17 @@ export async function performRoutineNoticeWorkWith(
     allEligible.map((item) =>
       routineNoticeOutcome(item, noticeStatuses.get(routineNoticeOutcomeKey(item)) ?? "in-review"),
     );
+  const review = planned.review.slice();
+  const reviewWhy = planned.reviewWhy.slice();
+  const reviewedIds = new Set(review.map((notice) => notice.provenance.externalId));
+  for (const [index, notice] of tablePlanned.review.entries()) {
+    if (reviewedIds.has(notice.provenance.externalId)) continue;
+    reviewedIds.add(notice.provenance.externalId);
+    review.push(notice);
+    reviewWhy.push(tablePlanned.reviewWhy[index] ?? "it needs an editor's look");
+  }
   let needsReview =
-    planned.review.length +
+    review.length +
     groups.reduce(
       (total, group) =>
         total +
@@ -538,9 +908,9 @@ export async function performRoutineNoticeWorkWith(
         ...(source ? { source } : {}),
       });
   };
-  planned.review.forEach((notice, index) =>
+  review.forEach((notice, index) =>
     addReason(
-      planned.reviewWhy[index] ?? "it needs an editor's look",
+      reviewWhy[index] ?? "it needs an editor's look",
       1,
       routineNoticeLabel(notice, run.timezone) || undefined,
       groups.find((group) => group.source.id === notice.provenance.sourceId)?.source.title || undefined,
@@ -574,12 +944,14 @@ export async function performRoutineNoticeWorkWith(
     deferred: [...noticeStatuses.values()].filter((status) => status === "deferred").length,
     notices: noticeRows(),
     reviewReasons: capReviewReasons(reviewReasons),
+    skipped,
   });
   await sql.query(
     "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
     [run.id, JSON.stringify(summary(0, 0)), run.newsroom_id],
   );
   await report("Filing the notices", 90);
+  await report(sourceReadSummary);
   await withTransaction(async (tx) => {
     const [claim] = await tx.query<{ claim_token: string | null; status: string }>(
       "select claim_token,status from desk_jobs where id=$1 and newsroom_id=$2 for update",
@@ -669,7 +1041,13 @@ export async function performRoutineNoticeWorkWith(
       const bodyHash = await sha256(plan.body);
       const fingerprint = routineEditionFingerprint(bodyHash);
       const existing = existingByChannel.get(plan.channel);
+      /*
+        A routine edition is the machine's own story, so a same-day change
+        updates its list and posts a short public note. A story changed or
+        taken down by an editor is still left alone for review.
+      */
       if (existing) {
+        const existingKeys = [...(sameDayKeys.get(plan.channel) ?? [])];
         const keysAfterRun = [
           ...new Set([
             ...(sameDayKeys.get(plan.channel) ?? []),
@@ -680,11 +1058,13 @@ export async function performRoutineNoticeWorkWith(
         ];
         const update = routineEditionUpdateKind({
           existingFingerprint: existing.content_fingerprint,
-          existingKeys: [...(sameDayKeys.get(plan.channel) ?? [])],
+          existingKeys,
           fingerprint,
           bodyHash,
           keysAfterRun,
         });
+        const existingKeySet = new Set(existingKeys);
+        const addedCount = keysAfterRun.filter((key) => !existingKeySet.has(key)).length;
         if (update === "unchanged") {
           markChannel(plan.channel, "published");
           continue;
@@ -717,19 +1097,36 @@ export async function performRoutineNoticeWorkWith(
           console.info(
             `[routine-edition] ${plan.channel} ${localDate}: the layout changed and no correction was posted`,
           );
-        else
+        else {
+          await tx.query(
+            "update articles set dek=$1, body=$2, source_urls=$3 where id=$4 and newsroom_id=$5",
+            [
+              plan.dek ?? "Logistics from approved public sources.",
+              plan.body,
+              JSON.stringify(plan.sourceUrls),
+              existing.article_id,
+              run.newsroom_id,
+            ],
+          );
           await tx.query(
             "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
             [
               run.actor,
               run.newsroom_id,
               existing.article_id,
-              `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
+              routineEditionUpdateNote(addedCount),
             ],
           );
+        }
         await tx.query(
-          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
-          [existing.id, run.id, fingerprint, JSON.stringify(keysAfterRun)],
+          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4,article_body_hash=$5 where id=$1",
+          [
+            existing.id,
+            run.id,
+            fingerprint,
+            JSON.stringify(keysAfterRun),
+            update === "correction" ? bodyHash : existing.article_body_hash,
+          ],
         );
         if (update === "correction") corrected += 1;
         markChannel(plan.channel, "published");

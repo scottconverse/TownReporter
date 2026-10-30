@@ -1,0 +1,1208 @@
+{
+  "events": [
+    {
+      "id": 68965,
+      "global_id": "thedairy.org?id=68965",
+      "global_id_lineage": [
+        "thedairy.org?id=68965"
+      ],
+      "author": "4",
+      "status": "publish",
+      "date": "2026-09-02 12:20:12",
+      "date_utc": "2026-09-02 18:20:12",
+      "modified": "2026-09-04 15:00:03",
+      "modified_utc": "2026-09-04 21:00:03",
+      "url": "https://thedairy.org/event/boulder-jewish-film-festival-once-upon-my-mother-2/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/68965",
+      "title": "Boulder Jewish Film Festival: Once Upon My Mother",
+      "description": "<p><img fetchpriority=\"high\" decoding=\"async\" class=\" wp-image-68953 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother.jpg\" alt=\"\" width=\"379\" height=\"561\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother.jpg 832w, https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-203x300.jpg 203w, https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-692x1024.jpg 692w, https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-768x1137.jpg 768w\" sizes=\"(max-width: 379px) 100vw, 379px\" /><a href=\"https://thedairy.org/bjff2026mothergrace/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#ee3a2a;border-color:#bf2f22;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#f4766a;border-radius:5px;text-shadow:none\"> TICKETS</span></a>\n<p><span style=\"font-weight: 400;\">The enduring strength of a French Moroccan mother’s love makes her a zealous advocate for her disabled son in this high-spirited story of determination and faith. Recently selected by Jewish film festival directors across the world as their favorite film of the year, this heartwarming French drama also won more audience awards than any other title this year. Based on a true story that begins in 1960s Paris and spans decades of challenges and miracles, this big-hearted, exuberant crowd-pleaser was a huge hit at the French box office. Blending humor and pathos, “Once Upon My Mother” both celebrates and questions the extreme lengths parents will go to determine their children’s future.</span></p>\n<p><span style=\"font-weight: 400;\">Feature/102 minutes/In French/2025. </span><span style=\"font-weight: 400;\">Directed by Ken Scott.<div class=\"su-spacer\" style=\"height:20px\"></div><div class=\"su-youtube su-u-responsive-media-yes\"><iframe width=\"600\" height=\"400\" src=\"https://www.youtube.com/embed/erBw_I42mSo?\" frameborder=\"0\" allowfullscreen allow=\"autoplay; encrypted-media; picture-in-picture\" title=\"\"></iframe></div></span></p>",
+      "excerpt": "",
+      "slug": "boulder-jewish-film-festival-once-upon-my-mother-2",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother.jpg",
+        "id": 68953,
+        "extension": "jpg",
+        "width": 832,
+        "height": 1232,
+        "filesize": 149983,
+        "sizes": {
+          "medium": {
+            "width": 203,
+            "height": 300,
+            "mime-type": "image/jpeg",
+            "filesize": 12733,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-203x300.jpg"
+          },
+          "large": {
+            "width": 692,
+            "height": 1024,
+            "mime-type": "image/jpeg",
+            "filesize": 97288,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-692x1024.jpg"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/jpeg",
+            "filesize": 5441,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-150x150.jpg"
+          },
+          "medium_large": {
+            "width": 768,
+            "height": 1137,
+            "mime-type": "image/jpeg",
+            "filesize": 117376,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02121537/once-upon-my-mother-768x1137.jpg"
+          }
+        }
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 12:00:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "12",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 14:00:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "14",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-29 18:00:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "18",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-29 20:00:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "20",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$20.70",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "20.70"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "BJFF",
+          "slug": "bjff",
+          "term_group": 0,
+          "term_taxonomy_id": 92,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 24,
+          "filter": "raw",
+          "id": 92,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/92",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        },
+        {
+          "name": "Cinema",
+          "slug": "cinema",
+          "term_group": 0,
+          "term_taxonomy_id": 96,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 1277,
+          "filter": "raw",
+          "id": 96,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/96",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [],
+      "venue": {
+        "id": 16417,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-07 16:40:35",
+        "date_utc": "2019-02-07 23:40:35",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/grace-gamm-theatre/",
+        "venue": "Grace Gamm Theatre",
+        "slug": "grace-gamm-theatre",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "phone": "(303) 440-7826",
+        "stateprovince": "CO",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16417",
+        "global_id_lineage": [
+          "thedairy.org?id=16417"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": [],
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    },
+    {
+      "id": 69008,
+      "global_id": "thedairy.org?id=69008",
+      "global_id_lineage": [
+        "thedairy.org?id=69008"
+      ],
+      "author": "23",
+      "status": "publish",
+      "date": "2026-09-02 12:30:24",
+      "date_utc": "2026-09-02 18:30:24",
+      "modified": "2026-09-04 15:00:40",
+      "modified_utc": "2026-09-04 21:00:40",
+      "url": "https://thedairy.org/event/boulder-jewish-film-festival-to-kill-a-nazi/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/69008",
+      "title": "Boulder Jewish Film Festival: To Kill a Nazi",
+      "description": "<p><img decoding=\"async\" class=\" wp-image-69010 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-203x300.png\" alt=\"\" width=\"233\" height=\"344\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-203x300.png 203w, https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-691x1024.png 691w, https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-768x1137.png 768w, https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi.png 1000w\" sizes=\"(max-width: 233px) 100vw, 233px\" /><a href=\"https://thedairy.org/bjff-2026-to-kill-a-nazi/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#ee3a2a;border-color:#bf2f22;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#f4766a;border-radius:5px;text-shadow:none\"> TICKETS</span></a>\n<p><span style=\"font-weight: 400;\">Thursday, October 29 at 3 p.m. </span></p>\n<p><span style=\"font-weight: 400;\">In this mindboggling true story, an unsung hero has a chance encounter with fate that inspires an historic act of daring. Michel Cojot, a French businessman tormented by his father’s murder at Auschwitz, is bent on revenge but fails to act when he has his chance. But one year later, he finds himself aboard a plane hijacked by terrorists who force the pilot to land at Entebbe Airport in Uganda. There, he uses his wits, cool resolve and negotiating skills, playing a pivotal role in the famous rescue operation &#8211; at great risk to himself and his young son. An astounding tale of redemption and valor, layered with a poignant story of family healing.</span></p>\n<p><span style=\"font-weight: 400;\">Documentary/101minutes/In French, English, Hebrew/2026</span></p>\n<p><span style=\"font-weight: 400;\">Directed by Boaz Dvir</span></p>\n<p><span style=\"font-weight: 400;\">Narrated by Jason Alexander</span></p>\n<div class=\"su-spacer\" style=\"height:20px\"></div><div class=\"su-youtube su-u-responsive-media-yes\"><iframe width=\"600\" height=\"400\" src=\"https://www.youtube.com/embed/_Bk-xlPrs_0?\" frameborder=\"0\" allowfullscreen allow=\"autoplay; encrypted-media; picture-in-picture\" title=\"\"></iframe></div>\n<p>&nbsp;</p>",
+      "excerpt": "",
+      "slug": "boulder-jewish-film-festival-to-kill-a-nazi",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi.png",
+        "id": 69010,
+        "extension": "png",
+        "width": 1000,
+        "height": 1481,
+        "filesize": 809510,
+        "sizes": {
+          "medium": {
+            "width": 203,
+            "height": 300,
+            "mime-type": "image/png",
+            "filesize": 51349,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-203x300.png"
+          },
+          "large": {
+            "width": 691,
+            "height": 1024,
+            "mime-type": "image/png",
+            "filesize": 385512,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-691x1024.png"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/png",
+            "filesize": 20604,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-150x150.png"
+          },
+          "medium_large": {
+            "width": 768,
+            "height": 1137,
+            "mime-type": "image/png",
+            "filesize": 451648,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122914/To-Kill-a-Nazi-768x1137.png"
+          }
+        }
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 15:00:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "15",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 17:15:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "17",
+        "minutes": "15",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-29 21:00:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "21",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-29 23:15:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "23",
+        "minutes": "15",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$20.70",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "20.70"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "BJFF",
+          "slug": "bjff",
+          "term_group": 0,
+          "term_taxonomy_id": 92,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 24,
+          "filter": "raw",
+          "id": 92,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/92",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        },
+        {
+          "name": "Cinema",
+          "slug": "cinema",
+          "term_group": 0,
+          "term_taxonomy_id": 96,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 1277,
+          "filter": "raw",
+          "id": 96,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/96",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [],
+      "venue": {
+        "id": 16417,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-07 16:40:35",
+        "date_utc": "2019-02-07 23:40:35",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/grace-gamm-theatre/",
+        "venue": "Grace Gamm Theatre",
+        "slug": "grace-gamm-theatre",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "phone": "(303) 440-7826",
+        "stateprovince": "CO",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16417",
+        "global_id_lineage": [
+          "thedairy.org?id=16417"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": [],
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    },
+    {
+      "id": 10008704,
+      "global_id": "thedairy.org?id=10008704",
+      "global_id_lineage": [
+        "thedairy.org?id=10008704"
+      ],
+      "author": "4",
+      "status": "publish",
+      "date": "2026-09-21 15:54:15",
+      "date_utc": "2026-09-21 21:54:15",
+      "modified": "2026-09-21 15:54:16",
+      "modified_utc": "2026-09-21 21:54:16",
+      "url": "https://thedairy.org/event/black-zombie/2026-10-29/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/10008704",
+      "title": "Black Zombie",
+      "description": "<p><span style=\"font-weight: 400;\"><img decoding=\"async\" class=\" wp-image-69473 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-scaled.jpg\" alt=\"\" width=\"413\" height=\"612\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-scaled.jpg 1728w, https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-203x300.jpg 203w, https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-691x1024.jpg 691w, https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-768x1138.jpg 768w, https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-1037x1536.jpg 1037w, https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-1382x2048.jpg 1382w\" sizes=\"(max-width: 413px) 100vw, 413px\" /><a href=\"https://thedairy.org/blackzombie/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#ee3a2a;border-color:#bf2f22;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#f4766a;border-radius:5px;text-shadow:none\"> TICKETS</span></a></span></p>\n<p><span style=\"font-weight: 400;\">Oct 28-Nov 1</span></p>\n<p><span style=\"font-weight: 400;\">Black Zombie digs beneath the blood-soaked spectacle of modern horror to uncover the zombie’s buried and unsettling origins. Long before it became associated with flesh-eating ghouls, the zombie was a living metaphor for slavery: not a monster, but the ultimate victim of colonial power. A symbol of stolen agency was recast as an object of fear, while Black spiritual traditions were distorted, sensationalized, and erased. Director Maya Annik Bedward traces the evolution of the zombie from colonial Haiti to contemporary Hollywood, reconsidering iconic films like White Zombie, Night of the Living Dead, and The Serpent and the Rainbow alongside archival footage, vérité scenes, and interviews with cultural historians, artists, and genre legends including Yves-Grégory Francois, Mambo Labelle Déesse, Slash, Tom Savini, and Zandashé Brown. Part cultural reckoning, part horror remix, Black Zombie exposes how a figure born from enslavement, spiritual belief, and resistance was transformed into one of pop culture’s most profitable monsters. (Maya Annik Bedward, 2026, Canada, 1:30, NR)<div class=\"su-spacer\" style=\"height:20px\"></div><div class=\"su-youtube su-u-responsive-media-yes\"><iframe width=\"600\" height=\"400\" src=\"https://www.youtube.com/embed/qxb3f3XumaE?\" frameborder=\"0\" allowfullscreen allow=\"autoplay; encrypted-media; picture-in-picture\" title=\"\"></iframe></div></span></p>",
+      "excerpt": "",
+      "slug": "black-zombie",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-scaled.jpg",
+        "id": 69473,
+        "extension": "jpg",
+        "width": 1728,
+        "height": 2560,
+        "filesize": 775418,
+        "sizes": {
+          "medium": {
+            "width": 203,
+            "height": 300,
+            "mime-type": "image/jpeg",
+            "filesize": 18458,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-203x300.jpg"
+          },
+          "large": {
+            "width": 691,
+            "height": 1024,
+            "mime-type": "image/jpeg",
+            "filesize": 154295,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-691x1024.jpg"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/jpeg",
+            "filesize": 8453,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-150x150.jpg"
+          },
+          "medium_large": {
+            "width": 768,
+            "height": 1138,
+            "mime-type": "image/jpeg",
+            "filesize": 183888,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-768x1138.jpg"
+          },
+          "1536x1536": {
+            "width": 1037,
+            "height": 1536,
+            "mime-type": "image/jpeg",
+            "filesize": 313292,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-1037x1536.jpg"
+          },
+          "2048x2048": {
+            "width": 1382,
+            "height": 2048,
+            "mime-type": "image/jpeg",
+            "filesize": 515853,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/21154957/BlackZombie_KL_poster_4050x6000-1382x2048.jpg"
+          }
+        },
+        "original_image": "BlackZombie_KL_poster_4050x6000.jpg"
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 16:30:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "16",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 18:00:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "18",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-29 22:30:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "22",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-30 00:00:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "00",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$7 – $14",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "7",
+          "14"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "Cinema",
+          "slug": "cinema",
+          "term_group": 0,
+          "term_taxonomy_id": 96,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 1277,
+          "filter": "raw",
+          "id": 96,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/96",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [
+        {
+          "name": "Member Discount",
+          "slug": "member-discount",
+          "term_group": 0,
+          "term_taxonomy_id": 166,
+          "taxonomy": "post_tag",
+          "description": "",
+          "parent": 0,
+          "count": 1226,
+          "filter": "raw",
+          "id": 166,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/tags/166",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/tags"
+          }
+        }
+      ],
+      "venue": {
+        "id": 16413,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-07 16:11:19",
+        "date_utc": "2019-02-07 23:11:19",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/boedecker-theater/",
+        "venue": "Boedecker Theater",
+        "slug": "boedecker-theater",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "phone": "(303) 440-7826",
+        "stateprovince": "CO",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16413",
+        "global_id_lineage": [
+          "thedairy.org?id=16413"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": [],
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    },
+    {
+      "id": 68991,
+      "global_id": "thedairy.org?id=68991",
+      "global_id_lineage": [
+        "thedairy.org?id=68991"
+      ],
+      "author": "23",
+      "status": "publish",
+      "date": "2026-09-02 12:26:51",
+      "date_utc": "2026-09-02 18:26:51",
+      "modified": "2026-09-04 15:01:24",
+      "modified_utc": "2026-09-04 21:01:24",
+      "url": "https://thedairy.org/event/boulder-jewish-film-festival-rosenthal-the-great-showman/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/68991",
+      "title": "Boulder Jewish Film Festival: Rosenthal The Great Showman",
+      "description": "<p><img loading=\"lazy\" decoding=\"async\" class=\"size-medium wp-image-68994 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-300x169.jpg\" alt=\"\" width=\"300\" height=\"169\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-300x169.jpg 300w, https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-1024x576.jpg 1024w, https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-768x432.jpg 768w, https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-1536x864.jpg 1536w, https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final.jpg 1920w\" sizes=\"(max-width: 300px) 100vw, 300px\" /><a href=\"https://thedairy.org/bjff-2026-rosenthal-the-great-showman/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#ee3a2a;border-color:#bf2f22;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#f4766a;border-radius:5px;text-shadow:none\"> TICKETS</span></a>\n<p><span style=\"font-weight: 400;\">Thursday, October 29 at 6:30 p.m.</span></p>\n<p><span style=\"font-weight: 400;\">In 1978, Hans Rosenthal is Germany’s most popular entertainer, a beloved game show host who brought joy to millions. He embodies cheerful optimism for a nation eager to move forward. What his adoring public does not know is that he is Jewish and privately nursing deep wounds from surviving the Holocaust. The great showman faces a moral dilemma when the demands of his career and his Jewish heritage come into conflict. Based on a true story, this German biographical drama portrays a man caught between public popularity and private conscience, an eager-to-please performer facing an agonizing moment of truth.</span></p>\n<p><span style=\"font-weight: 400;\">Feature/92 minutes/In German/2025</span></p>\n<p><span style=\"font-weight: 400;\">Directed by Oliver Haffner</span></p>\n<div class=\"su-spacer\" style=\"height:20px\"></div><div class=\"su-youtube su-u-responsive-media-yes\"><iframe width=\"600\" height=\"400\" src=\"https://www.youtube.com/embed/4f0csTLccBA?\" frameborder=\"0\" allowfullscreen allow=\"autoplay; encrypted-media; picture-in-picture\" title=\"\"></iframe></div>",
+      "excerpt": "",
+      "slug": "boulder-jewish-film-festival-rosenthal-the-great-showman",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final.jpg",
+        "id": 68994,
+        "extension": "jpg",
+        "width": 1920,
+        "height": 1080,
+        "filesize": 1292378,
+        "sizes": {
+          "medium": {
+            "width": 300,
+            "height": 169,
+            "mime-type": "image/jpeg",
+            "filesize": 18958,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-300x169.jpg"
+          },
+          "large": {
+            "width": 1024,
+            "height": 576,
+            "mime-type": "image/jpeg",
+            "filesize": 102898,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-1024x576.jpg"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/jpeg",
+            "filesize": 9882,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-150x150.jpg"
+          },
+          "medium_large": {
+            "width": 768,
+            "height": 432,
+            "mime-type": "image/jpeg",
+            "filesize": 68309,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-768x432.jpg"
+          },
+          "1536x1536": {
+            "width": 1536,
+            "height": 864,
+            "mime-type": "image/jpeg",
+            "filesize": 187150,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/02122542/Rosenthal2-final-1536x864.jpg"
+          }
+        }
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 18:30:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "18",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 20:45:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "20",
+        "minutes": "45",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-30 00:30:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "00",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-30 02:45:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "02",
+        "minutes": "45",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$20.70",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "20.70"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "BJFF",
+          "slug": "bjff",
+          "term_group": 0,
+          "term_taxonomy_id": 92,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 24,
+          "filter": "raw",
+          "id": 92,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/92",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        },
+        {
+          "name": "Cinema",
+          "slug": "cinema",
+          "term_group": 0,
+          "term_taxonomy_id": 96,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 1277,
+          "filter": "raw",
+          "id": 96,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/96",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [],
+      "venue": {
+        "id": 16417,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-07 16:40:35",
+        "date_utc": "2019-02-07 23:40:35",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/grace-gamm-theatre/",
+        "venue": "Grace Gamm Theatre",
+        "slug": "grace-gamm-theatre",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "phone": "(303) 440-7826",
+        "stateprovince": "CO",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16417",
+        "global_id_lineage": [
+          "thedairy.org?id=16417"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": [],
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    },
+    {
+      "id": 10008683,
+      "global_id": "thedairy.org?id=10008683",
+      "global_id_lineage": [
+        "thedairy.org?id=10008683"
+      ],
+      "author": "4",
+      "status": "publish",
+      "date": "2026-04-29 08:00:07",
+      "date_utc": "2026-04-29 14:00:07",
+      "modified": "2026-10-09 12:13:43",
+      "modified_utc": "2026-10-09 18:13:43",
+      "url": "https://thedairy.org/event/boulder-ensemble-theatre-company-betc-the-weir-oct-8-nov-1/2026-10-29/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/10008683",
+      "title": "Boulder Ensemble Theatre Company (BETC): The Weir | Oct. 8 &#8211; Nov. 1",
+      "description": "<p><img loading=\"lazy\" decoding=\"async\" class=\" wp-image-66725 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM.png\" alt=\"\" width=\"421\" height=\"298\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM.png 812w, https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM-300x212.png 300w, https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM-768x543.png 768w\" sizes=\"(max-width: 421px) 100vw, 421px\" /><a href=\"https://thedairy.org/betctheweir/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#F70B07;border-color:#c60906;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#fa5552;border-radius:5px;text-shadow:none\"> TICKETS</span></a>\n<p>A woman arrives at a remote country pub in Ireland and is entertained by the local bachelors who drink there. As the men compete to impress her with ghostly tales, she reveals a startling story of her own.</p>\n<p>The Weir is a modern masterpiece from one of Ireland’s most acclaimed playwrights, blending haunting storytelling with tender Irish camaraderie.</p>\n<p>The play reminds us that empathy and friendship grow out of the myths and stories that bind us.</p>\n<ul>\n<li>Thursday, October 8 is Preview Night, with regular tickets just $25 !</li>\n</ul>",
+      "excerpt": "",
+      "slug": "boulder-ensemble-theatre-company-betc-the-weir-oct-8-nov-1",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM.png",
+        "id": 66725,
+        "extension": "png",
+        "width": 812,
+        "height": 574,
+        "filesize": 910360,
+        "sizes": {
+          "medium": {
+            "width": 300,
+            "height": 212,
+            "mime-type": "image/png",
+            "filesize": 126255,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM-300x212.png"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/png",
+            "filesize": 49996,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM-150x150.png"
+          },
+          "medium_large": {
+            "width": 768,
+            "height": 543,
+            "mime-type": "image/png",
+            "filesize": 682810,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/04/27131721/Screenshot-2026-05-27-at-1.16.19-PM-768x543.png"
+          }
+        }
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 19:00:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "19",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 20:30:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "20",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-30 01:00:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "01",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-30 02:30:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "02",
+        "minutes": "30",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$17.25 – $48.30",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "17.25",
+          "48.30"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "Theater",
+          "slug": "theater",
+          "term_group": 0,
+          "term_taxonomy_id": 12,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 54,
+          "filter": "raw",
+          "id": 12,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/12",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [
+        {
+          "name": "BETC",
+          "slug": "betc",
+          "term_group": 0,
+          "term_taxonomy_id": 93,
+          "taxonomy": "post_tag",
+          "description": "",
+          "parent": 0,
+          "count": 3,
+          "filter": "raw",
+          "id": 93,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/tags/93",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/tags"
+          }
+        },
+        {
+          "name": "BETC26/27",
+          "slug": "betc26-27",
+          "term_group": 0,
+          "term_taxonomy_id": 218,
+          "taxonomy": "post_tag",
+          "description": "",
+          "parent": 0,
+          "count": 8,
+          "filter": "raw",
+          "id": 218,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/tags/218",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/tags"
+          }
+        }
+      ],
+      "venue": {
+        "id": 16552,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-12 11:18:03",
+        "date_utc": "2019-02-12 18:18:03",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/carsen-theater/",
+        "venue": "Carsen Theater",
+        "slug": "carsen-theater",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16552",
+        "global_id_lineage": [
+          "thedairy.org?id=16552"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": {
+        "_ecp_custom_4": {
+          "label": "Age Guideline:",
+          "value": "14+"
+        }
+      },
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    },
+    {
+      "id": 10008745,
+      "global_id": "thedairy.org?id=10008745",
+      "global_id_lineage": [
+        "thedairy.org?id=10008745"
+      ],
+      "author": "23",
+      "status": "publish",
+      "date": "2026-09-23 13:07:57",
+      "date_utc": "2026-09-23 19:07:57",
+      "modified": "2026-09-23 13:07:57",
+      "modified_utc": "2026-09-23 19:07:57",
+      "url": "https://thedairy.org/event/the-incomer/2026-10-29/",
+      "rest_url": "https://thedairy.org/wp-json/tribe/events/v1/events/10008745",
+      "title": "The Incomer",
+      "description": "<p><img loading=\"lazy\" decoding=\"async\" class=\" wp-image-69566 alignleft\" src=\"https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG-203x300.jpg\" alt=\"\" width=\"221\" height=\"327\" srcset=\"https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG-203x300.jpg 203w, https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG.jpg 500w\" sizes=\"(max-width: 221px) 100vw, 221px\" /><a href=\"https://thedairy.org/theincomer/\" class=\"su-button su-button-style-default\" style=\"color:#FFFFFF;background-color:#ee3a2a;border-color:#bf2f22;border-radius:5px\" target=\"_self\"><span style=\"color:#FFFFFF;padding:0px 16px;font-size:13px;line-height:26px;border-color:#f4766a;border-radius:5px;text-shadow:none\"> TICKETS</span></a>\n<p><span style=\"font-weight: 400;\">Oct 28-Nov 1</span></p>\n<p><span style=\"font-weight: 400;\">On a remote Scottish isle, siblings Isla and Sandy spend their days hunting seabirds and retelling the stories of their ancestors. They follow the strict rules inherited from their late father — protect the island, allow no incomer, survive — until one day, Daniel, an awkward and socially inept council official, arrives to evacuate them. Bringing with him the strange mainland ways of laws, paperwork, veganism and internet wizardry, he turns their world upside down. As long-held beliefs begin to crumble, each of them must confront the truth, embrace change, and dare to imagine a life beyond the island while fighting to preserve the heritage they have sworn to defend. <div class=\"su-spacer\" style=\"height:20px\"></div><div class=\"su-youtube su-u-responsive-media-yes\"><iframe width=\"600\" height=\"400\" src=\"https://www.youtube.com/embed/vJ6TSvmnUEE?\" frameborder=\"0\" allowfullscreen allow=\"autoplay; encrypted-media; picture-in-picture\" title=\"\"></iframe></div></span></p>",
+      "excerpt": "",
+      "slug": "the-incomer",
+      "image": {
+        "url": "https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG.jpg",
+        "id": 69566,
+        "extension": "jpg",
+        "width": 500,
+        "height": 740,
+        "filesize": 498185,
+        "sizes": {
+          "medium": {
+            "width": 203,
+            "height": 300,
+            "mime-type": "image/jpeg",
+            "filesize": 30885,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG-203x300.jpg"
+          },
+          "thumbnail": {
+            "width": 150,
+            "height": 150,
+            "mime-type": "image/jpeg",
+            "filesize": 20933,
+            "url": "https://media.thedairy.org/wp-content/uploads/2026/09/23130527/The-Incomer-27x40-One-Sheet-JPG-150x150.jpg"
+          }
+        }
+      },
+      "all_day": false,
+      "start_date": "2026-10-29 19:00:00",
+      "start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "19",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "end_date": "2026-10-29 21:00:00",
+      "end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "29",
+        "hour": "21",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_start_date": "2026-10-30 01:00:00",
+      "utc_start_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "01",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "utc_end_date": "2026-10-30 03:00:00",
+      "utc_end_date_details": {
+        "year": "2026",
+        "month": "10",
+        "day": "30",
+        "hour": "03",
+        "minutes": "00",
+        "seconds": "00"
+      },
+      "timezone": "America/Denver",
+      "timezone_abbr": "MDT",
+      "cost": "$7 – $14",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": [
+          "7",
+          "14"
+        ]
+      },
+      "website": "",
+      "show_map": false,
+      "show_map_link": true,
+      "hide_from_listings": false,
+      "sticky": true,
+      "featured": true,
+      "categories": [
+        {
+          "name": "Cinema",
+          "slug": "cinema",
+          "term_group": 0,
+          "term_taxonomy_id": 96,
+          "taxonomy": "tribe_events_cat",
+          "description": "",
+          "parent": 0,
+          "count": 1277,
+          "filter": "raw",
+          "id": 96,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/categories/96",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/categories"
+          }
+        }
+      ],
+      "tags": [
+        {
+          "name": "Member Discount",
+          "slug": "member-discount",
+          "term_group": 0,
+          "term_taxonomy_id": 166,
+          "taxonomy": "post_tag",
+          "description": "",
+          "parent": 0,
+          "count": 1226,
+          "filter": "raw",
+          "id": 166,
+          "urls": {
+            "self": "https://thedairy.org/wp-json/tribe/events/v1/tags/166",
+            "collection": "https://thedairy.org/wp-json/tribe/events/v1/tags"
+          }
+        }
+      ],
+      "venue": {
+        "id": 16413,
+        "author": "4",
+        "status": "publish",
+        "date": "2019-02-07 16:11:19",
+        "date_utc": "2019-02-07 23:11:19",
+        "modified": "2024-08-03 12:24:45",
+        "modified_utc": "2024-08-03 18:24:45",
+        "url": "https://thedairy.org/venue/boedecker-theater/",
+        "venue": "Boedecker Theater",
+        "slug": "boedecker-theater",
+        "address": "Walnut Street",
+        "city": "Boulder",
+        "country": "United States",
+        "province": "Boulder County",
+        "state": "Colorado",
+        "zip": "80302",
+        "phone": "(303) 440-7826",
+        "stateprovince": "CO",
+        "geo_lat": 40.0193115,
+        "geo_lng": -105.261067,
+        "show_map": true,
+        "show_map_link": true,
+        "global_id": "thedairy.org?id=16413",
+        "global_id_lineage": [
+          "thedairy.org?id=16413"
+        ]
+      },
+      "organizer": [
+        {
+          "id": 16377,
+          "author": "1",
+          "status": "publish",
+          "date": "2019-02-06 06:58:36",
+          "date_utc": "2019-02-06 13:58:36",
+          "modified": "2019-02-06 06:58:36",
+          "modified_utc": "2019-02-06 13:58:36",
+          "url": "https://thedairy.org/organizer/the-dairy-arts-center/",
+          "organizer": "The Dairy Arts Center",
+          "slug": "the-dairy-arts-center",
+          "global_id": "thedairy.org?id=16377",
+          "global_id_lineage": [
+            "thedairy.org?id=16377"
+          ]
+        }
+      ],
+      "custom_fields": [],
+      "is_virtual": false,
+      "virtual_url": null,
+      "virtual_video_source": ""
+    }
+  ],
+  "total": 231,
+  "total_pages": 5
+}

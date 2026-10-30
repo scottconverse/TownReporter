@@ -18,6 +18,10 @@ import {
   extractLibraryHours,
   extractRoutineIcs,
 } from "./routine-notice-feeds.ts";
+import {
+  extractCommunityEventFeed,
+  routineEventReaderKind,
+} from "./routine-notice-event-readers.ts";
 import type {
   CheckRoutineNoticeInput,
   RoutineNoticeCandidateView,
@@ -332,6 +336,27 @@ function adapterResults(
         })
         : extractLongmontLeafCollection(content, { provenance: base, issuer: ownerContext.issuer })
       : missingContext();
+  if (input.formatKey === "community-arts-event-logistics" && content.includes("BEGIN:VCALENDAR"))
+    return ownerContext
+      ? extractRoutineIcs(content, "event", {
+          provenance: base,
+          issuer: ownerContext.issuer,
+          locality: ownerContext.locality,
+          timezone: ownerContext.timezone,
+        })
+      : missingContext();
+  if (input.formatKey === "community-arts-event-logistics") {
+    const kind = routineEventReaderKind(content);
+    if (kind && kind !== "ics")
+      return ownerContext
+        ? extractCommunityEventFeed(content, kind, {
+            provenance: base,
+            issuer: ownerContext.issuer,
+            locality: ownerContext.locality,
+            timezone: ownerContext.timezone,
+          })
+        : missingContext();
+  }
   if (input.formatKey === "public-meeting-logistics") {
     if (!ownerContext) return missingContext();
     let parsed: unknown;
@@ -481,6 +506,8 @@ export function routineRefusalWhy(result: {
       return "it has no link or ID we can track";
     case "unsupported-event-type":
       return "it is a kind of event we do not list";
+    case "unsupported-recurrence":
+      return "its repeat rule uses a pattern we cannot read safely";
     case "malformed-json":
       return "the event data on the page is broken";
     case "content-too-large":
@@ -1041,6 +1068,7 @@ async function loadCheck(
       }
       candidates.push({
         id: ref.id,
+        externalId: notice.provenance.externalId,
         externalIdHash: ref.external_id_hash,
         formatKey: notice.formatKey,
         variant: notice.variant,

@@ -75,6 +75,7 @@ it("a Dark failover to DeepSeek uses the same runtime as a direct DeepSeek pick"
       ANTHROPIC_BASE_URL: "http://127.0.0.1:9/operator",
       ANTHROPIC_MODEL: "operator-model",
       TOWNREPORTER_DEEPSEEK: "1",
+      TOWNREPORTER_CLAUDE_CODE: "1",
       TOWNREPORTER_DEEPSEEK_BASE_URL: `${upstream.baseUrl}/v1`,
       TOWNREPORTER_DEEPSEEK_API_KEY: "fixture-rung",
       TOWNREPORTER_DEEPSEEK_MODEL: DEEPSEEK_MODEL,

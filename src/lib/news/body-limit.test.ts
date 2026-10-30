@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { BODY_LIMIT, readBodyCapped } from "./body-limit.ts";
+import { BODY_LIMIT, capFetchResponse, FetchResponseRefusal, readBodyCapped } from "./body-limit.ts";
 
 /**
  * How much of a stranger's response we are willing to hold in memory.
@@ -78,6 +78,23 @@ describe("capped body reads", () => {
   it("gives PDFs their own, larger ceiling", () => {
     assert.ok(BODY_LIMIT.pdf > BODY_LIMIT.html, "a packet PDF is legitimately bigger than a page");
     assert.ok(BODY_LIMIT.html >= 2_000_000, "a real civic page must still fit");
+  });
+
+  it("accepts calendar feeds while still refusing unrelated binary responses", async () => {
+    const calendar = streamed([new TextEncoder().encode("BEGIN:VCALENDAR\r\nEND:VCALENDAR")], {
+      "content-type": "text/calendar; charset=utf-8",
+    });
+    const accepted = await capFetchResponse(calendar, new URL("https://example.test/events.ics"));
+    assert.equal(await accepted.text(), "BEGIN:VCALENDAR\r\nEND:VCALENDAR");
+
+    const binary = streamed([new Uint8Array([137, 80, 78, 71])], {
+      "content-type": "image/png",
+    });
+    await assert.rejects(
+      () => capFetchResponse(binary, new URL("https://example.test/image.png")),
+      (error) =>
+        error instanceof FetchResponseRefusal && error.reason === "refused-content-type",
+    );
   });
 
   it("survives a body that is already gone", async () => {

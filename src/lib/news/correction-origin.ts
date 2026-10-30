@@ -41,6 +41,17 @@ export const ROUTINE_EDITION_UPDATE_PREFIX = "Routine edition update:";
 /** What the reader is told about one of those rows, so it is not read as an editor's. */
 export const ROUTINE_EDITION_UPDATE_LABEL = "Routine update";
 
+/** A short, plain note for a routine edition whose list changed after publication. */
+export function routineEditionUpdateNote(addedCount: number): string {
+  const added =
+    addedCount === 1
+      ? " 1 new item was added."
+      : addedCount > 1
+        ? ` ${addedCount} new items were added.`
+        : "";
+  return `${ROUTINE_EDITION_UPDATE_PREFIX}\n\nThe list in this story was updated.${added}`;
+}
+
 /** True when this correction body was written by the routine-notice worker rather than an editor. */
 export function correctionIsAutomatic(body: string): boolean {
   return body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX);
