@@ -16,6 +16,7 @@ import {
   tickRoutineNoticeEditions,
 } from "./routine-notice-worker.server.ts";
 import { recordSourceRead, type RoutineEventInput } from "./routine-events.server.ts";
+import type { RoutineNoticeFormatKey } from "./routine-notice-types.ts";
 
 await applyMigrationsToTestPglite();
 
@@ -91,6 +92,54 @@ async function activate(specs: Array<{ title: string; issuer: string; locality: 
   return sources;
 }
 
+type ActivationSpec = {
+  title: string;
+  issuer: string;
+  locality: string;
+  formatKey: RoutineNoticeFormatKey;
+  collectionArea?: string | null;
+  publicUrl?: string;
+};
+
+async function activateFormats(specs: ActivationSpec[]) {
+  const sql = await getSql();
+  const sources: Array<ActivationSpec & { id: number; url: string; publicUrl: string }> = [];
+  for (const [index, spec] of specs.entries()) {
+    const publicUrl = spec.publicUrl ?? `https://calendar.example/${index + 1}`;
+    const [source] = await sql.query<{ id: number; url: string }>(
+      "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,$4,'accepted') returning id,url",
+      [owner, room, `https://source.example/${index + 1}/feed`, spec.title],
+    );
+    sources.push({ ...spec, ...source!, publicUrl });
+  }
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 0,
+    paused: false,
+    approvals: sources.map((source) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      formatKey: source.formatKey,
+    })),
+  });
+  await saveRoutineNoticeAutomationFor(owner, room, {
+    expectedRevision: 0,
+    enabled: true,
+    timezone: "America/Denver",
+    localTime: "06:15",
+    sections: { today: "news", weekend: "events", deadlines: "deadlines" },
+    sources: sources.map((source) => ({
+      sourceId: source.id,
+      sourceUrl: source.url,
+      publicSourceUrl: source.publicUrl,
+      formatKey: source.formatKey,
+      issuer: source.issuer,
+      locality: source.locality,
+      collectionArea: source.collectionArea ?? null,
+    })),
+  });
+  return sources;
+}
+
 function event(
   sourceId: number,
   eventKey: string,
@@ -131,6 +180,16 @@ function event(
 
 async function runningJob() {
   await tickRoutineNoticeEditions(now);
+  const sql = await getSql();
+  const [job] = await sql.query<DeskJob>(
+    "update desk_jobs set status='running',claim_token=$2 where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room, `events-table-${Math.random()}`],
+  );
+  return job!;
+}
+
+async function runningJobAt(at: Date) {
+  await tickRoutineNoticeEditions(at);
   const sql = await getSql();
   const [job] = await sql.query<DeskJob>(
     "update desk_jobs set status='running',claim_token=$2 where newsroom_id=$1 and kind='routine-notice' returning *",
@@ -191,6 +250,44 @@ function eventCheck(
   };
 }
 
+function libraryCheck(
+  source: { id: number; title: string; url: string },
+  fields: EventFieldMap | null = null,
+) {
+  return {
+    ok: true as const,
+    check: {
+      checkId: source.id,
+      source: { id: source.id, title: source.title, url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "library-notice" as const,
+      checkedAt: now.toISOString(),
+      capture: {
+        captureEventId: source.id,
+        artifactVersionId: source.id + 10,
+        observedAt: now.toISOString(),
+        evidenceHref: null,
+        textAvailable: true,
+      },
+      state: "parsed" as const,
+      counts: { parsed: fields ? 1 : 0, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates: fields
+        ? [{
+            id: source.id,
+            externalId: `event-${source.id}`,
+            externalIdHash: `hash-${source.id}`,
+            formatKey: "library-notice" as const,
+            variant: "program" as const,
+            fields,
+            conflict: false,
+          }]
+        : [],
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  };
+}
 async function rerun(job: DeskJob) {
   const sql = await getSql();
   const [again] = await sql.query<DeskJob>(
@@ -579,4 +676,120 @@ test("a venue in a known nearby town prints under Nearby as the town only", asyn
   assert.ok(nearbyAt >= 0 && eventAt > nearbyAt, "the event is under the Nearby heading");
   assert.match(article!.body, /Stone Cup show \(Lyons\)/);
   assert.doesNotMatch(article!.body, /\(Lyons, Colorado\)/);
+});
+
+const fridayNow = new Date("2026-09-11T13:00:00Z");
+const libraryEventsUrl = "https://library.example/events";
+const cityEventsUrl = "https://events.example/city";
+
+async function activateStorytimePair() {
+  return activateFormats([
+    {
+      title: "Longmont Library Events",
+      issuer: "City of Longmont Library",
+      locality: "Longmont",
+      formatKey: "library-notice",
+      collectionArea: "Main branch",
+      publicUrl: libraryEventsUrl,
+    },
+    {
+      title: "City of Longmont events",
+      issuer: "City of Longmont",
+      locality: "Longmont",
+      formatKey: "community-arts-event-logistics",
+      publicUrl: cityEventsUrl,
+    },
+  ]);
+}
+
+function libraryStorytime(start: string): EventFieldMap {
+  return {
+    issuer: { value: "City of Longmont Library", locator: "OWNER_ISSUER" },
+    program: { value: "All Ages Halloween Storytime", locator: "program" },
+    start: { value: start, locator: "start" },
+    location: { value: "Longmont Public Library", locator: "location" },
+  };
+}
+
+function tableStorytime(start: string): EventFieldMap {
+  return {
+    issuer: { value: "City of Longmont", locator: "OWNER_ISSUER" },
+    title: { value: "ALL AGES HALLOWEEN STORYTIME!", locator: "title" },
+    start: { value: start, locator: "start" },
+    venue: { value: "Longmont Public Library", locator: "venue" },
+  };
+}
+
+test("a library notice and a same-day table event print once in Today with both sources credited", async () => {
+  const [library, table] = await activateStorytimePair();
+  const job = await runningJobAt(fridayNow);
+  await performRoutineNoticeWorkWith(job, {
+    now: fridayNow,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === library!.id
+        ? libraryCheck(library!, libraryStorytime("2026-09-11T10:00:00-06:00"))
+        : eventCheck(table!, tableStorytime("2026-09-11T10:00:00-06:00"))) as any,
+    verifyCheck: async () => {},
+  });
+
+  const sql = await getSql();
+  const [todayArticle] = await sql.query<{ body: string; source_urls: string }>(
+    "select body,source_urls from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  assert.equal((todayArticle!.body.match(/Halloween Storytime/gi) ?? []).length, 1, "the duplicate event prints once");
+  assert.ok(todayArticle!.body.includes(`(${cityEventsUrl})`));
+  assert.ok(todayArticle!.body.includes(`(${libraryEventsUrl})`));
+  assert.deepEqual(
+    new Set(JSON.parse(todayArticle!.source_urls) as string[]),
+    new Set([cityEventsUrl, libraryEventsUrl]),
+  );
+});
+
+test("the same library title at a different start time still prints as two Today lines", async () => {
+  const [library, table] = await activateStorytimePair();
+  const job = await runningJobAt(fridayNow);
+  await performRoutineNoticeWorkWith(job, {
+    now: fridayNow,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === library!.id
+        ? libraryCheck(library!, libraryStorytime("2026-09-11T10:00:00-06:00"))
+        : eventCheck(table!, tableStorytime("2026-09-11T11:00:00-06:00"))) as any,
+    verifyCheck: async () => {},
+  });
+
+  const sql = await getSql();
+  const [todayArticle] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  assert.equal((todayArticle!.body.match(/Halloween Storytime/gi) ?? []).length, 2);
+  assert.match(todayArticle!.body, /\*\*10 a\.m\.\*\*\nAll Ages Halloween Storytime/);
+  assert.match(todayArticle!.body, /\*\*11 a\.m\.\*\*\nALL AGES HALLOWEEN STORYTIME!/);
+});
+
+test("deduplicating Today leaves the weekend edition's library notice unchanged", async () => {
+  const [library, table] = await activateStorytimePair();
+  const job = await runningJobAt(fridayNow);
+  await performRoutineNoticeWorkWith(job, {
+    now: fridayNow,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === library!.id
+        ? libraryCheck(library!, libraryStorytime("2026-09-11T10:00:00-06:00"))
+        : eventCheck(table!, tableStorytime("2026-09-11T10:00:00-06:00"))) as any,
+    verifyCheck: async () => {},
+  });
+
+  const sql = await getSql();
+  const [todayArticle] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='news'",
+    [room],
+  );
+  const [weekendArticle] = await sql.query<{ body: string }>(
+    "select body from articles where newsroom_id=$1 and topic='events'",
+    [room],
+  );
+  assert.equal((todayArticle!.body.match(/Halloween Storytime/gi) ?? []).length, 1);
+  assert.ok(weekendArticle!.body.includes("- All Ages Halloween Storytime: "));
+  assert.ok(weekendArticle!.body.includes(`Source: ${libraryEventsUrl}`));
 });

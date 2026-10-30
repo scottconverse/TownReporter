@@ -177,6 +177,23 @@ function eventTiming(
     startsAt: instant.toISOString(),
   };
 }
+function routineNoticeTodayMatchKey(item: EligibleRoutineNotice, timezone: string) {
+  const fields = item.notice.normalizedFields;
+  const title = fields.title ?? fields.program ?? fields.service;
+  const start = fields.start?.trim();
+  if (!title?.trim() || !start) return null;
+  const allDay = fields.allDay === "true" || /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const timing = eventTiming(start, timezone, allDay, fields.timezone);
+  if (!timing) return null;
+  const place = [fields.venue, fields.location, fields.branch].find((value) => value?.trim()) ?? "";
+  return eventMatchKey({
+    title,
+    localDate: item.occurrenceDate,
+    startMinutes: timing.startMinutes,
+    allDay,
+    place,
+  });
+}
 async function routineCandidateKey(candidate: RoutineNoticeCheckGroup["candidates"][number]) {
   return `${candidate.externalIdHash}:${await sha256(
     JSON.stringify(
@@ -808,7 +825,29 @@ export async function performRoutineNoticeWorkWith(
     if (title && !sourceNames.has(source.public_source_url))
       sourceNames.set(source.public_source_url, title);
   }
-  let plans = planRoutineEditions(selectedEligible, localDate, {
+  /*
+    The same event can reach us as a library notice and as a table event. The
+    table line wins in Today, while retaining the notice's source credit. The
+    other channels and the run's status/receipt lists keep their existing
+    entries; only the rows handed to the Today edition are deduplicated.
+  */
+  const tableLineByMatchKey = new Map<string, EligibleRoutineNotice>();
+  for (const item of tableEligible) {
+    const event = collapsedByCandidateKey.get(item.notice.provenance.externalId);
+    if (event) tableLineByMatchKey.set(event.matchKey, item);
+  }
+  const editionEligible = selectedEligible.filter((item) => {
+    if (item.channel !== "today" || item.notice.formatKey === "community-arts-event-logistics")
+      return true;
+    const matchKey = routineNoticeTodayMatchKey(item, run.timezone);
+    const tableLine = matchKey ? tableLineByMatchKey.get(matchKey) : undefined;
+    if (!tableLine) return true;
+    tableLine.sourceUrls = [
+      ...new Set([...(tableLine.sourceUrls ?? [tableLine.sourceUrl]), item.sourceUrl]),
+    ];
+    return false;
+  });
+  let plans = planRoutineEditions(editionEligible, localDate, {
     timezone: run.timezone,
     town,
     sourceNames,
