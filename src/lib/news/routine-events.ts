@@ -1,4 +1,5 @@
 import { HOME_AREA, type StoryArea } from "../story-area.ts";
+import type { RoutineField } from "./routine-notice-types.ts";
 
 /** One stored event row. A story collapses rows with the same `matchKey`. */
 export type RoutineEventRow = {
@@ -21,6 +22,7 @@ export type RoutineEventRow = {
   link: string | null;
   sourceIssuer: string;
   sourceTitle: string;
+  fields: Record<string, RoutineField>;
 };
 
 export type CollapsedRoutineEvent = {
@@ -41,6 +43,7 @@ export type CollapsedRoutineEvent = {
   sourceUrl: string;
   sourceIssuer: string;
   sourceTitle: string;
+  fields: Record<string, RoutineField>;
   sourceUrls: string[];
   rows: RoutineEventRow[];
 };
@@ -201,6 +204,7 @@ export function collapseEvents(rows: readonly RoutineEventRow[]): CollapsedRouti
       sourceUrl: shown.sourceUrl,
       sourceIssuer: shown.sourceIssuer,
       sourceTitle: shown.sourceTitle,
+      fields: shown.fields,
       sourceUrls,
       rows: ordered,
     });

@@ -225,27 +225,22 @@ async function eventFromCandidate(
     town,
     area: eventArea(town, paperCity),
     link: candidate.fields.onlineUrl?.value?.trim() || null,
+    fields: candidate.fields,
   };
 }
 function collapsedEventNotice(event: CollapsedRoutineEvent, run: {
   newsroom_id: number;
   policy_revision: number;
 }): StructurallyValidRoutineNotice {
-  const fields: Record<string, RoutineField> = {
-    issuer: { value: event.sourceIssuer, locator: "routine-events.source_issuer" },
-    title: { value: event.title, locator: "routine-events.title" },
-    start: {
+  const fields: Record<string, RoutineField> = { ...event.fields };
+  if (!fields.start)
+    fields.start = {
       value:
         event.allDay || event.startMinutes === null
           ? event.localDate
           : `${event.localDate}T${String(Math.floor(event.startMinutes / 60)).padStart(2, "0")}:${String(event.startMinutes % 60).padStart(2, "0")}:00`,
       locator: "routine-events.start",
-    },
-  };
-  if (event.place) fields.venue = { value: event.place, locator: "routine-events.place" };
-  if (event.endsAt) fields.end = { value: event.endsAt, locator: "routine-events.ends_at" };
-  if (event.link) fields.onlineUrl = { value: event.link, locator: "routine-events.link" };
-  if (event.allDay) fields.allDay = { value: "true", locator: "routine-events.all_day" };
+    };
   return {
     formatKey: "community-arts-event-logistics",
     variant: "event",

@@ -30,6 +30,7 @@ create table if not exists routine_events (
   link text,
   source_issuer text not null default '',
   source_title text not null default '',
+  fields jsonb not null default '{}'::jsonb,
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   unique (newsroom_id, source_id, event_key, local_date)

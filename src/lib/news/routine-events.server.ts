@@ -1,5 +1,6 @@
 import type { Sql } from "../db.ts";
 import type { StoryArea } from "../story-area.ts";
+import type { RoutineField } from "./routine-notice-types.ts";
 import {
   eventSeenKey,
   rowsToRemove,
@@ -21,6 +22,7 @@ export type RoutineEventInput = {
   town: string;
   area: StoryArea;
   link?: string | null;
+  fields: Record<string, RoutineField>;
 };
 
 type DbRow = {
@@ -43,6 +45,7 @@ type DbRow = {
   link: string | null;
   source_issuer: string | null;
   source_title: string | null;
+  fields: Record<string, RoutineField> | null;
 };
 
 function iso(value: string | Date | null): string | null {
@@ -72,6 +75,7 @@ function rowFromDb(row: DbRow): RoutineEventRow {
     link: row.link,
     sourceIssuer: row.source_issuer ?? "",
     sourceTitle: row.source_title ?? "",
+    fields: row.fields ?? {},
   };
 }
 
@@ -107,8 +111,8 @@ export async function recordSourceRead(
     await sql.query(
       `insert into routine_events(
          newsroom_id,source_id,event_key,candidate_key,match_key,title,starts_at,ends_at,
-         local_date,start_minutes,all_day,place,town,area,source_url,link,source_issuer,source_title,last_seen_at
-       ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
+         local_date,start_minutes,all_day,place,town,area,source_url,link,source_issuer,source_title,fields,last_seen_at
+       ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,now())
        on conflict(newsroom_id,source_id,event_key,local_date) do update set
          candidate_key=excluded.candidate_key,
          match_key=excluded.match_key,
@@ -124,6 +128,7 @@ export async function recordSourceRead(
          link=excluded.link,
          source_issuer=excluded.source_issuer,
          source_title=excluded.source_title,
+         fields=excluded.fields,
          last_seen_at=now()`,
       [
         input.newsroomId,
@@ -144,6 +149,7 @@ export async function recordSourceRead(
         event.link ?? null,
         input.sourceIssuer,
         input.sourceTitle,
+        JSON.stringify(event.fields),
       ],
     );
   }

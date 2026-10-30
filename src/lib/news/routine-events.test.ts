@@ -62,6 +62,7 @@ const row = (overrides: Partial<RoutineEventRow> & Pick<RoutineEventRow, "id" | 
   link: null,
   sourceIssuer: "Arts",
   sourceTitle: "Calendar",
+  fields: {},
   ...overrides,
 });
 

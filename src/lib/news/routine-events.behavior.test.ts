@@ -96,7 +96,7 @@ function event(
   eventKey: string,
   overrides: Partial<RoutineEventInput> = {},
 ): RoutineEventInput {
-  return {
+  const input: RoutineEventInput = {
     eventKey,
     candidateKey: `candidate-${eventKey}`,
     matchKey: "stone cup show|2026-09-08|1080|stone cup",
@@ -109,7 +109,23 @@ function event(
     town: "Longmont",
     area: "longmont",
     link: `https://event.example/${eventKey}`,
+    fields: {},
     ...overrides,
+  };
+  return {
+    ...input,
+    fields: overrides.fields ?? {
+      issuer: { value: "Arts", locator: "issuer" },
+      title: { value: input.title, locator: "title" },
+      start: {
+        value:
+          input.allDay || input.startMinutes === null
+            ? input.localDate
+            : `${input.localDate}T${String(Math.floor(input.startMinutes / 60)).padStart(2, "0")}:${String(input.startMinutes % 60).padStart(2, "0")}:00`,
+        locator: "start",
+      },
+      venue: { value: input.place ?? "", locator: "venue" },
+    },
   };
 }
 
@@ -132,6 +148,68 @@ async function rawEvent(source: { id: number }, key: string, date: string) {
      ) values($1,$2,$3,$4,$5,$6,$7,540,false,'Park','Longmont','longmont',$8,'Arts','Calendar')`,
     [room, source.id, key, `candidate-${key}`, `park|${date}|540|park`, key, date, `https://source.example/${source.id}`],
   );
+}
+
+type EventFieldMap = Record<string, { value: string; locator: string }>;
+
+function eventCheck(
+  source: { id: number; title: string; url: string },
+  fields: EventFieldMap | null = null,
+) {
+  return {
+    ok: true as const,
+    check: {
+      checkId: source.id,
+      source: { id: source.id, title: source.title, url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: now.toISOString(),
+      capture: {
+        captureEventId: source.id,
+        artifactVersionId: source.id + 10,
+        observedAt: now.toISOString(),
+        evidenceHref: null,
+        textAvailable: true,
+      },
+      state: "parsed" as const,
+      counts: { parsed: fields ? 1 : 0, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates: fields
+        ? [{
+            id: source.id,
+            externalId: `event-${source.id}`,
+            externalIdHash: `hash-${source.id}`,
+            formatKey: "community-arts-event-logistics" as const,
+            variant: "event",
+            fields,
+            conflict: false,
+          }]
+        : [],
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  };
+}
+
+async function rerun(job: DeskJob) {
+  const sql = await getSql();
+  const [again] = await sql.query<DeskJob>(
+    "update desk_jobs set status='running',claim_token=$2,finished_at=null,updated_at=now() where id=$1 returning *",
+    [job.id, `events-table-rerun-${Math.random()}`],
+  );
+  return again!;
+}
+
+async function latestRunSummary() {
+  const sql = await getSql();
+  const [row] = await sql.query<{ summary_json: string }>(
+    "select summary_json from routine_notice_runs where newsroom_id=$1 order by id desc limit 1",
+    [room],
+  );
+  return JSON.parse(row!.summary_json) as {
+    needsReview: number;
+    reviewReasons: Array<{ why: string; count: number }>;
+  };
 }
 
 test("a full source read removes only its own unseen window rows", async () => {
@@ -311,5 +389,129 @@ test("a skipped source's stored rows stay and still print in the day's story", a
   assert.equal(
     (await sql.query<{ n: number }>("select count(*)::int n from routine_events where newsroom_id=$1 and source_id=$2", [room, skipped!.id]))[0]?.n,
     1,
+  );
+});
+
+test("a table event with postponed status is held for review", async () => {
+  const [source] = await activate([{ title: "Postponed Events", issuer: "Arts", locality: "Longmont" }]);
+  const fields: EventFieldMap = {
+    issuer: { value: source!.issuer, locator: "OWNER_ISSUER" },
+    title: { value: "Rain-delayed concert", locator: "title" },
+    start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup", locator: "venue" },
+    eventStatus: { value: "postponed", locator: "eventStatus" },
+  };
+  const job = await runningJob();
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async () => eventCheck(source!, fields)) as any,
+    verifyCheck: async () => {},
+  });
+  const sql = await getSql();
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    0,
+    "the postponed event is not printed in Today",
+  );
+  const summary = await latestRunSummary();
+  assert.ok(summary.needsReview >= 1);
+  assert.ok(summary.reviewReasons.some((reason) => reason.why === "it is cancelled or its status changed"));
+  const [stored] = await sql.query<{ fields: EventFieldMap }>("select fields from routine_events where newsroom_id=$1", [room]);
+  assert.deepEqual(stored?.fields, fields, "the table keeps the candidate's own field map");
+});
+
+test("a table event with cancellation set is held for review", async () => {
+  const [source] = await activate([{ title: "Cancelled Events", issuer: "Arts", locality: "Longmont" }]);
+  const fields: EventFieldMap = {
+    issuer: { value: source!.issuer, locator: "OWNER_ISSUER" },
+    title: { value: "Cancelled concert", locator: "title" },
+    start: { value: "2026-09-08T19:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup", locator: "venue" },
+    cancellation: { value: "The organizer cancelled this event.", locator: "cancellation" },
+  };
+  const job = await runningJob();
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async () => eventCheck(source!, fields)) as any,
+    verifyCheck: async () => {},
+  });
+  const sql = await getSql();
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    0,
+    "the cancelled event is not printed in Today",
+  );
+  const summary = await latestRunSummary();
+  assert.ok(summary.needsReview >= 1);
+  assert.ok(summary.reviewReasons.some((reason) => reason.why === "it is cancelled or its status changed"));
+});
+
+
+test("a table event keeps Free and Sign up on its Today line", async () => {
+  const [source] = await activate([{ title: "Free Events", issuer: "Arts", locality: "Longmont" }]);
+  const registrationUrl = "https://signup.example/stone-cup";
+  const fields: EventFieldMap = {
+    issuer: { value: source!.issuer, locator: "OWNER_ISSUER" },
+    title: { value: "Free Stone Cup show", locator: "title" },
+    start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup", locator: "venue" },
+    admission: { value: "Free", locator: "admission" },
+    registrationUrl: { value: registrationUrl, locator: "registrationUrl" },
+  };
+  const job = await runningJob();
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async () => eventCheck(source!, fields)) as any,
+    verifyCheck: async () => {},
+  });
+  const sql = await getSql();
+  const [article] = await sql.query<{ body: string }>("select body from articles where newsroom_id=$1 and status='published'", [room]);
+  assert.ok(article!.body.includes("Free"));
+  assert.ok(article!.body.includes("Sign up: " + registrationUrl));
+});
+
+test("a skipped source keeps its stored cancelled event out of Today on the next run", async () => {
+  const [skipped, good] = await activate([
+    { title: "Skipped Events", issuer: "Skipped Arts", locality: "Longmont" },
+    { title: "Good Events", issuer: "Good Arts", locality: "Longmont" },
+  ]);
+  const cancelledFields: EventFieldMap = {
+    issuer: { value: skipped!.issuer, locator: "OWNER_ISSUER" },
+    title: { value: "Cancelled show", locator: "title" },
+    start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+    venue: { value: "Stone Cup", locator: "venue" },
+    eventStatus: { value: "cancelled", locator: "eventStatus" },
+  };
+  const job = await runningJob();
+  await performRoutineNoticeWorkWith(job, {
+    now,
+    check: (async (_actor: unknown, input: { sourceId: number }) =>
+      input.sourceId === skipped!.id ? eventCheck(skipped!, cancelledFields) : eventCheck(good!)) as any,
+    verifyCheck: async () => {},
+  });
+  const sql = await getSql();
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    0,
+    "the first run held the cancelled event",
+  );
+  const second = await rerun(job);
+  await performRoutineNoticeWorkWith(second, {
+    now,
+    check: (async (_actor: unknown, input: { sourceId: number }) => {
+      if (input.sourceId === skipped!.id) throw new Error("capture failed");
+      return eventCheck(good!);
+    }) as any,
+    verifyCheck: async () => {},
+  });
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    0,
+    "the skipped source stored row stayed out of Today",
+  );
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from routine_events where newsroom_id=$1 and source_id=$2", [room, skipped!.id]))[0]?.n,
+    1,
+    "the skipped source row was retained",
   );
 });
