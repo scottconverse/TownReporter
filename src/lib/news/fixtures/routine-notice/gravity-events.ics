@@ -1,0 +1,414 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Kit//Events all//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Gravity Brewing
+NAME:Gravity Brewing
+REFRESH-INTERVAL;VALUE=DURATION:PT24H
+X-PUBLISHED-TTL:PT24H
+BEGIN:VEVENT
+UID:ee200d16-4837-4eac-a59a-5f6fb0fa1ee1@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Happy Hour
+DTSTART;TZID=America/Denver:20261012T150000
+DTEND;TZID=America/Denver:20261012T170000
+RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR
+DESCRIPTION:$5 on select craft pints. Light Lift Lager\, Mars Water
+  seltzer\, Wicked Nebula hazy IPA.\n\nNeed to relax after work? Enjoy $5
+  pints on select craft beers\, including Light Lift Lager\, Mars Water
+  seltzer and Wicked Nebula hazy IPA\, and unwind with old and new
+  friends.\n\nhttps://www.thegravitybrewing.com/events/happy-hour
+URL:https://www.thegravitybrewing.com/events/happy-hour
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:3235d40d-031c-4e6d-879a-8a6a190cb1b2@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Guesstronauts Trivia Game Night
+DTSTART;TZID=America/Denver:20260924T183000
+DTEND;TZID=America/Denver:20260924T200000
+RRULE:FREQ=WEEKLY
+DESCRIPTION:Trivia crossed with betting. The first game show we brewed
+  ourselves.\n\nThe first game show we have brewed ourselves. One hour on a
+  Thursday night\, in the taproom.\n\nIt is trivia crossed with betting.
+  The questions still get asked\, but the points come from reading the
+  room. Back your table\, back a stranger\, back yourself if you are
+  feeling brave. Knowing the answer helps. Spotting who does helps
+  more.\n\nNo team needed and no sign up. Turn up and we will get you into
+  the game.\n\nWe wrote this one\, so come tell us what works and what does
+  not.\n\nhttps://www.thegravitybrewing.com/events/guesstronaut-trivia-game
+ -night
+URL:https://www.thegravitybrewing.com/events/guesstronaut-trivia-game-night
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:fc17d880-960e-4353-9066-f695ca9229a1@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Bike Night
+DTSTART;TZID=America/Denver:20261002T180000
+DTEND;TZID=America/Denver:20261002T210000
+RRULE:FREQ=WEEKLY;BYDAY=FR
+DESCRIPTION:Park your bike out front and show it off. Pedal or
+  powered.\n\nEvery Friday from 6 to 9pm\, the parking lot is for bikes.
+  Pedal or powered\, all of it counts: motorcycles\, scooters\, e-bikes\,
+  road bikes. Park out front\, come in for a beer and a slice from Double
+  D's\, and talk bikes with whoever else rode in. Free\, no
+  sign-up.\n\nhttps://www.thegravitybrewing.com/events/bike-night-fridays
+LOCATION:Parking lot & taproom
+URL:https://www.thegravitybrewing.com/events/bike-night-fridays
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:ec78e00f-dcf2-41e4-bda1-405a5a6ac87b@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Halloween Party
+DTSTART;VALUE=DATE:20261031
+DTEND;VALUE=DATE:20261101
+DESCRIPTION:Kids' costume contest at 2\, adults' at 8. Plus a special
+  Halloween beer.\n\nHalloween all day in the taproom on Saturday\, Oct
+  31.\n\nTwo costume contests: kids at 2pm\, adults at 8pm. Come in costume
+  for either\, or both.\n\nWe will have a special Halloween beer on tap: a
+  pumpkin spiced English mild. At 4%\, it won't scare you off after
+  one.\n\nhttps://www.thegravitybrewing.com/events/halloween-party
+URL:https://www.thegravitybrewing.com/events/halloween-party
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:34a3568e-d6d8-40f9-89c0-bcf6dfb6181a@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Delo Apartments Halloween Party
+DTSTART;TZID=America/Denver:20261031T130000
+DTEND;TZID=America/Denver:20261031T160000
+DESCRIPTION:Our neighbors' party\, with prizes from us. Win Tsar Bomba in
+  the raffle.\n\nOur neighbors at Delo Apartments on Cannon St are throwing
+  their resident Halloween party\, and Gravity is a proud sponsor.\n\nWe've
+  put Gravity six packs and 750ml bottles of Tsar Bomba into the raffle.
+  Delo residents\, come in costume and try your luck.\n\nThen keep the
+  night going a short walk away: our own Halloween party runs all day in
+  the taproom\, with the adults' costume contest at
+  8pm.\n\nhttps://www.thegravitybrewing.com/events/delo-apartments-hallowee
+ n-party
+LOCATION:Delo Apartments\, 1140 Cannon St\, Louisville
+URL:https://www.thegravitybrewing.com/events/delo-apartments-halloween-part
+ y
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:c4d33e03-b9f7-43b9-94ae-26bd841ba20e@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:NFL Sundays
+DTSTART;TZID=America/Denver:20260913T110000
+DTEND;TZID=America/Denver:20260913T190000
+RRULE:FREQ=WEEKLY;BYDAY=SU;UNTIL=20270110
+DESCRIPTION:Football all season. We open at 11\, and NFL gear gets $1 off
+  your first beer.\n\nOpen at 11am.\n\nWear any NFL gear for $1 off your
+  first beer!\n\nFootball is on our screens all season.\n\n**Sundays we
+  open at 11am** for the early window. Thursday and Monday nights are on
+  too\, during normal hours.\n\n**Wear any NFL gear\, get $1 off your first
+  beer.** Any team.\n\nWe have the broadcast channels and ESPN\, not Sunday
+  Ticket. So that is the Broncos every week plus whatever else Denver
+  gets\, usually two or three games on a Sunday. Ring ahead and we will
+  tell you what is on.\n\nBroncos games get their own listing\, and Broncos
+  gear is worth $2 off those
+  days.\n\nhttps://www.thegravitybrewing.com/events/nfl-sundays
+URL:https://www.thegravitybrewing.com/events/nfl-sundays
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:c465e35d-ebf4-4240-ac85-f5a44ea94461@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:BOGO Pizza
+DTSTART;TZID=America/Denver:20260906T120000
+DTEND;TZID=America/Denver:20260906T190000
+RRULE:FREQ=WEEKLY;BYDAY=SU
+DESCRIPTION:Buy any sourdough pizza from Double D's and get one free when
+  you dine in.\n\nBuy one get one free on any sourdough pizza\nDine in
+  only\nMembers only — sign up at the
+  counter\n\nhttps://www.thegravitybrewing.com/events/bogo-pizza
+URL:https://www.thegravitybrewing.com/events/bogo-pizza
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:e4e6ed1c-9b94-4569-b271-ca34b8506a1d@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos vs. Chiefs Watch Party
+DTSTART;TZID=America/Denver:20261101T142500
+DTEND;TZID=America/Denver:20261101T174500
+DESCRIPTION:Division rival Kansas City comes to Denver. Broncos gear gets
+  you $2 off your first beer.\n\nBroncos vs. Kansas City\, kicking off
+  2:25pm on our screens.\n\n**Wear Broncos gear\, get $2 off your first
+  beer.** Any other NFL gear gets you $1
+  off.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-vs-c
+ hiefs
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-vs-chiefs
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:cb838413-c360-4efe-aea9-8ff5f5ede317@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:BOGO Pizza
+DTSTART;TZID=America/Denver:20260831T160000
+DTEND;TZID=America/Denver:20260831T210000
+RRULE:FREQ=WEEKLY;BYDAY=MO,TU
+DESCRIPTION:Buy any sourdough pizza from Double D's and get one free when
+  you dine in.\n\nBuy one get one free on any sourdough pizza\nDine in
+  only\nMembers only — sign up at the
+  counter\n\nhttps://www.thegravitybrewing.com/events/bogo-pizza-2
+URL:https://www.thegravitybrewing.com/events/bogo-pizza-2
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:95278c29-1fc1-4437-8053-50a97a2b808a@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Vinyl Night with Little Horse
+DTSTART;TZID=America/Denver:20260928T170000
+DTEND;TZID=America/Denver:20260928T210000
+RRULE:FREQ=WEEKLY
+DESCRIPTION:Bring your records or play ours. Little Horse Vintage brings
+  crates to buy from.\n\nMonday 28 September\, 5 to 9pm. Free to turn up\,
+  no sign-up.\n\nWe are partnering with Little Horse Vintage\, a short walk
+  on Main Street\, to host an evening playing choice selections as well as
+  anything you bring in. Requests welcome.\n\nBring a record from home\,
+  and if we play it\, your next beer is buy one get one free.\n\nLittle
+  Horse Vintage is also providing records to sell as well as to play\, so
+  bring a bit of cash if you want to dig through the crates.\n\nLittle
+  Horse has been dealing in vintage vinyl\, books and stereo gear around
+  Louisville and Boulder since 2004. Their shop is a short walk away at 820
+  Main
+  Street.\n\nhttps://www.thegravitybrewing.com/events/vinyl-night-with-litt
+ le-horse
+URL:https://www.thegravitybrewing.com/events/vinyl-night-with-little-horse
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:aca12d14-44a8-41f8-bb44-447505beac33@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Commander Night
+DTSTART;TZID=America/Denver:20261019T173000
+DTEND;TZID=America/Denver:20261019T203000
+RRULE:FREQ=WEEKLY
+DESCRIPTION:Free Magic: The Gathering for all levels. Starter decks from
+  Total Escape Games.\n\nCommander Night starts Monday\, October 19\, and
+  then runs every Monday from 5:30 to 8:30pm. It's free to play\, and your
+  first drink of the night is $1 off.\n\nWe're hosting it with Total Escape
+  Games\, Broomfield's tabletop game store since 2009. Their calendar runs
+  all week: Friday Night Magic\, prerelease weekends\, Warhammer\, D&D and
+  more\, backed by a Discord community over 2\,000 strong. They're bringing
+  starter decks\, so you can sit down and play without owning a single
+  card.\n\nCommander is the multiplayer format of Magic: The Gathering\,
+  usually four players to a table. Bring your own deck or borrow one of
+  theirs. New players are welcome.\n\nTotal Escape Games: 6831 W. 120th
+  Ave\, Suite C\, Broomfield.
+  https://www.totalescapegames.com/\n\nhttps://www.thegravitybrewing.com/ev
+ ents/mtg-commander-night
+URL:https://www.thegravitybrewing.com/events/mtg-commander-night
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:da4c250d-48f7-4d2e-91ae-6f85e8f6d3dd@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Monday Night Football
+DTSTART;TZID=America/Denver:20260921T180000
+DTEND;TZID=America/Denver:20260921T213000
+RDATE;TZID=America/Denver:20260928T180000,20261005T180000,20261012T180000,2
+ 0261019T180000,20261026T180000,20261102T180000,20261109T180000,20261116T18
+ 0000,20261123T180000,20261130T180000,20261207T180000,20261214T180000,20261
+ 221T180000,20261228T180000
+DESCRIPTION:Kickoff 6:15pm on the big screen. NFL gear gets you $1
+  off.\n\nThe Monday night game is on\, kicking off at
+  **6:15pm**.\n\n**Wear any NFL gear\, get $1 off your first beer.** Any
+  team.\n\nLast pour is at our usual 9pm\, but we are not going to throw
+  you out in the middle of the fourth quarter. Stay and watch it
+  finish.\n\nDouble D's are running half-price pizza and buy-one-get-one on
+  sourdough every Monday\, so dinner is sorted
+  too.\n\nhttps://www.thegravitybrewing.com/events/monday-night-football
+URL:https://www.thegravitybrewing.com/events/monday-night-football
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:b5f50026-526a-4df8-ac2f-0cc777fa3717@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Cribbage Night
+DTSTART;TZID=America/Denver:20261027T183000
+DTEND;TZID=America/Denver:20261027T200000
+RDATE;TZID=America/Denver:20261103T183000,20261124T183000
+DESCRIPTION:Relaxed cribbage in the taproom. New? Come early for a beginner
+  lesson.\n\nA low-key night of cribbage in the taproom. Grab a pint and a
+  seat.\n\nNever played? Come at 6:30 for a beginner lesson. We'll walk you
+  through the rules and play a practice hand together. Games start at
+  7.\n\nWe'll have cards and a board to borrow. Bring your own cards or
+  cribbage board and get $1 off your first drink.\n\nNot drinking? We have
+  craft sodas too.\n\nFree to
+  play.\n\nhttps://www.thegravitybrewing.com/events/cribbage-night
+URL:https://www.thegravitybrewing.com/events/cribbage-night
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:2975dd93-d543-475d-8425-eb88b05baee6@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Half-price Calzones
+DTSTART;TZID=America/Denver:20260902T160000
+DTEND;TZID=America/Denver:20260902T210000
+RRULE:FREQ=WEEKLY;BYDAY=WE
+DESCRIPTION:Half off any calzone from Double D's when you dine in.\n\nHalf
+  off any calzone\nDine in only\nMembers only — sign up at the
+  counter\n\nhttps://www.thegravitybrewing.com/events/half-price-calzones
+URL:https://www.thegravitybrewing.com/events/half-price-calzones
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:f213cedb-2494-481b-895c-a907d3703bbd@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Trivia with Geeks Who Drink
+DTSTART;TZID=America/Denver:20260805T183000
+DTEND;TZID=America/Denver:20260805T203000
+RRULE:FREQ=WEEKLY;BYDAY=WE
+DESCRIPTION:Free to play\, no sign-up. Just turn up with a team.\n\nGeeks
+  Who Drink bring their quiz to the taproom every Wednesday at 6:30pm. Free
+  to play\, no sign-up needed — just turn up with a
+  team.\n\nhttps://www.thegravitybrewing.com/events/trivia-with-geeks-who-d
+ rink
+LOCATION:Taproom
+URL:https://www.thegravitybrewing.com/events/trivia-with-geeks-who-drink
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:c26171c8-6b13-4ee6-a975-7b3ff73885ee@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Lafayette Area Brewers Homebrew Club
+DTSTART;TZID=America/Denver:20261105T190000
+DTEND;TZID=America/Denver:20261105T210000
+DESCRIPTION:A local homebrew club's monthly meeting. Members only.\n\nThe
+  [Lafayette Area
+  Brewers](https://www.facebook.com/groups/799823306718078/)\, a local
+  homebrew club\, hold their monthly meeting at Gravity this month\, with a
+  tour of our brewhouse. This month's topic is high gravity beers.\n\nThis
+  is a private meeting for club members only. Homebrewers interested in
+  joining can find the club on Facebook. The taproom stays open as usual\,
+  so come in for a pint and trivia either
+  way.\n\nhttps://www.thegravitybrewing.com/events/lafayette-area-brewers-h
+ omebrew-club
+URL:https://www.thegravitybrewing.com/events/lafayette-area-brewers-homebre
+ w-club
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:8aa8d02b-27d0-4a94-bdb5-5214b0c92f6b@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos at Panthers Watch Party
+DTSTART;TZID=America/Denver:20261108T110000
+DTEND;TZID=America/Denver:20261108T141500
+DESCRIPTION:Early 11am kickoff at Carolina. Doors at 10:45am. Broncos gear
+  gets you $2 off your first beer.\n\nBroncos at Carolina\, kicking off
+  11:00am on our screens.\n\n**Wear Broncos gear\, get $2 off your first
+  beer.** Any other NFL gear gets you $1 off.\n\nDoors at 10:45am for this
+  one\, so you are in and poured before
+  kickoff.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-
+ at-panthers
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-at-panther
+ s
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:871c08e2-9da8-4d91-aa78-df7ab295ba25@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Battles & Brews
+DTSTART;TZID=America/Denver:20260825T173000
+DTEND;TZID=America/Denver:20260825T210000
+RDATE;TZID=America/Denver:20260922T173000,20261110T173000,20261117T173000,2
+ 0261208T173000
+DESCRIPTION:Tabletop D&D with professional Game Masters. Free to
+  play.\n\nBattles & Brews brings professional Dungeons & Dragons to your
+  favorite local taprooms\, delivering the adventure directly to you.
+  Whether you've been rolling dice since the 80s or you're looking to join
+  your very first quest\, there's a seat at the table for you.\n\nNo
+  experience is required\, and all the gear is provided. We handle the
+  heavy lifting—the world-building\, the maps\, and the Game
+  Mastering—so you can focus on playing.\n\nFree to play. Grab a pint\,
+  roll for initiative\, and let's make the night
+  legendary.\n\nhttps://www.thegravitybrewing.com/events/battles-brews
+LOCATION:Taproom
+URL:https://www.thegravitybrewing.com/events/battles-brews
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:14142cb1-0fe8-439a-be13-90e70ff072e1@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos vs. Raiders Watch Party
+DTSTART;TZID=America/Denver:20261122T142500
+DTEND;TZID=America/Denver:20261122T174500
+DESCRIPTION:Division rival Las Vegas in Denver. Broncos gear gets you $2
+  off your first beer.\n\nBroncos vs. Las Vegas\, kicking off 2:25pm on our
+  screens.\n\n**Wear Broncos gear\, get $2 off your first beer.** Any other
+  NFL gear gets you $1
+  off.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-vs-r
+ aiders
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-vs-raiders
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:73fb4bf5-f5a6-433b-b250-a5e91f532722@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos at Steelers Watch Party
+DTSTART;TZID=America/Denver:20261127T130000
+DTEND;TZID=America/Denver:20261127T161500
+DESCRIPTION:Black Friday football at Pittsburgh. Doors at 12:30pm. Broncos
+  gear gets you $2 off your first beer.\n\nBlack Friday football. Broncos
+  at Pittsburgh\, kicking off 1:00pm on our screens.\n\n**Wear Broncos
+  gear\, get $2 off your first beer.** Any other NFL gear gets you $1
+  off.\n\nWe're opening early at 12:30pm for this
+  one.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-at-s
+ teelers
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-at-steeler
+ s
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:f7e528a5-6e7f-4d83-8bde-9e7cca25afd6@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos vs. Dolphins Watch Party
+DTSTART;TZID=America/Denver:20261206T140500
+DTEND;TZID=America/Denver:20261206T173000
+DESCRIPTION:Miami comes to Denver. Broncos gear gets you $2 off your first
+  beer.\n\nBroncos vs. Miami\, kicking off 2:05pm on our screens.\n\n**Wear
+  Broncos gear\, get $2 off your first beer.** Any other NFL gear gets you
+  $1
+  off.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-vs-d
+ olphins
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-vs-dolphin
+ s
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:23f1b934-a68a-46fb-9af0-ab64566c46b7@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos at Jets Watch Party
+DTSTART;TZID=America/Denver:20261213T110000
+DTEND;TZID=America/Denver:20261213T141500
+DESCRIPTION:Early 11am kickoff at the Jets. Doors at 10:45am. Broncos gear
+  gets you $2 off your first beer.\n\nBroncos at New York Jets\, kicking
+  off 11:00am on our screens.\n\n**Wear Broncos gear\, get $2 off your
+  first beer.** Any other NFL gear gets you $1 off.\n\nDoors at 10:45am for
+  this one\, so you are in and poured before
+  kickoff.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-
+ at-jets
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-at-jets
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:1bff70e2-9cc8-45d7-8bef-1a70f5b7fbcc@kit.events
+DTSTAMP:20261029T080022Z
+SUMMARY:Broncos at Raiders Watch Party
+DTSTART;TZID=America/Denver:20261220T142500
+DTEND;TZID=America/Denver:20261220T174500
+DESCRIPTION:Broncos at Las Vegas. Broncos gear gets you $2 off your first
+  beer.\n\nBroncos at Las Vegas\, kicking off 2:25pm on our
+  screens.\n\n**Wear Broncos gear\, get $2 off your first beer.** Any other
+  NFL gear gets you $1
+  off.\n\nhttps://www.thegravitybrewing.com/events/broncos-watch-party-at-r
+ aiders
+URL:https://www.thegravitybrewing.com/events/broncos-watch-party-at-raiders
+TRANSP:TRANSPARENT
+END:VEVENT
+END:VCALENDAR

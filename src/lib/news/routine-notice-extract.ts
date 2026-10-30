@@ -24,6 +24,7 @@ export type RoutineExtractionRefusalCode =
   | "node-limit-exceeded"
   | "traversal-limit-exceeded"
   | "malformed-json"
+  | "unsupported-recurrence"
   | "missing-stable-identity"
   | "unsupported-event-type"
   | "missing-owner-context"
