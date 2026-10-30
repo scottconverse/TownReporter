@@ -1099,8 +1099,14 @@ export async function performRoutineNoticeWorkWith(
           );
         else {
           await tx.query(
-            "update articles set body=$1, source_urls=$2 where id=$3 and newsroom_id=$4",
-            [plan.body, JSON.stringify(plan.sourceUrls), existing.article_id, run.newsroom_id],
+            "update articles set dek=$1, body=$2, source_urls=$3 where id=$4 and newsroom_id=$5",
+            [
+              plan.dek ?? "Logistics from approved public sources.",
+              plan.body,
+              JSON.stringify(plan.sourceUrls),
+              existing.article_id,
+              run.newsroom_id,
+            ],
           );
           await tx.query(
             "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",

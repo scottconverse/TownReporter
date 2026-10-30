@@ -257,11 +257,12 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   assert.equal(afterCorrection?.corrections, 1);
   assert.equal(afterCorrection?.articles, 2);
   assert.notDeepEqual(JSON.parse(afterCorrection!.candidate_keys_json), []);
-  const [correctedArticle] = await sql.query<{ body: string; article_body_hash: string }>(
-    "select a.body,p.article_body_hash from routine_notice_publications p join articles a on a.id=p.article_id where p.newsroom_id=$1 and p.channel='today'",
+  const [correctedArticle] = await sql.query<{ body: string; dek: string; article_body_hash: string }>(
+    "select a.body,a.dek,p.article_body_hash from routine_notice_publications p join articles a on a.id=p.article_id where p.newsroom_id=$1 and p.channel='today'",
     [room],
   );
   assert.match(correctedArticle!.body, /\n\n\*\*6 p\.m\.\*\*\nConcert — new time\nPark\n\n/);
+  assert.equal(correctedArticle!.dek, "1 event on Longmont's public calendars today.");
   assert.equal(correctedArticle!.article_body_hash, await sha256(correctedArticle!.body));
   /*
     The correction the worker appended carries the mark the public page reads
