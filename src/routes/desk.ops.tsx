@@ -585,7 +585,7 @@ function OpsPage() {
           <>
             {" "}
             (Excel and PowerPoint files are skipped without it.{" "}
-            <a href="https://www.libreoffice.org/download/" target="_blank" rel="noreferrer">
+            <a className="inline-link" href="https://www.libreoffice.org/download/" target="_blank" rel="noreferrer">
               Install LibreOffice
             </a>
             )
