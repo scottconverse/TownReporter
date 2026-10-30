@@ -338,7 +338,7 @@ const SECOND_HEADLINE = "Council approves the pilot program";
 // The control sweep can enqueue newer drafts or cancel jobs. Re-create the
 // three state fixtures immediately before their separate assertions so that
 // latestJob reads the intended scenario, not a side effect of an earlier press.
-async function seedJobStates(pg, userId, { leadId, leadId2, leadId3 }) {
+async function seedJobStates(pg, userId, { leadId, leadId2, leadId3, quotaLeadId = leadId }) {
   const q = (sql, params) => pg.query(sql, params);
   /* ── jobs: one stalled, one failed on quota, one cancelled ────────────── */
   /*
@@ -366,7 +366,7 @@ async function seedJobStates(pg, userId, { leadId, leadId2, leadId3 }) {
      values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
              'DeepSeek API error 429: usage limit reached; resets 11:30pm (America/Denver).',
              '', $3, $4, $3, $4)`,
-    [userId, leadId, ago(40 * MIN), ago(38 * MIN)],
+    [userId, quotaLeadId, ago(40 * MIN), ago(38 * MIN)],
   );
   await q(
     `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
@@ -1251,17 +1251,27 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
 /* ── 6. the job states, each on the screen that shows it ─────────────────── */
 {
   /*
-    The button sweep really presses Publish on the first fixture lead. The app
-    correctly suppresses draft errors on a story already on the paper
-    (src/routes/desk.story.$leadId.tsx:2244 and :3606), so restore the seeded
-    lead states before re-creating the job-state fixtures below.
+    The button sweep really presses Publish on the first fixture lead, so the
+    app correctly suppresses draft errors there. Give the quota assertion its
+    own drafted lead that the sweep never touches; otherwise a published
+    article keeps `publishedSlug` set and hides the draft problem.
   */
-  await pg.query("update leads set status = 'drafted' where id = $1", [seeded.leadId]);
-  await pg.query("update leads set status = 'new' where id = $1 or id = $2", [
-    seeded.leadId2,
-    seeded.leadId3,
-  ]);
-  await seedJobStates(pg, ownerId, seeded);
+  const quotaLead = await pg.query(
+    `insert into leads (user_id, newsroom_id, headline, why, topic, topic_unchosen, status,
+                        source_urls, evidence, newsworthiness, notes_json, created_at)
+     values ($1, 1, $2, $3, 'council', false, 'drafted', '[]', $4, 52, $5, $6)
+     returning id`,
+    [
+      ownerId,
+      "Quota fixture: the writing model hit its usage limit",
+      "A clean lead for the failed-on-quota state, not touched by the button sweep.",
+      "No draft was saved; the quota error is the only state on this lead.",
+      JSON.stringify({ todo: [], found: [], verify: [], opened: [], scratch: "" }),
+      ago(20 * MIN),
+    ],
+  );
+  const quotaLeadId = Number(quotaLead.rows[0].id);
+  await seedJobStates(pg, ownerId, { ...seeded, quotaLeadId });
   /*
     Each state is checked against what the desk ACTUALLY draws, which differs
     by state because the desk draws them in different places:
@@ -1292,7 +1302,7 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
     },
     {
       state: "failed on quota",
-      lead: seeded.leadId,
+      lead: quotaLeadId,
       re: /The writing model's usage limit was reached\. It resets [^.]+\./,
       plain:
         "The writing model's usage limit was reached. It resets 11:30pm (America/Denver). " +
