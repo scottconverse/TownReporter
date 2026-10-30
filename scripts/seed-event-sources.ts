@@ -53,6 +53,11 @@ function describe(result: Awaited<ReturnType<typeof seedEventSources>>) {
     `${result.applied ? "Applied" : "Dry run"}: newsroom ${result.newsroomId}, batch ${result.batch}`,
   );
   console.log(`Source rows: ${sourceRows}; approvals: ${approvals}; automation links: ${links}`);
+  for (const item of result.notAccepted) {
+    console.log(
+      `- ${item.name} (${item.town}): not added; the newsroom already has this URL with status ${item.status}`,
+    );
+  }
   for (const item of changes) {
     const parts = [
       item.addSource ? "source" : "",

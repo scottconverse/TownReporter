@@ -191,6 +191,83 @@ describe("event source seed transaction", () => {
     assert.deepEqual(rows[0], { id: existing!.id, title: "Existing title", kind: "official" });
   });
 
+  it("names the number of event sources actually linked in the change detail", async () => {
+    const room = 951_006;
+    const owner = await seedRoom(room);
+    const expected = readEventSourceSeed().sources.filter((source) => source.batch === 1);
+    const alreadyLinked = expected[0]!;
+    const sql = await getSql();
+    const [existing] = await sql.query<{ id: number }>(
+      `insert into sources(newsroom_id,user_id,url,title,kind,tier,status,interval_minutes)
+       values($1,$2,$3,$4,'community','A','accepted',1440) returning id`,
+      [room, owner, alreadyLinked.url, alreadyLinked.name],
+    );
+    await sql.query(
+      `insert into routine_notice_approvals(newsroom_id,source_id,format_key,source_url)
+       values($1,$2,$3,$4)`,
+      [room, existing!.id, EVENT_SOURCE_FORMAT_KEY, alreadyLinked.url],
+    );
+    await sql.query(
+      `insert into routine_notice_automation_sources(newsroom_id,source_id,format_key,source_url,public_source_url,issuer,locality)
+       values($1,$2,$3,$4,$4,$5,$6)`,
+      [
+        room,
+        existing!.id,
+        EVENT_SOURCE_FORMAT_KEY,
+        alreadyLinked.url,
+        alreadyLinked.name,
+        `${alreadyLinked.town}, Colorado`,
+      ],
+    );
+
+    const result = await withTransaction((tx) =>
+      seedEventSources(tx, { newsroomId: room, batch: 1, apply: true }),
+    );
+    assert.equal(result.linksAdded, expected.length - 1);
+
+    const [change] = await sql.query<{ detail: string }>(
+      "select detail from routine_notice_automation_changes where newsroom_id=$1",
+      [room],
+    );
+    assert.equal(change!.detail, "added 9 event sources");
+  });
+
+  it("leaves an existing source with a non-accepted status unapproved and unlinked", async () => {
+    const room = 951_007;
+    const owner = await seedRoom(room);
+    const source = readEventSourceSeed().sources.find((item) => item.batch === 1)!;
+    const sql = await getSql();
+    const [existing] = await sql.query<{ id: number }>(
+      `insert into sources(newsroom_id,user_id,url,title,kind,tier,status,interval_minutes)
+       values($1,$2,$3,'Existing paused title','official','B','paused',60) returning id`,
+      [room, owner, source.url],
+    );
+
+    const result = await withTransaction((tx) =>
+      seedEventSources(tx, { newsroomId: room, batch: 1, apply: true }),
+    );
+    assert.deepEqual(result.notAccepted, [
+      { name: source.name, town: source.town, url: source.url, status: "paused" },
+    ]);
+    assert.equal(result.planned.some((item) => item.source.url === source.url), false);
+    assert.equal(result.sourceRowsAdded, 9);
+    assert.equal(result.approvalsAdded, 9);
+    assert.equal(result.linksAdded, 9);
+
+    const [unchanged] = await sql.query<{ status: string }>(
+      "select status from sources where newsroom_id=$1 and url=$2",
+      [room, source.url],
+    );
+    assert.equal(unchanged!.status, "paused");
+    const [permissions] = await sql.query<{ approvals: number; links: number }>(
+      `select
+         (select count(*)::int from routine_notice_approvals where newsroom_id=$1 and source_id=$2) approvals,
+         (select count(*)::int from routine_notice_automation_sources where newsroom_id=$1 and source_id=$2) links`,
+      [room, existing!.id],
+    );
+    assert.deepEqual(permissions, { approvals: 0, links: 0 });
+  });
+
   it("refuses over the source limit and writes nothing", async () => {
     const room = 951_004;
     await seedRoom(room);

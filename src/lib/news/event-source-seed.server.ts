@@ -39,6 +39,12 @@ export type EventSourceSeedPlan = {
   addApproval: boolean;
   addLink: boolean;
 };
+export type EventSourceSeedNotAccepted = {
+  name: string;
+  town: string;
+  url: string;
+  status: string;
+};
 export type EventSourceSeedResult = {
   newsroomId: number;
   batch: number | "all";
@@ -47,6 +53,7 @@ export type EventSourceSeedResult = {
   revision: number;
   sourceLimit: number;
   linkedBefore: number;
+  notAccepted: EventSourceSeedNotAccepted[];
   planned: EventSourceSeedPlan[];
   sourceRowsAdded: number;
   approvalsAdded: number;
@@ -128,8 +135,8 @@ export async function seedEventSources(
     );
   }
 
-  const sources = await sql.query<{ id: number; url: string }>(
-    "select id,url from sources where newsroom_id=$1 order by id for update",
+  const sources = await sql.query<{ id: number; url: string; status: string }>(
+    "select id,url,status from sources where newsroom_id=$1 order by id for update",
     [options.newsroomId],
   );
   const approvals = await sql.query<{ source_id: number }>(
@@ -149,16 +156,27 @@ export async function seedEventSources(
       .map((link) => link.source_url),
   );
 
-  const planned: EventSourceSeedPlan[] = selected.map((source) => {
+  const notAccepted: EventSourceSeedNotAccepted[] = [];
+  const planned: EventSourceSeedPlan[] = [];
+  for (const source of selected) {
     const existing = sourceByUrl.get(source.url);
-    return {
+    if (existing && existing.status !== "accepted") {
+      notAccepted.push({
+        name: source.name,
+        town: source.town,
+        url: source.url,
+        status: existing.status,
+      });
+      continue;
+    }
+    planned.push({
       source,
       sourceId: existing?.id ?? null,
       addSource: !existing,
       addApproval: !existing || !approvedSourceIds.has(existing.id),
       addLink: !linkedUrls.has(source.url),
-    };
-  });
+    });
+  }
 
   const plannedLinks = planned.filter((item) => item.addLink).length;
   if (links.length + plannedLinks > limit) {
@@ -175,6 +193,7 @@ export async function seedEventSources(
     revision: automation.revision,
     sourceLimit: limit,
     linkedBefore: links.length,
+    notAccepted,
     planned,
     sourceRowsAdded: 0,
     approvalsAdded: 0,
@@ -234,7 +253,7 @@ export async function seedEventSources(
     revision = updated!.revision;
     await sql.query(
       "insert into routine_notice_automation_changes(newsroom_id,revision,actor,action,detail) values($1,$2,$3,'saved',$4)",
-      [options.newsroomId, revision, owner.user_id, `added ${selected.length} event sources`],
+      [options.newsroomId, revision, owner.user_id, `added ${linksAdded} event sources`],
     );
     await sql.query(
       "insert into audit_events(user_id,action,detail,newsroom_id,subject_kind,subject_id) values($1,'routine-notice-automation',$2,$3,'routine-notice-automation',$3)",
