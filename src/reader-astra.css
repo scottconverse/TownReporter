@@ -2022,6 +2022,7 @@
    edge to edge on the page, so both are direct children of `main.wrap` now
    (siblings of `<article>`, before `#related`), and they need the same negative
    gutter as the front page's bands. */
+.reader .eventweek,
 .reader .ledgerow,
 .reader .storygrid,
 .reader .regionband,
@@ -2280,6 +2281,258 @@
   margin-bottom: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   The front page's seven-day events box (design 1b).
+   --------------------------------------------------------------------------- */
+.reader .eventweek {
+  margin-top: 28px;
+  background: var(--block);
+  color: var(--blockInk);
+}
+.reader .eventweek-head {
+  padding: 22px 26px 18px;
+}
+.reader .eventweek-kicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.reader .eventweek-chip {
+  background: var(--yel);
+  color: #111;
+  padding: 5px 9px;
+  font-family: var(--fd);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.reader .eventweek-meta {
+  color: var(--blockInk2);
+  font-size: calc(14px * var(--reader-scale));
+  font-weight: 600;
+}
+.reader .eventweek h2 {
+  margin-top: 10px;
+  color: var(--yel);
+  font-family: var(--fd);
+  font-size: calc(36px * var(--reader-scale));
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.72px;
+}
+.reader .eventweek-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+  border-top: 1px solid var(--blockRule);
+  border-bottom: 1px solid var(--blockRule);
+}
+.reader .eventweek-daybutton {
+  display: flex;
+  min-height: 92px;
+  min-width: 0;
+  padding: 12px 8px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-right: 1px solid var(--blockRule);
+  border-radius: 0;
+  background: var(--block);
+  color: var(--blockInk);
+}
+.reader .eventweek-daybutton:last-child {
+  border-right: 0;
+}
+.reader .eventweek-daybutton:hover {
+  outline: 2px solid var(--yel);
+  outline-offset: -2px;
+}
+.reader .eventweek-daybutton.on {
+  background: var(--yel);
+  color: #111;
+}
+.reader .eventweek-dow,
+.reader .eventweek-daynum {
+  font-family: var(--fd);
+  font-weight: 800;
+  line-height: 1;
+}
+.reader .eventweek-dow {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+.reader .eventweek-daynum {
+  font-size: 28px;
+}
+.reader .eventweek-count {
+  color: var(--blockInk2);
+  font-size: calc(13px * var(--reader-scale));
+  font-weight: 600;
+}
+.reader .eventweek-daybutton.on .eventweek-count {
+  color: #111;
+}
+.reader .eventweek-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+.reader .eventweek-col {
+  min-width: 0;
+  padding: 18px 24px 22px;
+  border-right: 1px solid var(--blockRule);
+}
+.reader .eventweek-col:last-child {
+  border-right: 0;
+}
+.reader .eventweek-col h3 {
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--yel);
+  color: var(--yel);
+  font-family: var(--fd);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.reader .eventweek-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reader .eventweek-event {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--blockRule);
+  min-width: 0;
+}
+.reader .eventweek-time,
+.reader .eventweek-title,
+.reader .eventweek-place {
+  display: block;
+}
+.reader .eventweek-time {
+  color: var(--blockInk);
+  font-family: var(--fd);
+  font-size: calc(15px * var(--reader-scale));
+  font-weight: 800;
+}
+.reader .eventweek-title {
+  margin-top: 3px;
+  color: var(--blockInk);
+  font-size: calc(16px * var(--reader-scale));
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--blockRule);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.reader .eventweek-title:hover {
+  color: var(--blockInk);
+  text-decoration-color: var(--yel);
+}
+.reader .eventweek-place {
+  margin-top: 3px;
+  color: var(--blockInk2);
+  font-family: var(--fd);
+  font-size: calc(13px * var(--reader-scale));
+}
+.reader .eventweek-more {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--blockInk);
+  font-size: calc(14px * var(--reader-scale));
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--yel);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.reader .eventweek-foot {
+  padding: 0 26px 22px;
+}
+.reader .eventweek-all {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 11px 16px;
+  align-items: center;
+  border: 2px solid var(--yel);
+  border-radius: 0;
+  background: var(--yel);
+  color: #111;
+  font-family: var(--fd);
+  font-size: calc(15px * var(--reader-scale));
+  font-weight: 700;
+}
+.reader .eventweek-all:hover {
+  color: #111;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .eventweek-empty {
+  padding: 22px 26px 26px;
+  color: var(--blockInk2);
+  font-family: var(--fd);
+  font-size: calc(16px * var(--reader-scale));
+  font-weight: 600;
+}
+@media (max-width: 760px) {
+  .reader .eventweek {
+    margin-top: 16px;
+  }
+  .reader .eventweek-head {
+    padding: 18px 18px 14px;
+  }
+  .reader .eventweek h2 {
+    font-size: calc(28px * var(--reader-scale));
+    letter-spacing: -0.56px;
+  }
+  .reader .eventweek-strip {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+  .reader .eventweek-daybutton {
+    flex: 0 0 82px;
+    min-height: 82px;
+  }
+  .reader .eventweek-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .eventweek-col {
+    padding: 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--blockRule);
+  }
+  .reader .eventweek-col:last-child {
+    border-bottom: 0;
+  }
+  .reader .eventweek-event {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+  .reader .eventweek-time {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .reader .eventweek-title,
+  .reader .eventweek-place {
+    grid-column: 2;
+    margin-top: 0;
+  }
+  .reader .eventweek-foot,
+  .reader .eventweek-empty {
+    padding-inline: 18px;
+  }
+  .reader .eventweek-foot {
+    padding-bottom: 18px;
+  }
+}
 /* ---------------------------------------------------------------------------
    The lead and "This week".
    --------------------------------------------------------------------------- */

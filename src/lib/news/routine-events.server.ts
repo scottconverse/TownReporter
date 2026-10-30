@@ -173,21 +173,40 @@ export async function recordSourceRead(
   ]);
 }
 
-export async function eventsForDay(
+async function eventRowsBetween(
   sql: Sql,
   newsroomId: number,
-  localDate: string,
+  start: string,
+  end: string,
 ): Promise<RoutineEventRow[]> {
   const rows = await sql.query<DbRow>(
     `select e.* from routine_events e
-      where e.newsroom_id=$1 and e.local_date=$2
+      where e.newsroom_id=$1 and e.local_date between $2 and $3
         and exists (
           select 1 from routine_notice_automation_sources x
            where x.newsroom_id=e.newsroom_id and x.source_id=e.source_id
              and x.format_key='community-arts-event-logistics'
         )
       order by e.local_date,e.start_minutes nulls first,e.title,e.source_id,e.event_key`,
-    [newsroomId, localDate],
+    [newsroomId, start, end],
   );
   return rows.map(rowFromDb);
+}
+
+export function eventsForDay(
+  sql: Sql,
+  newsroomId: number,
+  localDate: string,
+): Promise<RoutineEventRow[]> {
+  return eventRowsBetween(sql, newsroomId, localDate, localDate);
+}
+
+/** The front-page box reads the whole visible week in one query. */
+export function eventsForRange(
+  sql: Sql,
+  newsroomId: number,
+  start: string,
+  end: string,
+): Promise<RoutineEventRow[]> {
+  return eventRowsBetween(sql, newsroomId, start, end);
 }
