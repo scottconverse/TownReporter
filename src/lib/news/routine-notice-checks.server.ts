@@ -1068,6 +1068,7 @@ async function loadCheck(
       }
       candidates.push({
         id: ref.id,
+        externalId: notice.provenance.externalId,
         externalIdHash: ref.external_id_hash,
         formatKey: notice.formatKey,
         variant: notice.variant,
