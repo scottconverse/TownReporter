@@ -1,4 +1,5 @@
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import { HOME_AREA, type StoryArea } from "../story-area.ts";
 import { parseHTML } from "linkedom";
 
 export type RoutineEditionChannel = "today" | "weekend" | "deadlines";
@@ -8,6 +9,11 @@ export type EligibleRoutineNotice = {
   occurrenceDate: string;
   line: string;
   sourceUrl: string;
+  /** Missing means the home ground, preserving every older notice path. */
+  area?: StoryArea;
+  town?: string;
+  /** Every source behind a collapsed event line; missing means `sourceUrl` alone. */
+  sourceUrls?: string[];
 };
 export type RoutineEditionPlan = {
   channel: RoutineEditionChannel;
@@ -334,6 +340,8 @@ type TodayEntry = {
   timeLine: string;
   name: string;
   details: string[];
+  area: StoryArea;
+  town: string;
 };
 const FREE_ADMISSION = /^(?:free|free admission|free event|no charge|no cost)[.!]?$/i;
 function todayEntry(row: EligibleRoutineNotice, timezone: string): TodayEntry {
@@ -387,6 +395,8 @@ function todayEntry(row: EligibleRoutineNotice, timezone: string): TodayEntry {
     timeLine: start ? `**${apTimeRange(start.minutes, end?.minutes)}**` : "",
     name,
     details,
+    area: row.area ?? HOME_AREA,
+    town: plainField(row.town),
   };
 }
 function sourceLabel(url: string, names: RoutineEditionOptions["sourceNames"]) {
@@ -414,40 +424,48 @@ function todayEdition(
 ) {
   const timezone = options.timezone ?? "UTC";
   const town = plainField(options.town);
-  const entries = rows
-    .map((row) => todayEntry(row, timezone))
-    .sort(
-      (a, b) =>
-        (a.startMinutes ?? -1) - (b.startMinutes ?? -1) ||
-        a.name.localeCompare(b.name) ||
-        a.details.join("\n").localeCompare(b.details.join("\n")),
-    );
-  const block = (entry: TodayEntry) =>
-    [entry.timeLine, entry.name, ...entry.details].filter(Boolean).join("\n");
-  const listing: string[] = [];
-  if (entries.length >= TODAY_HEADINGS_FROM) {
-    const timed = (e: TodayEntry, from: number, before: number) =>
-      e.startMinutes !== null && e.startMinutes >= from && e.startMinutes < before;
+  const compare = (a: TodayEntry, b: TodayEntry) =>
+    (a.startMinutes ?? -1) - (b.startMinutes ?? -1) ||
+    a.name.localeCompare(b.name) ||
+    a.details.join("\n").localeCompare(b.details.join("\n"));
+  const entries = rows.map((row) => todayEntry(row, timezone));
+  const longmont = entries.filter((entry) => entry.area === HOME_AREA).sort(compare);
+  const nearby = entries.filter((entry) => entry.area !== HOME_AREA).sort(compare);
+  const block = (entry: TodayEntry, nameTown = false) =>
+    [
+      entry.timeLine,
+      nameTown && entry.town ? `${entry.name} (${entry.town})` : entry.name,
+      ...entry.details,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  const parts = [
+    `Here is what is on ${town ? `${town}'s public calendars` : "the public calendars"} for ${readerDate(localDate)}.`,
+  ];
+  const listLongmont = () => {
+    if (longmont.length < TODAY_HEADINGS_FROM) {
+      parts.push(...longmont.map((entry) => block(entry)));
+      return;
+    }
+    const timed = (entry: TodayEntry, from: number, before: number) =>
+      entry.startMinutes !== null && entry.startMinutes >= from && entry.startMinutes < before;
     const groups: [string, TodayEntry[]][] = [
-      ["All day", entries.filter((e) => e.startMinutes === null)],
-      ["Morning", entries.filter((e) => timed(e, 0, NOON))],
-      ["Afternoon", entries.filter((e) => timed(e, NOON, FIVE_PM))],
-      ["Evening", entries.filter((e) => timed(e, FIVE_PM, 24 * 60))],
+      ["All day", longmont.filter((entry) => entry.startMinutes === null)],
+      ["Morning", longmont.filter((entry) => timed(entry, 0, NOON))],
+      ["Afternoon", longmont.filter((entry) => timed(entry, NOON, FIVE_PM))],
+      ["Evening", longmont.filter((entry) => timed(entry, FIVE_PM, 24 * 60))],
     ];
     for (const [heading, group] of groups)
-      if (group.length) listing.push(`## ${heading}`, ...group.map(block));
-  } else {
-    listing.push(...entries.map(block));
-  }
+      if (group.length) parts.push(`## ${heading}`, ...group.map((entry) => block(entry)));
+  };
+  listLongmont();
+  if (nearby.length) parts.push("## Nearby", ...nearby.map((entry) => block(entry, true)));
+  parts.push(sourceUrls.map((url) => sourceLine(url, options.sourceNames)).join("\n"));
   const count = `${entries.length} ${entries.length === 1 ? "event" : "events"}`;
   const calendars = town ? `${town}'s public calendars` : "the public calendars";
   return {
     dek: `${count} on ${calendars} today.`,
-    body: [
-      `Here is what is on ${calendars} for ${readerDate(localDate)}.`,
-      ...listing,
-      sourceUrls.map((url) => sourceLine(url, options.sourceNames)).join("\n"),
-    ].join("\n\n"),
+    body: parts.join("\n\n"),
   };
 }
 export function planRoutineEditions(
@@ -465,7 +483,7 @@ export function planRoutineEditions(
       .filter((x) => x.channel === channel)
       .sort((a, b) => a.line.localeCompare(b.line));
     if (!rows.length) return [];
-    const sourceUrls = [...new Set(rows.map((x) => x.sourceUrl))];
+    const sourceUrls = [...new Set(rows.flatMap((x) => x.sourceUrls ?? [x.sourceUrl]))];
     let dek: string | undefined;
     let body: string;
     if (channel === "today") {

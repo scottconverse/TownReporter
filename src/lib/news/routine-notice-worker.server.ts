@@ -28,7 +28,9 @@ import type {
   RoutineNoticeCheckGroup,
   RoutineNoticeCheckResult,
 } from "./routine-notice-checks.ts";
-import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import type { RoutineField, StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import { collapseEvents, eventArea, eventMatchKey, eventTown, localityTown, type CollapsedRoutineEvent } from "./routine-events.ts";
+import { eventsForDay, recordSourceRead, type RoutineEventInput } from "./routine-events.server.ts";
 import { sha256 } from "./fetch-url.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { routineNoticeSourceLimit } from "./routine-notice-source-limit.ts";
@@ -95,6 +97,189 @@ function localStamp(now: Date, timezone: string) {
     weekday: get("weekday"),
   };
 }
+function addDays(localDate: string, days: number) {
+  const instant = new Date(`${localDate}T12:00:00Z`);
+  instant.setUTCDate(instant.getUTCDate() + days);
+  return instant.toISOString().slice(0, 10);
+}
+function eventReadWindow(localDate: string) {
+  return { start: localDate, end: addDays(localDate, 7) };
+}
+function wallInstant(value: string, timezone: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const wanted = match.slice(1).map((part) => Number(part ?? 0));
+  const center = Date.UTC(wanted[0]!, wanted[1]! - 1, wanted[2]!, wanted[3]!, wanted[4]!, wanted[5]!);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let delta = -14 * 60; delta <= 14 * 60; delta += 15) {
+    const instant = center + delta * 60_000;
+    const parts = Object.fromEntries(
+      formatter
+        .formatToParts(new Date(instant))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    if ([parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second].every(
+      (part, index) => part === wanted[index],
+    ))
+      return new Date(instant);
+  }
+  return null;
+}
+function eventTiming(
+  value: string,
+  timezone: string,
+  allDay: boolean,
+  sourceTimezone?: string,
+) {
+  if (!value) return null;
+  if (allDay || /^\d{4}-\d{2}-\d{2}$/.test(value))
+    return { localDate: value.slice(0, 10), startMinutes: null, startsAt: null };
+  let instant: Date | null = null;
+  if (/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) instant = parsed;
+  } else {
+    instant = wallInstant(value, sourceTimezone || timezone);
+  }
+  if (!instant) {
+    const wall = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(value);
+    return wall
+      ? {
+          localDate: wall[1]!,
+          startMinutes: Number(wall[2]) * 60 + Number(wall[3]),
+          startsAt: null,
+        }
+      : null;
+  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    localDate: `${get("year")}-${get("month")}-${get("day")}`,
+    startMinutes: Number(get("hour")) * 60 + Number(get("minute")),
+    startsAt: instant.toISOString(),
+  };
+}
+function routineNoticeTodayMatchKey(item: EligibleRoutineNotice, timezone: string) {
+  const fields = item.notice.normalizedFields;
+  const title = fields.title ?? fields.program ?? fields.service;
+  const start = fields.start?.trim();
+  if (!title?.trim() || !start) return null;
+  const allDay = fields.allDay === "true" || /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const timing = eventTiming(start, timezone, allDay, fields.timezone);
+  if (!timing) return null;
+  const place = [fields.venue, fields.location, fields.branch].find((value) => value?.trim()) ?? "";
+  return eventMatchKey({
+    title,
+    localDate: item.occurrenceDate,
+    startMinutes: timing.startMinutes,
+    allDay,
+    place,
+  });
+}
+async function routineCandidateKey(candidate: RoutineNoticeCheckGroup["candidates"][number]) {
+  return `${candidate.externalIdHash}:${await sha256(
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(candidate.fields)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => [key, value.value]),
+      ),
+    ),
+  )}`;
+}
+async function eventFromCandidate(
+  candidate: RoutineNoticeCheckGroup["candidates"][number],
+  source: { source_id: number; source_url: string; public_source_url: string; source_title: string; issuer: string; locality: string },
+  timezone: string,
+  knownTowns: readonly string[],
+  paperCity: string,
+): Promise<RoutineEventInput | null> {
+  const start = candidate.fields.start?.value?.trim() ?? "";
+  if (!start) return null;
+  const allDay =
+    candidate.fields.allDay?.value === "true" || /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const timing = eventTiming(start, timezone, allDay, candidate.fields.timezone?.value);
+  if (!timing) return null;
+  const end = candidate.fields.end?.value?.trim();
+  const endTiming = end ? eventTiming(end, timezone, allDay, candidate.fields.timezone?.value) : null;
+  const venue = candidate.fields.venue?.value?.trim() ?? "";
+  const town = eventTown(venue, localityTown(source.locality), knownTowns);
+  return {
+    eventKey: candidate.externalId?.trim() || candidate.externalIdHash,
+    candidateKey: await routineCandidateKey(candidate),
+    matchKey: eventMatchKey({
+      title: candidate.fields.title?.value ?? "",
+      localDate: timing.localDate,
+      startMinutes: timing.startMinutes,
+      allDay,
+      place: venue,
+    }),
+    title: candidate.fields.title?.value ?? "",
+    startsAt: timing.startsAt,
+    endsAt: endTiming?.startsAt ?? null,
+    localDate: timing.localDate,
+    startMinutes: timing.startMinutes,
+    allDay,
+    place: venue,
+    town,
+    area: eventArea(town, paperCity),
+    link: candidate.fields.onlineUrl?.value?.trim() || null,
+    fields: candidate.fields,
+  };
+}
+function collapsedEventNotice(event: CollapsedRoutineEvent, run: {
+  newsroom_id: number;
+  policy_revision: number;
+}): StructurallyValidRoutineNotice {
+  const fields: Record<string, RoutineField> = { ...event.fields };
+  if (!fields.start)
+    fields.start = {
+      value:
+        event.allDay || event.startMinutes === null
+          ? event.localDate
+          : `${event.localDate}T${String(Math.floor(event.startMinutes / 60)).padStart(2, "0")}:${String(event.startMinutes % 60).padStart(2, "0")}:00`,
+      locator: "routine-events.start",
+    };
+  return {
+    formatKey: "community-arts-event-logistics",
+    variant: "event",
+    provenance: {
+      newsroomId: run.newsroom_id,
+      sourceId: event.sourceId,
+      sourceUrl: event.sourceUrl,
+      policyRevision: run.policy_revision,
+      captureEventId: 0,
+      artifactVersionId: 0,
+      contentHash: "routine-events",
+      externalId: event.candidateKey,
+    },
+    provenanceVerification: "unverified",
+    fields,
+    normalizedFields: Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, value.value]),
+    ),
+    fingerprintMaterial: event.candidateKey,
+  };
+}
+
 export async function tickRoutineNoticeEditions(now = new Date()): Promise<{ queued: number }> {
   await ensureJobsSchema();
   await ensureRoutineNoticeAutomationSchema();
@@ -260,6 +445,7 @@ export async function performRoutineNoticeWorkWith(
     [job.subject_id, job.newsroom_id],
   );
   if (!run) throw new Error("Routine edition run is missing.");
+  const localDate = String(run.local_date).slice(0, 10);
   const now = () => typeof deps.now === "function" ? deps.now() : deps.now ?? new Date();
   if (localStamp(now(), run.timezone).date !== String(run.local_date).slice(0, 10))
     throw new Error("Routine edition run expired before publication; editor review is required.");
@@ -281,6 +467,11 @@ export async function performRoutineNoticeWorkWith(
   );
   if (!sources.length || sources.length > sourceLimit)
     throw new Error("Routine edition source selection is unavailable.");
+  const paperCity = await getPaperConfig(run.newsroom_id).then(
+    (config) => config.city.trim(),
+    () => "",
+  );
+  const knownTowns = [...new Set(sources.map((source) => localityTown(source.locality)).filter(Boolean))];
   const groups: RoutineNoticeCheckGroup[] = [];
   const skipped: Array<{ sourceId: number; sourceUrl: string; name?: string; reason: string }> = [];
   const check = deps.check ?? checkRoutineNoticeSourceForOwner;
@@ -405,6 +596,46 @@ export async function performRoutineNoticeWorkWith(
     throw new Error(`Every routine source was skipped: ${skippedNames.join(", ")}.`);
   }
   await deps.beforeCommit?.();
+  /* The hook above may change authority. Check before committing table reads. */
+  await assertRoutineRunCanContinue(job, run);
+  const eventWindow = eventReadWindow(localDate);
+  const eventRows = await withTransaction(async (tx) => {
+    for (const group of groups) {
+      if (group.formatKey !== "community-arts-event-logistics") continue;
+      const source = sources.find(
+        (row) => row.source_id === group.source.id && row.format_key === group.formatKey,
+      );
+      if (!source) throw new Error("A routine event source disappeared before its table write.");
+      const events: RoutineEventInput[] = [];
+      for (const candidate of group.candidates) {
+        if (candidate.conflict) continue;
+        const event = await eventFromCandidate(
+          candidate,
+          source,
+          run.timezone,
+          knownTowns,
+          paperCity,
+        );
+        if (event) events.push(event);
+      }
+      await recordSourceRead(tx, {
+        newsroomId: run.newsroom_id,
+        sourceId: source.source_id,
+        sourceUrl: source.public_source_url,
+        sourceIssuer: source.issuer,
+        sourceTitle: source.source_title,
+        localDate,
+        window: eventWindow,
+        fullRead:
+          group.state === "parsed" &&
+          group.counts.refused === 0 &&
+          group.counts.conflicts === 0,
+        events,
+      });
+    }
+    return eventsForDay(tx, run.newsroom_id, localDate);
+  });
+  const collapsedTableEvents = collapseEvents(eventRows);
   await report("Planning the edition", 70);
   const notices: StructurallyValidRoutineNotice[] = [];
   for (const group of groups) {
@@ -450,8 +681,33 @@ export async function performRoutineNoticeWorkWith(
       });
     }
   }
-  const localDate = String(run.local_date).slice(0, 10);
+  const noticeBindings = new Map(
+    notices.map((notice) => [notice.provenance.externalId, notice.provenance]),
+  );
   const planned = eligibleRoutineNotices(notices, localDate, run.timezone);
+  const collapsedByCandidateKey = new Map(
+    collapsedTableEvents.map((event) => [event.candidateKey, event]),
+  );
+  const tableNotices = collapsedTableEvents.map((event) =>
+    collapsedEventNotice(event, run),
+  );
+  const tablePlanned = eligibleRoutineNotices(tableNotices, localDate, run.timezone);
+  const tableEligible = tablePlanned.eligible
+    .filter((item) => item.channel === "today")
+    .map((item) => {
+      const event = collapsedByCandidateKey.get(item.notice.provenance.externalId);
+      if (!event) return item;
+      const binding = noticeBindings.get(item.notice.provenance.externalId);
+      return {
+        ...item,
+        ...(binding
+          ? { notice: { ...item.notice, provenance: { ...item.notice.provenance, ...binding } } }
+          : {}),
+        area: event.area,
+        town: event.town,
+        sourceUrls: event.sourceUrls,
+      };
+    });
   const earlierDeadlineKeys = new Set<string>();
   let malformedDeadlineReceipt = false;
   for (const row of await sql.query<{ candidate_keys_json: string }>(
@@ -485,7 +741,15 @@ export async function performRoutineNoticeWorkWith(
       throw new Error("A same-day publication receipt is malformed; editor review is required.");
     sameDayKeys.set(row.channel, new Set(keys));
   }
-  const allEligible = planned.eligible.slice();
+  /* Event lines in Today come from the table; every other notice stays on its old path. */
+  const allEligible: EligibleRoutineNotice[] = [
+    ...planned.eligible.filter(
+      (item) =>
+        item.channel !== "today" ||
+        item.notice.formatKey !== "community-arts-event-logistics",
+    ),
+    ...tableEligible,
+  ];
   const alreadyPublished = new Set<string>();
   const schedulable = allEligible.filter((item) => {
     const externalId = item.notice.provenance.externalId ?? "";
@@ -554,17 +818,36 @@ export async function performRoutineNoticeWorkWith(
     by the name the desk already holds for it. A paper that cannot give its city
     just gets the wording without a town; it never gets a guessed one.
   */
-  const town = await getPaperConfig(run.newsroom_id).then(
-    (config) => config.city.trim(),
-    () => "",
-  );
+  const town = paperCity;
   const sourceNames = new Map<string, string>();
   for (const source of sources) {
-    const title = groups.find((group) => group.source.id === source.source_id)?.source.title;
-    if (title?.trim() && !sourceNames.has(source.public_source_url))
+    const title = source.source_title?.trim();
+    if (title && !sourceNames.has(source.public_source_url))
       sourceNames.set(source.public_source_url, title);
   }
-  let plans = planRoutineEditions(selectedEligible, localDate, {
+  /*
+    The same event can reach us as a library notice and as a table event. The
+    table line wins in Today, while retaining the notice's source credit. The
+    other channels and the run's status/receipt lists keep their existing
+    entries; only the rows handed to the Today edition are deduplicated.
+  */
+  const tableLineByMatchKey = new Map<string, EligibleRoutineNotice>();
+  for (const item of tableEligible) {
+    const event = collapsedByCandidateKey.get(item.notice.provenance.externalId);
+    if (event) tableLineByMatchKey.set(event.matchKey, item);
+  }
+  const editionEligible = selectedEligible.filter((item) => {
+    if (item.channel !== "today" || item.notice.formatKey === "community-arts-event-logistics")
+      return true;
+    const matchKey = routineNoticeTodayMatchKey(item, run.timezone);
+    const tableLine = matchKey ? tableLineByMatchKey.get(matchKey) : undefined;
+    if (!tableLine) return true;
+    tableLine.sourceUrls = [
+      ...new Set([...(tableLine.sourceUrls ?? [tableLine.sourceUrl]), item.sourceUrl]),
+    ];
+    return false;
+  });
+  let plans = planRoutineEditions(editionEligible, localDate, {
     timezone: run.timezone,
     town,
     sourceNames,
@@ -585,8 +868,17 @@ export async function performRoutineNoticeWorkWith(
     allEligible.map((item) =>
       routineNoticeOutcome(item, noticeStatuses.get(routineNoticeOutcomeKey(item)) ?? "in-review"),
     );
+  const review = planned.review.slice();
+  const reviewWhy = planned.reviewWhy.slice();
+  const reviewedIds = new Set(review.map((notice) => notice.provenance.externalId));
+  for (const [index, notice] of tablePlanned.review.entries()) {
+    if (reviewedIds.has(notice.provenance.externalId)) continue;
+    reviewedIds.add(notice.provenance.externalId);
+    review.push(notice);
+    reviewWhy.push(tablePlanned.reviewWhy[index] ?? "it needs an editor's look");
+  }
   let needsReview =
-    planned.review.length +
+    review.length +
     groups.reduce(
       (total, group) =>
         total +
@@ -616,9 +908,9 @@ export async function performRoutineNoticeWorkWith(
         ...(source ? { source } : {}),
       });
   };
-  planned.review.forEach((notice, index) =>
+  review.forEach((notice, index) =>
     addReason(
-      planned.reviewWhy[index] ?? "it needs an editor's look",
+      reviewWhy[index] ?? "it needs an editor's look",
       1,
       routineNoticeLabel(notice, run.timezone) || undefined,
       groups.find((group) => group.source.id === notice.provenance.sourceId)?.source.title || undefined,
