@@ -97,6 +97,11 @@ const provenance = await import(
       .replaceAll(JSON.stringify("@/lib/paper-context-state"), JSON.stringify(paperContext))
       .replaceAll(JSON.stringify("@/lib/news/findings"), JSON.stringify(findings))
       .replaceAll(JSON.stringify("@/components/paper/source-card"), JSON.stringify(sourceCard))
+      /* The real title rule, not a stub: the cards print what readers see. */
+      .replaceAll(
+        JSON.stringify("@/lib/news/reader-provenance"),
+        JSON.stringify(new URL("../src/lib/news/reader-provenance.ts", import.meta.url).href),
+      )
       .replaceAll(JSON.stringify("react/jsx-runtime"), JSON.stringify(jsxRuntime))
       .replaceAll(JSON.stringify("react"), JSON.stringify(react)),
   )
