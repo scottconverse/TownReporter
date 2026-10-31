@@ -1,4 +1,5 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
+import { parseHTML } from "linkedom";
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
@@ -465,8 +466,60 @@ export function parseRssItems(xml: string): { title: string; link: string; summa
 
 const DOC_HREF =
   /\.pdf(?:$|[?#])|agenda|minutes|packet|staff.?report|ordinance|resolution|budget|attachment/i;
+const FEED_HREF = /(?:\/feed\/?|\/rss\/?|\/atom\/?|\/atom\.xml|\.rss|\/feed\.xml|\/rss\.xml)$/i;
 
-export function discoverDocLinks(html: string, base: URL): string[] {
+/**
+ * Link discovery should read the page's news, not its menus. Strip structural
+ * navigation before searching, but keep the original when the remaining page
+ * has no links (some small sites put their whole listing in a header).
+ */
+export function stripNavigationBlocks(html: string): string {
+  const { document } = parseHTML(html);
+  for (const el of Array.from(document.querySelectorAll("nav, header, footer, aside"))) el.remove();
+  for (const el of Array.from(document.querySelectorAll("[role]"))) {
+    if (el.getAttribute("role")?.trim().toLowerCase() === "navigation") el.remove();
+  }
+  const stripped = document.toString();
+  return /<a\s[^>]*href\s*=/i.test(stripped) ? stripped : html;
+}
+
+function isFeedUrl(url: string): boolean {
+  try {
+    return FEED_HREF.test(new URL(url).pathname.replace(/\/+$/, "/"));
+  } catch {
+    return false;
+  }
+}
+
+function isDocumentUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      DOC_HREF.test(parsed.pathname + parsed.search) ||
+      parsed.pathname.toLowerCase().endsWith(".pdf")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function dateKeyForPath(pathname: string): number | null {
+  const match =
+    pathname.match(/(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?=\/|$)/) ??
+    pathname.match(/(?:^|\/)(\d{4})-(\d{2})-(\d{2})(?=\/|$)/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return year * 10000 + month * 100 + day;
+}
+
+function uniqueUrls(urls: string[]): string[] {
+  return [...new Set(urls)];
+}
+
+export function discoverFeedLinks(html: string, base: URL): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const re = /href\s*=\s*["']([^"']+)["']/gi;
@@ -478,8 +531,7 @@ export function discoverDocLinks(html: string, base: URL): string[] {
     try {
       const abs = new URL(href, base);
       if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
-      if (!DOC_HREF.test(abs.pathname + abs.search) && !abs.pathname.toLowerCase().endsWith(".pdf"))
-        continue;
+      if (!isFeedUrl(abs.toString())) continue;
       const key = abs.toString();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -488,6 +540,31 @@ export function discoverDocLinks(html: string, base: URL): string[] {
       /* skip */
     }
     if (out.length >= 10) break;
+  }
+  return out;
+}
+
+export function discoverDocLinks(html: string, base: URL): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /href\s*=\s*["']([^"']+)["']/gi;
+  const searchHtml = stripNavigationBlocks(html);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(searchHtml))) {
+    const href = m[1]!;
+    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:"))
+      continue;
+    try {
+      const abs = new URL(href, base);
+      if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
+      if (!isDocumentUrl(abs.toString())) continue;
+      const key = abs.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    } catch {
+      /* skip */
+    }
   }
   return out;
 }
@@ -514,8 +591,9 @@ export function discoverStoryLinks(html: string, base: URL): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const re = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const searchHtml = stripNavigationBlocks(html);
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
+  while ((m = re.exec(searchHtml))) {
     const href = m[1]!;
     if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:"))
       continue;
@@ -531,19 +609,51 @@ export function discoverStoryLinks(html: string, base: URL): string[] {
     } catch {
       /* skip */
     }
-    if (out.length >= 12) break;
   }
   return out;
 }
 
-function mergePageExtras(html: string, base: URL, into: string[] = []): string[] {
-  for (const u of discoverDocLinks(html, base)) {
-    if (!into.includes(u)) into.push(u);
-  }
-  for (const u of discoverStoryLinks(html, base)) {
-    if (!into.includes(u)) into.push(u);
-  }
-  return into.slice(0, 16);
+export type PageExtraCandidates = {
+  feeds?: string[];
+  stories?: string[];
+  documents?: string[];
+};
+
+/** Priority order for the bounded set of links opened after a page read. */
+export function rankPageExtras({
+  feeds = [],
+  stories = [],
+  documents = [],
+}: PageExtraCandidates): string[] {
+  const feedUrls = uniqueUrls(feeds);
+  const documentUrls = uniqueUrls(documents).filter((url) => !feedUrls.includes(url));
+  const storyUrls = uniqueUrls(stories).filter(
+    (url) => !feedUrls.includes(url) && !documentUrls.includes(url),
+  );
+  const datedStories = storyUrls
+    .map((url, index) => ({ url, index, date: dateKeyForPath(new URL(url).pathname) }))
+    .filter((entry): entry is { url: string; index: number; date: number } => entry.date !== null)
+    .sort((a, b) => b.date - a.date || a.index - b.index);
+  const otherStories = storyUrls.filter((url) => dateKeyForPath(new URL(url).pathname) === null);
+  return uniqueUrls([
+    ...feedUrls,
+    ...datedStories.map((entry) => entry.url),
+    ...documentUrls,
+    ...otherStories,
+  ]).slice(0, 16);
+}
+
+export function mergePageExtras(html: string, base: URL, into: string[] = []): string[] {
+  const priorFeeds = into.filter(isFeedUrl);
+  const priorDocuments = into.filter((url) => !isFeedUrl(url) && isDocumentUrl(url));
+  const priorStories = into.filter((url) => !isFeedUrl(url) && !isDocumentUrl(url));
+  const ranked = rankPageExtras({
+    feeds: [...priorFeeds, ...discoverFeedLinks(html, base)],
+    stories: [...priorStories, ...discoverStoryLinks(html, base)],
+    documents: [...priorDocuments, ...discoverDocLinks(html, base)],
+  });
+  into.splice(0, into.length, ...ranked);
+  return into;
 }
 
 async function ingestYoutubeIfNeeded(url: URL): Promise<YoutubeIngest | null> {
@@ -1298,7 +1408,8 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
   );
   if (alt?.[2]) {
     try {
-      extras.unshift(new URL(alt[2], url).toString());
+      const feedUrl = new URL(alt[2], url).toString();
+      if (!extras.includes(feedUrl)) extras.unshift(feedUrl);
     } catch {
       /* skip */
     }

@@ -2503,7 +2503,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const sourceText = postgresText(bundle.text);
       if (bundle.newsletterSignupUrl) pendingNewsletterSignups.push({ id: src.id, url: bundle.newsletterSignupUrl });
       const extras: { url: string; text: string }[] = [];
-      for (const extra of bundle.extras.slice(0, 4)) {
+      for (const extra of bundle.extras.slice(0, 6)) {
         await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         try {
@@ -2740,10 +2740,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   */
     const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
     const batchSources = ranked.map((f) => {
+    const expandedScan = expandForScope || reread || f.changed;
     const excerpt = scanSourceExcerpt(
       f.text,
       f.extras,
-      expandForScope || reread || f.changed ? 2800 : 800,
+      expandedScan ? (f.extras.length ? 6000 : 2800) : 800,
     );
     const changedLine = expandForScope
       ? f.changed

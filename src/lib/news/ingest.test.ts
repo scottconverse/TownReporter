@@ -12,7 +12,9 @@ import {
   ingestUrl,
   mapLimit,
   parseRssItems,
+  rankPageExtras,
   setOcrImpl,
+  stripNavigationBlocks,
   withRetry,
 } from "./ingest.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
@@ -147,6 +149,41 @@ describe("ingestUrl HTML scanner path", () => {
       assert.equal(result.text, report.replace(/\s+/g, " "));
       assert.equal(result.titleHint, "93.184.216.34");
       assert.deepEqual(result.extras, []);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("reads the district's news posts and documents instead of its menu", async () => {
+    const html = `<html><head><title>St. Vrain Valley Schools</title>
+      <link rel="alternate" type="application/rss+xml" href="/feed/"></head><body>
+      <nav>
+        <a href="/about/district-overview/">District overview</a>
+        <a href="/schools/school-calendar/">School calendar</a>
+      </nav>
+      <main>
+        <p>St. Vrain Valley Schools serves students and families across the district.</p>
+        <a href="/2026/10/28/three-st-vrain-leaders-named-to-statewide-education-program/">Three leaders named</a>
+        <a href="/2026/10/30/superintendents-update-discover-your-path-2/">Superintendent's update</a>
+        <a href="/boardmeetings/board-of-education-regular-meeting-180/">Board meeting</a>
+        <a href="/agenda.pdf">Agenda</a>
+        <p>District news and board meeting information for the community.</p>
+      </main>
+      <footer><a href="/about/board-of-education/">Board of education</a></footer>
+    </body></html>`;
+    setFetchImplForTests(async () => new Response(html, {
+      headers: { "content-type": "text/html" },
+    }));
+    try {
+      const result = await ingestUrl("https://www.svvsd.org/");
+      assert.deepEqual(result.extras.slice(0, 5), [
+        "https://www.svvsd.org/feed/",
+        "https://www.svvsd.org/2026/10/30/superintendents-update-discover-your-path-2/",
+        "https://www.svvsd.org/2026/10/28/three-st-vrain-leaders-named-to-statewide-education-program/",
+        "https://www.svvsd.org/agenda.pdf",
+        "https://www.svvsd.org/boardmeetings/board-of-education-regular-meeting-180/",
+      ]);
+      assert.doesNotMatch(result.extras.join("\n"), /district-overview|school-calendar|board-of-education\/$/);
     } finally {
       setFetchImplForTests(null);
     }
@@ -369,26 +406,48 @@ describe("encodeOcrExtractionMethod / describeExtractionMethod", () => {
 });
 
 describe("discoverDocLinks", () => {
-  it("follows public agenda/pdf links across origins and drops javascript", () => {
+  it("follows public agenda/pdf links across origins and drops menus and javascript", () => {
     const html = [
+      '<nav><a href="/menu/agenda.pdf">menu packet</a></nav>',
+      '<main>',
       '<a href="/government/agendas/packet.pdf">packet</a>',
       '<a href="https://civicclerk.example/agenda.pdf">vendor packet</a>',
       '<a href="javascript:alert(1)">no</a>',
       '<a href="/about">no</a>',
       '<a href="minutes.html">minutes</a>',
+      '</main>',
     ].join("");
     const found = discoverDocLinks(html, new URL("https://www.longmontcolorado.gov/gov"));
     assert.ok(found.includes("https://www.longmontcolorado.gov/government/agendas/packet.pdf"));
     assert.ok(found.includes("https://www.longmontcolorado.gov/minutes.html"));
     assert.ok(found.includes("https://civicclerk.example/agenda.pdf"));
+    assert.equal(found.some((u) => u.includes("/menu/agenda.pdf")), false);
     assert.equal(
       found.some((u) => u.startsWith("javascript:")),
       false,
     );
   });
+
+  it("falls back to the header when that is where the only links live", () => {
+    const html = '<header><a href="/2026/10/30/header-only-district-news-story/">News</a><a href="/packet.pdf">Packet</a></header>';
+    assert.deepEqual(discoverStoryLinks(html, new URL("https://www.svvsd.org/")), [
+      "https://www.svvsd.org/2026/10/30/header-only-district-news-story/",
+    ]);
+    assert.deepEqual(discoverDocLinks(html, new URL("https://www.svvsd.org/")), [
+      "https://www.svvsd.org/packet.pdf",
+    ]);
+  });
 });
 
 describe("discoverStoryLinks", () => {
+  it("removes navigation blocks before searching for stories", () => {
+    const html = '<div role="navigation"><a href="/about/district-overview/">Overview</a></div><main><a href="/2026/10/30/real-district-news-story/">News</a></main>';
+    assert.doesNotMatch(stripNavigationBlocks(html), /district-overview/);
+    assert.deepEqual(discoverStoryLinks(html, new URL("https://www.svvsd.org/")), [
+      "https://www.svvsd.org/2026/10/30/real-district-news-story/",
+    ]);
+  });
+
   it("picks same-host article URLs off a Leader listing and skips the section index", () => {
     const story =
       "/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123";
@@ -412,6 +471,29 @@ describe("discoverStoryLinks", () => {
       found.some((u) => u.includes("timescall.com")),
       false,
     );
+  });
+});
+
+describe("rankPageExtras", () => {
+  it("orders feeds, newest dated stories, documents, then other stories", () => {
+    const ranked = rankPageExtras({
+      feeds: ["https://www.svvsd.org/feed/"],
+      stories: [
+        "https://www.svvsd.org/2026/10/28/older-news-story/",
+        "https://www.svvsd.org/boardmeetings/board-of-education-regular-meeting-180/",
+        "https://www.svvsd.org/2026-10-29/dash-dated-news-story/",
+        "https://www.svvsd.org/2026/10/30/newest-news-story/",
+      ],
+      documents: ["https://www.svvsd.org/packet.pdf"],
+    });
+    assert.deepEqual(ranked, [
+      "https://www.svvsd.org/feed/",
+      "https://www.svvsd.org/2026/10/30/newest-news-story/",
+      "https://www.svvsd.org/2026-10-29/dash-dated-news-story/",
+      "https://www.svvsd.org/2026/10/28/older-news-story/",
+      "https://www.svvsd.org/packet.pdf",
+      "https://www.svvsd.org/boardmeetings/board-of-education-regular-meeting-180/",
+    ]);
   });
 });
 
