@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   buildEventsWeek,
   eventColumns,
+  eventDisplayTitle,
   eventTimeLabel,
+  isFeedUrl,
+  isJunkEventTitle,
   eventsWeekHeading,
   eventsWeekMeta,
   hasEvents,
@@ -24,6 +27,9 @@ const event = (id: string, overrides: Partial<EventsWeekEvent> = {}): EventsWeek
   area: "longmont",
   link: null,
   sourceUrl: `https://events.example/${id}`,
+  eventUrl: null,
+  description: "",
+  sourceName: "",
   ...overrides,
 });
 
@@ -167,4 +173,139 @@ test("an empty week suppresses the whole box", () => {
   const empty = buildEventsWeek(weekDates("2026-10-30"), []);
   assert.equal(hasEvents(empty), false);
   assert.equal(hasEvents(buildEventsWeek(weekDates("2026-10-30"), [event("one")])), true);
+});
+
+test("feed URLs are rejected in every shape while real event pages pass", () => {
+  const feeds = [
+    "https://events.example/feed.ics",
+    "https://events.example/calendar.ical",
+    "https://events.example/export.ifb",
+    "https://events.example/news.rss",
+    "https://events.example/events.xml",
+    "https://events.example/events.json",
+    "https://events.example/ical/123",
+    "https://events.example/feed/today",
+    "https://events.example/calendar/ical",
+    "https://events.example/events?format=ical",
+    "https://events.example/export/calendar",
+    "webcal://events.example/calendar",
+    "https://tockify.com/api/events?calendar=longmont",
+    "https://calendar.google.com/calendar/ical/example/public/basic.ics",
+    "https://calendar.google.com/calendar/ical/example%40group.calendar.google.com/public/basic.ics",
+  ];
+  for (const url of feeds) assert.equal(isFeedUrl(url), true, url);
+
+  const pages = [
+    "https://www.thegravitybrewing.com/events/halloween-party",
+    "https://longmontcolorado.gov/event/discovery-days-art-8/2026-10-29/",
+    "https://tockify.com/longmont/event/music-night",
+    "https://calendar.google.com/calendar/u/0/r/eventedit/abc",
+    "https://events.example/events/squirrel-junction",
+    "not a URL",
+  ];
+  for (const url of pages) assert.equal(isFeedUrl(url), false, url);
+});
+
+test("an event links to its page, then a non-feed source, and never to a feed", () => {
+  const href = (overrides: Partial<EventsWeekEvent>) =>
+    eventColumns([event("feed-check", overrides)], true)[0]!.items[0]!.href;
+
+  assert.equal(
+    href({ link: "https://events.example/events.ics", sourceUrl: "https://events.example/calendar.ics" }),
+    null,
+  );
+  assert.equal(
+    href({
+      link: "https://events.example/events.ics",
+      eventUrl: "https://events.example/events/halloween-party",
+      sourceUrl: "https://events.example/events.ics",
+    }),
+    "https://events.example/events/halloween-party",
+  );
+  assert.equal(
+    href({ link: null, sourceUrl: "https://events.example/organizer" }),
+    "https://events.example/organizer",
+  );
+  assert.equal(
+    href({
+      link: "https://events.example/events.ics",
+      sourceUrl: "https://events.example/organizer",
+    }),
+    "https://events.example/organizer",
+  );
+});
+
+test("business notices, private placeholders and school sports are hidden", () => {
+  for (const title of [
+    "Private Event",
+    "private",
+    "CLOSED",
+    "HALLOWEEN HOLIDAY HOURS",
+    "Closed for maintenance",
+    "GALLERY HOURS- CLOSED FOR INSTALL",
+    "Football JV",
+    "Cross Country Varsity",
+  ]) {
+    assert.equal(isJunkEventTitle(title), true, title);
+  }
+  for (const title of ["Halloween Party", "U-Create Open Studio", "Lloyd Drust", "Gallery Hours"]) {
+    assert.equal(isJunkEventTitle(title), false, title);
+  }
+});
+
+test("duplicate rows merge by cleaned title, date and town and join differing times", () => {
+  const columns = eventColumns(
+    [
+      event("lloyd-one", {
+        title: "Lloyd Drust",
+        startMinutes: 19 * 60,
+        town: "Berthoud",
+      }),
+      event("lloyd-two", {
+        title: "LLOYD DRUST!",
+        startMinutes: 14 * 60,
+        town: "berthoud",
+      }),
+      event("u-create-one", {
+        title: "U-Create Open Studio",
+        startMinutes: 10 * 60,
+        town: "Longmont",
+      }),
+      event("u-create-two", {
+        title: "u create open studio",
+        startMinutes: 10 * 60,
+        town: "LONGMONT",
+      }),
+    ],
+    true,
+  );
+  const items = columns.flatMap((column) => column.items);
+  assert.equal(items.length, 2);
+  const lloyd = items.find((item) => /Lloyd Drust/i.test(item.title))!;
+  assert.equal(lloyd.time, "2 p.m. & 7 p.m.");
+  const openStudio = items.find((item) => /U-Create Open Studio/i.test(item.title))!;
+  assert.equal(openStudio.time, "10 a.m.");
+});
+
+test("mostly-capitalized titles are normalized for display without changing short words", () => {
+  assert.equal(eventDisplayTitle("GALLERY HOURS- 12PM-5PM"), "Gallery Hours- 12PM-5PM");
+  assert.equal(eventDisplayTitle("MUSIC | SQUIRREL JUNCTION"), "Music | Squirrel Junction");
+  assert.equal(eventDisplayTitle("BBQ USA DJ NIGHT"), "BBQ USA DJ Night");
+  assert.equal(eventDisplayTitle("A mostly lower title"), "A mostly lower title");
+});
+
+test("the box item carries its cleaned description, source name and event page", () => {
+  const item = eventColumns(
+    [
+      event("carry", {
+        description: "  <b>Live music</b> &amp; dancing  ",
+        sourceName: "Firehouse Art Center",
+        eventUrl: "https://events.example/events/live-music",
+      }),
+    ],
+    true,
+  )[0]!.items[0]!;
+  assert.equal(item.description, "Live music & dancing");
+  assert.equal(item.sourceName, "Firehouse Art Center");
+  assert.equal(item.href, "https://events.example/events/live-music");
 });

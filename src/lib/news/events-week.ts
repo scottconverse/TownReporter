@@ -1,5 +1,6 @@
 import { HOME_AREA } from "../story-area.ts";
-import type { CollapsedRoutineEvent } from "./routine-events.ts";
+import { normalizeEventText, type CollapsedRoutineEvent } from "./routine-events.ts";
+import { cleanEventDescription, httpUrl, plainEventText } from "./routine-notice-text.ts";
 
 /** The event fields the front-page box needs; the table row keeps the rest. */
 export type EventsWeekEvent = Pick<
@@ -14,7 +15,13 @@ export type EventsWeekEvent = Pick<
   | "area"
   | "link"
   | "sourceUrl"
->;
+> & {
+  description: string;
+  sourceName: string;
+  eventUrl: string | null;
+  /** Every distinct time when the same event appeared more than once. */
+  startMinutesList?: Array<number | null>;
+};
 
 export type EventsWeekDay = {
   date: string;
@@ -35,6 +42,8 @@ export type EventColumnItem = {
   time: string;
   place: string;
   href: string | null;
+  description: string;
+  sourceName: string;
   startMinutes: number | null;
   allDay: boolean;
 };
@@ -73,6 +82,11 @@ const AP_MONTHS = [
 const NOON = 12 * 60;
 const FIVE_PM = 17 * 60;
 const COLUMN_LIMIT = 2;
+const EXACT_JUNK_TITLES = new Set(["private event", "private", "closed"]);
+const BUSINESS_HOURS_NOTICE = /\bholiday hours\b/i;
+const CLOSED_NOTICE = /^closed\b/i;
+const CLOSED_FOR_NOTICE = /\bclosed (for|on)\b/i;
+const SCHOOL_SPORTS_NOTICE = /\b(varsity|jv|junior varsity|freshman|c-team)\b/i;
 
 function dateInstant(localDate: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
@@ -144,6 +158,139 @@ export function weekStripItems(days: readonly EventsWeekDay[]): WeekStripItem[] 
   }));
 }
 
+/**
+ * A feed endpoint is never an event page. Keep this list in one pure function:
+ * the box, its tests, and the stored URL fallback all share the same definition.
+ */
+export function isFeedUrl(value: string | null | undefined): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const raw = value.trim();
+  if (/^webcal:/i.test(raw)) return true;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const path = url.pathname.toLowerCase().replace(/\/+$/, "");
+  const full = url.href.toLowerCase();
+  return (
+    /\.(?:ics|ical|ifb|rss|xml|json)$/i.test(path) ||
+    path.includes("/ical/") ||
+    path.includes("/feed") ||
+    path.includes("/export") ||
+    /(?:^|\/)calendar\/ical(?:\/|$)/i.test(path) ||
+    url.searchParams.has("format") && url.searchParams.get("format")?.toLowerCase() === "ical" ||
+    full.includes("calendar.google.com/calendar/ical") ||
+    ((url.hostname === "tockify.com" || url.hostname.endsWith(".tockify.com")) &&
+      path.startsWith("/api"))
+  );
+}
+
+/** The event's own page, then its non-feed source page, never a calendar file. */
+export function eventHref(
+  event: Pick<EventsWeekEvent, "link" | "eventUrl" | "sourceUrl">,
+): string | null {
+  for (const candidate of [event.link, event.eventUrl, event.sourceUrl]) {
+    const href = httpUrl(candidate);
+    if (href && !isFeedUrl(href)) return href;
+  }
+  return null;
+}
+
+/** Normal case a mostly-shouting title for display without touching stored data. */
+export function eventDisplayTitle(value: string): string {
+  const title = plainEventText(value) ?? "";
+  const letters = title.match(/\p{L}/gu)?.length ?? 0;
+  const capitals = title.match(/\p{Lu}/gu)?.length ?? 0;
+  if (!letters || capitals <= letters / 2) return title;
+  return title.replace(
+    /(^|[^\p{L}])(\p{Lu}{4,})(?=$|[^\p{L}])/gu,
+    (_whole, lead: string, word: string) =>
+      `${lead}${word.charAt(0)}${word.slice(1).toLocaleLowerCase("en-US")}`,
+  );
+}
+
+/** Business notices and school fixtures that are not things a reader can attend. */
+export function isJunkEventTitle(value: string): boolean {
+  const title = (plainEventText(value) ?? "").replace(/\s+/g, " ").trim();
+  const lower = title.toLowerCase();
+  return (
+    EXACT_JUNK_TITLES.has(lower) ||
+    BUSINESS_HOURS_NOTICE.test(title) ||
+    CLOSED_NOTICE.test(title) ||
+    CLOSED_FOR_NOTICE.test(title) ||
+    SCHOOL_SPORTS_NOTICE.test(title)
+  );
+}
+
+function mergeOrder(a: EventsWeekEvent, b: EventsWeekEvent): number {
+  if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+  return (
+    (a.startMinutes ?? Number.MAX_SAFE_INTEGER) - (b.startMinutes ?? Number.MAX_SAFE_INTEGER)
+  );
+}
+
+/**
+ * Hide non-events, normalize display capitalization, and merge the same event
+ * when two sources list it under the same title/date/town. Inputs are unchanged.
+ */
+export function prepareEventsWeekEvents(events: readonly EventsWeekEvent[]): EventsWeekEvent[] {
+  const grouped = new Map<string, EventsWeekEvent[]>();
+  for (const event of events) {
+    const title = plainEventText(event.title) ?? event.title;
+    if (isJunkEventTitle(title)) continue;
+    const key = [normalizeEventText(title), event.localDate, normalizeEventText(event.town)].join("|");
+    const group = grouped.get(key);
+    if (group) group.push(event);
+    else grouped.set(key, [event]);
+  }
+  const out: EventsWeekEvent[] = [];
+  for (const group of grouped.values()) {
+    const ordered = [...group].sort(mergeOrder);
+    const earliest = ordered[0]!;
+    const times = [
+      ...new Set(
+        ordered.flatMap((event) =>
+          event.startMinutesList?.length
+            ? event.startMinutesList
+            : event.allDay
+              ? []
+              : [event.startMinutes],
+        ),
+      ),
+    ].sort((a, b) => (a ?? Number.MAX_SAFE_INTEGER) - (b ?? Number.MAX_SAFE_INTEGER));
+    out.push({
+      ...earliest,
+      title: eventDisplayTitle(earliest.title),
+      description: ordered.find((event) => event.description)?.description ?? "",
+      sourceName: ordered.find((event) => event.sourceName)?.sourceName ?? "",
+      startMinutes: times[0] ?? earliest.startMinutes,
+      startMinutesList: times.length ? times : undefined,
+    });
+  }
+  return out.sort(eventOrder);
+}
+
+/** Convert a stored, source-collapsed row into the plain data the box serializes. */
+export function eventsWeekEvent(event: CollapsedRoutineEvent): EventsWeekEvent {
+  return {
+    matchKey: event.matchKey,
+    title: event.title,
+    localDate: event.localDate,
+    startMinutes: event.startMinutes,
+    allDay: event.allDay,
+    place: event.place,
+    town: event.town,
+    area: event.area,
+    link: event.link,
+    sourceUrl: event.sourceUrl,
+    eventUrl: httpUrl(event.fields.eventUrl?.value),
+    description: cleanEventDescription(event.fields.description?.value),
+    sourceName: plainEventText(event.sourceTitle) ?? plainEventText(event.sourceIssuer) ?? "",
+  };
+}
+
 function eventOrder(a: EventsWeekEvent, b: EventsWeekEvent): number {
   if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
   const aMinutes = a.startMinutes ?? Number.MAX_SAFE_INTEGER;
@@ -160,7 +307,7 @@ function eventOrder(a: EventsWeekEvent, b: EventsWeekEvent): number {
 function weekEvent(event: EventsWeekEvent): EventsWeekEvent {
   return {
     matchKey: event.matchKey,
-    title: event.title,
+    title: eventDisplayTitle(event.title),
     localDate: event.localDate,
     startMinutes: event.startMinutes,
     allDay: event.allDay,
@@ -169,6 +316,10 @@ function weekEvent(event: EventsWeekEvent): EventsWeekEvent {
     area: event.area,
     link: event.link,
     sourceUrl: event.sourceUrl,
+    eventUrl: event.eventUrl,
+    description: cleanEventDescription(event.description),
+    sourceName: plainEventText(event.sourceName) ?? "",
+    startMinutesList: event.startMinutesList ? [...event.startMinutesList] : undefined,
   };
 }
 
@@ -178,7 +329,7 @@ export function buildEventsWeek(
   events: readonly EventsWeekEvent[],
 ): EventsWeekDay[] {
   const byDate = new Map<string, EventsWeekEvent[]>();
-  for (const event of events) {
+  for (const event of prepareEventsWeekEvents(events)) {
     const day = byDate.get(event.localDate);
     const oneLine = weekEvent(event);
     if (day) day.push(oneLine);
@@ -212,23 +363,22 @@ function columnFor(event: EventsWeekEvent): EventColumnKey {
   return "evening";
 }
 
-function httpHref(value: string | null): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
-  } catch {
-    return null;
-  }
+function joinedEventTime(event: EventsWeekEvent): string {
+  const times = event.startMinutesList?.length ? event.startMinutesList : [event.startMinutes];
+  return [...new Set(times.map((startMinutes) => eventTimeLabel({ ...event, startMinutes })))].join(
+    " & ",
+  );
 }
 
 function columnItem(event: EventsWeekEvent, column: EventColumnKey): EventColumnItem {
   return {
     matchKey: event.matchKey,
-    title: event.title,
-    time: eventTimeLabel(event),
+    title: eventDisplayTitle(event.title),
+    time: joinedEventTime(event),
     place: column === "nearby" ? event.town || event.place : event.place || event.town,
-    href: httpHref(event.link) ?? httpHref(event.sourceUrl),
+    href: eventHref(event),
+    description: cleanEventDescription(event.description),
+    sourceName: plainEventText(event.sourceName) ?? "",
     startMinutes: event.startMinutes,
     allDay: event.allDay,
   };
@@ -242,7 +392,7 @@ export function eventColumns(events: readonly EventsWeekEvent[], expanded = fals
     evening: [],
     nearby: [],
   };
-  for (const event of events) groups[columnFor(event)].push(event);
+  for (const event of prepareEventsWeekEvents(events)) groups[columnFor(event)].push(event);
   const labels: Array<[EventColumnKey, string]> = [
     ["morning", "MORNING"],
     ["afternoon", "AFTERNOON"],

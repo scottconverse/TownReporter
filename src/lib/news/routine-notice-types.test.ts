@@ -207,15 +207,24 @@ describe("routine notice structural contracts", () => {
   });
 
   it("keeps optional facts unknown and rejects unsupported fields rather than interpreting prose", () => {
+    const withDescription = structuredClone(valid[2]) as RoutineNoticeInput & {
+      fields: Record<string, unknown>;
+    };
+    withDescription.fields.description = field(
+      "Free, probably cancelled if it rains",
+      "$.description",
+    );
+    assert.equal(validateRoutineNotice(withDescription).valid, true);
+
     const input = structuredClone(valid[2]) as RoutineNoticeInput & {
       fields: Record<string, unknown>;
     };
-    input.fields.description = field("Free, probably cancelled if it rains", "$.description");
+    input.fields.body = field("Free, probably cancelled if it rains", "$.description");
     const result = validateRoutineNotice(input);
     assert.deepEqual(result, {
       valid: false,
       formatKey: "community-arts-event-logistics",
-      reasons: [{ code: "outside-routine-contract", field: "description" }],
+      reasons: [{ code: "outside-routine-contract", field: "body" }],
     });
 
     const recurrence = structuredClone(valid[2]) as RoutineNoticeInput & {

@@ -1,5 +1,6 @@
 import { validateRoutineNotice, type RoutineField, type UnverifiedRoutineNoticeProvenance } from "./routine-notice-types.ts";
 import type { RoutineExtractionResult } from "./routine-notice-extract.ts";
+import { cleanEventDescription, httpUrl, plainEventText } from "./routine-notice-text.ts";
 
 type Base = Omit<UnverifiedRoutineNoticeProvenance, "externalId">;
 
@@ -36,47 +37,6 @@ const MONTHS: Record<string, number> = {
   november: 11,
   december: 12,
 };
-
-const decodeEntities = (value: string) => {
-  const named: Record<string, string> = {
-    amp: "&",
-    lt: "<",
-    gt: ">",
-    quot: '"',
-    apos: "'",
-    nbsp: " ",
-    ndash: "–",
-    mdash: "—",
-    rsquo: "’",
-    lsquo: "‘",
-    rdquo: "”",
-    ldquo: "“",
-    hellip: "…",
-    copy: "©",
-    reg: "®",
-    trade: "™",
-  };
-  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (whole, entity: string) => {
-    if (entity[0] === "#") {
-      const hex = entity[1]?.toLowerCase() === "x";
-      const value = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-      return Number.isFinite(value) && value > 0 && value <= 0x10ffff
-        ? String.fromCodePoint(value)
-        : whole;
-    }
-    return named[entity.toLowerCase()] ?? whole;
-  });
-};
-
-/** Source text made safe for a field: entities decoded, markup removed, whitespace flattened. */
-export function plainEventText(value: unknown) {
-  if (typeof value !== "string") return null;
-  const plain = decodeEntities(value)
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return plain || null;
-}
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -244,10 +204,20 @@ type EventRow = {
   end: string | null;
   allDay: boolean;
   venue: string | null;
+  description: string | null;
   link: string | null;
   startDate: string | null;
   endDate: string | null;
-  locators: { id: string; title: string; start: string; end: string; venue: string; link: string; allDay: string };
+  locators: {
+    id: string;
+    title: string;
+    start: string;
+    end: string;
+    venue: string;
+    description: string;
+    link: string;
+    allDay: string;
+  };
 };
 
 function eventResult(row: EventRow, context: EventFeedContext, timezone: string): RoutineExtractionResult {
@@ -255,7 +225,8 @@ function eventResult(row: EventRow, context: EventFeedContext, timezone: string)
   if (!row.title) return refusal("structurally-invalid", row.locators.title);
   const venue = row.venue ?? context.locality;
   const venueLocator = row.venue ? row.locators.venue : `${row.locators.venue.split(".")[0]}.OWNER_LOCALITY`;
-  const link = row.link && /^https?:\/\//i.test(row.link) ? row.link : null;
+  const link = httpUrl(row.link);
+  const description = cleanEventDescription(row.description);
   const validation = validateRoutineNotice({
     formatKey: "community-arts-event-logistics",
     variant: "event",
@@ -267,6 +238,8 @@ function eventResult(row: EventRow, context: EventFeedContext, timezone: string)
       end: field(row.end, row.locators.end),
       allDay: row.allDay ? field("true", row.locators.allDay) : undefined,
       venue: field(venue, venueLocator),
+      description: field(description, row.locators.description),
+      eventUrl: field(link, row.locators.link),
       onlineUrl: field(link, row.locators.link),
       timezone: row.allDay ? undefined : field(timezone, `${row.locators.start.split(".")[0]}.OWNER_TIMEZONE`),
     }),
@@ -321,6 +294,9 @@ function tribeRows(raw: Record<string, unknown>, context: EventFeedContext, time
     }
     const venueRecord = record(event.venue);
     const venue = plainEventText(venueRecord?.venue ?? event.venue);
+    const excerpt = cleanEventDescription(event.excerpt);
+    const description = excerpt || cleanEventDescription(event.description);
+    const descriptionLocator = excerpt ? `${prefix}.excerpt` : `${prefix}.description`;
     const link = plainEventText(event.url);
     out.push(eventResult({
       id: idText(event.id),
@@ -329,6 +305,7 @@ function tribeRows(raw: Record<string, unknown>, context: EventFeedContext, time
       end,
       allDay,
       venue,
+      description,
       link,
       startDate: startSource,
       endDate: endSource,
@@ -338,6 +315,7 @@ function tribeRows(raw: Record<string, unknown>, context: EventFeedContext, time
         start: `${prefix}.start_date`,
         end: `${prefix}.end_date`,
         venue: `${prefix}.venue.venue`,
+        description: descriptionLocator,
         link: `${prefix}.url`,
         allDay: `${prefix}.all_day`,
       },
@@ -395,6 +373,9 @@ function squarespaceRows(raw: Record<string, unknown>, context: EventFeedContext
     const venue = plainEventText(
       [location?.addressTitle, location?.addressLine1].filter((value) => typeof value === "string" && value.trim()).join(", "),
     );
+    const excerpt = cleanEventDescription(event.excerpt);
+    const description = excerpt || cleanEventDescription(event.description);
+    const descriptionLocator = excerpt ? `${prefix}.excerpt` : `${prefix}.description`;
     out.push(eventResult({
       id: idText(event.id),
       title,
@@ -402,6 +383,7 @@ function squarespaceRows(raw: Record<string, unknown>, context: EventFeedContext
       end,
       allDay: false,
       venue,
+      description,
       link: absoluteLink(event.fullUrl, context.provenance.sourceUrl),
       startDate,
       endDate: null,
@@ -411,6 +393,7 @@ function squarespaceRows(raw: Record<string, unknown>, context: EventFeedContext
         start: `${prefix}.startDate`,
         end: `${prefix}.endDate`,
         venue: `${prefix}.location.addressTitle`,
+        description: descriptionLocator,
         link: `${prefix}.fullUrl`,
         allDay: `${prefix}.startDate`,
       },
@@ -469,6 +452,9 @@ function libcalRows(raw: string, context: EventFeedContext, timezone: string, wi
     if (!dateInWindow(date, window)) continue;
     const location = xmlTag(item, "libcal:location");
     const campus = xmlTag(item, "libcal:campus");
+    const libcalDescription = xmlTag(item, "libcal:description");
+    const description = cleanEventDescription(libcalDescription ?? xmlTag(item, "description"));
+    const descriptionLocator = libcalDescription ? `${prefix}.libcal:description` : `${prefix}.description`;
     out.push(eventResult({
       id,
       title,
@@ -476,6 +462,7 @@ function libcalRows(raw: string, context: EventFeedContext, timezone: string, wi
       end,
       allDay,
       venue: location ?? campus,
+      description,
       link: xmlTag(item, "link"),
       startDate: date,
       endDate: end.slice(0, 10),
@@ -485,6 +472,7 @@ function libcalRows(raw: string, context: EventFeedContext, timezone: string, wi
         start: `${prefix}.libcal:date`,
         end: `${prefix}.libcal:end`,
         venue: `${prefix}.libcal:${location ? "location" : "campus"}`,
+        description: descriptionLocator,
         link: `${prefix}.link`,
         allDay: `${prefix}.libcal:start`,
       },
@@ -545,6 +533,7 @@ function civicPlusRows(raw: string, context: EventFeedContext, timezone: string,
       continue;
     }
     const link = xmlTag(item, "link");
+    const description = cleanEventDescription(xmlTag(item, "description"));
     const eid = link ? /[?&]EID=(\d+)/i.exec(link)?.[1] ?? null : null;
     const start = times.allDay ? date : timedValue(`${date} ${times.start}`, timezone);
     const end = times.allDay ? nextDate(date) : timedValue(`${date} ${times.end}`, timezone);
@@ -559,6 +548,7 @@ function civicPlusRows(raw: string, context: EventFeedContext, timezone: string,
       end,
       allDay: times.allDay,
       venue: null,
+      description,
       link,
       startDate: date,
       endDate: end.slice(0, 10),
@@ -568,6 +558,7 @@ function civicPlusRows(raw: string, context: EventFeedContext, timezone: string,
         start: `${prefix}.calendarEvent:EventDates`,
         end: `${prefix}.calendarEvent:EventTimes`,
         venue: `${prefix}.OWNER_LOCALITY`,
+        description: `${prefix}.description`,
         link: `${prefix}.link`,
         allDay: `${prefix}.calendarEvent:EventTimes`,
       },

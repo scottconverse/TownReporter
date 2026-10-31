@@ -95,6 +95,8 @@ export type RoutineNoticeInput =
         venue?: RoutineField;
         end?: RoutineField;
         onlineUrl?: RoutineField;
+        description?: RoutineField;
+        eventUrl?: RoutineField;
         admission?: RoutineField;
         allDay?: RoutineField;
         cancellation?: RoutineField;
@@ -216,7 +218,7 @@ const shapes: Record<string, Shape> = {
   },
   "community-arts-event-logistics:event": {
     required: ["issuer", "title", "start"],
-    optional: ["end", "venue", "onlineUrl", "admission", "allDay", "cancellation", "eventStatus", "timezone"],
+    optional: ["end", "venue", "onlineUrl", "description", "eventUrl", "admission", "allDay", "cancellation", "eventStatus", "timezone"],
     temporal: ["start", "end"],
     atLeastOne: ["venue", "onlineUrl"],
   },
@@ -257,6 +259,8 @@ const labels: Record<string, string> = {
   venue: "Venue",
   participationUrl: "Participation",
   onlineUrl: "Online",
+  description: "Description",
+  eventUrl: "Event page",
   admission: "Admission",
   allDay: "All day",
   cancellation: "Cancellation",
@@ -601,6 +605,7 @@ export function validateRoutineNotice(input: unknown): RoutineNoticeValidation {
   for (const field of [
     "participationUrl",
     "onlineUrl",
+    "eventUrl",
     "registrationUrl",
     "attendanceUrl",
     "agendaUrl",

@@ -3,7 +3,13 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPublicPaperConfig } from "./paper-settings.ts";
 import { collapseEvents } from "./routine-events.ts";
 import { eventsForRange } from "./routine-events.server.ts";
-import { buildEventsWeek, paperLocalDate, weekDates, type EventsWeekData } from "./events-week.ts";
+import {
+  buildEventsWeek,
+  eventsWeekEvent,
+  paperLocalDate,
+  weekDates,
+  type EventsWeekData,
+} from "./events-week.ts";
 
 /**
  * The one public read behind the front page's events box.
@@ -22,7 +28,7 @@ export async function readEventsWeek(
   const dates = weekDates(today);
   if (!dates.length) return { days: [], todayStorySlug: null };
   const rows = await eventsForRange(sql, newsroomId, dates[0]!, dates.at(-1)!);
-  const days = buildEventsWeek(dates, collapseEvents(rows));
+  const days = buildEventsWeek(dates, collapseEvents(rows).map(eventsWeekEvent));
   const stories = await sql.query<{ slug: string }>(
     `select a.slug
        from routine_notice_publications p

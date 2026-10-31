@@ -7,6 +7,7 @@ import type {
   RoutineExtractionRefusalCode,
   RoutineExtractionResult,
 } from "./routine-notice-extract.ts";
+import { cleanEventDescription, httpUrl, plainEventText } from "./routine-notice-text.ts";
 
 type Base = Omit<UnverifiedRoutineNoticeProvenance, "externalId">;
 
@@ -77,6 +78,8 @@ type ParsedEvent = {
   recurrenceId: DateValue | null;
   status: string;
   location: string | null;
+  description: string | null;
+  eventUrl: string | null;
   onlineUrl: string | null;
   timezone: string;
   cancelled: boolean;
@@ -717,7 +720,7 @@ function parseCalendar(raw: string): ParsedCalendar {
     const get = (name: string) => entries.find((item) => item.name === name) ?? null;
     const uid = text(get("UID")?.value);
     const startEntry = get("DTSTART");
-    const summary = text(get("SUMMARY")?.value);
+    const summary = plainEventText(get("SUMMARY")?.value);
     if (!uid) {
       refusals.push(refused("missing-stable-identity", rawEvent.locator));
       continue;
@@ -789,6 +792,8 @@ function parseCalendar(raw: string): ParsedCalendar {
       recurrenceId,
       status,
       location: text(get("LOCATION")?.value),
+      description: get("DESCRIPTION")?.value ?? null,
+      eventUrl: httpUrl(get("URL")?.value),
       onlineUrl: text(get("X-GOOGLE-CONFERENCE")?.value),
       timezone,
       cancelled: status === "CANCELLED",
@@ -817,6 +822,10 @@ function eventResult(
       : `${source.locator}.OWNER_LOCALITY`;
   const onlineUrl =
     source.onlineUrl && /^https?:\/\//i.test(source.onlineUrl) ? source.onlineUrl : null;
+  const description = cleanEventDescription(source.description ?? master.description);
+  const eventUrl = source.eventUrl ?? master.eventUrl;
+  const descriptionLocator = `${source.description ? source.locator : master.locator}.DESCRIPTION`;
+  const eventUrlLocator = `${source.eventUrl ? source.locator : master.locator}.URL`;
   const timezone = start.allDay
     ? undefined
     : field(start.zone ?? master.timezone, `${source.locator}.DTSTART.TZID`);
@@ -834,7 +843,12 @@ function eventResult(
       end: field(endText, `${source.locator}.DTEND`),
       allDay: start.allDay ? field("true", `${source.locator}.DTSTART.VALUE`) : undefined,
       venue: field(text(venue), venueLocator),
-      onlineUrl: field(onlineUrl, `${source.locator}.X-GOOGLE-CONFERENCE`),
+      description: field(description, descriptionLocator),
+      eventUrl: field(eventUrl, eventUrlLocator),
+      onlineUrl: field(
+        onlineUrl ?? eventUrl,
+        onlineUrl ? `${source.locator}.X-GOOGLE-CONFERENCE` : eventUrlLocator,
+      ),
       timezone,
     }),
   });

@@ -51,6 +51,10 @@ test("Tribe Longmont JSON reads only the fixed seven-day window", () => {
     discovery.normalizedFields.onlineUrl,
     "https://longmontcolorado.gov/event/discovery-days-art-8/2026-10-29/",
   );
+  assert.match(discovery.normalizedFields.description!, /early childhood program/i);
+  assert.equal(discovery.normalizedFields.eventUrl, discovery.normalizedFields.onlineUrl);
+  assert.equal(discovery.fields.description!.locator, "events[0].excerpt");
+  assert.equal(discovery.fields.eventUrl!.locator, "events[0].url");
 
   const storytime = byTitle(results, "Craft Storytime")!;
   assert.equal(storytime.normalizedFields.start, "2026-10-29T10:00:00-06:00");
@@ -93,6 +97,8 @@ test("Squarespace St. Vrain Cidery JSON joins event paths to the source origin",
   assert.equal(matt.normalizedFields.start, "2026-10-30T18:30:00-06:00");
   assert.equal(matt.normalizedFields.venue, "St. Vrain Cidery, 350 Terry Street");
   assert.equal(matt.normalizedFields.onlineUrl, "https://events.example/events/music-trevin-nelson");
+  assert.equal(matt.normalizedFields.description, "NO COVER");
+  assert.equal(matt.normalizedFields.eventUrl, matt.normalizedFields.onlineUrl);
 
   const squirrel = byTitle(results, "MUSIC | SQUIRREL JUNCTION")!;
   assert.equal(squirrel.normalizedFields.start, "2026-10-31T18:30:00-06:00");
@@ -126,6 +132,8 @@ test("LibCal RSS reads timed and all-day events in the fixed window", () => {
   assert.equal(allDay.normalizedFields.allDay, "true");
   assert.equal(allDay.normalizedFields.venue, "Voting Entrance - North End of Parking Lot");
   assert.equal(allDay.normalizedFields.onlineUrl, "https://lafayettepubliclibrary.libcal.com/event/17220580");
+  assert.match(allDay.normalizedFields.description!, /Vote Center/i);
+  assert.equal(allDay.normalizedFields.eventUrl, allDay.normalizedFields.onlineUrl);
 
   const storytime = byTitle(results, "Halloween Storytime with Mountain Buddies")!;
   assert.equal(storytime.normalizedFields.start, "2026-10-30T10:30:00-06:00");
@@ -147,6 +155,8 @@ test("CivicPlus RSS uses the event date, not pubDate, and can read a missing tim
   assert.equal(neighborhood.normalizedFields.start, "2026-11-02T17:00:00-07:00");
   assert.equal(neighborhood.normalizedFields.venue, "Longmont");
   assert.equal(neighborhood.normalizedFields.onlineUrl, "https://www.frederickco.gov/Calendar.aspx?EID=4404");
+  assert.match(neighborhood.normalizedFields.description!, /Event date/i);
+  assert.equal(neighborhood.normalizedFields.eventUrl, neighborhood.normalizedFields.onlineUrl);
   assert.equal(neighborhood.provenance.externalId, "4404#2026-11-02");
 
   const workSession = byTitle(results, "Board of Trustees Work Session")!;
