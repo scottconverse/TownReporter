@@ -316,3 +316,43 @@ it("a failed middle batch keeps the leads from the batches on either side", asyn
   ]);
   assert.deepEqual(receipt, { model_batches_used: 3, model_batches_failed: 1, leads_created: 2 });
 });
+
+it("an early-filed lead from a cross-domain attachment still links to its source", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room);
+  const sql = await getSql();
+  const parentUrl = `https://s0-${room}.example.test/agenda`;
+  const attachmentUrl = `https://files-${room}.other.test/packet.pdf`;
+  const [parent] = await sql<{ id: number }>`select id from sources where newsroom_id = ${room} and url = ${parentUrl}`;
+  let scanCalls = 0;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => ({
+      text: pageText(url),
+      titleHint: "Agenda",
+      extras: url === parentUrl ? [attachmentUrl] : [],
+    }),
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM)
+        return { ok: true as const, text: "[]" };
+      scanCalls += 1;
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [{ ...STREAM_BATCH_ONE_LEAD, source_urls: [attachmentUrl] }] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls}.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  const [filed] = await sql<{ source_id: number | null }>`
+    select source_id from leads where scan_run_id = ${runId} and headline = ${STREAM_BATCH_ONE_LEAD.headline}
+  `;
+  assert.ok(filed, "the attachment lead is filed");
+  assert.equal(filed.source_id, parent!.id, "the lead links to the source whose attachment it came from");
+});

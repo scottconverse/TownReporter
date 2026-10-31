@@ -2568,7 +2568,6 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const leadsLeftForCommit: import("./schema.ts").ParsedScanResult["leads"] = [];
     const fileBatchLeads = async (
       leads: import("./schema.ts").ParsedScanResult["leads"],
-      readSources: import("./scan-batches.ts").ScanBatch["sources"],
     ) => {
       const fresh = leads.filter((lead) => {
         const key = scanHeadlineKey(lead.headline);
@@ -2601,7 +2600,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             scanPlace,
             batchDupCheck,
             filedThisScan,
-            readSources,
+            // Every source read so far, with its attachment pages, so a lead
+            // from a cross-domain attachment still links to its source.
+            fetched,
           );
           await refreshManualScanClaim(writeSql, job);
           return counts;
@@ -2736,7 +2737,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (messageId) analyzedNewsletterIds.add(messageId);
     }
     failureReceipt.sourcesAnalyzed += batch.sources.length;
-    if (fileAsRead) await fileBatchLeads(parsed.leads, batch.sources);
+    if (fileAsRead) await fileBatchLeads(parsed.leads);
     // The row moves phase: from "reading sources — k of n" to "reading the
     // pages with a model", which is what the editor watching the history sees.
     await writeLiveRunRow(true);
