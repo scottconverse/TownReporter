@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Link } from "@tanstack/react-router";
+import { fitSectionCount } from "./section-nav-fit";
 
 /**
  * The paper's section navigation, on one line (unit BD5).
@@ -166,27 +167,13 @@ export function SectionNav({
       ? (aboutRef.current?.getBoundingClientRect().width ?? 0)
       : 0;
     metrics.current.about = about;
-    const room = nav.getBoundingClientRect().width;
-    /** The largest prefix that fits inside `limit`. */
-    const prefix = (limit: number) => {
-      let used = 0;
-      let fit = 0;
-      for (const width of widths) {
-        const next = fit === 0 ? width : used + gap + width;
-        if (next > limit) break;
-        used = next;
-        fit += 1;
-      }
-      return fit;
-    };
-    // About is always drawn at the end of the front-page row, whether or not
-    // the links spill into More. Reserve it before deciding that every link
-    // fits, or the last link can collide with a link that never moves.
-    const aboutCost = about > 0 ? gap + about : 0;
-    if (prefix(room - aboutCost) === widths.length) return items.length;
-    // Room for the button as well as the links it stands for.
-    const reserved = aboutCost + gap + more;
-    return Math.max(1, prefix(room - reserved));
+    return fitSectionCount({
+      room: nav.getBoundingClientRect().width,
+      widths,
+      gap,
+      more,
+      about,
+    });
   }, [count, includeAbout, items.length]);
 
   /** Re-cut the row for the width it has now. */
@@ -208,12 +195,16 @@ export function SectionNav({
     // The webfonts land after the first measure and change every link's width.
     let cancelled = false;
     document.fonts?.ready.then(() => {
-      if (!cancelled) refit();
+      if (cancelled) return;
+      // `refit()` alone would reuse the fallback-font widths measured above.
+      // Remeasure the links before applying the arithmetic again.
+      measureLinks();
+      refit();
     });
     return () => {
       cancelled = true;
     };
-  }, [refit]);
+  }, [refit, measureLinks]);
 
   useEffect(() => {
     const nav = navRef.current;
@@ -226,7 +217,7 @@ export function SectionNav({
       observer.disconnect();
       query.removeEventListener("change", refit);
     };
-  }, [refit]);
+  }, [refit, measureLinks]);
 
   // A disclosure, closed the two ways a reader expects one to close.
   useEffect(() => {

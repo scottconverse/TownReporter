@@ -36,8 +36,7 @@ describe("server-rendered public sections", () => {
         { client },
         createElement(
           PublicSectionsSeed,
-          { sections },
-          createElement(Kicker),
+          { sections, children: createElement(Kicker) },
         ),
       ),
     );

@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
 import { EventsWeekEventList } from "./events-week-event-list.ts";
-import type { EventColumn, EventColumnItem } from "../lib/news/events-week.ts";
+import type { EventColumn, EventColumnItem } from "../../lib/news/events-week.ts";
 
 const item = (id: string, overrides: Partial<EventColumnItem> = {}): EventColumnItem => ({
   matchKey: id,

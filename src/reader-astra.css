@@ -3686,6 +3686,7 @@
   font-size: 15px;
 }
 .reader .mast-geo {
+  flex: 0 0 auto;
   min-width: 0;
 }
 .reader .mast-geo .geopills {
@@ -3724,7 +3725,7 @@
 }
 .reader .sections {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-wrap: nowrap;
   align-items: center;
   gap: 20px;
@@ -5221,6 +5222,12 @@
   font-family: var(--fd);
   font-size: 15px;
   line-height: 1.4;
+}
+.reader .articlehead .bylinenames .bylineident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
 }
 .reader .articlehead .bylinenames strong {
   color: var(--ink);

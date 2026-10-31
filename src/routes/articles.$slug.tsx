@@ -396,11 +396,13 @@ function ArticlePage() {
           {dekText ? <p className="dek">{dekText}</p> : null}
           <div className="bylinebar">
             <span className="bylinenames">
-              <strong>
-                {paper.name}
-                {isOpinion ? " · Opinion" : ""}
-              </strong>
-              <span aria-hidden="true">·</span>
+              <span className="bylineident">
+                <strong>
+                  {paper.name}
+                  {isOpinion ? " · Opinion" : ""}
+                </strong>
+                <span aria-hidden="true">·</span>
+              </span>
               <span>
                 {formatDate(article.published_at)} · {readMinutes(article.body)} min read
               </span>

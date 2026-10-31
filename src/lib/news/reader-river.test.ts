@@ -332,7 +332,7 @@ describe("the edition and river leave routine roundups out", () => {
       notTopic: "opinion",
       notRoutine: true,
     });
-    const routineSlugs = ROUTINE.map((routine) => routine.slug);
+    const routineSlugs: string[] = ROUTINE.map((routine) => routine.slug);
     assert.deepEqual(
       edition.stories.filter((story) => routineSlugs.includes(story.slug)),
       [],
