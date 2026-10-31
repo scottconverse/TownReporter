@@ -285,7 +285,7 @@ const panelRemap = customProps(blockAfter(astraCss, '[data-desk-page="dark"] .re
  * and a multiplier is not a colour to re-point -- so an unlisted
  * `reader-scale` failed the audit for being a length, which is what it is.
  */
-const READER_NON_COLORS = new Set(["reading", "reader-scale", "serif"]);
+const READER_NON_COLORS = new Set(["reading", "reader-scale", "serif", "mono"]);
 
 /**
  * The reader names the panel deliberately leaves alone: they are read only by
@@ -293,7 +293,11 @@ const READER_NON_COLORS = new Set(["reading", "reader-scale", "serif"]);
  * (`.reader .btn`, `.reader .tag`, `.reader .iconbtn`), so nothing inside the
  * panel reads them, and the desk has no alias to point them at.
  */
-const PANEL_UNMAPPED = ["a", "sel", "ok", "warn"];
+const PANEL_UNMAPPED = [
+  "a", "sel", "ok", "warn",
+  "band", "card", "ctl", "ink2", "acc", "acctx", "onacc", "rule",
+  "foot", "foottx", "foot2", "warnbg",
+].sort();
 
 /** Resolve a value the way the browser would: at the element that declares it. */
 function resolvePanelValue(value, shellVars, seen = new Set()) {
@@ -305,6 +309,18 @@ function resolvePanelValue(value, shellVars, seen = new Set()) {
   const declared = panelGroundAlias.get(name) ?? shellVars.get(name);
   if (declared === undefined) throw new Error(`unresolved var: --${name} (via ${value})`);
   return resolvePanelValue(declared, shellVars, seen);
+}
+
+/** Resolve an unmapped reader token against the `.reader` block that declares it. */
+function resolveReaderValue(value, seen = new Set()) {
+  const m = value.match(/^var\(--([\w-]+)\)$/);
+  if (!m) return value;
+  const name = m[1];
+  if (seen.has(name)) throw new Error(`custom-property cycle on --${name}`);
+  seen.add(name);
+  const declared = readerOwn.get(name);
+  if (declared === undefined) throw new Error(`unresolved reader var: --${name} (via ${value})`);
+  return resolveReaderValue(declared, seen);
 }
 
 /**
@@ -328,7 +344,7 @@ function panelTokens(themeVars) {
   const shellVars = shellTokens(themeVars);
   const out = {};
   for (const [name, own] of readerOwn) {
-    out[name] = resolvePanelValue(panelRemap.get(name) ?? own, shellVars);
+    out[name] = panelRemap.has(name) ? resolvePanelValue(panelRemap.get(name), shellVars) : resolveReaderValue(own);
   }
   return out;
 }
@@ -437,7 +453,7 @@ test("desk tokens parsed from styles.css are the ones the CSS actually declares"
 test("the reader panel section parses the CSS it means to", () => {
   assert.equal(astraLight.get("bg").toLowerCase(), "#fffdf7", "desk-astra.css .desk-ltr.astra");
   assert.equal(astraDark.get("bg").toLowerCase(), "#1b1916", "desk-astra.css .desk-ltr.astra.night");
-  assert.equal(readerOwn.get("bg").toLowerCase(), "#fffdf7", "reader-astra.css .reader");
+  assert.equal(readerOwn.get("bg").toLowerCase(), "#ffffff", "reader-astra.css .reader");
   /*
     The reader's body size has been SCALE-DRIVEN since the Normal/Large pass
     moved it onto `--reader-scale` (src/reader-astra.css:36-37). This line used
@@ -450,7 +466,7 @@ test("the reader panel section parses the CSS it means to", () => {
   assert.equal(readerOwn.get("reader-scale"), "1", "reader-astra.css .reader");
   assert.equal(
     readerOwn.get("reading"),
-    "calc(20px * var(--reader-scale))",
+    "calc(19px * var(--reader-scale))",
     "reader-astra.css .reader",
   );
   assert.equal(panelRemap.size, 10, "the re-point block in desk-astra.css");
@@ -459,7 +475,7 @@ test("the reader panel section parses the CSS it means to", () => {
 test("the panel re-points every reader name the panel can read", () => {
   const colors = [...readerOwn.keys()].filter((n) => !READER_NON_COLORS.has(n));
   assert.deepEqual(
-    colors.filter((n) => !panelRemap.has(n)),
+    colors.filter((n) => !panelRemap.has(n)).sort(),
     PANEL_UNMAPPED,
     "reader names still carrying their own literal inside /desk/dark",
   );
@@ -493,17 +509,18 @@ test("the panel paints the desk's dark palette when the desk is dark", () => {
 });
 
 test("the panel paints the reader's own palette when the desk is light", () => {
-  // The re-point reads aliases that hold the reader's own light values, so the
-  // light build does not move -- which is why light mode was never the defect
-  // and is not changed here.
+  // The panel follows the desk in both themes. Its re-point reads the desk's
+  // light tokens rather than the Bulletin reader's white ground, so the
+  // captured page looks exactly as it did before the reader redesign.
   const panel = panelTokens(astraLight);
   const drift = [];
   for (const [name, hex] of Object.entries(PANEL_EXPECTED.light)) {
     if (panel[name].toLowerCase() !== hex) {
       drift.push(`--${name}: computed ${panel[name]}, expected ${hex}`);
     }
-    if ((readerOwn.get(name) ?? "").toLowerCase() !== hex) {
-      drift.push(`--${name}: reader-astra.css declares ${readerOwn.get(name)}, the table says ${hex}`);
+    const source = PANEL_DESK_SOURCE[name];
+    if (astraLight.get(source).toLowerCase() !== hex) {
+      drift.push(`desk --${source} is ${astraLight.get(source)}, the table says ${hex}`);
     }
   }
   assert.deepEqual(drift, []);

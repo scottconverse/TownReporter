@@ -33,11 +33,11 @@
  * browser's first paint, the one frame the owner sees first was never
  * measured and the check fails rather than passing quietly.
  *
- *   dark pass   every sampled frame on a desk route must be the desk's dark
- *               and on the public paper the reader's dark -- since the redesign
- *               both are the same warm black (#1b1916), the one dark ground the
- *               design system names (tokens/README)
- *   light pass  every sampled frame must be the light canvas (#fffdf7)
+ *   dark pass   every sampled frame on a desk route must be the desk's warm
+ *               black (#1b1916); every sampled frame on the public paper must
+ *               be the Bulletin reader dark (#0f141c)
+ *   light pass  desk frames must be the desk cream (#fffdf7); public-paper
+ *               frames must be the Bulletin reader white (#ffffff)
  *
  * The light pass is not decoration: it is the sensitivity control for the
  * dark one. Both passes run the SAME probe, so if the probe were blind or
@@ -75,12 +75,13 @@ const PORT_DESK_DARK_FLASH = 3474;
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const base = checkedUrl(`http://127.0.0.1:${PORT_DESK_DARK_FLASH}`).replace(/\/$/, "");
 
-/** The three surfaces, as the stylesheets paint them (src/styles.css).
-    The desk's night and the reader's night are the same warm black now; the
-    light canvas is the warm off-white (tokens/README, `--bg` in both themes). */
+/** The four surfaces, as the stylesheets paint them (src/styles.css).
+    The desk keeps its warm black while the reader follows the Bulletin palette;
+    the two light canvases differ (desk cream, reader white). */
 const DESK_DARK = { hex: "#1b1916", ...rgb(27, 25, 22) };
-const READER_DARK = { hex: "#1b1916", ...rgb(27, 25, 22) };
+const READER_DARK = { hex: "#0f141c", ...rgb(15, 20, 28) };
 const LIGHT = { hex: "#fffdf7", ...rgb(255, 253, 247) };
+const READER_LIGHT = { hex: "#ffffff", ...rgb(255, 255, 255) };
 
 /**
  * The reader's own store is per paper (`readerStorageKey`): the first-run
@@ -405,7 +406,7 @@ async function assertReaderState(dark, label, timeout = 15_000) {
       return (
         reader?.classList.contains("mode-dark") === expected &&
         document.documentElement.getAttribute("data-appearance") ===
-          (expected ? "reader-dark" : "light") &&
+          (expected ? "reader-dark" : "reader-light") &&
         button?.getAttribute("aria-pressed") === String(expected)
       );
     },
@@ -548,9 +549,9 @@ const DESK_ROUTES = [
 async function theWalk(pass) {
   const dark = pass === "dark";
   const deskSurface = dark ? DESK_DARK : LIGHT;
-  const paperSurface = dark ? READER_DARK : LIGHT;
+  const paperSurface = dark ? READER_DARK : READER_LIGHT;
   const deskAttr = dark ? "desk-dark" : "light";
-  const paperAttr = dark ? "reader-dark" : "light";
+  const paperAttr = dark ? "reader-dark" : "reader-light";
 
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },

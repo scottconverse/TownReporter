@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * The paper's two ink panels, measured in a real browser.
+ * The article page's ink "Dates in this story" panel, measured in a real
+ * browser.
  *
- * Unit BD shipped two panels that look right in a diff and are wrong on the
- * page: the front page's "This week" painted the reader's cream page color
- * instead of the ink block, so white event text and white date numbers sat on
- * cream; and the article's "Dates in this story" let long link text run out
- * past the panel's right edge, clipping the host off the page.
+ * The panel looked right in a diff and was wrong on the page: long link text
+ * ran out past its right edge, clipping the host. The surrounding instruments
+ * missed it because the document kept `overflow-x: hidden` and stayed exactly
+ * viewport-wide while the text itself left the panel.
  *
  * Neither defect was visible to the instruments that existed. `contrast-audit`
  * resolves the DESK's tokens and never reads the reader's palette.
@@ -43,24 +43,22 @@
  * both themes. In the dark theme a cream panel is a low-contrast failure too,
  * but the tokens are what the design hands over, and the panel is the block.
  *
- * Both panels, both themes. Fails loudly on a missing panel, an unmatched panel
- * heading, or a theme that was asked for and did not apply -- an instrument that
- * passes because it measured nothing is worse than no instrument.
+ * Both themes. Fails loudly on a missing panel, an unmatched panel heading, or
+ * a theme that was asked for and did not apply -- an instrument that passes
+ * because it measured nothing is worse than no instrument.
  *
  *   PAPER_PANELS_BASE_URL=http://127.0.0.1:8090 node scripts/paper-panels.mjs
  *
  * `PAPER_PANELS_ARTICLE_PATH` pins the article path (default: resolved from the
  * app's own /sitemap.xml, like public-a11y-floor.mjs).
  *
- * UNSEEDED, THIS WALK FAILS, AND THAT IS THE DESIGN. The front page's panel
- * renders only for a published story that names a date inside the next seven
- * days, so pointing this at an empty paper is a missing panel, not a pass. It
- * spent its life being pointed by hand at the operator's own paper for exactly
- * that reason, and no CI job ran it.
+ * UNSEEDED, THIS WALK FAILS, AND THAT IS THE DESIGN. The panel needs a
+ * published story with a dated public record, so pointing this at an empty
+ * paper is a missing panel, not a pass.
  *
- * So with no `PAPER_PANELS_BASE_URL` it boots the built server in THIS process,
- * on its own port and in-memory PGlite, and seeds a paper that has what the
- * two panels read -- the same seam `scripts/front-page-river-e2e.mjs` and
+ * With no `PAPER_PANELS_BASE_URL` it boots the built server in THIS process,
+ * on its own port and in-memory PGlite, and seeds a paper with that record --
+ * the same seam `scripts/front-page-river-e2e.mjs` and
  * `scripts/stats-privacy-e2e.mjs` use. Set `PAPER_PANELS_BASE_URL` and it goes
  * back to being a reader of someone else's server, seeding nothing.
  */
@@ -106,13 +104,10 @@ async function bootTheServer() {
 }
 
 /**
- * A paper with what the two panels read.
+ * A paper with the dated public record the article panel reads.
  *
- * The date is computed from TODAY rather than written down: "This week" is a
- * seven-day window over the reader's own calendar, so a fixture pinned to a
- * literal day would pass on the day it was written and fail the next week.
- * Three days out sits in the middle of that window in both the runner's day
- * and the paper's.
+ * The date is computed from today rather than written down so the seeded
+ * story's prose and its record agree whenever the check runs.
  */
 async function seedThePaper() {
   const pg = await globalThis.__pgliteInstance__;
@@ -174,9 +169,8 @@ async function seedThePaper() {
   ];
 
   /*
-    The NEWEST story carries the date inside the window. It is therefore the
-    lead on the front page (where `.ledgerow .datespanel` lives) and the first
-    /articles/ URL in the sitemap, which is the article this walk resolves.
+    The newest story carries the dated record. It is the first /articles/ URL
+    in the sitemap, which is the article this walk resolves.
   */
   await pg.query(
     `insert into articles (user_id, slug, headline, dek, body, topic, source_urls,
@@ -223,23 +217,6 @@ const WORD_SPLIT_ALLOWED = ".datenote";
 
 const TARGETS = [
   {
-    /*
-      The front page's "This week" panel is CONDITIONAL since unit BX: it
-      renders only when a published story names a date inside the next seven
-      days, and the lead runs full width when none does. So this target needs a
-      paper whose stories carry such a date -- a dated story in the seed (any
-      form a document bears: "October 1, 2026" and "2026-10-01" both read) --
-      and an empty paper now fails here as a missing panel. That is deliberate:
-      an instrument that passes because it measured nothing is worse than no
-      instrument, and a silently absent panel is exactly the defect this walk
-      would need to see.
-    */
-    name: "this-week",
-    route: "/",
-    selectors: [".ledgerow .datespanel", ".datespanel"],
-    head: /this week/i,
-  },
-  {
     name: "dates-in-this-story",
     route: null, // resolved below
     selectors: [".articleaside .datespanel", ".datespanel"],
@@ -270,9 +247,7 @@ async function resolveArticlePath(baseUrl) {
  * Everything the check asserts, run inside the page.
  *
  * Color maths is done in the page because `getComputedStyle` is the only thing
- * that knows what the cascade actually resolved to: the front page's panel was
- * cream because a three-class rule beat a two-class one, which no amount of
- * reading the source makes obvious.
+ * that knows what the cascade actually resolved to.
  */
 function auditPanels(cfg) {
   const parseColor = (value) => {
@@ -347,12 +322,7 @@ function auditPanels(cfg) {
     if (!panel) {
       panels.push({
         name: target.name,
-        fatal:
-          `no panel matched ${target.selectors.join(" | ")}` +
-          (target.name === "this-week"
-            ? ` -- since unit BX the front page's panel renders only when a published story names a` +
-              ` date inside the next seven days; check the paper this run points at has one`
-            : ""),
+        fatal: `no panel matched ${target.selectors.join(" | ")}`,
       });
       continue;
     }
@@ -567,7 +537,7 @@ async function findReaderKey(page) {
   if (existing) return existing;
   const identity = await page.evaluate(() => ({
     name: (document.querySelector("header .brand")?.textContent || "").trim(),
-    city: (document.querySelector("header .locality")?.textContent || "").trim(),
+    city: (document.querySelector("header .town")?.textContent || "").trim(),
   }));
   if (!identity.name || !identity.city) return null;
   return `${READER_KEY_PREFIX}${encodeURIComponent(identity.name)}:${encodeURIComponent(identity.city)}`;
@@ -593,8 +563,8 @@ if (!readerKey) {
 }
 report.readerKey = readerKey;
 
-const articlePath = TARGETS[1].route || (await resolveArticlePath(base));
-TARGETS[1].route = articlePath;
+const articlePath = TARGETS[0].route || (await resolveArticlePath(base));
+TARGETS[0].route = articlePath;
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -624,8 +594,8 @@ try {
       panel.appearance = appearance;
       panel.readerModeClass = measured.readerModeClass;
       /*
-        `data-appearance` is only ever stamped `reader-dark` / `desk-dark`; the
-        light theme is the attribute's absence, so "light was applied" is
+        `data-appearance` is stamped `reader-dark` / `reader-light` on the paper and
+        `desk-dark` / `light` on the desk, so "light was applied" is
         "dark was not". Asserted both ways so a dark run that stayed light
         cannot pass as a light one.
       */

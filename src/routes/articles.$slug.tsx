@@ -97,20 +97,7 @@ export const Route = createFileRoute("/articles/$slug")({
     const dates = await articleDates({ data: { slug: params.slug } });
     return { article, dates, legalGone: false };
   },
-  notFoundComponent: () => (
-    <PaperShell compact>
-      <EmptyState
-        kicker="Archive"
-        title="That story is not in this edition"
-        body="It may have been held, or the address is wrong. The paper is on the front page."
-        action={
-          <Link to="/" className={inkGhost}>
-            Back to the paper
-          </Link>
-        }
-      />
-    </PaperShell>
-  ),
+  notFoundComponent: () => <StoryNotFound />,
   /**
    * Per-story title and share cards.
    *
@@ -251,6 +238,26 @@ function useCurrentJump(jumps: Jump[]): string {
   return active;
 }
 
+/**
+ * One plain centered notice for both paths to a missing story: the router's
+ * not-found component and the query's empty answer. The 410 page has its own
+ * copy because its status is decided before React streams.
+ */
+function StoryNotFound() {
+  return (
+    <PaperShell compact>
+      <section className="story-gone" aria-labelledby="story-gone-title">
+        <span className="story-gone-kicker">Archive</span>
+        <h1 id="story-gone-title">That story is not in this edition</h1>
+        <p>It may have been held, or the address is wrong. The paper is on the front page.</p>
+        <Link to="/" className="btn primary">
+          Back to the paper
+        </Link>
+      </section>
+    </PaperShell>
+  );
+}
+
 function ArticlePage() {
   const paper = usePaper();
   const { sections } = usePublicSections();
@@ -323,22 +330,7 @@ function ArticlePage() {
       </PaperShell>
     );
   }
-  if (!article) {
-    return (
-      <PaperShell compact>
-        <EmptyState
-          kicker="Archive"
-          title="That story is not in this edition"
-          body="It may have been held, or the address is wrong. The paper is on the front page."
-          action={
-            <Link to="/" className={inkGhost}>
-              Back to the paper
-            </Link>
-          }
-        />
-      </PaperShell>
-    );
-  }
+  if (!article) return <StoryNotFound />;
 
   const dekText = dekOrFallback(article.dek, article.body);
   const sources = parseUrlList(article.source_urls);
@@ -374,7 +366,7 @@ function ArticlePage() {
       <ReadBeacon />
 
       {/* The story proper. "Keep reading" below it is about other stories, so it sits outside. */}
-      <article>
+      <article className="storycontent">
         <header className="articlehead">
           <div className="breadcrumbs">
             <Link to="/" search={{}}>
@@ -402,28 +394,26 @@ function ArticlePage() {
           </div>
           <h1>{article.headline}</h1>
           {dekText ? <p className="dek">{dekText}</p> : null}
-        </header>
-        <div className="bylinebar">
-          <div className="bylinewho">
-            <span className="trbadge" aria-hidden>
-              TR
-            </span>
+          <div className="bylinebar">
             <span className="bylinenames">
-              <strong>
-                {paper.name}
-                {isOpinion ? " · Opinion" : ""}
-              </strong>
+              <span className="bylineident">
+                <strong>
+                  {paper.name}
+                  {isOpinion ? " · Opinion" : ""}
+                </strong>
+                <span aria-hidden="true">·</span>
+              </span>
               <span>
                 {formatDate(article.published_at)} · {readMinutes(article.body)} min read
               </span>
             </span>
+            <div className="readingtools">
+              <SaveStory story={article} label />
+              <ShareStory slug={slug} headline={article.headline} />
+              <ReadingButton label />
+            </div>
           </div>
-          <div className="readingtools">
-            <SaveStory story={article} label />
-            <ShareStory slug={slug} headline={article.headline} />
-            <ReadingButton label />
-          </div>
-        </div>
+        </header>
         <div className="articlelayout">
         <nav className="contents" aria-label="In this article">
           <span className="contentslabel">In this article</span>
@@ -498,20 +488,22 @@ function ArticlePage() {
         </section>
       )}
       <div className="articlefoot">
-        <section className="sources" id="story-corrections">
-          <h2>Corrections &amp; accountability</h2>
+        <section className="sources" id="story-corrections" aria-labelledby="story-corrections-title">
+          <h2 id="story-corrections-title">Corrections &amp; accountability</h2>
           {article.corrections?.length ? (
             article.corrections.map((c, i) => (
               <div className="sourcecard" key={i}>
-                <strong>{formatDate(c.date)}</strong>
-                {/*
-                  A correction the routine-notice worker appended says so here
-                  too, and it is the same chip, from the same component, with
-                  the same label the corrections feed uses -- a reader who
-                  meets this row on the story after meeting it on /corrections
-                  must not be told two different things about who wrote it.
-                */}
-                <CorrectionOriginMark body={c.body} />
+                <div className="correctionmeta">
+                  <strong>{formatDate(c.date)}</strong>
+                  {/*
+                    A correction the routine-notice worker appended says so here
+                    too, and it is the same chip, from the same component, with
+                    the same label the corrections feed uses -- a reader who
+                    meets this row on the story after meeting it on /corrections
+                    must not be told two different things about who wrote it.
+                  */}
+                  <CorrectionOriginMark body={c.body} />
+                </div>
                 <p>{c.body}</p>
               </div>
             ))
@@ -522,8 +514,8 @@ function ArticlePage() {
             File a correction →
           </Link>
         </section>
-        <section className="sources sharepanel">
-          <h2>Share the reporting.</h2>
+        <section className="sources sharepanel" aria-labelledby="share-reporting-title">
+          <h2 id="share-reporting-title">Share the reporting</h2>
           <p>
             Free to reprint with credit to {paper.name} and a link to the original. Reprinting
             does not imply endorsement.

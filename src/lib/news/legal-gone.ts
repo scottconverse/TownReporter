@@ -103,10 +103,10 @@ export const LEGAL_GONE_BODY =
  * app means the route's own `server.handlers.GET`, returning a `Response`,
  * exactly as `feed.ts` and `sitemap[.]xml.ts` do.
  *
- * The colours are the reader shell's own tokens copied by value
- * (`src/reader-astra.css`: --bg #fffdf7, --ink #111111, --a #ffd23f, --line
- * #d8d3c4). A stylesheet link cannot be used -- the built CSS has a hashed
- * name -- and an unstyled white page reads as broken rather than as the paper.
+ * The colours are the Bulletin reader tokens copied by value
+ * (`src/reader-astra.css`, light and dark). A stylesheet link cannot be used --
+ * the built CSS has a hashed name -- and an unstyled page reads as broken
+ * rather than as the paper.
  */
 export function legalGonePageHtml(): string {
   return `<!doctype html>
@@ -117,23 +117,29 @@ export function legalGonePageHtml(): string {
 <meta name="robots" content="noindex">
 <title>${LEGAL_GONE_TITLE}</title>
 <style>
-  body{margin:0;background:#fffdf7;color:#111111;font:400 17px/1.65 Georgia,serif}
-  main{max-width:34rem;margin:0 auto;padding:12vh 1.5rem 6rem}
-  h1{font-size:1.75rem;line-height:1.2;margin:0 0 .75rem}
-  p{margin:0 0 1.25rem}
-  a{color:#111111;font-weight:700}
-  hr{border:0;border-top:1px solid #d8d3c4;margin:2rem 0}
-  .links{display:flex;flex-wrap:wrap;gap:1.5rem}
+  :root{color-scheme:light dark;--bg:#ffffff;--card:#ffffff;--line:#dfe3ea;--ctl:#c8cfda;--ink:#0e1726;--ink2:#3d4656;--acc:#1f48a8;--acctx:#1f48a8;--onacc:#ffffff}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f141c;--card:#1b2330;--line:#2a3442;--ctl:#3a4658;--ink:#e6eaf1;--ink2:#aab4c3;--acc:#3a66d4;--acctx:#8fadff;--onacc:#ffffff}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  main{max-width:640px;margin:0 auto;padding:80px clamp(16px,3.75vw,48px) 96px;display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+  .kicker{font-size:14px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--acctx)}
+  h1{margin:0;font-size:clamp(30px,3.6vw,44px);font-weight:800;letter-spacing:-.02em;line-height:1.05}
+  p{margin:0;font-size:19px;color:var(--ink2);line-height:1.5}
+  .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:6px;font-size:15px;font-weight:700;text-decoration:none}
+  a.primary{background:var(--acc);color:var(--onacc)}
+  a.secondary{border:1px solid var(--ctl);color:var(--ink)}
+  a:focus-visible{outline:3px solid var(--acctx);outline-offset:2px}
 </style>
 </head>
 <body>
 <main>
+<span class="kicker">Archive</span>
 <h1>${LEGAL_GONE_TITLE}</h1>
 <p>${LEGAL_GONE_BODY}</p>
-<hr>
 <nav class="links">
-<a href="/">Back to the paper</a>
-<a href="/corrections">Corrections log</a>
+<a class="primary" href="/">Back to the paper</a>
+<a class="secondary" href="/corrections">Corrections log</a>
 </nav>
 </main>
 </body>

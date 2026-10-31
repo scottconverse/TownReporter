@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
+import { fitSectionCount } from "./section-nav-fit";
 
 /**
  * The paper's section navigation, on one line (unit BD5).
@@ -65,13 +65,14 @@ type Item = {
 };
 
 /** How much of the row the links take, measured once per set of links. */
-type RowMetrics = { widths: number[]; gap: number; more: number };
+type RowMetrics = { widths: number[]; gap: number; more: number; about: number };
 
 export function SectionNav({
   sections,
   activeTopic,
   frontPageActive = false,
   includeFrontPage = false,
+  includeAbout = false,
   menuOpen = false,
 }: {
   sections: NavSection[];
@@ -79,8 +80,10 @@ export function SectionNav({
   activeTopic?: string;
   /** Whether the unfiltered front page is the current view. */
   frontPageActive?: boolean;
-  /** Print "Front page" ahead of the sections (the front page's own nav). */
+  /** Print "Front page" ahead of the sections in the reader menu. */
   includeFrontPage?: boolean;
+  /** Put About the newsroom at the end of the measured row on the front page. */
+  includeAbout?: boolean;
   /**
    * Whether the reader menu ("Explore the publication") is open. Below
    * `NAV_FIT_MIN_WIDTH` this nav IS that menu, opened by the button beside it,
@@ -109,6 +112,7 @@ export function SectionNav({
   const navRef = useRef<HTMLElement | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const aboutRef = useRef<HTMLAnchorElement | null>(null);
   /*
     The links' own widths, in px, and the gap between them. Both are properties
     of the text, not of the row: the row only decides how many of them fit. So
@@ -116,7 +120,7 @@ export function SectionNav({
     land, which changes every one of them) and the resize path is then pure
     arithmetic -- no un-hiding, no layout of anything below the row.
   */
-  const metrics = useRef<RowMetrics>({ widths: [], gap: 0, more: 0 });
+  const metrics = useRef<RowMetrics>({ widths: [], gap: 0, more: 0, about: 0 });
 
   /** Measure the links on one line, wherever the row currently cuts them. */
   const measureLinks = useCallback(() => {
@@ -147,6 +151,7 @@ export function SectionNav({
     */
     const more = moreRef.current?.getBoundingClientRect().width ?? 0;
     if (more > 0) metrics.current.more = more;
+    metrics.current.about = aboutRef.current?.getBoundingClientRect().width ?? 0;
   }, []);
 
   /** How many of the links fit, reserving the button when there are leftovers. */
@@ -155,24 +160,21 @@ export function SectionNav({
     if (!nav || items.length === 0) return items.length;
     const { widths, gap, more } = metrics.current;
     if (widths.length !== items.length) return count;
-    const room = nav.getBoundingClientRect().width;
-    /** The largest prefix that fits inside `limit`. */
-    const prefix = (limit: number) => {
-      let used = 0;
-      let fit = 0;
-      for (const width of widths) {
-        const next = fit === 0 ? width : used + gap + width;
-        if (next > limit) break;
-        used = next;
-        fit += 1;
-      }
-      return fit;
-    };
-    const bare = prefix(room);
-    if (bare === widths.length) return items.length;
-    // Room for the button as well as the links it stands for.
-    return Math.max(1, prefix(room - gap - more));
-  }, [count, items.length]);
+    // About is outside items, so its width changes with the route even when
+    // the section set does not. Read it on every fit rather than trusting the
+    // last link measurement.
+    const about = includeAbout
+      ? (aboutRef.current?.getBoundingClientRect().width ?? 0)
+      : 0;
+    metrics.current.about = about;
+    return fitSectionCount({
+      room: nav.getBoundingClientRect().width,
+      widths,
+      gap,
+      more,
+      about,
+    });
+  }, [count, includeAbout, items.length]);
 
   /** Re-cut the row for the width it has now. */
   const refit = useCallback(() => {
@@ -193,12 +195,16 @@ export function SectionNav({
     // The webfonts land after the first measure and change every link's width.
     let cancelled = false;
     document.fonts?.ready.then(() => {
-      if (!cancelled) refit();
+      if (cancelled) return;
+      // `refit()` alone would reuse the fallback-font widths measured above.
+      // Remeasure the links before applying the arithmetic again.
+      measureLinks();
+      refit();
     });
     return () => {
       cancelled = true;
     };
-  }, [refit]);
+  }, [refit, measureLinks]);
 
   useEffect(() => {
     const nav = navRef.current;
@@ -211,7 +217,7 @@ export function SectionNav({
       observer.disconnect();
       query.removeEventListener("change", refit);
     };
-  }, [refit]);
+  }, [refit, measureLinks]);
 
   // A disclosure, closed the two ways a reader expects one to close.
   useEffect(() => {
@@ -245,6 +251,15 @@ export function SectionNav({
         aria-label="News sections"
         ref={navRef}
       >
+        {!includeFrontPage && (
+          <Link
+            className={`mobilefront${frontPageActive ? " active" : ""}`}
+            to="/"
+            search={{}}
+          >
+            Front page
+          </Link>
+        )}
         {items.map((item, index) => (
           <Link
             key={item.key}
@@ -266,13 +281,21 @@ export function SectionNav({
             aria-controls="more-sections"
             onClick={() => setOpen((value) => !value)}
           >
-            More sections <ChevronDown aria-hidden />
+            More sections <span aria-hidden>▾</span>
           </button>
         )}
+        <Link
+          ref={includeAbout ? aboutRef : undefined}
+          to="/about"
+          className={`about-nav${includeAbout ? "" : " mobileabout"}`}
+          data-nav-about=""
+        >
+          About the newsroom <span aria-hidden>→</span>
+        </Link>
       </nav>
       {open && rest.length > 0 && (
         <div className="morepanel" id="more-sections" ref={panelRef}>
-          <b>More sections</b>
+          <b>MORE SECTIONS</b>
           {rest.map((item) => (
             <Link
               key={item.key}

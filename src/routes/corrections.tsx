@@ -21,7 +21,7 @@ function Corrections() {
   const query = useQuery({ queryKey: ["corrections"], queryFn: () => listPublicCorrections() });
   return (
     <PaperShell compact>
-      <div className="infopage">
+      <div className="infopage standing-page corrections-page">
         <div className="pagehead">
           <span className="eyebrow">CORRECTIONS</span>
           <h1>
@@ -30,59 +30,63 @@ function Corrections() {
             putting it right.
           </h1>
           <p>Changes should be easy to find and easy to understand.</p>
+          <p>
+            Corrections appear here and on the affected story, with a date and an explanation of
+            what changed.
+          </p>
         </div>
-        <p>
-          Corrections appear here and on the affected story, with a date and an explanation of what
-          changed.
-        </p>
         <CorrectionForm article={article} />
-        <h2>Corrections to published stories</h2>
-        {query.isPending ? (
-          <p role="status">Loading corrections…</p>
-        ) : query.isError ? (
-          <div role="alert" className="reader-error">
-            The correction log could not load.{" "}
-            <button className="btn" onClick={() => void query.refetch()}>
-              Try again
-            </button>
-          </div>
-        ) : !query.data?.length ? (
-          <div className="empty">
-            <h2>No corrections posted.</h2>
-            <p>See an error? Use the form above to write to the editor.</p>
-          </div>
-        ) : (
-          query.data.map((c) => (
-            <section className="sourcecard" key={c.id}>
-              <span className="eyebrow">{formatShortDate(c.created_at)}</span>
-              {/*
-                A correction the routine-notice worker appended says so, so it
-                is not read as a correction an editor decided on. Same card,
-                same date, same words, plus one chip above the headline that
-                an editor's row does not carry.
+        <section className="correction-log" aria-labelledby="correction-log-title">
+          <h2 id="correction-log-title">Corrections to published stories</h2>
+          {query.isPending ? (
+            <p role="status">Loading corrections…</p>
+          ) : query.isError ? (
+            <div role="alert" className="reader-error">
+              The correction log could not load.{" "}
+              <button className="btn" type="button" onClick={() => void query.refetch()}>
+                Try again
+              </button>
+            </div>
+          ) : !query.data?.length ? (
+            <div className="empty">
+              <h2>No corrections posted.</h2>
+              <p>See an error? Use the form above to write to the editor.</p>
+            </div>
+          ) : (
+            query.data.map((c) => (
+              <article className="correction-entry" key={c.id}>
+                <div className="correction-meta">
+                  <span className="correction-date">{formatShortDate(c.created_at)}</span>
+                  {/*
+                    A correction the routine-notice worker appended says so, so it
+                    is not read as a correction an editor decided on. Same date,
+                    same words, plus one chip above the headline that an editor's
+                    row does not carry.
 
-                The distinction is read off the row's own text rather than
-                sent as a flag by `listPublicCorrections`, because the read
-                cannot be exercised without the framework's request runtime:
-                `public.ts`'s server functions throw outside it (see
-                public-surfaces.no-leak.test.ts). The rule is the shared one in
-                `correction-origin.ts`, the chip is the shared one in
-                `components/correction-origin-mark.tsx` -- so this page and the
-                story page cannot label the same row differently -- and
-                scripts/corrections-automatic-render.test.mjs renders this
-                route against both.
-              */}
-              <CorrectionOriginMark body={c.body} />
-              <h3>{c.headline}</h3>
-              <p>{c.body}</p>
-              {"slug" in c && typeof c.slug === "string" && (
-                <Link className="textlink" to="/articles/$slug" params={{ slug: c.slug }}>
-                  Read the corrected story →
-                </Link>
-              )}
-            </section>
-          ))
-        )}
+                    The distinction is read off the row's own text rather than
+                    sent as a flag by `listPublicCorrections`, because the read
+                    cannot be exercised without the framework's request runtime:
+                    `public.ts`'s server functions throw outside it (see
+                    public-surfaces.no-leak.test.ts). The rule is the shared one in
+                    `correction-origin.ts`, the chip is the shared one in
+                    `components/correction-origin-mark.tsx` -- so this page and the
+                    story page cannot label the same row differently -- and
+                    scripts/corrections-automatic-render.test.mjs renders this
+                    route against both.
+                  */}
+                  <CorrectionOriginMark body={c.body} />
+                </div>
+                <h3>{c.headline}</h3>
+                <p>{c.body}</p>
+                {"slug" in c && typeof c.slug === "string" && (
+                  <Link className="textlink" to="/articles/$slug" params={{ slug: c.slug }}>
+                    Read the corrected story →
+                  </Link>
+                )}
+              </article>
+            ))
+          )}
+        </section>
       </div>
     </PaperShell>
   );

@@ -19,7 +19,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /*
-  The families and weights are the redesign's (docs/design/handoff-2026-09-26/
+  The Bricolage and Literata families and weights are the 2026-09 redesign's (docs/design/handoff-2026-09-26/
   design-system/tokens/fonts.css:2, and design-system/README.md §4): Bricolage
   Grotesque does the talking at 500/700/800, Literata does the reading at
   400/500/600 roman plus 400 italic for Opinion headlines. Keep this string in
@@ -29,6 +29,12 @@ const GOOGLE_CSS =
   "https://fonts.googleapis.com/css2" +
   "?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800" +
   "&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400" +
+  // Bulletin redesign (Oct 31 2026), reader pages only: Schibsted Grotesk for
+  // headlines and UI, Source Serif 4 for reading, JetBrains Mono for the
+  // SHA-256 fingerprint. Bricolage and Literata stay for the editor's desk.
+  "&family=Schibsted+Grotesk:wght@400;600;700;800;900" +
+  "&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400" +
+  "&family=JetBrains+Mono:wght@400" +
   "&display=swap";
 
 // Google serves woff2 only to a browser-shaped request; anything else gets the

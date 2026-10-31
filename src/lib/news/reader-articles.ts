@@ -31,6 +31,12 @@ export const readerArticlesInput = z.object({
     different read and does not pass it, so Latest stories still lists opinion.
   */
   notTopic: z.string().max(100).optional(),
+  /**
+   * Leave out stories published as routine editions (Today in town, This
+   * weekend and Deadlines approaching). The front-page edition and the river
+   * pass this; archive and section listings do not, so roundups remain there.
+   */
+  notRoutine: z.boolean().optional(),
   page: z.number().int().min(1).max(100000).default(1),
   oldest: z.boolean().default(false),
   saved: z.array(z.string().max(300)).max(500).optional(),

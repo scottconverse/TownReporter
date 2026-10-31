@@ -1,7 +1,7 @@
 import { NativeDialog } from "@/components/dialog";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
+import { ArrowRight, Bookmark, Check, Moon, Sun, X } from "lucide-react";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { sendTrustEvent } from "@/components/read-beacon-send";
 import {
@@ -18,8 +18,8 @@ import { readReaderMode, readStoredReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
 
 const READER_TEXT_SIZES = [
-  { size: 21, label: "Normal" },
-  { size: 25, label: "Large" },
+  { size: 19, label: "Normal" },
+  { size: 23, label: "Large" },
 ] as const;
 
 export function ReaderProvider({ children }: { children: ReactNode }) {
@@ -131,7 +131,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     // and these are counts of presses, so a press must count once. Fire only on
     // a real change -- re-pressing the button already selected is not a choice.
     if (value.dark === true && current.dark !== true) sendTrustEvent("dark-mode-chosen");
-    if (typeof value.size === "number" && value.size > 21 && value.size !== current.size) {
+    if (typeof value.size === "number" && value.size > 19 && value.size !== current.size) {
       sendTrustEvent("larger-text-chosen");
     }
   }
@@ -139,7 +139,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     <ReaderContext.Provider value={{ ...renderedPrefs, ready, update, notify: setMessage }}>
       <div
         className={`reader${renderedPrefs.dark ? " mode-dark" : ""}`}
-        style={{ "--reader-scale": renderedPrefs.size === 25 ? "1.2" : "1" } as CSSProperties}
+        style={{ "--reader-scale": renderedPrefs.size === 23 ? "1.2" : "1" } as CSSProperties}
       >
         {children}
         {message && (
@@ -185,7 +185,7 @@ export function ReaderDialog({
     </NativeDialog>
   );
 }
-export function ReadingButton({ label = false }: { label?: boolean }) {
+export function ReadingButton({ label = false, short = false }: { label?: boolean; short?: boolean }) {
   const [open, setOpen] = useState(false);
   const r = useReader();
   return (
@@ -196,7 +196,9 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
         onClick={() => setOpen(true)}
         aria-label="Reading preferences"
       >
-        {label ? (
+        {short ? (
+          "Aa"
+        ) : label ? (
           <>
             Aa <span>Text size</span>
           </>
@@ -288,19 +290,29 @@ export function DarkModeButton({ label = false }: { label?: boolean }) {
 export function SaveStory({
   story,
   label = false,
+  archive = false,
 }: {
   story: Pick<ReaderStory, "slug" | "headline">;
   label?: boolean;
+  /** The archive listing's text button; the story/front-page buttons keep their icon. */
+  archive?: boolean;
 }) {
   const r = useReader();
   const saved = r.saved.includes(story.slug);
   return (
     <button
       type="button"
-      className={label ? "btn small" : `iconbtn ${saved ? "saved" : ""}`}
+      className={
+        archive
+          ? `save-listing${saved ? " is-saved" : ""}`
+          : label
+            ? "btn small"
+            : `iconbtn ${saved ? "saved" : ""}`
+      }
       disabled={!r.ready}
       aria-pressed={saved}
       aria-label={`${saved ? "Remove saved story" : "Save story"}: ${story.headline}`}
+      data-state={saved ? "saved" : "save"}
       onClick={() => {
         if (!saved && r.saved.length >= 500) {
           r.notify("Your reading list has 500 stories. Remove one to save another.");
@@ -312,8 +324,18 @@ export function SaveStory({
         r.notify(saved ? "Removed from saved stories." : "Saved to your reading list.");
       }}
     >
-      {saved ? <Check aria-hidden /> : <Bookmark aria-hidden />}
-      {label && (saved ? "Saved" : "Save")}
+      {archive ? (
+        saved ? (
+          <Check aria-hidden />
+        ) : (
+          "Save"
+        )
+      ) : (
+        <>
+          {!label && (saved ? <Check aria-hidden /> : <Bookmark aria-hidden />)}
+          {label && (saved ? "Saved" : "Save")}
+        </>
+      )}
     </button>
   );
 }
@@ -324,7 +346,11 @@ export function SaveStory({
  * stories read in order. The front page's "Latest stories" passes `false`
  * (unit BX): its rows carried the date twice, once in that box and once in the
  * meta line under the headline, and the brief keeps the meta line. The box is
- * already hidden below 760px, so the two are the same row on a phone.
+ * already hidden below 900px, so the two are the same row on a phone.
+ *
+ * `archive` selects the Bulletin listing row: a 110px date gutter, kicker and
+ * read time, headline, dek, and the text Save control. Everywhere else keeps
+ * the existing compact row.
  *
  * A story in the "misc" catch-all prints no section tag (unit BX): the reader
  * side never shows that bucket. The desk's lists do not come through here.
@@ -334,6 +360,7 @@ export function ReaderRow({
   description = true,
   datebox = true,
   title,
+  archive = false,
 }: {
   story: ReaderStory;
   description?: boolean;
@@ -347,10 +374,36 @@ export function ReaderRow({
    * prints the stored headline unchanged, which is what a listing screen wants.
    */
   title?: string;
+  /** Use the archive listing's date gutter, meta line and text Save button. */
+  archive?: boolean;
 }) {
   const { sections } = usePublicSections();
   const { formatShortDate } = usePaperDateFormatters();
   const label = sections.find((s) => s.key === story.topic)?.name ?? story.topic;
+  if (archive) {
+    return (
+      <article className="listingrow">
+        {datebox ? <div className="listingdate">{formatShortDate(story.published_at)}</div> : null}
+        <div className="listingmain">
+          <div className="listingmeta">
+            <span className="listingmobiledate">{formatShortDate(story.published_at)}</span>
+            {isMiscTopic(story.topic) ? null : (
+              <Link className="listingkicker" to="/" search={{ topic: story.topic }}>
+                {label}
+              </Link>
+            )}
+            {isMiscTopic(story.topic) ? null : <span className="dot" />}
+            <span>{readMinutes(story.body)} min read</span>
+          </div>
+          <Link to="/articles/$slug" params={{ slug: story.slug }}>
+            <h3>{title ?? story.headline}</h3>
+          </Link>
+          {description && <p>{dekOrFallback(story.dek, story.body)}</p>}
+        </div>
+        <SaveStory story={story} archive />
+      </article>
+    );
+  }
   return (
     <article className={`newsrow${datebox ? "" : " nodate"}`}>
       {datebox ? <div className="datebox">{formatShortDate(story.published_at)}</div> : null}
@@ -377,9 +430,11 @@ export function ReaderRow({
 export function CopyButton({
   text,
   children,
+  primary = false,
 }: {
   text: string | (() => string);
   children: ReactNode;
+  primary?: boolean;
 }) {
   const r = useReader();
   const [fallback, setFallback] = useState<string | null>(null);
@@ -387,7 +442,7 @@ export function CopyButton({
     <>
       <button
         type="button"
-        className="btn"
+        className={primary ? "btn primary" : "btn"}
         onClick={async () => {
           const value = typeof text === "function" ? text() : text;
           try {
@@ -428,12 +483,12 @@ export function ShareStory({ slug, headline }: { slug: string; headline: string 
           setOpen(true);
         }}
       >
-        Share <ExternalLink aria-hidden />
+        Share ↗
       </button>
       {open && (
         <ReaderDialog title="Share this story" close={() => setOpen(false)}>
           <p>{headline}</p>
-          <CopyButton text={url}>
+          <CopyButton text={url} primary>
             Copy story link <ArrowRight aria-hidden />
           </CopyButton>
         </ReaderDialog>

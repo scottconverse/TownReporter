@@ -323,6 +323,15 @@ test("reads the Gravity fixture with recurring and all-day events", () => {
   const halloween = parsed.find((notice) => notice.normalizedFields.title === "Halloween Party")!;
   assert.equal(halloween.normalizedFields.start, "2026-10-31");
   assert.equal(halloween.normalizedFields.allDay, "true");
+  assert.match(halloween.normalizedFields.description!, /costume contest/i);
+  assert.equal(
+    halloween.normalizedFields.eventUrl,
+    "https://www.thegravitybrewing.com/events/halloween-party",
+  );
+  // The event page is not an online-attendance link; only X-GOOGLE-CONFERENCE is.
+  assert.equal(halloween.normalizedFields.onlineUrl, undefined);
+  assert.match(halloween.fields.description!.locator, /\.DESCRIPTION$/);
+  assert.match(halloween.fields.eventUrl!.locator, /\.URL$/);
 });
 
 test("refuses an unsupported recurrence part instead of guessing", () => {
@@ -358,6 +367,8 @@ test("reads the 1.37 MB Firehouse feed and expands its dated window", () => {
   )!;
   assert.equal(gallery.normalizedFields.start, "2026-10-29T12:00:00-06:00");
   assert.equal(gallery.normalizedFields.end, "2026-10-29T17:00:00-06:00");
+  assert.match(gallery.normalizedFields.description!, /open to walk in guests/i);
+  assert.match(gallery.fields.description!.locator, /\.DESCRIPTION$/);
   const market = parsed.find(
     (notice) => notice.normalizedFields.title === "Farmers Market- Market craft booth",
   )!;

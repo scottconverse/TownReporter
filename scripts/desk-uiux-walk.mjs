@@ -683,11 +683,11 @@ async function establishIdentity(page, surface, scenario) {
   const appearance =
     surface.kind === "desk"
       ? scenario.theme === "dark" ? "desk-dark" : "light"
-      : scenario.theme === "dark" ? "reader-dark" : "light";
+      : scenario.theme === "dark" ? "reader-dark" : "reader-light";
   const deskFont = scenario.size === "large" ? 16.8 : 14;
   const readerScale = scenario.size === "large" ? "1.2" : "1";
   const readerFont =
-    (scenario.viewport.width <= 560 ? 18 : 20) * (scenario.size === "large" ? 1.2 : 1);
+    19 * (scenario.size === "large" ? 1.2 : 1);
   await page.waitForFunction(
     (value) => {
       if (document.documentElement.getAttribute("data-appearance") !== value.appearance) return false;
@@ -1688,7 +1688,7 @@ async function captureSurface(page, scenario, surface) {
 
   const expectedTheme = surface.kind === "desk"
     ? (scenario.theme === "dark" ? "desk-dark" : "light")
-    : (scenario.theme === "dark" ? "reader-dark" : "light");
+    : (scenario.theme === "dark" ? "reader-dark" : "reader-light");
   const expectedColor = scenario.theme === "dark" ? DARK_RGB : LIGHT_RGB;
   const violations = [];
   const missingRoleFailure = missingInteractiveRoleFailure(measured);
@@ -1834,7 +1834,7 @@ async function captureSurface(page, scenario, surface) {
         violations.push("published article identity/body is missing (" + measured.articleBodyChars + " body characters)");
       }
       const expectedBodyFont =
-        (scenario.viewport.width <= 560 ? 18 : 20) * (scenario.size === "large" ? 1.2 : 1);
+        19 * (scenario.size === "large" ? 1.2 : 1);
       if (!closeNumber(measured.articleBodyFontPx, expectedBodyFont)) {
         violations.push(
           "article body computed font was " + measured.articleBodyFontPx + "px, expected " + expectedBodyFont + "px",

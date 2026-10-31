@@ -217,7 +217,6 @@ const sectionsStub = inlineModule(`export function usePublicSections() { return 
 const readerStub = inlineModule(`export function readMinutes() { return 3; }`);
 const storyDatesPublicStub = inlineModule(`
   export async function articleDates() { return []; }
-  export async function thisWeekDates() { return []; }
 `);
 const storyDatesStub = inlineModule(`
   export function storyDateRows(items) {

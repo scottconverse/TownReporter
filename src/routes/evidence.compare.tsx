@@ -71,8 +71,7 @@ function ComparePage() {
 
   const { older, newer, changes, timeline, excerpt_removed } = compared;
   const unchanged =
-    older.content_hash === newer.content_hash ||
-    (!changes.added.length && !changes.removed.length);
+    older.content_hash === newer.content_hash || (!changes.added.length && !changes.removed.length);
   /*
     A total that sits on the server-side diff's own cap is a floor, not a
     count: `describeTextChanges` stops counting at 24 sentences a side, so a
@@ -85,116 +84,106 @@ function ComparePage() {
 
   return (
     <PaperShell compact>
-      <p className="text-[11px] tracking-[0.16em] text-rust uppercase">Compare observations</p>
-      <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight">
-        {newer.title || newer.url}
-      </h1>
-      <p className="mt-3 max-w-2xl break-all text-sm text-muted">{newer.url}</p>
-      {timeline.length > 0 ? (
-        <ol className="mt-6 max-w-2xl space-y-2 text-sm">
-          {timeline.map((entry) => (
-            <li key={entry.capture_event_id}>
-              {entry.observed_at ? formatDateTime(entry.observed_at) : "Observed"}
-              {" — "}
-              {observationLabel(entry.observation, entry.disappeared)}
-              {entry.content_label && !entry.disappeared ? ` — ${entry.content_label}` : ""}
-            </li>
-          ))}
-        </ol>
-      ) : null}
-      <div className="mt-6 grid gap-6 sm:grid-cols-2">
-        <div className="border border-rule p-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Previous observed state</p>
-          <p className="mt-2">{captureName(older.content_label, older.version_id)}</p>
-          <p className="text-sm text-muted">
-            {older.captured_at ? formatDateTime(older.captured_at) : "—"}
-          </p>
-          <p className="mt-2 break-all font-mono text-xs">{older.content_hash}</p>
-          {older.version_id != null ? (
-            <p className="mt-2">
-              <Link
-                to="/evidence/$versionId"
-                params={{ versionId: String(older.version_id) }}
-                className="text-rust hover:text-rust-2"
-              >
+      <div className="compare-page">
+        <div className="pagehead comparehead">
+          <span className="eyebrow">Compare observations</span>
+          <h1>{newer.title || newer.url}</h1>
+          <p>{newer.url}</p>
+        </div>
+        {timeline.length > 0 ? (
+          <ol className="compare-timeline">
+            {timeline.map((entry) => (
+              <li key={entry.capture_event_id}>
+                {entry.observed_at ? formatDateTime(entry.observed_at) : "Observed"}
+                {" — "}
+                {observationLabel(entry.observation, entry.disappeared)}
+                {entry.content_label && !entry.disappeared ? ` — ${entry.content_label}` : ""}
+              </li>
+            ))}
+          </ol>
+        ) : null}
+        <div className="compare-states">
+          <article className="compare-card">
+            <span className="compare-label">Previous observed state</span>
+            <b>{captureName(older.content_label, older.version_id)}</b>
+            <span className="compare-when">
+              {older.captured_at ? formatDateTime(older.captured_at) : "—"}
+            </span>
+            <code>{older.content_hash}</code>
+            {older.version_id != null ? (
+              <Link to="/evidence/$versionId" params={{ versionId: String(older.version_id) }}>
                 Open
               </Link>
-            </p>
-          ) : null}
-        </div>
-        <div className="border border-rule p-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Latest observed state</p>
-          <p className="mt-2">{captureName(newer.content_label, newer.version_id)}</p>
-          <p className="text-sm text-muted">
-            {newer.captured_at ? formatDateTime(newer.captured_at) : "—"}
-          </p>
-          <p className="mt-2 break-all font-mono text-xs">{newer.content_hash}</p>
-          {newer.version_id != null ? (
-            <p className="mt-2">
-              <Link
-                to="/evidence/$versionId"
-                params={{ versionId: String(newer.version_id) }}
-                className="text-rust hover:text-rust-2"
-              >
+            ) : null}
+          </article>
+          <article className="compare-card is-latest">
+            <span className="compare-label">Latest observed state</span>
+            <b>{captureName(newer.content_label, newer.version_id)}</b>
+            <span className="compare-when">
+              {newer.captured_at ? formatDateTime(newer.captured_at) : "—"}
+            </span>
+            <code>{newer.content_hash}</code>
+            {newer.version_id != null ? (
+              <Link to="/evidence/$versionId" params={{ versionId: String(newer.version_id) }}>
                 Open
               </Link>
-            </p>
-          ) : null}
+            ) : null}
+          </article>
         </div>
+        {/*
+          Unit U11b2: one side's excerpt was taken down, so the comparison says so
+          instead of diffing. The server already returns an empty change summary
+          for this case (`compareChanges`), and the sentence is what stops an
+          empty "None detected" pair from reading as "these two captures are
+          identical".
+        */}
+        {excerpt_removed ? (
+          <p className="compare-status" role="status">
+            An excerpt of this capture was removed at the publisher’s request, so there is nothing
+            left to compare. The record’s address, capture time and fingerprint are above.
+          </p>
+        ) : unchanged ? (
+          <p className="compare-status">No textual change between these observations.</p>
+        ) : (
+          <>
+            <div className="compare-changes">
+              <section>
+                <h2>Removed</h2>
+                <ul className="removed-list">
+                  {changes.removed.length ? (
+                    changes.removed.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
+                  ) : (
+                    /* "None detected" is a claim about the two captures. It is
+                       only true when this side's own total is zero -- the shared
+                       snippet budget can leave a side with changes unshown. */
+                    <li>{changes.removed_total ? "None shown." : "None detected."}</li>
+                  )}
+                </ul>
+              </section>
+              <section>
+                <h2>Added</h2>
+                <ul className="added-list">
+                  {changes.added.length ? (
+                    changes.added.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
+                  ) : (
+                    <li>{changes.added_total ? "None shown." : "None detected."}</li>
+                  )}
+                </ul>
+              </section>
+            </div>
+            {/*
+              A comparison is of two captured pages, so the full difference is
+              the pages. The reader gets the count and the first few sentences.
+            */}
+            {shown < totalFloor || totalIsFloor ? (
+              <p className="compare-count">
+                Showing {shown} of {totalIsFloor ? "at least " : ""}
+                {totalFloor} changed passages.
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
-      {/*
-        Unit U11b2: one side's excerpt was taken down, so the comparison says so
-        instead of diffing. The server already returns an empty change summary
-        for this case (`compareChanges`), and the sentence is what stops an
-        empty "None detected" pair from reading as "these two captures are
-        identical".
-      */}
-      {excerpt_removed ? (
-        <p className="mt-8 max-w-2xl text-ink-2" role="status">
-          An excerpt of this capture was removed at the publisher’s request, so there is nothing
-          left to compare. The record’s address, capture time and fingerprint are above.
-        </p>
-      ) : unchanged ? (
-        <p className="mt-8 max-w-2xl text-ink-2">No textual change between these observations.</p>
-      ) : (
-        <>
-          <div className="mt-8 grid gap-6 sm:grid-cols-2">
-            <div>
-              <h2 className="font-display text-2xl">Removed</h2>
-              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
-                {changes.removed.length ? (
-                  changes.removed.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
-                ) : (
-                  /* "None detected" is a claim about the two captures. It is
-                     only true when this side's own total is zero -- the shared
-                     snippet budget can leave a side with changes unshown. */
-                  <li>{changes.removed_total ? "None shown." : "None detected."}</li>
-                )}
-              </ul>
-            </div>
-            <div>
-              <h2 className="font-display text-2xl">Added</h2>
-              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
-                {changes.added.length ? (
-                  changes.added.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
-                ) : (
-                  <li>{changes.added_total ? "None shown." : "None detected."}</li>
-                )}
-              </ul>
-            </div>
-          </div>
-          {/*
-            A comparison is of two captured pages, so the full difference is
-            the pages. The reader gets the count and the first few sentences.
-          */}
-          {shown < totalFloor || totalIsFloor ? (
-            <p className="mt-4 max-w-2xl text-sm text-muted">
-              Showing {shown} of {totalIsFloor ? "at least " : ""}
-              {totalFloor} changed passages.
-            </p>
-          ) : null}
-        </>
-      )}
     </PaperShell>
   );
 }
