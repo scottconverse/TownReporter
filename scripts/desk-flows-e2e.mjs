@@ -489,8 +489,8 @@ async function main() {
   const balancedCodex = bulkOptions.find((option) => option.value === "codex-frontier");
   if (!balancedCodex) throw new Error("the bulk picker is missing Codex Sol 6.1 (codex-frontier)");
   await bulkWritingModel.selectOption(balancedCodex.value);
-  // The header scan picker emits its own "Thinking effort" select and sits
-  // earlier in the DOM, so the read is scoped to the bulk strip whose choice
+  // The scan picker emits its own "Thinking effort" select in the Queue body
+  // row above the list, so the read is scoped to the bulk strip whose choice
   // the Start press actually carries (desk.queue.tsx `.queue-bulk`).
   const bulkEffort = page.locator(".queue-bulk").getByLabel("Thinking effort").first();
   await bulkEffort.waitFor({ timeout: 10_000 });
