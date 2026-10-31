@@ -59,26 +59,37 @@ test("every event-week font size is at least 14px", () => {
   assert.deepEqual(undersized, []);
 });
 
-test("event-week head keeps the dark box background visible", () => {
-  const backgrounds = cssRules(CSS)
-    .filter((rule) => rule.selector === ".reader .eventweek-head")
-    .flatMap((rule) => declarations(rule.body, "background"));
+function declarationValues(selector: string, property: string): string[] {
+  return EVENTWEEK_RULES.filter((rule) =>
+    rule.selector.split(",").some((part) => part.trim() === selector),
+  ).flatMap((rule) => declarations(rule.body, property));
+}
 
+test("the events band uses the design's light band and white card grounds", () => {
+  assert.ok(declarationValues(".reader .eventweek", "background").includes("var(--band)"));
+  assert.ok(declarationValues(".reader .eventweek-card", "background").includes("var(--card)"));
+});
+
+test("the day strip scrolls sideways with 84px day columns", () => {
+  assert.ok(declarationValues(".reader .eventweek-strip", "grid-auto-flow").includes("column"));
+  assert.ok(declarationValues(".reader .eventweek-strip", "overflow-x").includes("auto"));
   assert.ok(
-    backgrounds.includes("transparent"),
-    ".reader .eventweek-head must set background: transparent",
+    declarationValues(".reader .eventweek-strip", "grid-auto-columns").some(
+      (value) => pxValue(value) >= 84,
+    ),
   );
 });
 
-test("event-week title links have a 44px tap target", () => {
-  const heights = EVENTWEEK_RULES.filter((rule) =>
-    rule.selector.split(",").some((selector) => selector.includes(".eventweek-title")),
-  ).flatMap((rule) => declarations(rule.body, "min-height").map(pxValue));
-
-  assert.ok(
-    heights.some((height) => height >= 44),
-    "an .eventweek-title rule must set min-height to at least 44px",
-  );
+test("event-week title links and controls have 44px tap targets", () => {
+  for (const selector of [".eventweek-title", ".eventweek-more", ".eventweek-all"]) {
+    const heights = EVENTWEEK_RULES.filter((rule) =>
+      rule.selector.split(",").some((part) => part.includes(selector)),
+    ).flatMap((rule) => declarations(rule.body, "min-height").map(pxValue));
+    assert.ok(
+      heights.some((height) => height >= 44),
+      `${selector} must set min-height to at least 44px`,
+    );
+  }
 });
 test("descriptions clamp to two lines and only linked titles are underlined", () => {
   const clamps = EVENTWEEK_RULES.filter((rule) =>

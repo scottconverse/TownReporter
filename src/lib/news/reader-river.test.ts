@@ -87,6 +87,8 @@ async function reseed(): Promise<Seeded[]> {
     seed a welcome article dated `now()`, and every test below asserts an
     exact order and an exact count.
   */
+  await sql`delete from routine_notice_publications where newsroom_id = 1`;
+  await sql`delete from routine_notice_runs where newsroom_id = 1`;
   await sql`delete from articles`;
   await sql`
     insert into paper_settings (newsroom_id, onboarded) values (1, true)
@@ -275,14 +277,82 @@ describe("the edition read, opinion left out", () => {
     );
   });
 
-  it("does not touch the river or a listing read: Latest stories still lists opinion", async () => {
-    const river = await listReaderArticles({ limit: 12 });
-    assert.ok(
-      river.stories.some((s) => s.slug === "river-0"),
-      "the river lost the newest opinion piece",
+  it("keeps opinion out of the river but leaves it in a listing", async () => {
+    const river = await listReaderArticles({
+      limit: 12,
+      notTopic: "opinion",
+      notRoutine: true,
+    });
+    assert.equal(
+      river.stories.some((s) => s.topic === "opinion"),
+      false,
+      "the river printed an opinion piece beside the Opinion box",
     );
     const listing = await listReaderArticles({ page: 1 });
     assert.equal(listing.total, CORPUS.length);
     assert.ok(listing.stories.some((s) => s.topic === "opinion"));
+  });
+});
+
+describe("the edition and river leave routine roundups out", () => {
+  const ROUTINE = [
+    { channel: "today", slug: "river-0" },
+    { channel: "weekend", slug: "river-1" },
+    { channel: "deadlines", slug: "river-2" },
+  ] as const;
+
+  beforeEach(async () => {
+    const seeded = await reseed();
+    const sql = await getSql();
+    const [run] = await sql<{ id: number }>`
+      insert into routine_notice_runs
+        (newsroom_id, local_date, automation_revision, policy_revision, status, actor)
+      values (1, '2026-01-02', 1, 1, 'completed', 'river-test')
+      returning id`;
+    for (const [index, routine] of ROUTINE.entries()) {
+      const article = seeded.find((story) => story.slug === routine.slug);
+      assert.ok(article, `missing routine fixture ${routine.slug}`);
+      await sql`
+        insert into routine_notice_publications
+          (newsroom_id, run_id, channel, issue_date, article_id,
+           content_fingerprint, candidate_keys_json, article_body_hash)
+        values (1, ${run!.id}, ${routine.channel}, ${`2026-01-${String(index + 2).padStart(2, "0")}`},
+                ${article.id}, 'fixture', '[]', 'fixture')`;
+    }
+  });
+
+  it("excludes every routine channel from the edition and the river", async () => {
+    const edition = await listReaderArticles({
+      page: 1,
+      notTopic: "opinion",
+      notRoutine: true,
+    });
+    const river = await listReaderArticles({
+      limit: 12,
+      notTopic: "opinion",
+      notRoutine: true,
+    });
+    const routineSlugs = ROUTINE.map((routine) => routine.slug);
+    assert.deepEqual(
+      edition.stories.filter((story) => routineSlugs.includes(story.slug)),
+      [],
+    );
+    assert.deepEqual(
+      river.stories.filter((story) => routineSlugs.includes(story.slug)),
+      [],
+    );
+    assert.equal(edition.total, CORPUS.length - ROUTINE.length);
+    assert.equal(river.total, CORPUS.length - ROUTINE.length);
+  });
+
+  it("still lists every roundup in the archive and a section listing", async () => {
+    const archive = await listReaderArticles({ page: 1 });
+    const section = await listReaderArticles({ page: 1, topic: "council" });
+    for (const routine of ROUTINE) {
+      assert.ok(archive.stories.some((story) => story.slug === routine.slug));
+      assert.ok(section.stories.some((story) => story.slug === routine.slug));
+    }
+    assert.equal(archive.total, CORPUS.length);
+    assert.equal(section.total, CORPUS.length);
   });
 });

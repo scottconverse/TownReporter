@@ -5,7 +5,7 @@ import { STORY_AREAS } from "../story-area.ts";
 
 it("requests Latest stories on the edition's ground, including an empty edition", () => {
   for (const area of STORY_AREAS) {
-    assert.deepEqual(editionRiverQuery(area, 6, []), { area, limit: 6, exclude: [] });
-    assert.deepEqual(editionRiverQuery(area, 6, [12, 42]), { area, limit: 6, exclude: [12, 42] });
+    assert.deepEqual(editionRiverQuery(area, 6, []), { area, limit: 6, exclude: [], notTopic: "opinion", notRoutine: true });
+    assert.deepEqual(editionRiverQuery(area, 6, [12, 42]), { area, limit: 6, exclude: [12, 42], notTopic: "opinion", notRoutine: true });
   }
 });

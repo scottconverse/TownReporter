@@ -42,6 +42,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     `articles.topic` (`TOPICS` in `../paper.ts` is where "opinion" is declared).
   */
   const notTopic = data.notTopic ? await resolveSectionKey(DEFAULT_NEWSROOM_ID, data.notTopic) : "";
+  const notRoutine = data.notRoutine === true;
   const q = data.q || "";
   // Treat punctuation literally. Short searches stay on headline and dek.
   const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -86,6 +87,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
   }>`select count(*)::text as count from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
     and (${topic}='' or topic=${topic})
     and (${notTopic}='' or topic<>${notTopic})
+    and (${!notRoutine} or not exists (select 1 from routine_notice_publications p where p.article_id=articles.id and p.newsroom_id=articles.newsroom_id and p.channel in ('today','weekend','deadlines')))
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
@@ -96,6 +98,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     await sql<Omit<ReaderStory, "area"> & { area: string | null; published_at_text: string }>`select id,slug,headline,dek,body,topic,published_at,published_at::text as published_at_text,area from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
     and (${topic}='' or topic=${topic})
     and (${notTopic}='' or topic<>${notTopic})
+    and (${!notRoutine} or not exists (select 1 from routine_notice_publications p where p.article_id=articles.id and p.newsroom_id=articles.newsroom_id and p.channel in ('today','weekend','deadlines')))
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))

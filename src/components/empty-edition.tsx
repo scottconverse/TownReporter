@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 export function EmptyEdition({ area }: { area?: string }) {
   return (
-    <div className="empty">
+    <div className="empty frontempty">
       <h2>{area ? "No stories in this area yet." : "The edition is still being set."}</h2>
       {area ? null : (
         <p>

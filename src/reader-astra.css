@@ -1981,26 +1981,20 @@
    `:has` picks the front page out by the band only it prints; without `:has`
    support the wrap stays 1240px and the bands simply stop short of the edge,
    which is a narrower paper rather than a broken one. */
-.reader .wrap:has(> .ledgerow) {
+.reader .wrap:has(> .fronttop) {
   width: min(1600px, calc(100% - 2 * var(--px)));
 }
-/* The masthead and the nav rule share that measure and that gutter (unit BZ,
-   item 4). Measured at a 1892px window before this rule: the masthead wrap and
-   both header rules stopped at 286..1606 while the lead, the grid and the river
-   bled to 86..1806, so the story column started 200px left of the masthead and
-   the This week panel ended 200px right of the nav rule. The design draws one
-   full-bleed stack -- masthead and nav carry the same `--px` padding as every
-   band below them -- so the header wrap takes the front page's width and the
-   two rules bleed one gutter, which puts their ink on exactly the band edges.
-   Written from 1500 up, where `--px` and `.wrap` already step: below it the
-   1240px header column and the 1360px front-page wrap are the numbers 1440 and
-   390 are measured at, and the note is about a wide window only. */
+/* The masthead and the nav rule share the front page's measure and gutter.
+   The Bulletin front is one full-bleed stack: the header rules and every band
+   below them put their ink on the same edge. Written from 1500 up, where the
+   reader wrap steps wider; at 1440 and 390 the ordinary gutter is already the
+   design's measure. */
 @media (min-width: 1500px) {
-  .reader:has(.ledgerow) > header .wrap {
+  .reader:has(.fronttop) > header .wrap {
     width: min(1600px, calc(100% - 2 * var(--px)));
   }
-  .reader:has(.ledgerow) .mast,
-  .reader:has(.ledgerow) .navrow {
+  .reader:has(.fronttop) .mast,
+  .reader:has(.fronttop) .navrow {
     margin-inline: calc(-1 * var(--px));
     padding-inline: var(--px);
   }
@@ -2029,10 +2023,8 @@
    (siblings of `<article>`, before `#related`), and they need the same negative
    gutter as the front page's bands. */
 .reader .eventweek,
-.reader .ledgerow,
-.reader .storygrid,
-.reader .regionband,
-.reader .river,
+.reader .fronttop,
+.reader .frontlatestband,
 .reader .aboutstrip,
 .reader .keepreading,
 .reader .evidence,
@@ -2287,393 +2279,6 @@
   margin-bottom: 0;
 }
 
-/* ---------------------------------------------------------------------------
-   The front page's seven-day events box (design 1b).
-   --------------------------------------------------------------------------- */
-.reader .eventweek {
-  margin-top: 28px;
-  background: var(--block);
-  color: var(--blockInk);
-}
-.reader .eventweek-head {
-  background: transparent;
-  border-bottom: 0;
-  padding: 22px 26px 18px;
-}
-.reader .eventweek-kicker {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.reader .eventweek-chip {
-  background: var(--yel);
-  color: var(--onacc);
-  padding: 5px 9px;
-  font-family: var(--fd);
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-}
-.reader .eventweek-meta {
-  color: var(--blockInk2);
-  font-size: calc(14px * var(--reader-scale));
-  font-weight: 600;
-}
-.reader .eventweek h2 {
-  margin-top: 10px;
-  color: var(--onacc);
-  font-family: var(--fd);
-  font-size: calc(36px * var(--reader-scale));
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -0.72px;
-}
-.reader .eventweek-strip {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  min-width: 0;
-  border-top: 1px solid var(--blockRule);
-  border-bottom: 1px solid var(--blockRule);
-}
-.reader .eventweek-daybutton {
-  display: flex;
-  min-height: 92px;
-  min-width: 0;
-  padding: 12px 8px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 0;
-  border-right: 1px solid var(--blockRule);
-  border-radius: 0;
-  background: var(--block);
-  color: var(--blockInk);
-}
-.reader .eventweek-daybutton:last-child {
-  border-right: 0;
-}
-.reader .eventweek-daybutton:hover {
-  outline: 2px solid var(--yel);
-  outline-offset: -2px;
-}
-.reader .eventweek-daybutton.on {
-  background: var(--yel);
-  color: var(--onacc);
-}
-.reader .eventweek-dow,
-.reader .eventweek-daynum {
-  font-family: var(--fd);
-  font-weight: 800;
-  line-height: 1;
-}
-.reader .eventweek-dow {
-  font-size: 14px;
-  letter-spacing: 0.14em;
-}
-.reader .eventweek-daynum {
-  font-size: 28px;
-}
-.reader .eventweek-count {
-  color: var(--blockInk2);
-  font-size: calc(14px * var(--reader-scale));
-  font-weight: 600;
-}
-.reader .eventweek-daybutton.on .eventweek-count {
-  color: var(--onacc);
-}
-.reader .eventweek-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  min-width: 0;
-}
-.reader .eventweek-col {
-  min-width: 0;
-  padding: 18px 24px 22px;
-  border-right: 1px solid var(--blockRule);
-}
-.reader .eventweek-col:last-child {
-  border-right: 0;
-}
-.reader .eventweek-col h3 {
-  padding-bottom: 10px;
-  border-bottom: 2px solid var(--yel);
-  color: var(--onacc);
-  font-family: var(--fd);
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-}
-.reader .eventweek-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.reader .eventweek-event {
-  padding: 13px 0;
-  border-bottom: 1px solid var(--blockRule);
-  min-width: 0;
-}
-.reader .eventweek-time,
-.reader .eventweek-title,
-.reader .eventweek-description,
-.reader .eventweek-source,
-.reader .eventweek-place {
-  display: block;
-}
-.reader .eventweek-time {
-  color: var(--blockInk);
-  font-family: var(--fd);
-  font-size: calc(15px * var(--reader-scale));
-  font-weight: 800;
-}
-.reader .eventweek-title {
-  margin-top: 3px;
-  color: var(--blockInk);
-  font-size: calc(16px * var(--reader-scale));
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  line-height: 1.35;
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-.reader a.eventweek-title {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-decoration-color: var(--blockRule);
-  text-underline-offset: 3px;
-}
-.reader a.eventweek-title:hover {
-  color: var(--blockInk);
-  text-decoration-color: var(--onacc);
-}
-.reader .eventweek-description {
-  margin-top: 4px;
-  color: var(--blockInk2);
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: calc(14px * var(--reader-scale));
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.reader .eventweek-source {
-  margin-top: 3px;
-  color: var(--blockInk2);
-  font-size: calc(14px * var(--reader-scale));
-  font-weight: 600;
-  line-height: 1.35;
-}
-.reader .eventweek-place {
-  margin-top: 3px;
-  color: var(--blockInk2);
-  font-family: var(--fd);
-  font-size: calc(14px * var(--reader-scale));
-}
-.reader .eventweek-more {
-  display: inline-block;
-  margin-top: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--blockInk);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: calc(14px * var(--reader-scale));
-  font-weight: 600;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: var(--onacc);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 4px;
-}
-.reader .eventweek-foot {
-  padding: 0 26px 22px;
-}
-.reader .eventweek-all {
-  display: inline-flex;
-  min-height: 44px;
-  padding: 11px 16px;
-  align-items: center;
-  border: 2px solid var(--yel);
-  border-radius: 0;
-  background: var(--yel);
-  color: var(--onacc);
-  font-family: var(--fd);
-  font-size: calc(15px * var(--reader-scale));
-  font-weight: 700;
-}
-.reader .eventweek-all:hover {
-  color: var(--onacc);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.reader .eventweek-empty {
-  padding: 22px 26px 26px;
-  color: var(--blockInk2);
-  font-family: var(--fd);
-  font-size: calc(16px * var(--reader-scale));
-  font-weight: 600;
-}
-@media (max-width: 760px) {
-  .reader .eventweek {
-    margin-top: 16px;
-  }
-  .reader .eventweek-head {
-    padding: 18px 18px 14px;
-  }
-  .reader .eventweek h2 {
-    font-size: calc(28px * var(--reader-scale));
-    letter-spacing: -0.56px;
-  }
-  .reader .eventweek-strip {
-    display: flex;
-    max-width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
-  }
-  .reader .eventweek-daybutton {
-    flex: 0 0 82px;
-    min-height: 82px;
-  }
-  .reader .eventweek-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .reader .eventweek-col {
-    padding: 18px;
-    border-right: 0;
-    border-bottom: 1px solid var(--blockRule);
-  }
-  .reader .eventweek-col:last-child {
-    border-bottom: 0;
-  }
-  .reader .eventweek-event {
-    display: grid;
-    grid-template-columns: 74px minmax(0, 1fr);
-    column-gap: 10px;
-  }
-  .reader .eventweek-time {
-    grid-column: 1;
-    grid-row: 1 / span 4;
-  }
-  .reader .eventweek-title,
-  .reader .eventweek-description,
-  .reader .eventweek-source,
-  .reader .eventweek-place {
-    grid-column: 2;
-    margin-top: 0;
-  }
-  .reader .eventweek-foot,
-  .reader .eventweek-empty {
-    padding-inline: 18px;
-  }
-  .reader .eventweek-foot {
-    padding-bottom: 18px;
-  }
-}
-/* ---------------------------------------------------------------------------
-   The lead and "This week".
-   --------------------------------------------------------------------------- */
-.reader .ledgerow {
-  display: grid;
-  grid-template-columns: 1.7fr 1fr;
-  gap: 1px;
-  background: var(--grid);
-  border-bottom: 3px solid var(--grid);
-}
-/* The row's left-hand grid item is the COLUMN, not the lead article: the lead
-   and the paper's next stories under it are two things, and each one is its
-   own story in this page's markup (unit CN, item 1(b); `river-e2e` reads a
-   card's stories, so the rows sit beside `.lead` rather than inside it). The
-   padding is the column's, which is what keeps the rows and the lead's own
-   button on the same left edge. */
-.reader .ledgerow > .leadcolumn {
-  background: var(--bg);
-  padding: 32px var(--px) 36px;
-}
-/* The lead carries no box of its own inside the column: the column above has
-   the padding. This is not decoration. `.reader .lead { padding: 39px 42px
-   34px }` earlier in this file is the pre-redesign `.hero` layout's rule, and
-   it is still there because nothing else needed it changed; the lead used to
-   be the row's grid item, whose own three-class rule beat it. Now that the
-   column is the item, the old rule is the only thing setting the article's
-   padding, and it would put the lead's text 42px inside the rows that sit
-   under it (measured: the column grew 85px at 1790px and the two columns read
-   85px apart). */
-.reader .leadcolumn > .lead {
-  padding: 0;
-}
-/* The panel is the ink block in BOTH themes, and it is stated here rather than
-   left to the `.datespanel` rule below: this selector carries three classes to
-   that rule's two, so a shared `background: var(--bg)` on the row's children
-   silently repainted the panel cream and put white event text and white date
-   numbers on it (measured at 1.02:1 before Unit BD2). */
-.reader .ledgerow > .datespanel {
-  background: var(--block);
-  color: var(--blockInk);
-  padding: 32px 32px 36px;
-}
-/* One column when a band has lost a half (unit BX).
-   Two rows are built as two columns: the lead beside "This week", "Around the
-   region" beside Opinion. Either half can now be absent rather than empty --
-   the dates panel prints nothing at all when no published story names a date
-   in the next seven days, and the region column prints nothing when no story
-   is filed outside the home town -- and when one goes the other runs the full
-   width, which is what `solo` says. Below 900px the media query further down
-   already collapses both rows to one column, so this states it for the wide
-   layout only; the two together cover every width. */
-@media (min-width: 901px) {
-  .reader .ledgerow.solo,
-  .reader .regionband.solo {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* A sole lead reads as two columns rather than a wide one (unit BX2).
-   With the panel gone the lead's box is the whole row, but its text was not:
-   a 20ch headline and a 60ch dek inside a 1440px row left the right half of
-   the row blank (`evidence/audit-BX/front-desktop-light.png`). The tag and
-   headline take the left column, the dek and the line under it the right, so
-   the width the row actually has carries text instead of air. This is the wide
-   layout only -- below 901px the media query further down already stacks the
-   lead, and the row's own grid is untouched, so `.lead`'s box is still the
-   whole row and a check that measures the box measures the same thing.
-   The tag is placed explicitly and told `start`: as a grid item its
-   `inline-block` is blockified, and a stretched one would paint the yellow
-   label across the whole column instead of its own words. */
-@media (min-width: 901px) {
-  .reader .ledgerow.solo > .leadcolumn > .lead {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    column-gap: 56px;
-    align-items: start;
-  }
-  .reader .ledgerow.solo > .leadcolumn > .lead > .sectiontag {
-    grid-area: 1 / 1 / 2 / 2;
-    justify-self: start;
-  }
-  .reader .ledgerow.solo > .leadcolumn > .lead > .leadhead {
-    grid-area: 2 / 1 / 4 / 2;
-    max-width: none;
-  }
-  .reader .ledgerow.solo > .leadcolumn > .lead > .dek {
-    grid-area: 1 / 2 / 3 / 3;
-    margin-top: 0;
-    max-width: none;
-  }
-  .reader .ledgerow.solo > .leadcolumn > .lead > .meta {
-    grid-area: 3 / 2 / 4 / 3;
-  }
-  .reader .ledgerow.solo > .leadcolumn > .lead > .leadbottom {
-    grid-area: 4 / 1 / 5 / 3;
-  }
-  /* The column's own rows (unit CN, item 1(b)) need no placement here: they
-     are a block under the lead's two-column grid, so they already run the
-     whole width the way the button's row does. */
-}
 .reader .lead h2.leadhead {
   font-family: var(--fd);
   font-size: calc(50px * var(--reader-scale));
@@ -2706,64 +2311,6 @@
 .reader .lead .leadbottom {
   margin-top: 26px;
 }
-/*
-   The lead column's own rows, under the lead (unit CN, item 1(b)).
-
-   The lead and "This week" are one grid row, so the column's box is always as
-   tall as the panel; these rows are what the column has to say with the
-   paper's next news rather than with blank paper. They are the grid cell
-   itself -- same markup, same `.storysec` / `h3` / `.storymeta` classes, so
-   the kicker still links to its section and a `misc` story still reserves its
-   empty kicker line -- laid out as COMPACT rows: the owner's own words for
-   them ("compact rows under the lead's 'Read the story' button: section tag,
-   headline link, date · min read"). The three fields sit on one line, the
-   headline flexing between the kicker and the line, which wraps to a second
-   line rather than crowding when the column is narrow. No type goes below the
-   handoff's 14px floor: the kicker and the line stay at the cell's 14px, the
-   headline comes down from the cell's 23px to 17px.
-
-   The block's height is not decoration. Measured at 1790px (`reports/
-   CN-front-gap-and-clause.md`), five rows in the panel end 97px below the
-   lead's button; two of these rows plus the block's own margin are 91px, which
-   is what puts the two columns within the owner's 40px. The three-line cell
-   the first attempt used was 95px a row, and two of those overshot the panel by
-   136px -- the balance the owner asked for is only reachable with a row this
-   size, which is why these are one line and not three.
-*/
-.reader .leadalso {
-  margin-top: 22px;
-}
-.reader .leadcolumn .leadalso .storycell {
-  display: flex;
-  /* The grid cell stacks its three fields (`flex-direction: column`, further
-     down this file); these rows put them on one line. */
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 12px;
-  row-gap: 2px;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--grid);
-}
-/* Each of these carries one class more than the grid cell's own rule, which
-   is further down this file and would otherwise win on a tie. */
-.reader .leadcolumn .leadalso .storysec {
-  margin-bottom: 0;
-}
-.reader .leadcolumn .leadalso h3 {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: calc(17px * var(--reader-scale));
-  line-height: 1.3;
-}
-.reader .leadcolumn .leadalso .storymeta {
-  margin-top: 0;
-  margin-left: auto;
-  padding-top: 0;
-  /* "Sep 27, 2026 · 1 min read" is one unbreakable line at the row's end. */
-  white-space: nowrap;
-}
-
 /* ---------------------------------------------------------------------------
    "This week" / "Dates in this story": a block panel with yellow day labels.
    --------------------------------------------------------------------------- */
@@ -2772,18 +2319,13 @@
   color: var(--blockInk);
   padding: 32px var(--px);
 }
-/* The article rail's panel is the prototype's own block, and the prototype pads
-   it 24px on every side (`Article Daily.dc.html`, the aside's `padding:24px`),
-   where the front page's panel keeps the row's 32px. Only the INLINE padding
-   decides the event text's column, and at the rail's 224px at 1280 the page
-   gutter's 40px cost the text 16px a side: 86px for a word ("attachments" in
-   Literata 400 at 16px) that needs 94.6 to sit on one line, so `break-word`
-   had nowhere to put it but the middle of the word. 24px leaves 118px. The
-   vertical padding is left at 32px -- it changes nothing about the wrap. */
+/* The article rail's panel is the prototype's own block and is padded 24px on
+   every side (`Article Daily.dc.html`, the aside's `padding:24px`). The page
+   gutter would leave too little width for an ordinary word at 1280px. */
 .reader:has(.articlelayout) .datespanel {
   padding: 32px 24px;
 }
-/* (The front page's panel keeps the row's 32px inline padding, set above.) */.reader .datespanel h2 {
+.reader .datespanel h2 {
   font-family: var(--fd);
   font-size: 28px;
   font-weight: 800;
@@ -2894,46 +2436,7 @@
   text-underline-offset: 4px;
 }
 
-/* ---------------------------------------------------------------------------
-   The ruled story grid: three across, two on a tablet, one on a phone.
-   The 1px lines are the container's `--grid` showing through the gap, so the
-   outermost cells take the page gutter as their own padding -- which is why
-   the edge padding is written per column count and rewritten when the column
-   count changes.
-   --------------------------------------------------------------------------- */
-.reader .storygrid {
-  display: grid;
-  gap: 1px;
-  background: var(--grid);
-  border-bottom: 3px solid var(--grid);
-}
-.reader .storygrid.cols-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.reader .storygrid.cols-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.reader .storygrid.cols-1 {
-  grid-template-columns: minmax(0, 1fr);
-}
-.reader .storycell {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  padding: 26px 32px 30px;
-}
-.reader .storygrid.cols-3 > :nth-child(3n + 1),
-.reader .storygrid.cols-2 > :nth-child(2n + 1),
-.reader .storygrid.cols-1 > :nth-child(n) {
-  padding-left: var(--px);
-}
-.reader .storygrid.cols-3 > :nth-child(3n),
-.reader .storygrid.cols-2 > :nth-child(2n),
-.reader .storygrid.cols-1 > :nth-child(n) {
-  padding-right: var(--px);
-}
-.reader .storysec,
-.reader .storycell .storysec {
+.reader .storysec {
   font-family: var(--fd);
   font-size: 14px;
   font-weight: 700;
@@ -2947,22 +2450,6 @@
   text-decoration: underline;
   text-underline-offset: 4px;
 }
-.reader .storycell h3 {
-  font-family: var(--fd);
-  font-size: calc(23px * var(--reader-scale));
-  font-weight: 700;
-  line-height: 1.22;
-  letter-spacing: -0.5px;
-}
-.reader .storycell h3 a {
-  color: var(--ink);
-}
-.reader .storycell h3 a:hover {
-  text-decoration: underline;
-  text-decoration-thickness: 3px;
-  text-decoration-color: var(--yel);
-  text-underline-offset: 5px;
-}
 .reader .storymeta {
   margin-top: auto;
   padding-top: 14px;
@@ -2971,66 +2458,6 @@
 }
 
 
-/* ---------------------------------------------------------------------------
-   Around the region, beside Opinion.
-   --------------------------------------------------------------------------- */
-.reader .regionband {
-  display: grid;
-  grid-template-columns: 1.7fr 1fr;
-  gap: 1px;
-  background: var(--grid);
-  border-bottom: 3px solid var(--grid);
-}
-.reader .regioncol {
-  background: var(--bg);
-  padding: 30px var(--px);
-}
-.reader .regioncol .sectionhead h2 {
-  font-family: var(--fd);
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -0.8px;
-}
-.reader .regionlist {
-  list-style: none;
-  margin: 0 0 8px;
-  padding: 0;
-}
-.reader .regionlist > li {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px 0;
-  border-top: 1px solid var(--grid);
-}
-.reader .regionplace {
-  font-family: var(--fd);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: none;
-  color: var(--muted);
-}
-.reader .regionlist a {
-  font-family: var(--serif);
-  font-size: calc(20px * var(--reader-scale));
-  line-height: 1.35;
-  color: var(--ink);
-  text-decoration: underline;
-}
-.reader .regionlist a:hover {
-  text-decoration: underline;
-  text-decoration-thickness: 3px;
-  text-decoration-color: var(--yel);
-  text-underline-offset: 4px;
-}
-.reader .regionempty {
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--muted);
-  max-width: 46ch;
-  margin-bottom: 12px;
-}
 .reader .opinionpanel {
   background: var(--yel);
   color: var(--onacc);
@@ -3071,35 +2498,6 @@
 /* ---------------------------------------------------------------------------
    The river, and the back of the book.
    --------------------------------------------------------------------------- */
-.reader .river {
-  padding: 30px var(--px) 40px;
-  border-top: 0;
-}
-.reader .river .sectionhead h2 {
-  font-family: var(--fd);
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -0.8px;
-}
-.reader .river .newsrow {
-  border-top: 1px solid var(--grid);
-}
-/* The front page's rows have no date gutter (unit BX): the date is printed once,
-   in the meta line under the headline, so the row's first track goes with the
-   box. Below 760px the box is hidden for every row anyway and the media query
-   there sets the two-track row this rule is spelling out, which is why this is
-   stated for the widths above it. */
-@media (min-width: 761px) {
-  .reader .river .newsrow.nodate {
-    grid-template-columns: minmax(0, 1fr) 35px;
-  }
-}
-.reader .river .newsrow h3 {
-  font-family: var(--fd);
-  font-size: calc(21px * var(--reader-scale));
-  font-weight: 700;
-  letter-spacing: -0.35px;
-}
 .reader .backmatter {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3609,15 +3007,11 @@
   border-bottom: 1px solid var(--grid);
 }
 /*
-  The grid is sized to the stories it was handed (`cols-N`, the front page's
-  own vocabulary -- `StoryGrid` in src/components/paper/story-grid.tsx), and
-  not to the three columns this band once always drew. The ruled ground is the
-  container's `background: var(--grid)` showing through the 1px gaps, so an
-  unfilled track printed the ground itself: a solid block of rule colour where
-  a third story would have been, and the whole band a black box with no
-  related stories at all. A track that no story fills cannot be painted, so the
-  fix is to stop creating one: one related story prints one across, two print
-  two across, three print the front page's 3-up.
+  The keep-reading grid is sized to the related stories it was handed
+  (`cols-N`): one story prints one across, two print two across, three print
+  three. The ruled ground is the container's background showing through the
+  1px gaps, so creating an unfilled track would paint a solid block of rule
+  colour where no story exists.
 */
 .reader .keepreadinggrid.cols-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3671,21 +3065,6 @@
   }
 }
 @media (max-width: 1024px) {
-  /* Three across becomes two -- and the edge cells change with the column
-     count, so the gutter padding is rewritten in the same breath. */
-  .reader .storygrid.cols-3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .reader .storygrid.cols-3 > :nth-child(3n + 1),
-  .reader .storygrid.cols-3 > :nth-child(3n) {
-    padding-inline: 32px;
-  }
-  .reader .storygrid.cols-3 > :nth-child(2n + 1) {
-    padding-left: var(--px);
-  }
-  .reader .storygrid.cols-3 > :nth-child(2n) {
-    padding-right: var(--px);
-  }
   /* Three across becomes two, and the edge cells change with the column count,
      so the gutter padding is rewritten in the same breath. Only `cols-3` is
      touched: `cols-2` and `cols-1` are already at or below two columns, and
@@ -3717,9 +3096,7 @@
      still wraps. Both lines have to be named.
 
      `:nth-child(3):last-child` is the exact condition: three cards, and the
-     third is the last. It cannot reach the front page's `.storygrid.cols-3`,
-     where `cols-3` is a column count and six stories wrap to three full rows --
-     no odd card, and this rule is not written on that class.
+     third is the last.
   */
   .reader .keepreadinggrid.cols-3 > :nth-child(3):last-child {
     grid-column: 1 / -1;
@@ -3727,13 +3104,6 @@
   }
 }
 @media (max-width: 900px) {
-  .reader .ledgerow,
-  .reader .regionband {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .reader .ledgerow > .datespanel {
-    padding-inline: var(--px);
-  }
   .reader .articlelayout {
     grid-template-columns: minmax(0, 1fr);
     gap: 30px;
@@ -3857,39 +3227,16 @@
   .reader .lead .dek {
     font-size: calc(18px * var(--reader-scale));
   }
-  .reader .ledgerow > .leadcolumn,
-  .reader .ledgerow > .datespanel {
-    padding: 24px var(--px) 26px;
-  }
   .reader .datespanel h2,
-  .reader .regioncol .sectionhead h2,
-  .reader .river .sectionhead h2,
   .reader .opinionpanel h2,
   .reader .keepreading .sectionhead h2 {
     font-size: 24px;
-  }
-  /* One story per row on the smallest screens, and only the first four: a
-     single-column river of six would push everything after it off the page. */
-  .reader .storygrid,
-  .reader .storygrid.cols-3,
-  .reader .storygrid.cols-2 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .reader .storygrid > :nth-child(n) {
-    padding-inline: var(--px);
-  }
-  .reader .storygrid > :nth-child(n + 5) {
-    display: none;
-  }
-  .reader .storycell {
-    padding-block: 22px 24px;
   }
   /* One column, whatever count the grid was handed, so every cell is an edge
      cell on both sides and takes the page gutter on both sides. The class
      variants are named because the rules that set the edge padding above carry
      the class too, and a bare `.keepreadinggrid > :nth-child(n)` is one class
-     lighter and would lose to them (`storygrid` above still has this: its
-     phone rule is dead against the ≤1024 reset). */
+     lighter and would lose to them. */
   .reader .keepreadinggrid.cols-1,
   .reader .keepreadinggrid.cols-2,
   .reader .keepreadinggrid.cols-3 {
@@ -4940,4 +4287,837 @@
   .reader {
     --reading: calc(19px * var(--reader-scale));
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Bulletin front page: lead, numbered list, events band, latest + opinion.
+   These selectors are the second section of the redesign and intentionally
+   live after the older front-page rules so the new page shape wins without
+   disturbing the story page's DatesPanel.
+   --------------------------------------------------------------------------- */
+.reader .fronttop,
+.reader .frontlatestband {
+  margin-inline: calc(-1 * var(--px));
+}
+.reader .fronttop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 36px 48px;
+  padding: 32px var(--px) 40px;
+}
+.reader .fronttop-main {
+  display: flex;
+  flex: 999 1 520px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 28px;
+}
+.reader .frontlead {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+}
+.reader .frontkicker {
+  align-self: flex-start;
+  min-height: 18px;
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+}
+.reader a.frontkicker:hover {
+  color: var(--acctx);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .frontlead h2.leadhead {
+  max-width: none;
+  color: var(--ink);
+  font-size: calc(clamp(32px, 4.1vw, 54px) * var(--reader-scale));
+  font-weight: 800;
+  line-height: 1.03;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.reader .frontlead .dek {
+  max-width: 65ch;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: calc(clamp(18px, 1.65vw, 21px) * var(--reader-scale));
+  line-height: 1.45;
+  color: var(--ink2);
+  text-wrap: pretty;
+}
+.reader .frontlead .leadbottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  margin: 0;
+}
+.reader .frontlead .btn.primary {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 0 18px;
+  align-items: center;
+  border: 1px solid var(--acc);
+  border-radius: 6px;
+  background: var(--acc);
+  color: var(--onacc);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .frontlead .btn.small,
+.reader .frontlateststory .btn.small {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 0 12px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.reader .frontlead .btn.small svg,
+.reader .frontlateststory .btn.small svg {
+  width: 16px;
+  height: 16px;
+}
+.reader .frontmeta {
+  color: var(--ink2);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.reader .frontpair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 24px 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.reader .frontpairstory {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.reader .frontpairstory h3 {
+  margin: 0;
+  font-family: var(--fd);
+  font-size: calc(24px * var(--reader-scale));
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.reader .frontpairstory h3 a,
+.reader .frontlateststory h3 a,
+.reader .moretop h3 a {
+  color: var(--ink);
+}
+.reader .frontpairstory h3 a:hover,
+.reader .frontlateststory h3 a:hover,
+.reader .moretop h3 a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.reader .frontpairstory p {
+  margin: 0;
+  color: var(--ink2);
+  font-family: var(--serif);
+  font-size: calc(17px * var(--reader-scale));
+  line-height: 1.45;
+}
+.reader .frontpairstory .frontmeta {
+  font-size: 14px;
+}
+.reader .moretop {
+  display: flex;
+  flex: 1 1 300px;
+  min-width: 0;
+  flex-direction: column;
+}
+.reader .moretop > h2 {
+  margin: 0 0 4px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--rule);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.reader .moretop ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reader .moretop li {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.reader .moretop-number {
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1;
+}
+.reader .moretop .storysec {
+  min-height: 17px;
+  margin: 0 0 6px;
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: none;
+}
+.reader .moretop h3 {
+  margin: 0 0 6px;
+  font-family: var(--fd);
+  font-size: calc(19px * var(--reader-scale));
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.reader .moretop .storymeta {
+  margin: 0;
+  padding: 0;
+  color: var(--ink2);
+  font-size: 14px;
+}
+
+/* The events band is a light, full-width calendar page with a white card. */
+.reader .eventweek {
+  margin-top: 0;
+  padding: 32px var(--px) 36px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--band);
+  color: var(--ink);
+}
+.reader .eventweek-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 40px;
+}
+.reader .eventweek-side {
+  display: flex;
+  flex: 1 1 220px;
+  max-width: 300px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+.reader .eventweek-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0 8px;
+  flex-wrap: wrap;
+  color: var(--acctx);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+.reader .eventweek-chip {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.reader .eventweek-kicker .eventweek-meta::before {
+  content: "·";
+  margin-right: 8px;
+}
+.reader .eventweek-meta {
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.reader .eventweek h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: calc(clamp(26px, 2.5vw, 32px) * var(--reader-scale));
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.reader .eventweek-intro {
+  margin: 0;
+  color: var(--ink2);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.reader .eventweek-roundups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.reader .eventweek-roundups h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+.reader .eventweek-roundup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--ctl);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  text-decoration: none;
+}
+.reader .eventweek-roundup strong {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .eventweek-roundup span {
+  color: var(--ink2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.reader .eventweek-roundup:hover strong {
+  text-decoration-thickness: 2px;
+}
+.reader .eventweek-main {
+  display: flex;
+  flex: 999 1 520px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+.reader .eventweek-strip {
+  display: grid;
+  grid-auto-columns: minmax(84px, 1fr);
+  grid-auto-flow: column;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  border: 0;
+  overscroll-behavior-inline: contain;
+}
+.reader .eventweek-daybutton {
+  display: flex;
+  min-height: 64px;
+  min-width: 0;
+  padding: 8px 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid var(--ctl);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+.reader .eventweek-daybutton:last-child {
+  border-right: 1px solid var(--ctl);
+}
+.reader .eventweek-daybutton:hover {
+  outline: 2px solid var(--acctx);
+  outline-offset: 1px;
+}
+.reader .eventweek-daybutton.on {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--onacc);
+}
+.reader .eventweek-dow {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.reader .eventweek-count {
+  color: var(--ink2);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.reader .eventweek-daybutton.on .eventweek-count {
+  color: var(--onacc);
+}
+.reader .eventweek-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.reader .eventweek-grid {
+  display: block;
+  min-width: 0;
+}
+.reader .eventweek-col {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.reader .eventweek-col:last-child {
+  border-bottom: 0;
+}
+.reader .eventweek-col h3 {
+  margin: 0;
+  padding: 12px 18px 4px;
+  border: 0;
+  color: var(--ink2);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+}
+.reader .eventweek-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reader .eventweek-event {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) minmax(200px, 0.7fr);
+  column-gap: 16px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 8px 18px;
+  border: 0;
+}
+.reader .eventweek-time,
+.reader .eventweek-title,
+.reader .eventweek-description,
+.reader .eventweek-source,
+.reader .eventweek-place {
+  display: block;
+  min-width: 0;
+}
+.reader .eventweek-time {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--acctx);
+  font-family: var(--fd);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.reader .eventweek-title {
+  grid-column: 2;
+  grid-row: 1;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.reader a.eventweek-title {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.reader a.eventweek-title:hover {
+  color: var(--ink);
+  text-decoration-thickness: 2px;
+}
+.reader .eventweek-place {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--ink2);
+  font-family: var(--fd);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.reader .eventweek-description {
+  grid-column: 2 / 4;
+  grid-row: 2;
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink2);
+  font-family: var(--serif);
+  font-size: 14px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.reader .eventweek-source {
+  grid-column: 2 / 4;
+  grid-row: 3;
+  margin: 2px 0 0;
+  color: var(--ink2);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.reader .eventweek-more {
+  display: inline-flex;
+  min-height: 44px;
+  margin: 2px 0 4px 130px;
+  padding: 0;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink2);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .eventweek-foot {
+  display: flex;
+  padding: 12px 18px;
+}
+.reader .eventweek-all {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 0 14px;
+  align-items: center;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.reader .eventweek-foot a.eventweek-all {
+  padding-inline: 0;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .eventweek-all:hover {
+  border-color: var(--acctx);
+  color: var(--ink);
+}
+.reader .eventweek-empty {
+  margin: 0;
+  padding: 18px;
+  color: var(--ink2);
+  font-family: var(--fd);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+/* Latest stories and the solid-opinion card. */
+.reader .frontlatestband {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px 48px;
+  padding: 40px var(--px) 48px;
+}
+.reader .frontlatest {
+  flex: 999 1 560px;
+  min-width: 0;
+}
+.reader .frontsectionhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--rule);
+}
+.reader .frontsectionhead h2 {
+  margin: 0;
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.reader .frontsectionhead .textlink {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .frontlatestgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 32px;
+}
+.reader .frontlateststory {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 20px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.reader .frontlateststory .frontkicker {
+  min-height: 17px;
+  font-size: 14px;
+}
+.reader .frontlateststory h3 {
+  margin: 0;
+  font-family: var(--fd);
+  font-size: calc(20px * var(--reader-scale));
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.reader .frontlateststory p {
+  margin: 0;
+  color: var(--ink2);
+  font-family: var(--serif);
+  font-size: calc(16px * var(--reader-scale));
+  line-height: 1.45;
+}
+.reader .frontlatestmeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  color: var(--ink2);
+  font-size: 14px;
+  line-height: 1.3;
+}
+.reader .frontlateststory .btn.small {
+  padding-inline: 4px;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .frontopinion {
+  flex: 1 1 300px;
+  align-self: flex-start;
+  max-width: 420px;
+  padding: 28px;
+  border-radius: 10px;
+  background: var(--acc);
+  color: var(--onacc);
+}
+.reader .frontopinion h2 {
+  margin: 0;
+  color: var(--onacc);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.reader .frontopinion h3 {
+  margin: 0;
+  color: var(--onacc);
+  font-family: var(--fd);
+  font-size: calc(clamp(25px, 2.4vw, 30px) * var(--reader-scale));
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+.reader .frontopinion h3 a,
+.reader .frontopinion p,
+.reader .frontopinion .textlink {
+  color: var(--onacc);
+}
+.reader .frontopinion h3 a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.reader .frontopinion p {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.45;
+}
+.reader .frontopinion .textlink {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .reader .fronttop-main,
+  .reader .moretop,
+  .reader .frontlatest,
+  .reader .frontopinion {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .reader .frontlatestband {
+    gap: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .reader .fronttop {
+    gap: 26px;
+    padding: 24px var(--px) 30px;
+  }
+  .reader .frontlead h2.leadhead {
+    font-size: calc(32px * var(--reader-scale));
+    letter-spacing: -0.03em;
+  }
+  .reader .frontlead .dek {
+    font-size: calc(18px * var(--reader-scale));
+  }
+  .reader .frontpair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .frontpairstory h3 {
+    font-size: calc(22px * var(--reader-scale));
+  }
+  .reader .moretop li {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+  .reader .moretop-number {
+    font-size: 28px;
+  }
+  .reader .eventweek {
+    padding: 24px var(--px) 28px;
+  }
+  .reader .eventweek-side {
+    max-width: none;
+  }
+  .reader .eventweek h2 {
+    font-size: calc(28px * var(--reader-scale));
+  }
+  .reader .eventweek-daybutton {
+    min-height: 64px;
+  }
+  .reader .eventweek-event {
+    grid-template-columns: 74px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+  .reader .eventweek-time {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+  }
+  .reader .eventweek-title,
+  .reader .eventweek-description,
+  .reader .eventweek-source,
+  .reader .eventweek-place {
+    grid-column: 2;
+  }
+  .reader .eventweek-title {
+    grid-row: 1;
+  }
+  .reader .eventweek-place {
+    grid-row: 2;
+  }
+  .reader .eventweek-description {
+    grid-row: 3;
+  }
+  .reader .eventweek-source {
+    grid-row: 4;
+  }
+  .reader .eventweek-more {
+    margin-left: 18px;
+  }
+  .reader .frontlatestband {
+    padding: 30px var(--px) 36px;
+  }
+  .reader .frontlatestgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .frontopinion {
+    padding: 24px;
+  }
+}
+
+/* Front-page states: amber load error and the edition/area empty message. */
+.reader .reader-error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 24px 0 0;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--warnbg);
+  color: var(--warn);
+  font-size: 16px;
+  font-weight: 600;
+}
+.reader .reader-error .btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+}
+.reader .frontempty {
+  display: flex;
+  width: 100%;
+  max-width: 736px;
+  margin: 0 auto;
+  padding: 80px var(--px) 96px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+}
+.reader .frontempty h2 {
+  margin: 0;
+  font-family: var(--fd);
+  font-size: clamp(30px, 3.6vw, 44px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.reader .frontempty p {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--ink2);
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.45;
+}
+.reader .frontempty .btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
 }

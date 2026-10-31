@@ -2,7 +2,6 @@ import { getSql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
 import {
-  addDays,
   collectStoryDates,
   routineLineParts,
   type StoryDateItem,
@@ -11,56 +10,13 @@ import {
 import type { ProvenanceItem } from "./findings.ts";
 
 /**
- * The two dated-item reads. See `story-dates.ts` for what a dated item is and
- * why only published stories are read; this file is the database side.
- *
- * Both panels read the same thing -- a printed story's `provenance_json` and
- * its own printed words (unit BX2) -- so there is one query and two windows
- * over it: the front page asks for the next seven days, the article page asks
- * for everything the one story carries.
+ * The dated-item read behind the article page's "Dates in this story" panel.
+ * See `story-dates.ts` for what a dated item is and why only published stories
+ * are read; this file is the database side.
  */
 
-/**
- * How many of the newest printed stories the panels read through.
- *
- * "This week" has no story to hang off, so it has to sweep the paper, and a
- * sweep with no bound is a full table read on every front-page load. Sixty is
- * several weeks of this paper's output, which is far more than a week of dated
- * items can be hiding behind; a paper that prints faster than that would want
- * the window pushed into SQL rather than this number raised.
- */
-const SOURCE_LIMIT = 60;
-/** How many days ahead the front page's panel looks, on the paper's own calendar. */
-export const WEEK_DAYS = 7;
 /** How many rows the article page's "Dates in this story" panel prints before it stops. */
 const ROW_LIMIT = 12;
-/**
- * How many rows the front page's "This week" panel prints before it stops.
- *
- * Unit BZ, item 7 (owner review, 2026-09-27): at 1790px "This week" ran to ten
- * rows beside a lead column that is four fields tall (tag, headline, dek,
- * date -- `.reader .ledgerow > .lead`), leaving roughly 430px of blank paper
- * under the lead. The drawing caps the panel at six
- * (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:43`,
- * `hint-placeholder-count="6"` over `week`, and `week` there is a fixed
- * six-item array) with a "Full calendar →" link under it. The count is taken
- * from the drawing; the link is not -- `DatesPanel`'s own doc says why: the
- * drawing's link is a bare `href="#"` to a calendar screen this paper does not
- * have (Unit BD ruling), and inventing one to fill the space would be scope
- * this fix was not asked for. Six is still the fewer of the two: a panel that
- * prints fewer than it is given is honest, and it is what balances the lead
- * column at both 1790 and 1440px (measured, `reports/CL-front-page-0681.md`).
- *
- * Unit CN, item 1(a) (owner review, 2026-09-27): six rows was still 214px too
- * many at 1790px. Five is what the owner asked to try, and five is the count
- * that leaves the panel within 40px of the lead column at 1790 and 1440 once
- * the lead carries its own rows under the button (item 1(b), `ALSO_ROWS` in
- * `routes/index.tsx`) -- measured, `reports/CN-front-gap-and-clause.md`. The
- * drawing's six is a placeholder count in a drawing whose lead column also
- * carries no such rows; the panel's job is to say what is dated this week, and
- * five rows say it.
- */
-const FRONT_WEEK_LIMIT = 5;
 
 /** The paper's own calendar day for an instant -- the day a reader is living in. */
 function localDay(timezone: string, now: Date): string {
@@ -139,7 +95,7 @@ async function routineLines(slug: string): Promise<NonNullable<StoryDateSource["
   });
 }
 
-async function readSources(slug: string | null): Promise<{
+async function readSources(slug: string): Promise<{
   sources: StoryDateSource[];
   today: string;
 }> {
@@ -156,17 +112,11 @@ async function readSources(slug: string | null): Promise<{
     paper's timezone, so a story filed at 11 p.m. Denver time is read on the day
     its readers were living in.
   */
-  const rows =
-    slug === null
-      ? await sql<SourceRow>`
-          select slug, topic, headline, dek, published_at, provenance_json from articles
-          where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
-          order by published_at desc, id desc limit ${SOURCE_LIMIT}`
-      : await sql<SourceRow>`
-          select slug, topic, headline, dek, published_at, provenance_json from articles
-          where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published' and slug=${slug}
-          limit 1`;
-  const lines = slug === null || !rows[0] ? [] : await routineLines(rows[0].slug);
+  const rows = await sql<SourceRow>`
+    select slug, topic, headline, dek, published_at, provenance_json from articles
+    where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published' and slug=${slug}
+    limit 1`;
+  const lines = !rows[0] ? [] : await routineLines(rows[0].slug);
   return {
     today,
     sources: rows.map((row) => ({
@@ -183,57 +133,6 @@ async function readSources(slug: string | null): Promise<{
       })),
     })),
   };
-}
-
-/**
- * "This week" on the front page: the dated records printed stories carry for
- * the next seven days, oldest first.
- *
- * Usually empty, and that is the honest reading rather than a failure: most
- * stories carry records that bear a past date, and the ones that bear a future
- * one are the agendas, notices and filings captured ahead of the meeting they
- * describe. The panel says so in its own words instead of printing a calendar
- * this schema does not have.
- */
-export async function listThisWeekDates(): Promise<StoryDateItem[]> {
-  const { sources, today } = await readSources(null);
-  if (!today) return [];
-  return collectStoryDates(sources, { from: today, days: WEEK_DAYS, limit: FRONT_WEEK_LIMIT });
-}
-
-/**
- * "This week" on the front page: the paper's newest printed stories, one row
- * each, newest first. The box is for the reader who has not seen the new
- * stories yet, so it lists the stories themselves rather than the dates in them.
- *
- * Published in the last seven days on the paper's own calendar, leaving out
- * the story the front page leads with (`skipSlug`). When none of the paper's
- * stories is that recent, the box prints the newest ones anyway rather than
- * nothing, and `withinWeek` comes back false so the caller titles the panel for
- * what it holds. A row is its story's headline and the day the story was published.
- */
-export async function listNewestStories(
-  skipSlug: string,
-): Promise<{ stories: StoryDateItem[]; withinWeek: boolean }> {
-  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return { stories: [], withinWeek: false };
-  const config = await getPaperConfig(DEFAULT_NEWSROOM_ID);
-  const today = localDay(config.timezone, new Date());
-  const from = addDays(today, -(WEEK_DAYS - 1));
-  const sql = await getSql();
-  const rows = await sql<{ slug: string; headline: string | null; published_at: string }>`
-    select slug, headline, published_at from articles
-    where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
-    order by published_at desc, id desc limit ${SOURCE_LIMIT}`;
-  const stories: StoryDateItem[] = rows
-    .filter((row) => row.slug !== skipSlug && (row.headline ?? "").trim() !== "")
-    .map((row) => ({
-      date: localDay(config.timezone, new Date(row.published_at)),
-      what: row.headline ?? "",
-      slug: row.slug,
-    }));
-  const recent = stories.filter((story) => story.date >= from && story.date <= today);
-  const withinWeek = recent.length > 0;
-  return { stories: (withinWeek ? recent : stories).slice(0, FRONT_WEEK_LIMIT), withinWeek };
 }
 
 /**
