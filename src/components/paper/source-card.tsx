@@ -35,17 +35,22 @@ export function SourceCard({
   captured?: string;
   actions: ReactNode;
 }) {
-  const line = [host, documentDate].filter(Boolean).join(" · ");
+  const details = [documentDate, captured ? `Captured ${captured}` : ""]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="sourcecard-new">
-      <span className="sourcerole">{role}</span>
-      <b>{title}</b>
-      {line || captured ? (
-        <span className="sourcehost">
-          {line}
-          {captured ? `${line ? " · " : ""}Captured ${captured}` : ""}
-        </span>
-      ) : null}
+      <span className="sourcerole">
+        <b>{role}</b>
+        {host ? (
+          <>
+            <span aria-hidden> · </span>
+            <span className="sourceorg">{host}</span>
+          </>
+        ) : null}
+      </span>
+      <b className="sourcecardtitle">{title}</b>
+      {details ? <span className="sourcehost">{details}</span> : null}
       <div className="sourceactionrow">{actions}</div>
     </div>
   );

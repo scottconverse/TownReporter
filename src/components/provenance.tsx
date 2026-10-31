@@ -82,7 +82,7 @@ export function ProvenanceBlock({
               actions={
                 <>
                   {item.disappeared ? (
-                    <p className="sourcecardnote">
+                    <p className="sourcecardnote sourcecardnote-warn">
                       Original source no longer available
                       {item.captured_at
                         ? ` — captured by TownReporter on ${formatShortDate(item.captured_at)}`
@@ -97,17 +97,17 @@ export function ProvenanceBlock({
                       "Current source" pointing at nothing would be worse than
                       saying so.
                     */
-                    <p className="sourcecardnote">
+                    <p className="sourcecardnote sourcecardnote-warn">
                       Named in the report we worked from — there is no page to open for this one.
                     </p>
                   ) : null}
                   {item.url && !item.disappeared && !linkRemoved ? (
                     <a href={item.url} className="sourcelink" target="_blank" rel="noreferrer">
-                      Current source
+                      Current source ↗
                     </a>
                   ) : null}
                   {item.url && !item.disappeared && linkRemoved ? (
-                    <p className="sourcecardnote break-all">
+                    <p className="sourcecardnote sourcecardnote-warn break-all">
                       Excerpt removed at the publisher’s request, and the link to the original with
                       it. The address is {item.url}.
                     </p>
