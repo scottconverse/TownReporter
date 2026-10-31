@@ -46,6 +46,66 @@ export function readerSourceKey(url: string): string {
   }
 }
 
+const GENERIC_SOURCE_TITLES = new Set(["portal", "home", "index", "untitled", "document"]);
+const ID_LIKE_TITLE = /^[A-Z]{1,4}\s?[A-Za-z0-9]{10,}$/i;
+const COMPACT_ID_TITLE = /^[A-Za-z0-9_-]{10,}$/;
+
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isJunkSourceTitle(title: string, url: string): boolean {
+  const text = title.trim().replace(/\s+/g, " ");
+  const letters = text.match(/[A-Za-z]/g)?.length ?? 0;
+  if (letters < 4) return true;
+  if (GENERIC_SOURCE_TITLES.has(text.toLowerCase())) return true;
+  if (/^https?:\/\//i.test(text)) return true;
+  if (text.toLowerCase().replace(/^www\./, "") === sourceHostname(url)) return true;
+  if (!/\d/.test(text)) return false;
+  return ID_LIKE_TITLE.test(text) || (!/\s/.test(text) && COMPACT_ID_TITLE.test(text));
+}
+
+/**
+ * The website and path a reader can recognize when a page did not supply a
+ * usable title. This is the last resort, not an editable desk label.
+ */
+export function readerSourceUrlLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    const segments = parsed.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      });
+    return segments.length ? `${hostname} / ${segments.join(" / ")}` : hostname;
+  } catch {
+    return url.trim() || "Source";
+  }
+}
+
+/**
+ * What a source card prints above its record details.
+ *
+ * A captured `<title>` is the best label when it is real. Form IDs, generic
+ * application-shell words and bare URLs are not titles; for those the reader
+ * gets the website plus the path instead. No desk-editable replacement label
+ * exists, so this stays a pure, testable display rule.
+ */
+export function readableSourceTitle(title: string, url: string): string {
+  const text = title.trim().replace(/\s+/g, " ");
+  return isJunkSourceTitle(text, url) ? readerSourceUrlLabel(url) : text;
+}
+
 /**
  * Records first, then the cited URLs they do not already name.
  *
@@ -64,22 +124,33 @@ export function readerProvenanceItems(
   recorded: readonly ProvenanceItem[],
   sources: readonly string[],
 ): ProvenanceItem[] {
-  const named = new Set(recorded.map((item) => readerSourceKey(item.url)).filter(Boolean));
-  return [
-    ...recorded,
-    ...sources
-      .filter((url) => !named.has(readerSourceKey(url)))
-      .map((url) => ({
-        title: url,
-        organization: "",
-        document_date: "",
-        url,
-        captured_at: null,
-        version_id: null,
-        version_count: null,
-        capture_event_id: null,
-        disappeared: false,
-        role: "source",
-      })),
-  ];
+  const seen = new Set<string>();
+  const items: ProvenanceItem[] = [];
+
+  for (const item of recorded) {
+    const key = item.url ? readerSourceKey(item.url) : "";
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    items.push(item);
+  }
+
+  for (const url of sources) {
+    const key = readerSourceKey(url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      title: readerSourceUrlLabel(url),
+      organization: "",
+      document_date: "",
+      url,
+      captured_at: null,
+      version_id: null,
+      version_count: null,
+      capture_event_id: null,
+      disappeared: false,
+      role: "source",
+    });
+  }
+
+  return items;
 }

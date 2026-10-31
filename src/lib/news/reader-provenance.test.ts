@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readerProvenanceItems, readerSourceKey } from "./reader-provenance.ts";
+import {
+  readableSourceTitle,
+  readerProvenanceItems,
+  readerSourceKey,
+} from "./reader-provenance.ts";
 import type { ProvenanceItem } from "./findings.ts";
 
 /*
@@ -88,6 +92,18 @@ describe("the reader's source list", () => {
     assert.equal(items[1]!.url, "https://records.example.test/agenda");
   });
 
+  it("prints a recorded source once when only its trailing slash differs", () => {
+    const items = readerProvenanceItems(
+      [
+        record({ title: "Board packet" }),
+        record({ url: "https://records.example.test/agenda/", title: "Duplicate record" }),
+      ],
+      [],
+    );
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.title, "Board packet");
+  });
+
   it("gives an address identity even when it cannot be parsed", () => {
     /*
       `readerSourceKey`, not `url-guard.ts`'s `sourceIdentity`. That one returns
@@ -99,5 +115,44 @@ describe("the reader's source list", () => {
       readerSourceKey("https://records.example.test/agenda/"),
       readerSourceKey("https://records.example.test/agenda"),
     );
+  });
+});
+
+describe("readable source-card titles", () => {
+  const url = "https://www.longmontcolorado.gov/council/agendas/";
+  const fallback = "longmontcolorado.gov / council / agendas";
+
+  it("keeps a captured page title when it is readable", () => {
+    assert.equal(
+      readableSourceTitle("City Council agendas and minutes", url),
+      "City Council agendas and minutes",
+    );
+  });
+
+  it("replaces the real bad titles with the website and page path", () => {
+    for (const title of [
+      "SV 9pEFkEi66KN71gG",
+      "Portal",
+      "Home",
+      "Index",
+      "Untitled",
+      "Document",
+      "",
+      "abc",
+      "1234",
+    ]) {
+      assert.equal(readableSourceTitle(title, url), fallback, `${JSON.stringify(title)} leaked to a card`);
+    }
+  });
+
+  it("treats a bare URL or hostname as no captured title", () => {
+    assert.equal(readableSourceTitle(url, url), fallback);
+    assert.equal(readableSourceTitle("www.longmontcolorado.gov", url), fallback);
+  });
+
+  it("gives a cited URL with no record card the same readable fallback", () => {
+    const items = readerProvenanceItems([], [url]);
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.title, fallback);
   });
 });

@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { SourceCard } from "@/components/paper/source-card";
 import { provenanceHost as hostOf, type ProvenanceItem } from "@/lib/news/findings";
+import { readableSourceTitle } from "@/lib/news/reader-provenance";
 
 
 /**
@@ -75,7 +76,7 @@ export function ProvenanceBlock({
             <SourceCard
               key={item.url || `${item.title}-${index}`}
               role={item.role && item.role !== "source" ? item.role.replace(/[-_]+/g, " ") : "Source"}
-              title={item.title}
+              title={readableSourceTitle(item.title, item.url)}
               host={hostOf(item)}
               {...(item.document_date ? { documentDate: item.document_date } : {})}
               {...(item.captured_at ? { captured: formatDateTime(item.captured_at) } : {})}
