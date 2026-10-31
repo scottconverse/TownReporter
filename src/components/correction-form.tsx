@@ -55,9 +55,13 @@ export function CorrectionForm({ article = "" }: { article?: string }) {
   };
   const url = correctionMailto(recipient, paper.name, draft);
   return (
-    <section className="correction-panel" id="file-correction">
+    <section
+      className="correction-panel"
+      id="file-correction"
+      aria-labelledby="file-correction-title"
+    >
       <span className="eyebrow">WRITE TO THE EDITOR</span>
-      <h2>File a correction</h2>
+      <h2 id="file-correction-title">File a correction</h2>
       <p>
         Something wrong in a story? Tell us what needs changing and, if you can, point us to the
         source.
@@ -70,42 +74,48 @@ export function CorrectionForm({ article = "" }: { article?: string }) {
           window.location.href = url;
         }}
       >
-        <label htmlFor="correction-article">
-          Story headline or link <span>(optional)</span>
-        </label>
-        <input
-          className="field"
-          id="correction-article"
-          value={draft.article}
-          onChange={(e) => update("article", e.target.value)}
-          maxLength={2000}
-          placeholder="Paste the story link or enter its headline"
-        />
-        <label htmlFor="correction-details">
-          What needs correcting? <span>(required)</span>
-        </label>
-        <textarea
-          className="field"
-          id="correction-details"
-          required
-          rows={5}
-          value={draft.details}
-          onChange={(e) => update("details", e.target.value)}
-          placeholder="Tell us what is wrong and what the correct information should be."
-        />
-        <label htmlFor="correction-evidence">
-          Supporting source or explanation <span>(optional)</span>
-        </label>
-        <textarea
-          className="field"
-          id="correction-evidence"
-          rows={3}
-          value={draft.evidence}
-          onChange={(e) => update("evidence", e.target.value)}
-          placeholder="A source link, document reference or a little more context."
-        />
+        <div className="correction-field">
+          <label htmlFor="correction-article">
+            Story headline or link <span>(optional)</span>
+          </label>
+          <input
+            className="field"
+            id="correction-article"
+            value={draft.article}
+            onChange={(e) => update("article", e.target.value)}
+            maxLength={2000}
+            placeholder="Paste the story link or enter its headline"
+          />
+        </div>
+        <div className="correction-field">
+          <label htmlFor="correction-details">
+            What needs correcting? <span>(required)</span>
+          </label>
+          <textarea
+            className="field"
+            id="correction-details"
+            required
+            rows={5}
+            value={draft.details}
+            onChange={(e) => update("details", e.target.value)}
+            placeholder="Tell us what is wrong and what the correct information should be."
+          />
+        </div>
+        <div className="correction-field">
+          <label htmlFor="correction-evidence">
+            Supporting source or explanation <span>(optional)</span>
+          </label>
+          <textarea
+            className="field"
+            id="correction-evidence"
+            rows={3}
+            value={draft.evidence}
+            onChange={(e) => update("evidence", e.target.value)}
+            placeholder="A source link, document reference or a little more context."
+          />
+        </div>
         <div className="correction-contact">
-          <div>
+          <div className="correction-field">
             <label htmlFor="correction-name">
               Your name <span>(optional)</span>
             </label>
@@ -117,7 +127,7 @@ export function CorrectionForm({ article = "" }: { article?: string }) {
               onChange={(e) => update("name", e.target.value)}
             />
           </div>
-          <div>
+          <div className="correction-field">
             <label htmlFor="correction-email">
               Reply email <span>(optional)</span>
             </label>
@@ -137,11 +147,13 @@ export function CorrectionForm({ article = "" }: { article?: string }) {
           This opens a prepared message in your email app. Review it and press Send there. If an
           email app is not configured, you can copy your text and email the editor directly.
         </p>
-        <button type="submit" className="btn primary" disabled={!ready}>
-          Open correction email <ArrowRight aria-hidden />
-        </button>
+        <div className="correction-submit">
+          <button type="submit" className="btn primary" disabled={!ready}>
+            Open correction email <ArrowRight aria-hidden />
+          </button>
+        </div>
         {opened && (
-          <p className="form-help" role="status">
+          <p className="form-help correction-note" role="status">
             Finish sending in your email app. This page has not sent your correction.{" "}
             <a href={url}>Open the prepared email again</a>. Your text remains in the form.
           </p>

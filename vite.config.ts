@@ -284,6 +284,10 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  // Nitro builds the server graph separately from Vite's SSR external list.
+  // Keep the server-only native ML package external there too, so installation
+  // supplies it at runtime instead of Rolldown trying to resolve it into the bundle.
+  build: { rolldownOptions: { external: ["@huggingface/transformers"] } },
   // @napi-rs/canvas loads a platform-specific .node binding through its JS
   // loader. Leave that package external to Vite's SSR graph so Nitro/runtime
   // can retain the installed native package instead of parsing the binary as

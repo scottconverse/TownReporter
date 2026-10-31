@@ -192,7 +192,7 @@ function Home() {
         </div>
       ) : null}
       {listing ? (
-        <div className="listing">
+        <div className="listing bulletin-listing">
           <div className="pagehead">
             <span className="eyebrow">
               {search.view === "saved"
@@ -212,6 +212,7 @@ function Home() {
           </div>
           <form
             className="searchform"
+            role="search"
             onSubmit={(event) => {
               event.preventDefault();
               nav({ q: q.trim() || undefined, view: search.view ?? "archive" });
@@ -226,7 +227,7 @@ function Home() {
               onChange={(event) => setQ(event.target.value)}
               placeholder="Search stories, names or places"
             />
-            <button className="btn primary" type="submit">
+            <button className="btn primary searchsubmit" type="submit">
               <Search aria-hidden />
               Search
             </button>
@@ -270,9 +271,11 @@ function Home() {
               </label>
             </div>
           </div>
-          {stories.map((story) => (
-            <ReaderRow key={story.id} story={story} />
-          ))}
+          <div className="listingrows">
+            {stories.map((story) => (
+              <ReaderRow key={story.id} story={story} archive />
+            ))}
+          </div>
           {!stories.length && !query.isFetching && !query.isError && (
             <div className="empty">
               <h2>
@@ -285,18 +288,21 @@ function Home() {
                   ? "Tap the bookmark beside a story to save it here. Previously saved stories may no longer be published."
                   : "Try another search or explore a different section."}
               </p>
-              <Link className="btn" to="/" search={{}}>
-                Front page
-              </Link>{" "}
-              <Link className="btn" to="/" search={{ view: search.view ?? "archive" }}>
-                Clear filters
-              </Link>
+              <div className="empty-actions">
+                <Link className="btn" to="/" search={{}}>
+                  Front page
+                </Link>{" "}
+                <Link className="btn" to="/" search={{ view: search.view ?? "archive" }}>
+                  Clear filters
+                </Link>
+              </div>
             </div>
           )}
           {data.total > data.pageSize && (
             <nav className="pagination" aria-label="Archive pages">
               <button
-                className="btn"
+                className="btn previous"
+                type="button"
                 disabled={(search.page ?? 1) <= 1 || query.isFetching}
                 onClick={() => nav({ page: (search.page ?? 1) - 1 })}
               >
@@ -306,11 +312,12 @@ function Home() {
                 Page {search.page ?? 1} of {Math.ceil(data.total / data.pageSize)}
               </span>
               <button
-                className="btn"
+                className="btn next"
+                type="button"
                 disabled={(search.page ?? 1) * data.pageSize >= data.total || query.isFetching}
                 onClick={() => nav({ page: (search.page ?? 1) + 1 })}
               >
-                Next <ArrowRight aria-hidden />
+                Next →
               </button>
             </nav>
           )}
