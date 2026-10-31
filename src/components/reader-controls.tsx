@@ -18,8 +18,8 @@ import { readReaderMode, readStoredReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
 
 const READER_TEXT_SIZES = [
-  { size: 21, label: "Normal" },
-  { size: 25, label: "Large" },
+  { size: 19, label: "Normal" },
+  { size: 23, label: "Large" },
 ] as const;
 
 export function ReaderProvider({ children }: { children: ReactNode }) {
@@ -131,7 +131,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     // and these are counts of presses, so a press must count once. Fire only on
     // a real change -- re-pressing the button already selected is not a choice.
     if (value.dark === true && current.dark !== true) sendTrustEvent("dark-mode-chosen");
-    if (typeof value.size === "number" && value.size > 21 && value.size !== current.size) {
+    if (typeof value.size === "number" && value.size > 19 && value.size !== current.size) {
       sendTrustEvent("larger-text-chosen");
     }
   }
@@ -139,7 +139,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     <ReaderContext.Provider value={{ ...renderedPrefs, ready, update, notify: setMessage }}>
       <div
         className={`reader${renderedPrefs.dark ? " mode-dark" : ""}`}
-        style={{ "--reader-scale": renderedPrefs.size === 25 ? "1.2" : "1" } as CSSProperties}
+        style={{ "--reader-scale": renderedPrefs.size === 23 ? "1.2" : "1" } as CSSProperties}
       >
         {children}
         {message && (
@@ -185,7 +185,7 @@ export function ReaderDialog({
     </NativeDialog>
   );
 }
-export function ReadingButton({ label = false }: { label?: boolean }) {
+export function ReadingButton({ label = false, short = false }: { label?: boolean; short?: boolean }) {
   const [open, setOpen] = useState(false);
   const r = useReader();
   return (
@@ -196,7 +196,9 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
         onClick={() => setOpen(true)}
         aria-label="Reading preferences"
       >
-        {label ? (
+        {short ? (
+          "Aa"
+        ) : label ? (
           <>
             Aa <span>Text size</span>
           </>
@@ -377,9 +379,11 @@ export function ReaderRow({
 export function CopyButton({
   text,
   children,
+  primary = false,
 }: {
   text: string | (() => string);
   children: ReactNode;
+  primary?: boolean;
 }) {
   const r = useReader();
   const [fallback, setFallback] = useState<string | null>(null);
@@ -387,7 +391,7 @@ export function CopyButton({
     <>
       <button
         type="button"
-        className="btn"
+        className={primary ? "btn primary" : "btn"}
         onClick={async () => {
           const value = typeof text === "function" ? text() : text;
           try {
@@ -433,7 +437,7 @@ export function ShareStory({ slug, headline }: { slug: string; headline: string 
       {open && (
         <ReaderDialog title="Share this story" close={() => setOpen(false)}>
           <p>{headline}</p>
-          <CopyButton text={url}>
+          <CopyButton text={url} primary>
             Copy story link <ArrowRight aria-hidden />
           </CopyButton>
         </ReaderDialog>

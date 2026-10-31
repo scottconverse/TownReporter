@@ -53,7 +53,7 @@ test("reader text-size preferences normalize the saved choices", () => {
     value: unknown,
   ) => number;
   assert.deepEqual(
-    [18, 21, 25, 0, -1, "25", null, undefined, 99].map(normalizeReaderSize),
-    [21, 21, 25, 21, 21, 21, 21, 21, 21],
+    [18, 19, 21, 23, 25, 0, -1, "25", null, undefined, 99].map(normalizeReaderSize),
+    [19, 19, 19, 23, 23, 19, 19, 19, 19, 19, 19],
   );
 });

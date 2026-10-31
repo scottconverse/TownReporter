@@ -20,6 +20,30 @@ Project Authors (<https://github.com/googlefonts/literata>). The complete
 license text is included at
 [`licenses/fonts/Literata-OFL.txt`](licenses/fonts/Literata-OFL.txt).
 
+## Schibsted Grotesk webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Schibsted
+Grotesk, in the 400/600/700/800/900 weights the Bulletin design uses for the
+reader's headlines and interface. Schibsted Grotesk is licensed under the SIL
+Open Font License 1.1. The complete license text is included at
+[`licenses/fonts/schibsted-grotesk-OFL.txt`](licenses/fonts/schibsted-grotesk-OFL.txt).
+
+## Source Serif 4 webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Source Serif 4,
+in the 400/600 roman and 400 italic cuts the Bulletin design uses for deks and
+story text. Source Serif 4 is licensed under the SIL Open Font License 1.1.
+The complete license text is included at
+[`licenses/fonts/source-serif-4-OFL.txt`](licenses/fonts/source-serif-4-OFL.txt).
+
+## JetBrains Mono webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of JetBrains Mono in
+the 400 weight the Bulletin design uses for the SHA-256 fingerprint. JetBrains
+Mono is licensed under the SIL Open Font License 1.1. The complete license text
+is included at
+[`licenses/fonts/jetbrains-mono-OFL.txt`](licenses/fonts/jetbrains-mono-OFL.txt).
+
 ## @earendil-works/pi-ai 0.82.1
 
 `@earendil-works/pi-ai` version `0.82.1` is still listed in `package.json` and

@@ -567,7 +567,7 @@ async function findReaderKey(page) {
   if (existing) return existing;
   const identity = await page.evaluate(() => ({
     name: (document.querySelector("header .brand")?.textContent || "").trim(),
-    city: (document.querySelector("header .locality")?.textContent || "").trim(),
+    city: (document.querySelector("header .town")?.textContent || "").trim(),
   }));
   if (!identity.name || !identity.city) return null;
   return `${READER_KEY_PREFIX}${encodeURIComponent(identity.name)}:${encodeURIComponent(identity.city)}`;
@@ -624,8 +624,8 @@ try {
       panel.appearance = appearance;
       panel.readerModeClass = measured.readerModeClass;
       /*
-        `data-appearance` is only ever stamped `reader-dark` / `desk-dark`; the
-        light theme is the attribute's absence, so "light was applied" is
+        `data-appearance` is stamped `reader-dark` / `reader-light` on the paper and
+        `desk-dark` / `light` on the desk, so "light was applied" is
         "dark was not". Asserted both ways so a dark run that stayed light
         cannot pass as a light one.
       */

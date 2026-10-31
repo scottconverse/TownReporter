@@ -43,7 +43,7 @@ export type DeskTextSize = "normal" | "large";
 export type ReaderMode = "light" | "dark";
 
 /** What the document is currently painted as. `light` is the shipped default. */
-export type AppearanceSurface = "desk-dark" | "reader-dark" | "light";
+export type AppearanceSurface = "desk-dark" | "reader-dark" | "reader-light" | "light";
 
 export type Appearance = {
   /** Desk light/dark, from the header toggle. */
@@ -70,27 +70,18 @@ export const DESK_SIZE_ATTR = "data-desk-size";
 /** Static baseline; an unset reader appearance is resolved from system preference in-browser. */
 export const DEFAULT_APPEARANCE: Appearance = { desk: "dark", size: "normal", reader: "light" };
 
-/** The dark page color, for both surfaces: the desk's `.desk-ltr.astra.night`
-    `--bg` / `:root[data-appearance="desk-dark"]` and the paper's
-    `.reader.mode-dark` `--bg` (desk-astra.css, reader-astra.css, styles.css).
-    Used by the head script to keep the browser's own `theme-color` in step, so
-    a phone's address bar does not stay white over a dark page. There is no
-    custom property holding it -- the value is written out at each site, and
-    src/lib/appearance.test.ts fails if one of them moves away from this
-    constant.
-
-    Until the redesign this was two constants, #182024 for the desk and #142428
-    for the paper. The tokens have one dark -- `--dd: #0f0e0c` is the darkest
-    step and `#1b1916` is the ground every dark panel sits on -- because an
-    editor switching the desk to Dark and then opening the paper should not be
-    looking at two different newspapers. */
+/** The desk's dark page color, matching `.desk-ltr.astra.night` `--bg` and
+    `:root[data-appearance="desk-dark"]` (desk-astra.css, styles.css). Used by
+    the head script to keep the browser's own `theme-color` in step, so a
+    phone's address bar does not stay white over a dark page. The reader has
+    its own Bulletin night below; the desk keeps its unchanged warm black. */
 export const DESK_NIGHT_BG = "#1b1916";
-/** The paper's dark page color. The same warm black as the desk's, and the
-    same value on `:root[data-appearance="reader-dark"] .reader`
-    (reader-astra.css). Kept as its own name because `surfaceBackground` and
-    the head script still have to answer per surface. */
-export const READER_DARK_BG = "#1b1916";
-/** The shipped light page color, matching `--color-paper` (styles.css). */
+/** The Bulletin reader's dark ground, matching `--bg` on `.reader.mode-dark`
+    and `:root[data-appearance="reader-dark"] .reader` (reader-astra.css). */
+export const READER_DARK_BG = "#0f141c";
+/** The Bulletin reader's white page ground. */
+export const READER_LIGHT_BG = "#ffffff";
+/** The desk's shipped light page color, matching `--color-paper` (styles.css). */
 export const LIGHT_BG = "#fffdf7";
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -121,12 +112,13 @@ export function appearanceSurface(
   pathname: string,
 ): AppearanceSurface {
   if (isDeskPath(pathname)) return desk === "dark" ? "desk-dark" : "light";
-  return reader === "dark" ? "reader-dark" : "light";
+  return reader === "dark" ? "reader-dark" : "reader-light";
 }
 
 export function surfaceBackground(surface: AppearanceSurface): string {
   if (surface === "desk-dark") return DESK_NIGHT_BG;
   if (surface === "reader-dark") return READER_DARK_BG;
+  if (surface === "reader-light") return READER_LIGHT_BG;
   return LIGHT_BG;
 }
 
@@ -245,7 +237,7 @@ export function appearanceHeadScript(readerKey: string): string {
     "if(s!=='large'&&s!=='normal')s='normal';" +
     "var desk=/^\\/desk(\\/|$)/.test(location.pathname);" +
     "var dark=desk?m==='dark':r==='dark';" +
-    "var surface=dark?(desk?'desk-dark':'reader-dark'):'light';" +
+    "var surface=desk?(dark?'desk-dark':'light'):(dark?'reader-dark':'reader-light');" +
     "d.setAttribute('" +
     APPEARANCE_ATTR +
     "',surface);" +
@@ -257,9 +249,11 @@ export function appearanceHeadScript(readerKey: string): string {
     DESK_NIGHT_BG +
     "':'" +
     READER_DARK_BG +
-    "'):'" +
+    "'):(desk?'" +
     LIGHT_BG +
-    "');" +
+    "':'" +
+    READER_LIGHT_BG +
+    "'));" +
     "}catch(e){}})();"
   );
 }

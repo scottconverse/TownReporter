@@ -454,11 +454,11 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
     `TownReporter` / `Longmont`) sitting over the dateline (`:15`) -- and the
     tagline became footer body copy in the shipped product
     (`src/components/paper-chrome.tsx`, the `<p>A clearer view of ...`). So the
-    step waits on the shipped masthead hook instead, `.mast .brand`, which
+    step waits on the shipped masthead hook instead, `.masthead .brand`, which
     carries the paper's own name. The `Latest stories` heading is unchanged and
     still the river's own `h2#latest-stories`.
   */
-  await page.locator(".mast .brand").waitFor({ timeout: 30_000 });
+  await page.locator(".masthead .brand").waitFor({ timeout: 30_000 });
   await page.getByRole("heading", { level: 2, name: "Latest stories" }).waitFor({ timeout: 30_000 });
   step("the front page renders its masthead and the Latest stories heading");
 

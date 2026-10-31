@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Bookmark, ExternalLink, Menu, Search } from "lucide-react";
+import { ArrowRight, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { usePaper } from "@/lib/paper-context-state";
 import { APP_VERSION } from "@/lib/version";
@@ -12,7 +12,7 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
-import { clearerViewSentence, datelineLine } from "@/lib/paper-phrases";
+import { clearerViewSentence } from "@/lib/paper-phrases";
 import {
   DarkModeButton,
   ReaderProvider,
@@ -24,27 +24,23 @@ import { NAV_ID, SectionNav } from "./section-nav";
 import { useReader } from "./reader-context";
 
 /**
- * The paper's three rows, in the order the handoff sets them
- * (`docs/design/handoff-2026-09-26/README.md`, "Front page"): the yellow
- * dateline bar, the masthead, the section nav.
+ * The Bulletin masthead: two rows shared by every reader page.
  *
- * `geography` is a slot rather than a prop because the front page's pill row
- * (`GeoPills`) is the only thing that fills it, and it belongs to the front
- * page's search -- the article page's masthead carries no pills, per its own
- * prototype. A masthead that imported the pills would have to import the
- * front page's search shape with them.
+ * Row one carries the wordmark, town and date, then search, saved stories,
+ * appearance, text size and the editor's desk. Row two carries the front
+ * page's geography, the fitted section links and (front page only) About the
+ * newsroom. Below `NAV_FIT_MIN_WIDTH` the section links become the in-flow
+ * "Explore the publication" menu.
  *
- * `compact` is the article page's header (`Article Daily.dc.html`): the same
- * dateline bar, then ONE row -- wordmark and town chip on the left, the section
- * links on the right -- with no pill row and no second nav row. Unit BD had the
- * article repeat the front page's two-row header; this is the prototype's
- * single row.
+ * `geography` remains a slot because the front page's pill row (`GeoPills`) is
+ * the only thing that fills it. `compact` remains accepted for route
+ * compatibility; the Bulletin uses the same shell on every public page.
  */
 export function Masthead({
   geography,
-  compact = false,
 }: {
   geography?: ReactNode;
+  /** Kept for route compatibility; the Bulletin uses the same shell everywhere. */
   compact?: boolean;
 }) {
   const paper = usePaper();
@@ -54,141 +50,64 @@ export function Masthead({
   const { formatDayStamp } = usePaperDateFormatters();
   const location = useRouterState({ select: (s) => s.location });
   const current = location.search as { topic?: string; q?: string; view?: string };
+  const frontPage = location.pathname === "/" && !current.topic && !current.q && !current.view;
   useEffect(() => setOpen(false), [location.href]);
-  /*
-    The section links. On the front page this is the nav row's own list and it
-    starts with "Front page"; the article prototype's header carries the
-    sections only, so in compact mode the wordmark and the story's breadcrumb
-    are the two ways home and the list is the sections alone.
-
-    The list itself -- how many of the 21 sections it prints, where it cuts
-    them, and the "More sections" button that carries the rest -- belongs to
-    `SectionNav`, because the fit is a measurement of the real links and not
-    something this component can know. Both rows use the same component, which
-    is the point: the article row and the front row are the same row in the
-    two prototypes.
-  */
   const sectionNav = (
     <SectionNav
       sections={sections.filter((s) => s.visible)}
       activeTopic={current.topic}
-      frontPageActive={
-        location.pathname === "/" && !current.topic && !current.q && !current.view
-      }
-      includeFrontPage={!compact}
+      frontPageActive={frontPage}
+      includeAbout={frontPage}
       menuOpen={open}
     />
   );
-  const mobileMenu = (
-    <button
-      className="mobilemenu"
-      type="button"
-      aria-expanded={open}
-      aria-controls={NAV_ID}
-      onClick={() => setOpen(!open)}
-    >
-      Explore the publication
-      <Menu aria-hidden />
-    </button>
-  );
   return (
-    <header>
+    <header className="masthead">
       <a className="skip" href="#paper">
         Skip to stories
       </a>
-      {/*
-        The dateline bar. It carries the paper's own day and the four
-        utilities that used to sit in the masthead; they moved up here because
-        the masthead is now the wordmark and the geography, which is what a
-        reader is looking at when they land.
-      */}
-      <div className="topbar">
-        <div className="wrap topbarin">
-          <span className="dateline" suppressHydrationWarning>
-            {/*
-              F5: a paper that has not named a town prints the day alone. The
-              literal "Today in {town} · ..." lived here, so an un-onboarded
-              install read "Today in  · Sat, Sept. 26" (a dangling "in" and a
-              doubled space) in the bar on every public page.
-            */}
-            {datelineLine(paper.city, formatDayStamp(new Date()))}
+      <div className="wrap mast-top">
+        <div className="identity">
+          <Link to="/" search={{}} className="brand" aria-label={`${paper.name} home`}>
+            {paper.name}
+          </Link>
+          {paper.city.trim() ? <span className="town">{paper.city}</span> : null}
+          <span className="datestamp" suppressHydrationWarning>
+            {formatDayStamp(new Date())}
           </span>
-          <div className="topactions">
-            <Link to="/" search={{ view: "archive" }} className="toplink">
-              <Search aria-hidden />
-              <span>Search</span>
-            </Link>
-            <Link to="/" search={{ view: "saved" }} className="toplink">
-              <Bookmark aria-hidden />
-              <span>Saved{r.saved.length ? ` · ${r.saved.length}` : ""}</span>
-            </Link>
-            {/*
-              Dark mode, in the bar the handoff gives the utilities (unit BD5).
-              It is the reader's own appearance preference -- the same one the
-              reading dialog's Light/Dark pair writes -- so the paper is dark on
-              the next screen too, and `ReaderProvider.update` moves the
-              document attribute with it. The label names the mode it will
-              switch TO, and reads "Light mode" while the paper is dark.
-            */}
-            <DarkModeButton label />
-            <ReadingButton label />
-            {/*
-              The desk entry deliberately performs a document navigation. An
-              in-app transition can change the URL to /desk while the public
-              home remains mounted, which is the reported regression this path
-              must prevent. A fresh document load lets the /desk route gate
-              decide from the server-rendered route.
-            */}
-            <a href="/desk" className="toplink">
-              Editor’s desk
-            </a>
-          </div>
+        </div>
+        <div className="mast-actions">
+          <form className="searchstories" method="get" action="/" role="search">
+            <input type="hidden" name="view" value="archive" />
+            <input name="q" type="search" placeholder="Search stories" aria-label="Search stories" />
+          </form>
+          <Link to="/" search={{ view: "saved" }} className="utilitylink">
+            Saved{r.saved.length ? ` · ${r.saved.length}` : ""}
+          </Link>
+          <DarkModeButton label />
+          <ReadingButton short />
+          <a href="/desk" className="utilitylink">
+            Editor’s desk
+          </a>
         </div>
       </div>
-      <div className="wrap">
-        <div className={`mast ${compact ? "mast-compact" : ""}`}>
-          <div className="identity">
-            <Link to="/" search={{}} className="brand" aria-label={`${paper.name} home`}>
-              {paper.name}
-            </Link>
-            {/*
-              The town tag. It replaces the old three-line "Independent. Local.
-              Accountable." standfirst, which no longer fits the masthead's
-              one-line rule and is printed in the footer either way.
-            */}
-            {/* No town named, no town chip: an empty .locality box is a blank
-                gap under the wordmark, not a fact about the paper. */}
-            {paper.city.trim() ? <span className="locality">{paper.city}</span> : null}
-          </div>
-          {compact ? (
-            <>
-              {mobileMenu}
-              {sectionNav}
-            </>
-          ) : (
-            geography
-          )}
-        </div>
-        {compact ? null : (
-          <div className="navrow">
-            {mobileMenu}
-            {sectionNav}
-            <div className="reader-nav-actions">
-              {/*
-                The nav row's one action. The desk entry used to sit beside it
-                and now sits in the dateline bar, which is where the handoff puts
-                it; printing it twice on one screen is noise, not reach.
-              */}
-              <Link to="/about" className="textlink about-newsroom">
-                About the newsroom <ArrowRight aria-hidden />
-              </Link>
-            </div>
-          </div>
-        )}
+      <div className="wrap mast-nav">
+        {frontPage && geography ? <div className="mast-geo">{geography}</div> : null}
+        <button
+          className="mobilemenu"
+          type="button"
+          aria-expanded={open}
+          aria-controls={NAV_ID}
+          onClick={() => setOpen(!open)}
+        >
+          Explore the publication <span aria-hidden>☰</span>
+        </button>
+        {sectionNav}
       </div>
     </header>
   );
 }
+
 function FollowFeed() {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -209,7 +128,7 @@ function FollowFeed() {
           <p>Follow this publication using any RSS reader.</p>
           <input className="field" aria-label="RSS feed address" readOnly value={url} />
           <div className="sourceactions">
-            <CopyButton text={url}>Copy feed address</CopyButton>
+            <CopyButton text={url} primary>Copy feed address</CopyButton>
             <a href="/feed" className="btn" target="_blank" rel="noreferrer">
               Open feed <ExternalLink aria-hidden />
             </a>

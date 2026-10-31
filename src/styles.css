@@ -830,13 +830,20 @@
 }
 :root[data-appearance="reader-dark"] {
   color-scheme: dark;
-  background: #1b1916;
+  background: #0f141c;
+}
+:root[data-appearance="reader-light"] {
+  color-scheme: light;
+  background: #ffffff;
 }
 :root[data-appearance="desk-dark"] body {
   background: #1b1916;
 }
 :root[data-appearance="reader-dark"] body {
-  background: #1b1916;
+  background: #0f141c;
+}
+:root[data-appearance="reader-light"] body {
+  background: #ffffff;
 }
 /*
   A full-page screen with no desk shell around it.
@@ -929,21 +936,38 @@
 */
 :root[data-appearance="reader-dark"] .screen-page {
   color-scheme: dark;
-  --bg: #1b1916;
-  --bg2: #27231f;
-  --fg: #e8e6e1;
-  --fg2: #bdbab3;
-  --mut: #bdbab3;
-  --line: #3b3631;
-  --a: #e6c35c;
-  --adeep: #e8e6e1;
-  --sel: #e6c35c;
+  --bg: #0f141c;
+  --bg2: #1b2330;
+  --fg: #e6eaf1;
+  --fg2: #aab4c3;
+  --mut: #aab4c3;
+  --line: #2a3442;
+  --a: #3a66d4;
+  --adeep: #8fadff;
+  --sel: #3a66d4;
   --ok: #9fd4a8;
-  --warn: #f0b27a;
+  --warn: #ffc278;
   --danger: #f0998c;
-  --color-rust: #e8e6e1;
-  --color-rule: #3b3631;
+  --color-rust: #8fadff;
+  --color-rule: #2a3442;
   --color-danger: #f0998c;
+}:root[data-appearance="reader-light"] .screen-page {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg2: #f1f4f9;
+  --fg: #0e1726;
+  --fg2: #3d4656;
+  --mut: #3d4656;
+  --line: #dfe3ea;
+  --a: #1f48a8;
+  --adeep: #1f48a8;
+  --sel: #1f48a8;
+  --ok: #1e6b34;
+  --warn: #8a4b00;
+  --danger: #b3261e;
+  --color-rust: #1f48a8;
+  --color-rule: #dfe3ea;
+  --color-danger: #b3261e;
 }
 .screen-page .border-ink {
   border-color: var(--fg);

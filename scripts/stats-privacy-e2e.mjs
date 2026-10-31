@@ -463,7 +463,7 @@ function noRequestCarriesAnIdentifier(when) {
 /** The front page, arriving from a search result. */
 async function theFrontPageFromASearchResult(context) {
   await page.goto(`${base}/`, { waitUntil: "networkidle", referer: FRONT_REFERRER });
-  await page.locator(".mast .brand").waitFor({ timeout: 30_000 });
+  await page.locator(".masthead .brand").waitFor({ timeout: 30_000 });
   const referrer = await page.evaluate(() => document.referrer);
   if (referrer !== FRONT_REFERRER)
     fail(`the browser did not carry the referrer this step set; it had "${referrer}"`);
@@ -616,7 +616,7 @@ async function aPhoneWindow(browser) {
   watchRequests(page);
   try {
     await page.goto(`${base}/`, { waitUntil: "networkidle" });
-    await page.locator(".mast .brand").waitFor({ timeout: 30_000 });
+    await page.locator(".masthead .brand").waitFor({ timeout: 30_000 });
     const load = await untilBeacon(
       (b) => b.kind === "load" && b.path === "/" && b.device === "phone",
       "the phone window's load beacon",

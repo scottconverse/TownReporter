@@ -1,43 +1,62 @@
 /* Public reader 14px floor: no informational text below 14px (pre-Option-B accessibility gate). */
 /*
-  The reader, on the redesign's tokens
-  (docs/design/handoff-2026-09-26/design-system/tokens/).
+  The reader, on the Bulletin tokens
+  (design/bulletin-2026-10-31/README.md, section 2).
 
-  `--teal` survives as a NAME because forty-odd rules in this file read it, but
-  it is no longer a color: it is the accent TEXT tone, so it is ink on cream
-  and bone on warm black. The accent FILL is `--a`, the yellow, and nothing
-  informational is ever set in it -- `--sel` exists for the marks that need to
-  be legible as a position (the current section, the selected segment) because
-  yellow on cream is 1.42:1.
+  `--teal` survives as a NAME because older reader rules still read it, but it
+  resolves to `--acctx`, the accent text tone. The accent FILL is `--acc`; text
+  on it is always `--onacc`.
 
-  `--serif` is Literata and the shell's UI face is Bricolage Grotesque, which is
-  the whole visible point of this pass: the reader used to run a display serif
-  over the system UI face. Both new faces are self-hosted (src/fonts.css), and
-  no stylesheet still asks for the ones they replaced -- scripts/font-licenses.test.mjs
-  fails on the family names, so they are deliberately not written here either.
+  `--serif` is Source Serif 4, the shell's UI/headline face is Schibsted
+  Grotesk, and the SHA-256 fingerprint alone uses JetBrains Mono. All three are
+  self-hosted (src/fonts.css). The desk keeps its separate Bricolage/Literata
+  palette in desk-astra.css.
 
   The accepted Normal/Large reader scale is shared by story text, headlines and
-  deks. Normal body text is 20px on desktop and 18px on phones; Large is 1.2x.
+  deks. Normal body text is 19px; Large is 1.2x (about 22.8px).
+*/
+/*
+  Bulletin reader palette (design/bulletin-2026-10-31, section 2).
+
+  The public paper and the editor's desk are intentionally different products.
+  These literals are reader-only; desk-astra.css keeps its own cream, warm-black
+  and Bricolage/Literata palette. `--surface`, `--muted`, `--teal`, `--soft`,
+  `--warm`, `--a`, `--sel`, `--grid`, `--block` and `--yel` remain as compatibility
+  aliases because older reader routes still read those names. Their values all
+  resolve to the Bulletin tokens below.
 */
 .reader {
-  --bg: #fffdf7;
-  --surface: #f6f2e7;
-  --ink: #111111;
-  --muted: #3a3a3a;
-  --line: #d8d3c4;
-  --teal: #111111;
-  --soft: #f6f2e7;
-  --warm: #f6f2e7;
-  --a: #ffd23f;
-  --sel: #111111;
-  --ok: #1e6b34;
+  --bg: #ffffff;
+  --band: #f1f4f9;
+  --card: #ffffff;
+  --line: #dfe3ea;
+  --ctl: #c8cfda;
+  --ink: #0e1726;
+  --ink2: #3d4656;
+  --acc: #1f48a8;
+  --acctx: #1f48a8;
+  --onacc: #ffffff;
+  --rule: #0e1726;
+  --foot: #0e1726;
+  --foottx: #e6eaf1;
+  --foot2: #b9c2d0;
   --warn: #8a4b00;
+  --warnbg: #fff4e0;
   --danger: #b3261e;
+  --ok: #1e6b34;
+  --surface: var(--card);
+  --muted: var(--ink2);
+  --teal: var(--acctx);
+  --soft: var(--band);
+  --warm: var(--band);
+  --a: var(--acc);
+  --sel: var(--acc);
   --reader-scale: 1;
-  --reading: calc(20px * var(--reader-scale));
-  --serif: "Literata", Georgia, serif;
-  --fd: "Bricolage Grotesque", system-ui, sans-serif;
-  font-family: "Bricolage Grotesque", system-ui, sans-serif;
+  --reading: calc(19px * var(--reader-scale));
+  --serif: "Source Serif 4", Georgia, serif;
+  --fd: "Schibsted Grotesk", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--fd);
   color: var(--ink);
   background: var(--bg);
   font-synthesis: none;
@@ -83,8 +102,9 @@
 .reader a:focus-visible,
 .reader input:focus-visible,
 .reader select:focus-visible,
+.reader textarea:focus-visible,
 .reader summary:focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 3px solid var(--acctx);
   outline-offset: 2px;
 }
 .reader button {
@@ -137,8 +157,11 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 5px;
 }
+.reader .font-mono {
+  font-family: var(--mono);
+}
 .reader .wrap {
-  width: min(1240px, calc(100% - 80px));
+  width: min(1240px, calc(100% - 2 * var(--px)));
   margin: auto;
 }
 .reader .skip {
@@ -256,12 +279,12 @@
 .reader .btn.primary {
   background: var(--a);
   border-color: var(--a);
-  color: #111;
+  color: var(--onacc);
   font-weight: 800;
 }
 .reader .btn.primary:hover {
   background: color-mix(in srgb, var(--a) 88%, #111);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .btn.subtle {
   border-color: transparent;
@@ -401,7 +424,7 @@
    padding, so the background paints exactly the text box and nothing reflows. */
 .reader .tag.opinion {
   background: var(--a);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .lead h2 {
   font-family: var(--fd);
@@ -669,7 +692,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #111;
+  color: var(--onacc);
   font-family: var(--serif);
   font-size: 62px;
   padding-top: 22px;
@@ -1066,7 +1089,7 @@
    fills under ink, so both themes get the same two rules. */
 .reader .comparison mark {
   background: var(--a);
-  color: #111;
+  color: var(--onacc);
   padding: 2px 4px;
 }
 .reader .comparison del {
@@ -1176,22 +1199,21 @@
   color: var(--muted);
 }
 /*
-  Two triggers, one palette -- the same pair as the desk's night palette (see
-  the comment in desk-astra.css).
+  Two triggers, one Bulletin palette. The desk keeps its own separate night
+  palette (see the comment in desk-astra.css).
 
   `.mode-dark` is what React renders once it has read the reader's preference,
   and React cannot know it on the server: it lives in a per-paper localStorage
   blob, so a hard reload of an article was server-rendered light -- a full
-  page of #fffdf7 in a dark room -- and flipped dark a paint later.
+  page of #ffffff in a dark room -- and flipped dark a paint later.
   `:root[data-appearance="reader-dark"]` is stamped on <html> by the inline
   <head> script in __root.tsx BEFORE the first paint, out of the same blob, so
   the first frame is already this palette.
 
-  #1b1916 is the reader's dark -- the same warm black as the desk's, so the
-  paper and the desk are the same newspaper at night -- and it is what
-  `READER_DARK_BG` in src/lib/appearance.ts reports to the
-  `<meta name="theme-color">` update; src/lib/appearance.test.ts fails if either
-  color moves without the other.
+  #0f141c is the reader's Bulletin dark. It is intentionally distinct from the
+  desk's unchanged warm black (#1b1916), and it is what `READER_DARK_BG` in
+  src/lib/appearance.ts reports to the `<meta name="theme-color">` update;
+  src/lib/appearance.test.ts fails if the stylesheet and the constant drift.
 
   Every value that has to change with the theme lives in this one block: the
   seven `.prototype` / `.btn.primary` / `.opinionmark` / `.tag.opinion`
@@ -1201,23 +1223,28 @@
 */
 .reader.mode-dark,
 :root[data-appearance="reader-dark"] .reader {
-  --bg: #1b1916;
-  --surface: #27231f;
-  --ink: #e8e6e1;
-  --muted: #bdbab3;
-  --line: #3b3631;
-  --teal: #e8e6e1;
-  --soft: #27231f;
-  --warm: #27231f;
-  --a: #e6c35c;
-  --sel: #e6c35c;
-  --ok: #9fd4a8;
-  --warn: #f0b27a;
+  --bg: #0f141c;
+  --band: #161d28;
+  --card: #1b2330;
+  --line: #2a3442;
+  --ctl: #3a4658;
+  --ink: #e6eaf1;
+  --ink2: #aab4c3;
+  --acc: #3a66d4;
+  --acctx: #8fadff;
+  --onacc: #ffffff;
+  --rule: #e6eaf1;
+  --foot: #0a0e14;
+  --foottx: #e6eaf1;
+  --foot2: #aab4c3;
+  --warn: #ffc278;
+  --warnbg: #2a2113;
   --danger: #f0998c;
+  --ok: #9fd4a8;
 }
 @media (min-width: 1500px) {
   .reader .wrap {
-    width: min(1320px, calc(100% - 120px));
+    width: min(1320px, calc(100% - 2 * var(--px)));
   }
   .reader .lead h2 {
     font-size: 46px;
@@ -1271,7 +1298,7 @@
 }
 @media (max-width: 760px) {
   .reader .wrap {
-    width: calc(100% - 36px);
+    width: calc(100% - 2 * var(--px));
   }
   .reader .prototype {
     padding: 0 18px;
@@ -1617,7 +1644,7 @@
   color: var(--ink);
 }
 .reader .comparison mark {
-  color: #111;
+  color: var(--onacc);
 }
 .reader .comparison del {
   color: var(--warn);
@@ -1699,8 +1726,8 @@
   --color-rust: var(--ink);
   --color-rust-2: var(--ink);
   --color-danger: var(--danger);
-  --font-serif: "Literata", Georgia, serif;
-  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-serif: var(--serif);
+  --font-display: var(--fd);
   color: var(--ink);
   background: var(--bg);
 }
@@ -1932,43 +1959,22 @@
         its cells paint `--bg` back over it, so a rule stops at the cell edge
         instead of two cell borders doubling to 2px where they meet.
      3. BANDS REACH THE PAGE EDGE BY NEGATIVE MARGIN, NOT BY `100vw`. `--px` is
-        the page gutter (40px, 60px from 1500 up, 18px on a phone) and it is
-        the same number the wrap uses, so `margin-inline: calc(-1 * var(--px))`
+        the Bulletin page gutter, clamp(16px, 3.75vw, 48px), and it is the
+        same number the wrap uses, so `margin-inline: calc(-1 * var(--px))`
         reaches the viewport edge exactly. `100vw` includes the scrollbar and
         would make scrollWidth exceed innerWidth at 390.
    =========================================================================== */
 
-/* The gutter. `.wrap` is min(1240px, 100% - 80px), 100% - 120px from 1500 up
-   and 100% - 36px below 760, so these are the same three numbers. */
+/* The Bulletin page gutter, shared by the chrome and every reader band. */
 .reader {
-  --px: 40px;
-  --grid: #111111;
-  --block: #111111;
-  --blockInk: #ffffff;
-  --blockInk2: #cfcfcf;
-  --blockRule: #444444;
-  --yel: #ffd23f;
-  --tagInk: #ffd23f;
-}
-.reader.mode-dark,
-:root[data-appearance="reader-dark"] .reader {
-  --grid: #3b3631;
-  --block: #27231f;
-  --blockInk: #e8e6e1;
-  --blockInk2: #bdbab3;
-  --blockRule: #3b3631;
-  --yel: #e6c35c;
-  --tagInk: #e6c35c;
-}
-@media (min-width: 1500px) {
-  .reader {
-    --px: 60px;
-  }
-}
-@media (max-width: 760px) {
-  .reader {
-    --px: 18px;
-  }
+  --px: clamp(16px, 3.75vw, 48px);
+  --grid: var(--rule);
+  --block: var(--foot);
+  --blockInk: var(--foottx);
+  --blockInk2: var(--foot2);
+  --blockRule: var(--line);
+  --yel: var(--acc);
+  --tagInk: var(--onacc);
 }
 /* The front page is a full-bleed paper, not a column: its wrap runs to `--px`
    from the edge (1600px ceiling, so a very wide screen still has gutters).
@@ -2054,7 +2060,7 @@
    --------------------------------------------------------------------------- */
 .reader .topbar {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .topbarin {
   display: flex;
@@ -2068,7 +2074,7 @@
 .reader .dateline {
   font-size: 15px;
   font-weight: 700;
-  color: #111;
+  color: var(--onacc);
 }
 .reader .topactions {
   display: flex;
@@ -2091,14 +2097,14 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: #111;
+  color: var(--onacc);
   font-size: 15px;
   font-weight: 700;
 }
 .reader .topbar .toplink:hover,
 .reader .topbar .btn:hover {
   background: rgba(17, 17, 17, 0.14);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .topbar .toplink svg,
 .reader .topbar .btn svg {
@@ -2261,7 +2267,7 @@
   display: inline-block;
   padding: 5px 9px;
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: 14px;
   font-weight: 700;
@@ -2302,7 +2308,7 @@
 }
 .reader .eventweek-chip {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
   padding: 5px 9px;
   font-family: var(--fd);
   font-size: 14px;
@@ -2316,7 +2322,7 @@
 }
 .reader .eventweek h2 {
   margin-top: 10px;
-  color: var(--yel);
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: calc(36px * var(--reader-scale));
   font-weight: 800;
@@ -2354,7 +2360,7 @@
 }
 .reader .eventweek-daybutton.on {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .eventweek-dow,
 .reader .eventweek-daynum {
@@ -2375,7 +2381,7 @@
   font-weight: 600;
 }
 .reader .eventweek-daybutton.on .eventweek-count {
-  color: #111;
+  color: var(--onacc);
 }
 .reader .eventweek-grid {
   display: grid;
@@ -2393,7 +2399,7 @@
 .reader .eventweek-col h3 {
   padding-bottom: 10px;
   border-bottom: 2px solid var(--yel);
-  color: var(--yel);
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: 14px;
   font-weight: 800;
@@ -2436,7 +2442,7 @@
 }
 .reader .eventweek-title:hover {
   color: var(--blockInk);
-  text-decoration-color: var(--yel);
+  text-decoration-color: var(--onacc);
 }
 .reader .eventweek-place {
   margin-top: 3px;
@@ -2451,7 +2457,7 @@
   font-size: calc(14px * var(--reader-scale));
   font-weight: 600;
   text-decoration: underline;
-  text-decoration-color: var(--yel);
+  text-decoration-color: var(--onacc);
   text-decoration-thickness: 2px;
   text-underline-offset: 4px;
 }
@@ -2466,13 +2472,13 @@
   border: 2px solid var(--yel);
   border-radius: 0;
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: calc(15px * var(--reader-scale));
   font-weight: 700;
 }
 .reader .eventweek-all:hover {
-  color: #111;
+  color: var(--onacc);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -2753,7 +2759,7 @@
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.8px;
-  color: var(--yel);
+  color: var(--onacc);
   margin-bottom: 12px;
 }
 .reader .dateslist {
@@ -2783,7 +2789,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--yel);
+  color: var(--onacc);
   line-height: 1.3;
 }
 .reader .datenum {
@@ -2812,7 +2818,7 @@
 .reader .datewhat a {
   color: var(--blockInk);
   text-decoration: underline;
-  text-decoration-color: var(--yel);
+  text-decoration-color: var(--onacc);
   text-decoration-thickness: 3px;
   text-underline-offset: 3px;
 }
@@ -2848,7 +2854,7 @@
   align-items: center;
   min-height: 44px;
   margin-top: 12px;
-  color: var(--yel);
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: 15px;
   font-weight: 700;
@@ -2997,7 +3003,7 @@
 }
 .reader .opinionpanel {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
   padding: 30px var(--px);
 }
 .reader .opinionpanel h2 {
@@ -3005,7 +3011,7 @@
   font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.8px;
-  color: #111;
+  color: var(--onacc);
 }
 .reader .opinionpanel h3 {
   font-family: var(--fd);
@@ -3013,7 +3019,7 @@
   font-weight: 700;
   line-height: 1.22;
   letter-spacing: -0.4px;
-  color: #111;
+  color: var(--onacc);
   margin: 14px 0 10px;
 }
 .reader .opinionpanel h3:hover {
@@ -3025,11 +3031,11 @@
   font-family: var(--serif);
   font-size: calc(16px * var(--reader-scale));
   line-height: 1.55;
-  color: #111;
+  color: var(--onacc);
   margin-bottom: 14px;
 }
 .reader .opinionpanel .textlink {
-  color: #111;
+  color: var(--onacc);
 }
 
 /* ---------------------------------------------------------------------------
@@ -3107,7 +3113,7 @@
 }
 .reader .footerlinks a:hover,
 .reader .footer-button:hover {
-  color: var(--yel);
+  color: var(--foottx);
 }
 .reader .footerbottom {
   color: var(--blockInk2);
@@ -3179,7 +3185,7 @@
   height: 44px;
   flex: 0 0 auto;
   background: var(--block);
-  color: var(--yel);
+  color: var(--onacc);
   font-family: var(--fd);
   font-size: 16px;
   font-weight: 800;
@@ -3188,7 +3194,7 @@
 .reader.mode-dark .trbadge,
 :root[data-appearance="reader-dark"] .reader .trbadge {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .bylinenames {
   display: flex;
@@ -3227,7 +3233,7 @@
 }
 .reader .readingtools .btn.saved {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
 }
 
 .reader .articlelayout {
@@ -3337,7 +3343,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
   padding: 2px 8px;
 }
 .reader .evidence .evidencehead h2 {
@@ -3526,23 +3532,23 @@
 }
 .reader .articlefoot .sharepanel {
   background: var(--yel);
-  color: #111;
+  color: var(--onacc);
 }
 .reader .articlefoot .sharepanel h2,
 .reader .articlefoot .sharepanel > p {
-  color: #111;
+  color: var(--onacc);
 }
 .reader .articlefoot .sharepanel .btn {
-  border: 2px solid #111;
-  background: #111;
-  color: var(--yel);
+  border: 2px solid var(--onacc);
+  background: var(--onacc);
+  color: var(--acc);
   font-size: 15px;
   font-weight: 700;
   min-height: 44px;
 }
 .reader .articlefoot .sharepanel .btn:hover {
   background: transparent;
-  color: #111;
+  color: var(--onacc);
 }
 
 /* ---------------------------------------------------------------------------
@@ -4043,7 +4049,7 @@
   background: var(--soft);
 }
 .reader .morepanel a.active {
-  color: var(--sel);
+  color: var(--acctx);
 }
 
 /* ---------------------------------------------------------------------------
@@ -4109,5 +4115,799 @@
   .reader .moresections,
   .reader .morepanel {
     display: none;
+  }
+}
+
+/* ===========================================================================
+   BULLETIN SHELL (2026-10-31)
+
+   The shared reader chrome: two-row masthead, section navigation, footer,
+   dialogs and toast. These rules sit at the end deliberately. The body-page
+   work follows in later units, but the shell has to override the old
+   Neighborhood Daily chrome without carrying a second copy of those pages.
+   =========================================================================== */
+
+.reader {
+  --grid: var(--line);
+}
+
+/* One control family for every reader surface. */
+.reader .btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.reader .btn:hover {
+  background: var(--band);
+  color: var(--ink);
+  text-decoration: none;
+}
+.reader .btn.primary {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--onacc);
+}
+.reader .btn.primary:hover {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 88%, var(--ink));
+  color: var(--onacc);
+}
+.reader .btn.subtle {
+  border-color: transparent;
+  background: transparent;
+}
+.reader .btn.small {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 15px;
+}
+.reader .iconbtn {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+}
+.reader .iconbtn:hover {
+  background: var(--band);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Row 1: wordmark, place, date and the reader utilities.
+   --------------------------------------------------------------------------- */
+.reader .masthead {
+  border-bottom: 0;
+  background: var(--bg);
+}
+.reader .masthead > .wrap {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.reader .mast-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 24px;
+  padding: 18px var(--px);
+  border-bottom: 1px solid var(--line);
+}
+.reader .masthead .identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  min-width: 0;
+}
+.reader .masthead .brand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: clamp(30px, 3.2vw, 40px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.reader .masthead .town {
+  color: var(--acctx);
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .masthead .datestamp {
+  color: var(--ink2);
+  font-size: 15px;
+  white-space: nowrap;
+}
+.reader .mast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+  font-size: 15px;
+}
+.reader .searchstories {
+  width: 200px;
+  max-width: 100%;
+  margin: 0;
+}
+.reader .searchstories input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+}
+.reader .searchstories input::placeholder {
+  color: var(--ink2);
+  opacity: 1;
+}
+.reader .utilitylink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--ink);
+  font-size: 15px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.reader .utilitylink:hover {
+  color: var(--acctx);
+}
+.reader .mast-actions .btn {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .mast-actions .btn:hover {
+  background: var(--band);
+  color: var(--ink);
+}
+.reader .mast-actions .btn svg {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Row 2: geography, sections, More sections and the mobile disclosure.
+   --------------------------------------------------------------------------- */
+.reader .mast-nav {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding: 10px var(--px);
+  border-bottom: 4px solid var(--rule);
+  font-size: 15px;
+}
+.reader .mast-geo {
+  min-width: 0;
+}
+.reader .mast-geo .geopills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--band);
+}
+.reader .mast-geo .geopill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.reader .mast-geo .geopill:hover {
+  background: var(--card);
+  color: var(--ink);
+  text-decoration: none;
+}
+.reader .mast-geo .geopill.on,
+.reader .mast-geo .geopill.on:hover {
+  background: var(--acc);
+  color: var(--onacc);
+}
+.reader .sections {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+  min-height: 48px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .sections .mobilefront {
+  display: none;
+}
+.reader .sections a {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--ink);
+  font-size: inherit;
+  font-weight: inherit;
+  white-space: nowrap;
+}
+.reader .sections a:hover {
+  color: var(--acctx);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.reader .sections a.active,
+.reader .sections a.active:hover {
+  border-bottom-color: var(--acc);
+  color: var(--ink);
+  text-decoration: none;
+}
+.reader .sections a.active::after {
+  content: none;
+  display: none;
+}
+.reader .sections .about-nav {
+  margin-left: auto;
+  border-bottom: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .sections .about-nav.mobileabout {
+  display: none;
+}
+.reader .moresections {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .moresections:hover {
+  background: var(--band);
+  color: var(--ink);
+}
+.reader .moresections span {
+  font-size: 14px;
+}
+.reader .morepanel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: var(--px);
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 2px 8px;
+  min-width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--ctl);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+.reader .morepanel b {
+  grid-column: 1 / -1;
+  padding: 6px 8px;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.reader .morepanel a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .morepanel a:hover {
+  background: var(--band);
+  color: var(--ink);
+}
+.reader .morepanel a.active {
+  color: var(--acctx);
+}
+.reader .mobilemenu {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Footer.
+   --------------------------------------------------------------------------- */
+.reader footer {
+  padding: 40px var(--px) 28px;
+  background: var(--foot);
+  color: var(--foottx);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.reader footer > .wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.reader footer .footergrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 32px 40px;
+}
+.reader footer .footerlinks {
+  display: contents;
+}
+.reader footer .footerlinks > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.reader footer .footergrid .brand,
+.reader footer .brand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--foottx);
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+.reader footer .footergrid p {
+  margin: 0;
+  color: var(--foot2);
+  font-family: var(--fd);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.reader footer .footerlinks b {
+  padding-bottom: 6px;
+  color: var(--foottx);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.reader footer .footerlinks a,
+.reader footer .footer-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  color: var(--foottx);
+  font-size: 15px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.reader footer .footer-button {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader footer .footerlinks a:hover,
+.reader footer .footer-button:hover {
+  color: var(--foottx);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader footer .footerlinks svg {
+  width: 15px;
+  height: 15px;
+  margin-left: 4px;
+}
+.reader .footerbottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding-top: 16px;
+  border-top: 1px solid #2a3442;
+  color: var(--foot2);
+  font-size: 14px;
+}
+.reader footer .skeleton-rule {
+  min-height: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   Reader dialogs and toast.
+   --------------------------------------------------------------------------- */
+.reader dialog.reader-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-width: 480px;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+}
+.reader dialog.reader-dialog::backdrop {
+  background: rgba(8, 12, 20, 0.55);
+  backdrop-filter: none;
+}
+.reader .reader-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.reader .reader-dialog .dialoghead {
+  flex: none;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 20px 10px;
+}
+.reader .reader-dialog .dialoghead h2 {
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.reader .reader-dialog .dialoghead .iconbtn {
+  flex: 0 0 44px;
+}
+.reader .reader-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.reader .reader-dialog p {
+  margin: 0;
+  color: var(--ink2);
+  font-size: 16px;
+  line-height: 1.5;
+}
+.reader .reader-dialog .setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+.reader .reader-dialog .setting strong {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .reader-dialog .segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border: 0;
+}
+.reader .reader-dialog .segmented .btn {
+  min-height: 44px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .reader-dialog .segmented .btn[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--onacc);
+}
+.reader .reader-dialog .reading-sample {
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--band);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--reading);
+  line-height: 1.5;
+}
+.reader .reader-dialog .field {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--ctl);
+  border-radius: 6px;
+  background: var(--band);
+  color: var(--ink);
+  font-size: 15px;
+}
+.reader .reader-dialog .sourceactions {
+  margin-top: 0;
+}
+.reader .reader-dialog .sourceactions .btn {
+  min-height: 44px;
+  padding: 0 16px;
+}
+.reader .reader-dialog-foot {
+  flex: none;
+  padding: 0 20px 20px;
+}
+.reader .reader-dialog-foot .more {
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  font-size: 15px;
+}
+.reader .reader-toast,
+.reader #toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 100;
+  max-width: calc(100% - 32px);
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  transform: translateX(-50%);
+}
+.reader #toast {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 20px);
+}
+.reader #toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Token fixes for older reader controls whose only contrast pair was the
+   former yellow fill. These are colour repairs, not a second redesign. */
+.reader .tag.opinion,
+.reader .comparison mark,
+.reader .sectiontag,
+.reader .eventweek-chip,
+.reader .eventweek-daybutton.on,
+.reader .eventweek-all,
+.reader .opinionpanel,
+.reader .opinionpanel h2,
+.reader .opinionpanel h3,
+.reader .opinionpanel p,
+.reader .opinionpanel .textlink,
+.reader .trbadge,
+.reader .readingtools .btn.saved,
+.reader .evidence .evidencehead span,
+.reader .articlefoot .sharepanel,
+.reader .articlefoot .sharepanel h2,
+.reader .articlefoot .sharepanel > p {
+  color: var(--onacc);
+}
+.reader .tag.opinion,
+.reader .comparison mark,
+.reader .sectiontag,
+.reader .eventweek-chip,
+.reader .eventweek-daybutton.on,
+.reader .eventweek-all,
+.reader .opinionpanel,
+.reader .trbadge,
+.reader .readingtools .btn.saved,
+.reader .evidence .evidencehead span,
+.reader .articlefoot .sharepanel {
+  background: var(--acc);
+}
+.reader .eventweek-daybutton.on .eventweek-count,
+.reader .eventweek-all:hover,
+.reader .articlefoot .sharepanel .btn:hover {
+  color: var(--onacc);
+}
+.reader .articlefoot .sharepanel .btn {
+  border-color: var(--onacc);
+  background: var(--onacc);
+  color: var(--acc);
+}
+.reader .articlefoot .sharepanel .btn:hover {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive shell.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1180px) {
+  .reader .mast-nav {
+    flex-wrap: nowrap;
+  }
+  .reader .sections {
+    flex-wrap: nowrap;
+  }
+}
+@media (min-width: 900px) and (max-width: 1179px) {
+  .reader .mast-geo {
+    flex: 1 1 100%;
+  }
+  .reader .sections {
+    flex: 1 1 100%;
+  }
+}
+@media (max-width: 899px) {
+  .reader .mast-top {
+    align-items: flex-start;
+    gap: 10px 14px;
+    padding: 16px var(--px);
+  }
+  .reader .masthead .identity {
+    gap: 4px 10px;
+  }
+  .reader .masthead .brand {
+    font-size: clamp(30px, 8vw, 36px);
+  }
+  .reader .mast-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .reader .searchstories {
+    flex: 1 1 180px;
+    width: auto;
+  }
+  .reader .mast-actions .utilitylink,
+  .reader .mast-actions .btn {
+    padding-inline: 8px;
+  }
+  .reader .mast-nav {
+    gap: 8px;
+    padding: 10px var(--px) 12px;
+  }
+  .reader .mast-geo {
+    flex: 1 1 100%;
+  }
+  .reader .mast-geo .geopill {
+    min-height: 40px;
+    padding-inline: 11px;
+    font-size: 14px;
+  }
+  .reader .mobilemenu {
+    display: inline-flex;
+    flex: 1 1 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--ctl);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 700;
+    text-align: left;
+  }
+  .reader .mobilemenu:hover {
+    background: var(--band);
+  }
+  .reader .mobilemenu span {
+    font-size: 18px;
+  }
+  .reader .sections {
+    display: none;
+    flex: 1 1 100%;
+  }
+  .reader .sections.open {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0 12px;
+    width: 100%;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--line);
+  }
+  .reader .sections.open a,
+  .reader .sections.open .mobilefront {
+    display: flex;
+    min-height: 44px;
+    padding: 0;
+    border-bottom: 0;
+    font-size: 16px;
+  }
+  .reader .sections a:hover {
+    text-decoration: none;
+  }
+  .reader .sections a.active,
+  .reader .sections a.active:hover {
+    background: transparent;
+    color: var(--acctx);
+    text-decoration: none;
+  }
+  .reader .sections .about-nav {
+    margin-left: 0;
+    text-decoration: underline;
+  }
+  .reader .sections.open .about-nav.mobileabout {
+    display: flex;
+  }
+  .reader .moresections,
+  .reader .morepanel {
+    display: none;
+  }
+}
+@media (max-width: 560px) {
+  .reader .searchstories {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .reader .mast-actions .utilitylink {
+    flex: 0 0 auto;
+  }
+  .reader .masthead .datestamp {
+    flex-basis: 100%;
+  }
+  .reader footer {
+    padding: 32px var(--px) 22px;
+  }
+  .reader .morepanel {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: min(320px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 560px) {
+  .reader {
+    --reading: calc(19px * var(--reader-scale));
   }
 }

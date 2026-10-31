@@ -9,6 +9,7 @@ import {
   DESK_SIZE_ATTR,
   LIGHT_BG,
   READER_DARK_BG,
+  READER_LIGHT_BG,
   appearanceHeadScript,
   appearanceSurface,
   isDeskPath,
@@ -169,14 +170,14 @@ test("the pre-paint script resolves fresh and explicit appearance choices", () =
   assert.equal(systemDarkReader.attributes[APPEARANCE_ATTR], "reader-dark");
 
   const systemLightReader = runHeadScript({ pathname: "/", systemDark: false });
-  assert.equal(systemLightReader.attributes[APPEARANCE_ATTR], "light");
+  assert.equal(systemLightReader.attributes[APPEARANCE_ATTR], "reader-light");
 
   const explicitLight = runHeadScript({
     pathname: "/",
     systemDark: true,
     readerBlob: JSON.stringify({ dark: false }),
   });
-  assert.equal(explicitLight.attributes[APPEARANCE_ATTR], "light");
+  assert.equal(explicitLight.attributes[APPEARANCE_ATTR], "reader-light");
 
   const explicitDark = runHeadScript({
     pathname: "/",
@@ -306,8 +307,10 @@ test("the palette constants are the ones the stylesheets actually paint", () => 
 
   assert.match(deskCss, /--bg:\s*#1b1916/, "desk-astra.css no longer paints the desk's dark");
   assert.match(styles, /:root\[data-appearance="desk-dark"\][^{]*\{[^}]*background:\s*#1b1916/);
-  assert.match(readerCss, /--bg:\s*#1b1916/, "reader-astra.css no longer paints the reader's dark");
-  assert.match(styles, /:root\[data-appearance="reader-dark"\][^{]*\{[^}]*background:\s*#1b1916/);
+  assert.match(readerCss, /--bg:\s*#0f141c/, "reader-astra.css no longer paints the reader's dark");
+  assert.match(styles, /:root\[data-appearance="reader-dark"\][^{]*\{[^}]*background:\s*#0f141c/);
+  assert.match(styles, /:root\[data-appearance="reader-light"\][^{]*\{[^}]*background:\s*#ffffff/);
+  assert.match(styles, /:root\[data-appearance="reader-light"\]\s+\.screen-page\s*\{[^}]*--bg:\s*#ffffff/);
   assert.match(styles, new RegExp(`--color-paper:\\s*${LIGHT_BG}`), "the light canvas moved");
 
   // And the reader's dark palette is reachable from the attribute, not only
@@ -337,15 +340,18 @@ test("the surface backgrounds are the designed ones, and light is not dark", () 
   // what has to hold now is that both dark surfaces resolve to it and that the
   // light canvas is still a different color (a mix-up between the constants
   // and the stylesheets is what this guards, not the palette).
-  const surfaces: AppearanceSurface[] = ["desk-dark", "reader-dark", "light"];
+  const surfaces: AppearanceSurface[] = ["desk-dark", "reader-dark", "reader-light", "light"];
   assert.equal(surfaceBackground("desk-dark"), DESK_NIGHT_BG);
   assert.equal(surfaceBackground("reader-dark"), READER_DARK_BG);
+  assert.equal(surfaceBackground("reader-light"), READER_LIGHT_BG);
   assert.equal(surfaceBackground("light"), LIGHT_BG);
   assert.equal(DESK_NIGHT_BG, "#1b1916");
-  assert.equal(READER_DARK_BG, "#1b1916");
+  assert.equal(READER_DARK_BG, "#0f141c");
+  assert.equal(READER_LIGHT_BG, "#ffffff");
   assert.notEqual(LIGHT_BG, DESK_NIGHT_BG);
   assert.notEqual(LIGHT_BG, READER_DARK_BG);
-  assert.equal(new Set(surfaces.map(surfaceBackground)).size, 2);
+  assert.notEqual(LIGHT_BG, READER_LIGHT_BG);
+  assert.equal(new Set(surfaces.map(surfaceBackground)).size, 4);
 });
 
 test("isDeskPath does not claim a route that merely starts with the word", () => {
