@@ -160,3 +160,27 @@ test("a citation with no capture behind it is unchanged", () => {
   assert.doesNotMatch(html, /View captured version/);
   assert.doesNotMatch(html, /Compare versions/);
 });
+
+test("the four source-card states render their notes", () => {
+  const normal = render([item()]);
+  assert.doesNotMatch(normal, /class="sourcecardnote/, "a normal card has no warning note");
+
+  const originalGone = render([item({ disappeared: true })]);
+  assert.match(originalGone, /class="sourcecardnote sourcecardnote-warn">Original source no longer available/);
+  assert.doesNotMatch(originalGone, />Current source ↗</);
+
+  const namedOnly = render([item({ url: "", version_id: null, version_count: null })]);
+  assert.match(
+    namedOnly,
+    /class="sourcecardnote sourcecardnote-warn">Named in the report we worked from/,
+  );
+
+  const excerptRemoved = render([
+    item({ excerpt_removed: true, excerpt_removed_link_kept: false }),
+  ]);
+  assert.match(
+    excerptRemoved,
+    /class="sourcecardnote sourcecardnote-warn break-all">Excerpt removed at the publisher’s request/,
+  );
+  assert.match(excerptRemoved, /View captured version \(excerpt removed\)/);
+});

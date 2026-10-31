@@ -1,7 +1,7 @@
 import { NativeDialog } from "@/components/dialog";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
+import { ArrowRight, Bookmark, Check, Moon, Sun, X } from "lucide-react";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { sendTrustEvent } from "@/components/read-beacon-send";
 import {
@@ -314,7 +314,7 @@ export function SaveStory({
         r.notify(saved ? "Removed from saved stories." : "Saved to your reading list.");
       }}
     >
-      {saved ? <Check aria-hidden /> : <Bookmark aria-hidden />}
+      {!label && (saved ? <Check aria-hidden /> : <Bookmark aria-hidden />)}
       {label && (saved ? "Saved" : "Save")}
     </button>
   );
@@ -432,7 +432,7 @@ export function ShareStory({ slug, headline }: { slug: string; headline: string 
           setOpen(true);
         }}
       >
-        Share <ExternalLink aria-hidden />
+        Share ↗
       </button>
       {open && (
         <ReaderDialog title="Share this story" close={() => setOpen(false)}>
