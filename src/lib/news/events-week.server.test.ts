@@ -35,14 +35,15 @@ async function seedEvent(
     matchKey: string;
     title: string;
     date: string;
+    fields?: Record<string, { value: string; locator: string }>;
   },
 ) {
   const sql = await getSql();
   await sql.query(
     `insert into routine_events(
        newsroom_id,source_id,event_key,candidate_key,match_key,title,local_date,start_minutes,
-       all_day,place,town,area,source_url,source_issuer,source_title
-     ) values($1,$2,$3,$4,$5,$6,$7,540,false,'Civic Center','Longmont','longmont',$8,'Arts','Calendar')`,
+       all_day,place,town,area,source_url,source_issuer,source_title,fields
+     ) values($1,$2,$3,$4,$5,$6,$7,540,false,'Civic Center','Longmont','longmont',$8,'Arts','Calendar',$9::jsonb)`,
     [
       room,
       source.id,
@@ -52,6 +53,7 @@ async function seedEvent(
       input.title,
       input.date,
       source.url,
+      JSON.stringify(input.fields ?? {}),
     ],
   );
 }
@@ -100,6 +102,19 @@ test("the seven-day read keeps allowed event sources, excludes other formats, an
       matchKey: `day ${index}|${date}|540|civic center`,
       title: `Day ${index} event`,
       date,
+      fields:
+        index === 0
+          ? {
+              description: {
+                value: "Doors open at 5 p.m.",
+                locator: "events[0].description",
+              },
+              eventUrl: {
+                value: "https://events.example/day-0-event",
+                locator: "events[0].url",
+              },
+            }
+          : undefined,
     });
   }
   await seedEvent(duplicate, {
@@ -131,4 +146,8 @@ test("the seven-day read keeps allowed event sources, excludes other formats, an
     false,
   );
   assert.equal(week.todayStorySlug, null);
+  assert.equal(week.days[0]!.events[0]!.description, "Doors open at 5 p.m.");
+  assert.equal(week.days[0]!.events[0]!.sourceName, "Calendar");
+  assert.equal(week.days[0]!.events[0]!.eventUrl, "https://events.example/day-0-event");
+  assert.deepEqual(JSON.parse(JSON.stringify(week)), week, "the server result is plain JSON");
 });

@@ -80,3 +80,21 @@ test("event-week title links have a 44px tap target", () => {
     "an .eventweek-title rule must set min-height to at least 44px",
   );
 });
+test("descriptions clamp to two lines and only linked titles are underlined", () => {
+  const clamps = EVENTWEEK_RULES.filter((rule) =>
+    rule.selector.split(",").some((selector) => selector.trim() === ".reader .eventweek-description"),
+  ).flatMap((rule) => declarations(rule.body, "-webkit-line-clamp"));
+  assert.ok(clamps.includes("2"));
+
+  const titleRule = EVENTWEEK_RULES.find(
+    (rule) => rule.selector.trim() === ".reader .eventweek-title",
+  );
+  assert.ok(titleRule);
+  assert.deepEqual(declarations(titleRule.body, "text-decoration"), ["none"]);
+
+  const linkRule = EVENTWEEK_RULES.find(
+    (rule) => rule.selector.trim() === ".reader a.eventweek-title",
+  );
+  assert.ok(linkRule);
+  assert.deepEqual(declarations(linkRule.body, "text-decoration"), ["underline"]);
+});

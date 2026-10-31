@@ -9,22 +9,40 @@ import {
   hasEvents,
   weekStripItems,
   weekdayName,
+  type EventColumnKey,
   type EventsWeekData,
 } from "@/lib/news/events-week";
+import { EventsWeekEventList } from "./events-week-event-list.ts";
 
 /** The front page's compact seven-day event box (design 1b). */
 export function EventsWeekBox({ data }: { data: EventsWeekData }) {
   const paper = usePaper();
   const [selected, setSelected] = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const [expandedColumns, setExpandedColumns] = useState<EventColumnKey[]>([]);
+  const [allExpanded, setAllExpanded] = useState(false);
   if (!data.days.length || !hasEvents(data.days)) return null;
 
   const index = Math.min(selected, data.days.length - 1);
   const day = data.days[index]!;
   const strip = weekStripItems(data.days);
-  const columns = eventColumns(day.events, expanded);
+  const columns = eventColumns(day.events, true);
   const today = index === 0;
   const storySlug = today ? data.todayStorySlug : null;
+
+  const toggleColumn = (key: EventColumnKey) => {
+    if (allExpanded) {
+      setAllExpanded(false);
+      setExpandedColumns(
+        columns
+          .filter((column) => column.key !== key && column.items.length > 2)
+          .map((column) => column.key),
+      );
+      return;
+    }
+    setExpandedColumns((current) =>
+      current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
+    );
+  };
 
   return (
     <section className="eventweek" aria-labelledby="eventweek-title">
@@ -48,7 +66,8 @@ export function EventsWeekBox({ data }: { data: EventsWeekData }) {
             aria-pressed={i === index}
             onClick={() => {
               setSelected(i);
-              setExpanded(false);
+              setExpandedColumns([]);
+              setAllExpanded(false);
             }}
           >
             <span className="eventweek-dow">{item.label}</span>
@@ -62,31 +81,13 @@ export function EventsWeekBox({ data }: { data: EventsWeekData }) {
         <>
           <div className="eventweek-grid">
             {columns.map((column) => (
-              <section className="eventweek-col" key={column.key} aria-label={column.label}>
-                <h3>{column.label}</h3>
-                {column.items.length ? (
-                  <ul className="eventweek-list">
-                    {column.items.map((event) => (
-                      <li className="eventweek-event" key={event.matchKey}>
-                        <span className="eventweek-time">{event.time}</span>
-                        {event.href ? (
-                          <a className="eventweek-title" href={event.href}>
-                            {event.title}
-                          </a>
-                        ) : (
-                          <span className="eventweek-title">{event.title}</span>
-                        )}
-                        {event.place ? (
-                          <span className="eventweek-place">{event.place}</span>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {column.more > 0 ? (
-                  <span className="eventweek-more">+ {column.more} more</span>
-                ) : null}
-              </section>
+              <EventsWeekEventList
+                key={column.key}
+                column={column}
+                expanded={allExpanded || expandedColumns.includes(column.key)}
+                listId={`eventweek-${day.date}-${column.key}`}
+                onToggle={toggleColumn}
+              />
             ))}
           </div>
           <div className="eventweek-foot">
@@ -94,12 +95,15 @@ export function EventsWeekBox({ data }: { data: EventsWeekData }) {
               <Link className="eventweek-all" to="/articles/$slug" params={{ slug: storySlug }}>
                 All {eventCountLabel(day.events.length)} →
               </Link>
-            ) : !expanded ? (
+            ) : !allExpanded ? (
               <button
                 className="eventweek-all"
                 type="button"
-                aria-expanded={expanded}
-                onClick={() => setExpanded(true)}
+                aria-expanded={allExpanded}
+                onClick={() => {
+                  setAllExpanded(true);
+                  setExpandedColumns(columns.map((column) => column.key));
+                }}
               >
                 All {eventCountLabel(day.events.length)} →
               </button>

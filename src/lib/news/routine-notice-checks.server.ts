@@ -6,6 +6,7 @@ import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { ingestDocument, extractPdfBetter, type PdfPage } from "./ingest.ts";
 import { extractLongmontSportsRegistrationDeadlines, isLongmontSportsBrochure } from "./routine-notice-registration.ts";
 import { rememberCapture } from "./investigate.ts";
+import { decodeRoutineSourceBytes } from "./routine-notice-text.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import {
   extractJsonLdEvents,
@@ -607,7 +608,7 @@ export async function checkRoutineNoticeSourceForOwner(
     document.status >= 200 &&
     document.status < 300 &&
     document.outcome !== "soft-404"
-      ? new TextDecoder().decode(document.rawBytes)
+      ? decodeRoutineSourceBytes(document.rawBytes)
       : null;
   const pdfPages = rawContent && input.formatKey === "registration-deadline" &&
     isLongmontSportsBrochure(input.sourceUrl) && document.rawBytes &&
@@ -949,7 +950,7 @@ async function boundRawEvidence(sql: Sql, actor: Actor, row: CheckRow) {
     isLongmontSportsBrochure(row.source_url) && bytes.subarray(0, 5).toString() === "%PDF-"
     ? (await extractPdfBetter(bytes, null)).pages
     : undefined;
-  return { ...evidence, bytes, html: new TextDecoder().decode(bytes), pdfPages };
+  return { ...evidence, bytes, html: decodeRoutineSourceBytes(bytes), pdfPages };
 }
 
 /** Revalidates and locks the private evidence behind a scheduled publication. */
