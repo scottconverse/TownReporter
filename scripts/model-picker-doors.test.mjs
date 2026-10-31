@@ -98,7 +98,7 @@ const doorScopes = {
   Headlines: ["story"],
   "Today New story": ["story", "scan", "story"],
   "Drafts New story destination": ["story", "scan"],
-  "Queue Draft selected": ["forced"],
+  "Queue Draft selected": ["scan", "forced"],
   "Dark Desk": ["dark"],
   "Dark start dialog": ["dark"],
   Story: ["story"],
@@ -355,6 +355,7 @@ test("FM3c: rendered shared options and actual local select agree across AI door
       const counts = {
         "Today New story": 3,
         "Drafts New story destination": 2,
+        "Queue Draft selected": 2,
         "Meeting Redraft": 2,
         "Models Who does what": 27,
         "Server Writing models": 27,
@@ -422,9 +423,14 @@ test("FM3c: rendered shared options and actual local select agree across AI door
         if (picker.getAttribute("data-model-scope") === "ocr")
           assert.match(picker.textContent, /OCR reads images.*Models without image support/);
       }
-      // DHD1-2: the batch dialog's shared picker carries the same label as the bulk strip's.
+      // DHD1-2: the batch dialog's shared picker carries the same label as the bulk strip's,
+      // even though the Queue's scan picker now renders first.
       if (door.name === "Queue Draft selected")
-        assert.match(pickers[0].textContent, /Model for these stories/, "dialog picker label matches the bulk strip");
+        assert.match(
+          pickers.find((picker) => picker.getAttribute("data-model-scope") === "forced")?.textContent ?? "",
+          /Model for these stories/,
+          "dialog picker label matches the bulk strip",
+        );
       assert.ok(
         document.querySelector('select option[value*="fixture-local-32b"]'),
         `${door.name}: selected Local model exposes actual discovered model select`,
