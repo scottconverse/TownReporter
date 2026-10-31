@@ -845,10 +845,7 @@ function eventResult(
       venue: field(text(venue), venueLocator),
       description: field(description, descriptionLocator),
       eventUrl: field(eventUrl, eventUrlLocator),
-      onlineUrl: field(
-        onlineUrl ?? eventUrl,
-        onlineUrl ? `${source.locator}.X-GOOGLE-CONFERENCE` : eventUrlLocator,
-      ),
+      onlineUrl: field(onlineUrl, `${source.locator}.X-GOOGLE-CONFERENCE`),
       timezone,
     }),
   });

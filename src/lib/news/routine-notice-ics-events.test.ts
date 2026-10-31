@@ -328,7 +328,8 @@ test("reads the Gravity fixture with recurring and all-day events", () => {
     halloween.normalizedFields.eventUrl,
     "https://www.thegravitybrewing.com/events/halloween-party",
   );
-  assert.equal(halloween.normalizedFields.onlineUrl, halloween.normalizedFields.eventUrl);
+  // The event page is not an online-attendance link; only X-GOOGLE-CONFERENCE is.
+  assert.equal(halloween.normalizedFields.onlineUrl, undefined);
   assert.match(halloween.fields.description!.locator, /\.DESCRIPTION$/);
   assert.match(halloween.fields.eventUrl!.locator, /\.URL$/);
 });
