@@ -24,7 +24,8 @@ import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { HOME_AREA } from "@/lib/story-area";
 import { readerSearch, readMinutes } from "@/lib/reader";
-import { usePublicSections } from "@/lib/use-sections";
+import { PublicSectionsSeed, usePublicSections } from "@/lib/use-sections";
+import { publicSections } from "@/lib/news/sections";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { topicReportingSentence } from "@/lib/paper-phrases";
 import { editionRiverQuery } from "@/lib/news/edition-river";
@@ -42,19 +43,23 @@ export const Route = createFileRoute("/")({
       story slots on the front page; listings deliberately keep both.
     */
     const area = listing ? deps.area : (deps.area ?? HOME_AREA);
-    const page = await readerArticles({
-      data: {
-        q: deps.q,
-        topic: deps.topic,
-        page: deps.page ?? 1,
-        oldest: deps.sort === "oldest",
-        ...(area ? { area } : {}),
-        ...(deps.view === "saved" ? { saved: [] } : {}),
-        ...(listing ? {} : { notTopic: "opinion", notRoutine: true }),
-      },
-    });
+    const [page, sections] = await Promise.all([
+      readerArticles({
+        data: {
+          q: deps.q,
+          topic: deps.topic,
+          page: deps.page ?? 1,
+          oldest: deps.sort === "oldest",
+          ...(area ? { area } : {}),
+          ...(deps.view === "saved" ? { saved: [] } : {}),
+          ...(listing ? {} : { notTopic: "opinion", notRoutine: true }),
+        },
+      }),
+      publicSections(),
+    ]);
     if (listing)
       return {
+        sections,
         listing: page,
         river: null,
         opinion: null,
@@ -78,7 +83,7 @@ export const Route = createFileRoute("/")({
     });
     /* A seven-day read with no events is no band at all. */
     const events = hasEvents(eventsWeek.days) ? eventsWeek : null;
-    return { listing: page, river, opinion, roundups, events };
+    return { sections, listing: page, river, opinion, roundups, events };
   },
   component: FrontPage,
 });
@@ -107,13 +112,16 @@ function FrontKicker({ topic, children }: { topic: string | null; children: stri
  */
 function FrontPage() {
   const search = Route.useSearch();
+  const initial = Route.useLoaderData();
   const listing = Boolean(search.topic || search.q || search.view);
   return (
-    <PaperShell
-      geography={listing ? undefined : <GeoPills active={search.area} search={search} />}
-    >
-      <Home />
-    </PaperShell>
+    <PublicSectionsSeed sections={initial.sections}>
+      <PaperShell
+        geography={listing ? undefined : <GeoPills active={search.area} search={search} />}
+      >
+        <Home />
+      </PaperShell>
+    </PublicSectionsSeed>
   );
 }
 

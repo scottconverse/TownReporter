@@ -291,6 +291,18 @@ export default defineConfig(({ command, isPreview }) => ({
   // The meaning model (D286) loads native ONNX and image binaries through their
   // own JS loaders; leave them external to Vite's SSR graph for the same reason.
   ssr: { external: ["@napi-rs/canvas", "@huggingface/transformers", "onnxruntime-node", "sharp"] },
+  /*
+    Nitro's final bundle walk must preserve the same optional native/model
+    packages Vite leaves external for SSR. In a checkout where the optional
+    meaning-model package is not installed, letting Rolldown resolve it turns
+    `vite build` into a missing-module failure even though the runtime import
+    is already lazy and server-only.
+  */
+  build: {
+    rolldownOptions: {
+      external: ["@huggingface/transformers", "onnxruntime-node", "sharp"],
+    },
+  },
   plugins: [
     pgliteBootstrapPlugin(),
     schemaWarmupDevPlugin(),
