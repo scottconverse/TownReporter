@@ -475,7 +475,13 @@ const FEED_HREF = /(?:\/feed\/?|\/rss\/?|\/atom\/?|\/atom\.xml|\.rss|\/feed\.xml
  */
 export function stripNavigationBlocks(html: string): string {
   const { document } = parseHTML(html);
-  for (const el of Array.from(document.querySelectorAll("nav, header, footer, aside"))) el.remove();
+  for (const el of Array.from(document.querySelectorAll("nav, aside"))) el.remove();
+  // A story headline often lives in `<article><header>...`; that header is
+  // article metadata, not site navigation. Only strip headers/footers outside
+  // an article boundary.
+  for (const el of Array.from(document.querySelectorAll("header, footer"))) {
+    if (!el.closest("article")) el.remove();
+  }
   for (const el of Array.from(document.querySelectorAll("[role]"))) {
     if (el.getAttribute("role")?.trim().toLowerCase() === "navigation") el.remove();
   }

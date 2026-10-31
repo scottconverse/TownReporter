@@ -448,6 +448,22 @@ describe("discoverStoryLinks", () => {
     ]);
   });
 
+  it("keeps story links in article headers while removing the site header menu", () => {
+    const html = [
+      '<header><nav><a href="/2026/10/27/menu-link/">Menu</a></nav></header>',
+      '<main>',
+      '<article><header class="entry-header"><h2><a href="/2026/10/30/article-header-story-one/">Story one</a></h2></header></article>',
+      '<article><header class="entry-header"><h2><a href="/2026/10/29/article-header-story-two/">Story two</a></h2></header></article>',
+      '<a href="/2026/10/28/plain-main-story/">Story three</a>',
+      '</main>',
+    ].join("");
+    assert.deepEqual(discoverStoryLinks(html, new URL("https://example.test/")), [
+      "https://example.test/2026/10/30/article-header-story-one/",
+      "https://example.test/2026/10/29/article-header-story-two/",
+      "https://example.test/2026/10/28/plain-main-story/",
+    ]);
+  });
+
   it("picks same-host article URLs off a Leader listing and skips the section index", () => {
     const story =
       "/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123";
