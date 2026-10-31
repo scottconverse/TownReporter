@@ -1449,20 +1449,6 @@ function QueuePage() {
       kicker="Every open lead"
       actions={
         <>
-          <div className="max-w-sm">
-            <ModelPicker
-              scope="scan"
-              label="Model for this scan"
-              value={scanModel}
-              onChange={(choice) => {
-                scanModelTouched.current = true;
-                setScanModel(choice);
-                setScanModelEffort(defaultModelEffort(choice));
-              }}
-              effort={scanModelEffort}
-              onEffortChange={setScanModelEffort}
-            />
-          </div>
           <InkButton
             tone="ghost"
             disabled={scan.isPending}
@@ -1497,6 +1483,26 @@ function QueuePage() {
         </>
       }
     >
+      {/*
+        The scan model and effort belong to the page body, not the header:
+        their help and effort fields would otherwise make the header taller
+        than the title. This is the first body row, with a readable cap on its
+        width so the picker's long help does not run the full desktop line.
+      */}
+      <div className="queue-scan-model mb-3 max-w-xl">
+        <ModelPicker
+          scope="scan"
+          label="Model for this scan"
+          value={scanModel}
+          onChange={(choice) => {
+            scanModelTouched.current = true;
+            setScanModel(choice);
+            setScanModelEffort(defaultModelEffort(choice));
+          }}
+          effort={scanModelEffort}
+          onEffortChange={setScanModelEffort}
+        />
+      </div>
       {/*
         BF3, defect 2: one controls row, drawn order -- the tabs at the left,
         then search, Sort and Section at the right -- with the words inside

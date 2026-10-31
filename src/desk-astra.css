@@ -3928,8 +3928,8 @@
    width; alone on that line the row's `space-between` starts it at the left,
    which is the drawn position. Scoped with `:has(.today-create)` to Today's
    own wrapper, so a screen that uses the shell's action slot differently --
-   the Queue's two presses, which the drawing does put on the header line --
-   keeps the layout it has. */
+   the Queue's own presses, which stay on the header line now that its model
+   picker is a body row -- keeps the layout it has. */
 .desk-ltr.astra .head-acts:has(.today-create) {
   flex-basis: 100%;
 }
@@ -4202,6 +4202,16 @@
 /* ---------------------------------------------------------------------------
    QUEUE
 --------------------------------------------------------------------------- */
+/* The scan model and effort are a body row under the header, not header
+   actions. Keep their labels and help at full ink with a 14px floor; long
+   model names wrap rather than widening the Queue at phone widths. */
+.desk-ltr.astra .queue-scan-model .model-picker-label,
+.desk-ltr.astra .queue-scan-model .model-picker-help {
+  color: var(--fg);
+  font-size: max(14px, calc(14px * var(--ts)));
+  opacity: 1;
+  overflow-wrap: anywhere;
+}
 /* BF3, defect 2: ONE line at 1280, drawn order -- the tab strip at the left,
    then search, Sort and Section at the right -- with the words inside the
    controls ("Sort: Best first", "Section: All") rather than as labels above

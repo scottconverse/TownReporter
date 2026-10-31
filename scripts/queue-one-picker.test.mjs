@@ -28,18 +28,20 @@ const lead = {
   summary: "Fixture",
   url: "https://example.org",
 };
-// DeskShell in the door harness drops `actions`; the Queue's header picker lives
-// there, so this door renders the shell with its actions as well. The key-hint
-// legend is not part of the picker check and the harness stubs its import.
+// DeskShell in the door harness drops `actions`, so render its action slot too:
+// the scan picker must be absent from it, while the header's own buttons remain.
+// The key-hint legend is not part of the picker check and the harness stubs its
+// import.
 const queueOverrides = {
-  DeskShell: `({children,lede,actions})=>h("main",{},lede,actions,children)`,
+  DeskShell: `({children,lede,actions})=>h("main",{},h("div",{className:"head-acts"},actions),lede,children)`,
   TRIAGE_LEGEND: "[]",
 };
 
 // Two shared model pickers on the Queue, one per job (Walk C, DHC13):
-// "Model for this scan" in the header scans, and "Model for these stories" in
-// the bulk strip that Start N stories uses. Both keep the full list.
-test("the Queue keeps both shared model pickers, each with its own label and the full list", async (t) => {
+// "Model for this scan" in its own body row directly above the controls, and
+// "Model for these stories" in the bulk strip that Start N stories uses. Both
+// keep the full list.
+test("the Queue keeps one scan picker in its body row and one bulk picker, each with the full list", async (t) => {
   t.after(cleanupDoorModules);
   availabilityStub.__setAvailability({});
   availabilityStub.__setLocalChoice({ override: local, catalog });
@@ -56,7 +58,26 @@ test("the Queue keeps both shared model pickers, each with its own label and the
   const queueModule = await import(await doorModule("src/routes/desk.queue.tsx", [], queueOverrides));
   const doc = parseHTML(renderToStaticMarkup(createElement(queueModule.Route.component))).document;
 
+  const scanRow = doc.querySelector(".queue-scan-model");
+  assert.ok(scanRow, "the scan picker has its own body row");
+  assert.equal(
+    scanRow.nextElementSibling,
+    doc.querySelector(".queue-controls"),
+    "the scan picker row comes directly before the Open/Held/Killed controls",
+  );
+  const scanPickers = [...scanRow.querySelectorAll('[data-model-picker="shared"]')];
+  assert.equal(scanPickers.length, 1, "there is exactly one scan picker, in the body row");
+  assert.equal(scanPickers[0].getAttribute("data-model-scope"), "scan", "the body-row picker scans");
+  assert.equal(
+    doc.querySelectorAll('.head-acts [data-model-picker="shared"]').length,
+    0,
+    "no model picker remains in the header actions",
+  );
+  const bulkPickers = [...doc.querySelectorAll('.queue-bulk [data-model-picker="shared"]')];
+  assert.equal(bulkPickers.length, 1, "there is exactly one bulk picker");
+  assert.equal(bulkPickers[0].getAttribute("data-model-scope"), "forced", "the bulk picker drafts stories");
   const pickers = [...doc.querySelectorAll('[data-model-picker="shared"]')];
+  assert.equal(pickers.length, 2, "the Queue renders exactly two shared model pickers");
   assert.deepEqual(
     pickers.map((picker) => picker.querySelector("label")?.textContent),
     ["Model for this scan", "Model for these stories"],
