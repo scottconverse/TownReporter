@@ -22,7 +22,13 @@ import {
 } from "./source-seeds.server.ts";
 import { selectCustomScanSources, selectedScanSources } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
-import { buildScanBatches, mergeScanBatchResults, scanHeadlineKey } from "./scan-batches.ts";
+import {
+  buildScanBatches,
+  DEFAULT_SCAN_BATCH_CHARS,
+  DEFAULT_SCAN_BATCH_SOURCES,
+  mergeScanBatchResults,
+  scanHeadlineKey,
+} from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
@@ -2324,6 +2330,464 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     card's bar and "Now:" line), and the run-row write below is what the Scan
     and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
   */
+    const buildScanModelContext = async () => {
+      const memory = await sql<MemoryRow>`
+        select id, entity, last_angle, updated_at from beat_memory
+        where newsroom_id = ${owned(context)} order by updated_at desc limit 24
+      `;
+      const published = await sql<{
+        headline: string;
+        dek: string | null;
+        source_urls: string;
+        published_at: string | null;
+      }>`
+        select headline, dek, source_urls, published_at::text as published_at
+        from articles
+        where newsroom_id = ${owned(context)} and status = 'published'
+          and published_at >= now() - interval '60 days'
+        order by published_at desc nulls last, id desc
+        limit 100`;
+      const publishedContext = published.map((row) => {
+        let sourceUrls: string[] = [];
+        try {
+          const parsed = JSON.parse(row.source_urls || "[]");
+          if (Array.isArray(parsed))
+            sourceUrls = parsed
+              .map(String)
+              .filter((url) => /^https?:\/\//i.test(url))
+              .slice(0, 4);
+        } catch {
+          /* malformed legacy source metadata is not scan context */
+        }
+        return {
+          headline: row.headline,
+          dek: row.dek ?? "",
+          source_urls: sourceUrls,
+          published_at: row.published_at ?? "",
+        };
+      });
+      const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
+        applyJobLocalModelSnapshot(
+          job,
+          await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({})),
+        );
+      return {
+        memory,
+        publishedContext,
+        scanOverrides,
+        scanLocalModel: scanOverrides["local-model"]?.localModel,
+        batchTimeoutMs: scanCallTimeoutFor(scanOverrides),
+      };
+    };
+    let scanModelContextPromise: ReturnType<typeof buildScanModelContext> | null = null;
+    const ensureScanModelContext = () => {
+      scanModelContextPromise ??= buildScanModelContext();
+      return scanModelContextPromise;
+    };
+
+    /*
+      P0-5: bounded batches, not one truncated pass. A manual scan reuses the
+      same builder mid-fetch; the scheduled scan still builds the full list only
+      after its fetch pass.
+    */
+    type FetchedScanSource = (typeof fetched)[number];
+    const changedFirst = (items: FetchedScanSource[]) =>
+      [...items].sort((a, b) => Number(b.changed) - Number(a.changed));
+    const batchSourceFor = (f: FetchedScanSource) => {
+      const expandedScan = expandForScope || reread || f.changed;
+      const excerpt = scanSourceExcerpt(
+        f.text,
+        f.extras,
+        expandedScan ? (f.extras.length ? 6000 : 2800) : 800,
+      );
+      const changedLine = expandForScope
+        ? f.changed
+          ? "yes; expanded excerpt for this scan scope"
+          : "no; re-read for this scan scope (source hashes are shared across section scans)"
+        : reread
+          ? "re-read (previous scan fetched this but filed no leads)"
+          : f.changed
+            ? "yes"
+            : "no (still include if newly newsworthy)";
+      return {
+        id: f.id,
+        title: f.title,
+        url: f.url,
+        block: `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`,
+      };
+    };
+    const buildBatchesFor = (items: FetchedScanSource[]) =>
+      buildScanBatches({ sources: changedFirst(items).map(batchSourceFor) });
+    let batches: import("./scan-batches.ts").ScanBatch[] = [];
+
+    const batchResults: import("./schema.ts").ParsedScanResult[] = [];
+    let batchesFailed = 0;
+    let lastBatchError: string | null = null;
+
+    /*
+    The leads this scan may match against.
+
+    `fileScanLeads` has always read this itself, inside the commit transaction.
+    U28 hoists it out for the same reason `getPaperPlace` above is read out
+    here: the duplicate check has to identify its borderline pairs BEFORE the
+    commit, and a model call inside `commitResults` would hold that transaction
+    open for as long as the model takes. On the dev desk's single PGlite
+    connection that is not a slow query, it is the whole desk.
+  */
+    const readExistingLeads = async (): Promise<MatchCandidateLead[]> => {
+      const existingLeadsRaw = await sql<{
+        id: number;
+        status: string;
+        headline: string;
+        topic: string | null;
+        source_urls: string;
+        created_at: string;
+        why: string | null;
+        evidence: string | null;
+      }>`
+        select id, status, headline, source_urls, created_at, why, evidence, topic
+        from leads
+        where newsroom_id = ${owned(context)}
+          and status <> 'published'
+          and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
+      `;
+      return existingLeadsRaw.map((l) => ({
+        id: l.id,
+        status: l.status,
+        headline: l.headline,
+        topic: l.topic,
+        source_urls: parseLeadSourceUrls(l.source_urls),
+        created_at: l.created_at,
+        // Unit AK item 2: the killed lead's own words, so a strong match that
+        // brings new facts can be filed against it instead of discarded.
+        why: l.why,
+        evidence: l.evidence,
+      }));
+    };
+
+    /*
+    U28 (2026-09-30): the owner's "double check. worth it."
+
+    The desk asks two bounded questions per batch. The pair check reads the
+    pairs the word rules can only rate BORDERLINE -- the matcher's "possible"
+    tier and a "Looks already printed" chip candidate. The same-story finder
+    reads every new item against the recent desk and paper, so a reworded pair
+    the word rule misses still reaches the model. D162: a manual scan asks once
+    per batch it files; a scheduled scan asks once, before its one commit.
+
+    The duplicate check uses the scan's current pinned provider, reasoning
+    effort and local model snapshot. A separate lead-scoring assignment cannot
+    override the editor's pick. Technical scan failovers are already recorded
+    on the job, so the check follows that same effective runtime.
+
+    A failure here is never fatal and never moves a chip on its own: the
+    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
+    trace is a log line -- the operator asked for no noise about it.
+  */
+    const checkScanDuplicates = async (
+      candidates: import("./schema.ts").ParsedScanResult["leads"],
+      existing: MatchCandidateLead[],
+    ): Promise<DupCheckOutcome | null> => {
+      let outcome: DupCheckOutcome | null = null;
+      try {
+        await throwIfJobCancelled(job.id);
+        /* A scan that found nothing has no pairs and no reason to read the
+         * published list -- the check costs one query and one model call per scan
+         * THAT NEEDS ONE, and not one query per scheduled scan. */
+        const printed = candidates.length > 0 ? await queryDupCheckPrinted(context) : [];
+        const collected = collectDupPairs({
+          candidates,
+          existing,
+          printed,
+          place: scanPlace,
+        });
+        if (candidates.length > 0) {
+          const { batchTimeoutMs, scanLocalModel: modelForDuplicates } =
+            await ensureScanModelContext();
+          /*
+            `scheduledCommit` is this function's own test for "am I the scheduled
+            lane" (it is what the commit below branches on), and the scheduled
+            lane's job row carries the exact choice its forced runtime is pinned
+            to (daily-scan.server.ts queues it with `model.modelChoice`), so
+            passing it back to that same runtime is a no-op rather than a
+            re-resolution.
+          */
+          const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
+          const chat = scanDuplicateChat({
+            modelChoice: job.model_choice,
+            reasoningEffort: effortFromJob(job),
+            newsroomId: job.newsroom_id,
+            localModel: modelForDuplicates,
+            timeoutMs: dupTimeoutMs,
+          }, runChat);
+          /*
+            Two independent questions, one batch: the old pair check still only
+            reads the pairs the word rule flagged, while the same-story finder
+            reads every new item against the recent desk and paper. They share a
+            provider binding and timeout, and a failure in either leaves the
+            other's answer intact.
+          */
+          const pairCheck: Promise<DupCheckOutcome | null> = collected.pairs.length > 0
+            ? runDupCheck({ pairs: collected.pairs, skipped: collected.skipped, chat })
+            : Promise.resolve(null);
+          const [pairOutcome, sameStoryOutcome] = await Promise.all([
+            pairCheck,
+            runSameStoryCheck({ candidates, existing, printed, chat }),
+          ]);
+          outcome = combineDupCheckOutcomes(pairOutcome, sameStoryOutcome);
+        }
+      } catch (error) {
+        if (error instanceof JobCancelledError) throw error;
+        // A check that could not run must not be able to change an answer: the
+        // word rule stands, exactly as it did before this unit (see dup-check.ts).
+        console.error("[scan] duplicate check could not run", error);
+      }
+      if (outcome?.failure) console.error(`[scan] run ${runId}: ${outcome.failure}`);
+      return outcome;
+    };
+
+    /*
+    D162 (Scott, Oct 19 2026: "why don't you update the queue live while it's
+    searching"): a MANUAL scan files each batch's leads as soon as the model has
+    read that batch, in its own short transaction, so they show on the Queue
+    while the scan is still running. Same rules as the one commit at the end:
+    the same-headline drop `mergeScanBatchResults` applies, `fileScanLeads`'
+    same-scan merge (through `filedThisScan`), the existing-lead match and the
+    duplicate check. A scheduled scan is unchanged: everything it writes is held
+    for its one commit with the daily reservation.
+
+    If a batch's filing fails, its leads wait for the final commit instead, so a
+    failed early write never loses a lead. Leads already filed stay filed if the
+    scan is cancelled or fails later; the receipt counts them.
+  */
+    const fileAsRead = !deps.scheduledCommit;
+    const filedThisScan: MatchCandidateLead[] = [];
+    const headlinesFiledThisScan = new Set<string>();
+    let existingForEarlyFiling: MatchCandidateLead[] | null = null;
+    let earlyFiling = emptyScanFilingCounts();
+    const leadsLeftForCommit: import("./schema.ts").ParsedScanResult["leads"] = [];
+    const fileBatchLeads = async (
+      leads: import("./schema.ts").ParsedScanResult["leads"],
+    ) => {
+      const fresh = leads.filter((lead) => {
+        const key = scanHeadlineKey(lead.headline);
+        if (!key || headlinesFiledThisScan.has(key)) return false;
+        headlinesFiledThisScan.add(key);
+        return true;
+      });
+      if (!fresh.length) return;
+      const filedBefore = filedThisScan.length;
+      try {
+        existingForEarlyFiling ??= await readExistingLeads();
+        const existing = existingForEarlyFiling;
+        const batchDupCheck = await checkScanDuplicates(fresh, existing);
+        const filed = await withTransaction(async (writeSql) => {
+          if (!(await lockManualScanClaim(writeSql, job)))
+            throw new Error("Scan job claim was superseded; refusing stale result writes.");
+          const openRun = await writeSql<{ id: number }>`
+            select id from scan_runs
+            where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+            for update
+          `;
+          if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
+          const counts = await fileScanLeads(
+            writeSql,
+            context,
+            owned(context),
+            runId,
+            fresh,
+            existing,
+            scanPlace,
+            batchDupCheck,
+            filedThisScan,
+            // Every source read so far, with its attachment pages, so a lead
+            // from a cross-domain attachment still links to its source.
+            fetched,
+          );
+          await refreshManualScanClaim(writeSql, job);
+          return counts;
+        });
+        earlyFiling = addScanFilingCounts(earlyFiling, filed);
+        leadsFiledEarly = earlyFiling.leadsCreated;
+      } catch (error) {
+        if (error instanceof JobCancelledError) throw error;
+        // The transaction rolled back: forget the rows it pushed into the
+        // in-memory lists and re-read the leads next time, then let the final
+        // commit file these.
+        filedThisScan.splice(filedBefore);
+        existingForEarlyFiling = null;
+        leadsLeftForCommit.push(...fresh);
+        console.error(`[scan] run ${runId}: a batch's leads could not be filed early; they wait for the final commit`, error);
+      }
+    };
+    /*
+    The second countable pass. `buildScanBatches` has already split the fetched
+    text into bounded batches, so the model phase knows exactly how many calls
+    it is going to make -- which is the one place in a scan where a percentage
+    is a real fraction of the work rather than a guess.
+  */
+    const runOneScanBatch = async (
+      batch: import("./scan-batches.ts").ScanBatch,
+      progress?: { batchIndex: number; batches: import("./scan-batches.ts").ScanBatch[] },
+    ) => {
+      await deps.scheduledGuard?.();
+      if (progress) {
+        const { batchIndex, batches } = progress;
+        await reportStage(
+          countedStep("Reading the sources with a model", batchIndex + 1, batches.length),
+          spanPct(batchIndex + 1, batches.length, 55, 92),
+        );
+      } else {
+        // While pages are still arriving the final batch count is unknown. The
+        // stage is still named, but the bar stays indeterminate instead of
+        // claiming a denominator the scan does not have yet.
+        await reportStage("Reading the sources with a model");
+      }
+      /*
+      Between batch boundaries is where a scan can be stopped: the batches
+      already read are committed, and stopping here leaves the job's real
+      reason ("Cancelled by the editor") on the row rather than a half-read
+      batch's parse error. `executeJob` maps the throw.
+    */
+      await throwIfJobCancelled(job.id);
+      const { memory, publishedContext, scanOverrides, scanLocalModel, batchTimeoutMs } =
+        await ensureScanModelContext();
+      const userMsg = buildScanUserMessage({
+      topics: topicChoices,
+      section: sectionSnapshot,
+      city: paperConfig.city,
+      state: paperConfig.state,
+      reread,
+      memory,
+      published: publishedContext,
+      payload: batch.payload,
+    });
+      /*
+      The same one-shot technical failover Draft uses (see `failOverAndRetry`),
+      except the fetched source text is never re-fetched -- this batch's
+      payload is reused verbatim for the retry by `runScanChatWithFailover`.
+
+      `liveLabel` tracks the rung the batch is actually on: the failover above
+      can hop mid-call, and the ticker below would otherwise keep naming a model
+      that has already failed for the rest of the batch's wait.
+    */
+      let liveLabel = modelChoiceLabel(effectiveStoryModelChoice(job.model_choice));
+      const ai = await waitForModel({
+        jobId: job.id,
+        label: () => liveLabel,
+        run: () => {
+          failureReceipt.modelBatchesUsed += 1;
+          return runScanChatWithFailover({
+            job,
+            newsroomId: job.newsroom_id,
+            localModel: scanOverrides["local-model"]?.localModel,
+            system: scanSystem({
+            name: paperConfig.name,
+            city: paperConfig.city,
+            state: paperConfig.state,
+          }),
+            user: userMsg,
+            /*
+            A reply this batch cannot read is not a success (Unit Y item 3): the
+            helper retries it once on the same rung and then fails over, so the
+            batch's parse below is the second half of the contract rather than the
+            only reader. Same parser as the line after the call, so the two cannot
+            disagree about what "readable" means.
+          */
+            read: (text) =>
+            !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
+            maxTokens: 3500,
+            modelEffort: effortFromJob(job),
+            timeoutMs: batchTimeoutMs,
+            grokChat: runChat,
+            probe: (choice) =>
+              probe(
+                choice,
+                job.newsroom_id,
+                undefined,
+                "scan",
+                choice === "local-model" ? (scanLocalModel ?? undefined) : undefined,
+              ),
+            setModelChoice,
+            setStage,
+            setFailoverNote: setJobFailoverNote,
+            onSwitch: async (receipt) => {
+            liveLabel = receipt.nextLabel;
+            await deps.onModelSwitch?.(receipt);
+          },
+          });
+        },
+      });
+      if (!ai.ok) {
+      batchesFailed += 1;
+      failureReceipt.modelBatchesFailed = batchesFailed;
+      lastBatchError = ai.error;
+      return;
+    }
+      const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
+      if (parsed.parseError) {
+      batchesFailed += 1;
+      failureReceipt.modelBatchesFailed = batchesFailed;
+      lastBatchError = parsed.parseError;
+      return;
+    }
+    batchResults.push(parsed);
+    for (const source of batch.sources) {
+      const messageId = newsletterInputs.get(source.url);
+      if (messageId) analyzedNewsletterIds.add(messageId);
+    }
+    failureReceipt.sourcesAnalyzed += batch.sources.length;
+    if (fileAsRead) await fileBatchLeads(parsed.leads);
+    // The row moves phase: from "reading sources — k of n" to "reading the
+    // pages with a model", which is what the editor watching the history sees.
+    await writeLiveRunRow(true);
+  }
+    /*
+      Manual scans are a pipeline: once one full batch is ready, its model call
+      runs in the background while the fetch loop reads the next page. At most
+      one batch is in flight. The final partial group is taken after the fetch
+      pass, using the same builder and limits as the scheduled path.
+    */
+    const newsletterInputs = new Map<string, number>();
+    const analyzedNewsletterIds = new Set<number>();
+    let streamingReady: FetchedScanSource[] = [];
+    let streamingBatchInFlight: Promise<void> | null = null;
+    let streamingError: unknown = null;
+    let fetchPassFinished = false;
+    const throwStreamingError = () => {
+      if (streamingError) throw streamingError;
+    };
+    const startReadyStreamingBatch = () => {
+      if (!fileAsRead || fetchPassFinished || streamingBatchInFlight || streamingError) return;
+      const ready = changedFirst(streamingReady);
+      if (!ready.length) return;
+      const built = buildScanBatches({ sources: ready.map(batchSourceFor) });
+      const first = built[0];
+      if (!first) return;
+      const full =
+        built.length > 1 ||
+        first.sources.length >= DEFAULT_SCAN_BATCH_SOURCES ||
+        first.payload.length >= DEFAULT_SCAN_BATCH_CHARS;
+      if (!full) return;
+
+      streamingReady = ready.slice(first.sources.length);
+      batches.push(first);
+      const task = runOneScanBatch(first)
+        .catch((error) => {
+          streamingError = error;
+        })
+        .finally(() => {
+          if (streamingBatchInFlight === task) streamingBatchInFlight = null;
+          if (!streamingError) startReadyStreamingBatch();
+        });
+      streamingBatchInFlight = task;
+    };
+    const queueFetchedForStreaming = (source: FetchedScanSource) => {
+      if (!fileAsRead) return;
+      streamingReady.push(source);
+      startReadyStreamingBatch();
+    };
+
     let attemptedCount = 0;
     /** SH-B: rows this pass selected but deliberately did not knock on -- parked
      *  by a site's "come back later", or held back by the per-host allowance. */
@@ -2409,6 +2873,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     readingSources: for (const batch of sourceBatches(watchSlice, Date.now, scanDeadline)) for (const src of batch) {
     if (Date.now() >= scanDeadline) break readingSources;
     try {
+    throwStreamingError();
     await throwIfJobCancelled(job.id);
     await deps.scheduledGuard?.();
     /*
@@ -2503,7 +2968,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const sourceText = postgresText(bundle.text);
       if (bundle.newsletterSignupUrl) pendingNewsletterSignups.push({ id: src.id, url: bundle.newsletterSignupUrl });
       const extras: { url: string; text: string }[] = [];
-      for (const extra of bundle.extras.slice(0, 4)) {
+      for (const extra of bundle.extras.slice(0, 6)) {
         await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         try {
@@ -2555,14 +3020,16 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       failureReceipt.sourcesFetched = fetchedCount;
-      fetched.push({
+      const fetchedSource: FetchedScanSource = {
         id: src.id,
         title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
         url: src.url,
         text: sourceText.slice(0, 4500),
         extras,
         changed,
-      });
+      };
+      fetched.push(fetchedSource);
+      queueFetchedForStreaming(fetchedSource);
       sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
         status: "read",
         readAt: new Date().toISOString(),
@@ -2662,418 +3129,68 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       break readingSources;
     }
   }
-  const newsletterInputs = new Map<string, number>();
-  const analyzedNewsletterIds = new Set<number>();
-  // Retained mail supplements the website, even when a web fetch was blocked.
-  for (const src of watchSlice) {
-    for (const doc of await newsletterScanDocs(owned(context), src.id, 6, sql)) {
-      fetched.push({ id: src.id, title: doc.title, url: doc.url,
-        text: postgresText(doc.text).slice(0, 4500), extras: doc.extras, changed: true });
-      newsletterInputs.set(doc.url, doc.id);
+    fetchPassFinished = true;
+    if (streamingBatchInFlight) await streamingBatchInFlight;
+    throwStreamingError();
+    // Retained mail supplements the website, even when a web fetch was blocked.
+    for (const src of watchSlice) {
+      for (const doc of await newsletterScanDocs(owned(context), src.id, 6, sql)) {
+        const fetchedSource: FetchedScanSource = {
+          id: src.id,
+          title: doc.title,
+          url: doc.url,
+          text: postgresText(doc.text).slice(0, 4500),
+          extras: doc.extras,
+          changed: true,
+        };
+        fetched.push(fetchedSource);
+        if (fileAsRead) streamingReady.push(fetchedSource);
+        newsletterInputs.set(doc.url, doc.id);
+      }
     }
-  }
-  if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
-    ? { ...entry, status: "skipped" as const, reasonCode: "time-budget" as const,
-        reason: "The 90-minute scan reading budget ended before this source was reached." } : entry,
-      );
-    sourceCoverage = finishScanCoverage(sourceCoverage);
-    if (fetchLoopError) throw fetchLoopError;
-    // The final count is a boundary, not a throttled tick. A fast last source
-    // (including a parked one) must not leave the card one source behind.
-    await progressReporterFor(job, { minWriteMs: 0 })(
-    countedStep("Reading sources", attemptedCount, watchSlice.length),
-    spanPct(attemptedCount, watchSlice.length, 5, 55),
-  );
-    await writeLiveRunRow(true);
-    /*
-    SH-B: a row the pass deliberately did not knock on is not an attempt.
-    `sources_selected` still counts it -- it was in scope -- so the receipt
-    reads "14 selected, 12 attempted" exactly the way it already reads when
-    `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
-    to come back is not recorded as a fetch that never happened.
-  */
-    // Actual fetch attempts are counted at dispatch, including failures.
-    // Watches left at the deadline were never attempted.
-
-    const memory = await sql<MemoryRow>`
-      select id, entity, last_angle, updated_at from beat_memory
-      where newsroom_id = ${owned(context)} order by updated_at desc limit 24
-    `;
-    const published = await sql<{
-    headline: string;
-    dek: string | null;
-    source_urls: string;
-    published_at: string | null;
-  }>`
-    select headline, dek, source_urls, published_at::text as published_at
-       from articles
-      where newsroom_id = ${owned(context)} and status = 'published'
-        and published_at >= now() - interval '60 days'
-      order by published_at desc nulls last, id desc
-      limit 100`;
-    const publishedContext = published.map((row) => {
-    let sourceUrls: string[] = [];
-    try {
-      const parsed = JSON.parse(row.source_urls || "[]");
-      if (Array.isArray(parsed))
-        sourceUrls = parsed
-          .map(String)
-          .filter((url) => /^https?:\/\//i.test(url))
-          .slice(0, 4);
-    } catch {
-      /* malformed legacy source metadata is not scan context */
-    }
-    return {
-      headline: row.headline,
-      dek: row.dek ?? "",
-      source_urls: sourceUrls,
-      published_at: row.published_at ?? "",
-    };
-  });
-
-    /*
-    P0-5: bounded batches, not one truncated pass. The old code built a single
-    payload against a 48,000-character budget and `break`-ed the moment the
-    next source overflowed, so a 100-source scan silently reached the model
-    with a fraction of its sources. Each batch now gets its own model call; a
-    failed batch does not discard the others. See `scan-batches.ts`.
-  */
-    const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
-    const batchSources = ranked.map((f) => {
-    const excerpt = scanSourceExcerpt(
-      f.text,
-      f.extras,
-      expandForScope || reread || f.changed ? 2800 : 800,
+    if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
+      ? { ...entry, status: "skipped" as const, reasonCode: "time-budget" as const,
+          reason: "The 90-minute scan reading budget ended before this source was reached." } : entry,
+        );
+      sourceCoverage = finishScanCoverage(sourceCoverage);
+      if (fetchLoopError) throw fetchLoopError;
+      // The final count is a boundary, not a throttled tick. A fast last source
+      // (including a parked one) must not leave the card one source behind.
+      await progressReporterFor(job, { minWriteMs: 0 })(
+      countedStep("Reading sources", attemptedCount, watchSlice.length),
+      spanPct(attemptedCount, watchSlice.length, 5, 55),
     );
-    const changedLine = expandForScope
-      ? f.changed
-        ? "yes; expanded excerpt for this scan scope"
-        : "no; re-read for this scan scope (source hashes are shared across section scans)"
-      : reread
-        ? "re-read (previous scan fetched this but filed no leads)"
-        : f.changed
-          ? "yes"
-          : "no (still include if newly newsworthy)";
-    return {
-      id: f.id,
-      title: f.title,
-      url: f.url,
-      block: `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`,
-    };
-  });
-    const batches = buildScanBatches({ sources: batchSources });
+      await writeLiveRunRow(true);
+      /*
+      SH-B: a row the pass deliberately did not knock on is not an attempt.
+      `sources_selected` still counts it -- it was in scope -- so the receipt
+      reads "14 selected, 12 attempted" exactly the way it already reads when
+      `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
+      to come back is not recorded as a fetch that never happened.
+    */
+      // Actual fetch attempts are counted at dispatch, including failures.
+      // Watches left at the deadline were never attempted.
 
-    const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
-    applyJobLocalModelSnapshot(
-      job,
-      await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({})),
-    );
-    const scanLocalModel = scanOverrides["local-model"]?.localModel;
-    const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
-    const batchResults: import("./schema.ts").ParsedScanResult[] = [];
-    let batchesFailed = 0;
-    let lastBatchError: string | null = null;
-
-    /*
-    The leads this scan may match against.
-
-    `fileScanLeads` has always read this itself, inside the commit transaction.
-    U28 hoists it out for the same reason `getPaperPlace` above is read out
-    here: the duplicate check has to identify its borderline pairs BEFORE the
-    commit, and a model call inside `commitResults` would hold that transaction
-    open for as long as the model takes. On the dev desk's single PGlite
-    connection that is not a slow query, it is the whole desk.
-  */
-    const readExistingLeads = async (): Promise<MatchCandidateLead[]> => {
-      const existingLeadsRaw = await sql<{
-        id: number;
-        status: string;
-        headline: string;
-        topic: string | null;
-        source_urls: string;
-        created_at: string;
-        why: string | null;
-        evidence: string | null;
-      }>`
-        select id, status, headline, source_urls, created_at, why, evidence, topic
-        from leads
-        where newsroom_id = ${owned(context)}
-          and status <> 'published'
-          and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
-      `;
-      return existingLeadsRaw.map((l) => ({
-        id: l.id,
-        status: l.status,
-        headline: l.headline,
-        topic: l.topic,
-        source_urls: parseLeadSourceUrls(l.source_urls),
-        created_at: l.created_at,
-        // Unit AK item 2: the killed lead's own words, so a strong match that
-        // brings new facts can be filed against it instead of discarded.
-        why: l.why,
-        evidence: l.evidence,
-      }));
-    };
-
-    /*
-    U28 (2026-09-30): the owner's "double check. worth it."
-
-    The desk asks two bounded questions per batch. The pair check reads the
-    pairs the word rules can only rate BORDERLINE -- the matcher's "possible"
-    tier and a "Looks already printed" chip candidate. The same-story finder
-    reads every new item against the recent desk and paper, so a reworded pair
-    the word rule misses still reaches the model. D162: a manual scan asks once
-    per batch it files; a scheduled scan asks once, before its one commit.
-
-    The duplicate check uses the scan's current pinned provider, reasoning
-    effort and local model snapshot. A separate lead-scoring assignment cannot
-    override the editor's pick. Technical scan failovers are already recorded
-    on the job, so the check follows that same effective runtime.
-
-    A failure here is never fatal and never moves a chip on its own: the
-    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
-    trace is a log line -- the operator asked for no noise about it.
-  */
-    const checkScanDuplicates = async (
-      candidates: import("./schema.ts").ParsedScanResult["leads"],
-      existing: MatchCandidateLead[],
-    ): Promise<DupCheckOutcome | null> => {
-      let outcome: DupCheckOutcome | null = null;
-      try {
-        await throwIfJobCancelled(job.id);
-        /* A scan that found nothing has no pairs and no reason to read the
-         * published list -- the check costs one query and one model call per scan
-         * THAT NEEDS ONE, and not one query per scheduled scan. */
-        const printed = candidates.length > 0 ? await queryDupCheckPrinted(context) : [];
-        const collected = collectDupPairs({
-          candidates,
-          existing,
-          printed,
-          place: scanPlace,
-        });
-        if (candidates.length > 0) {
-          /*
-            `scheduledCommit` is this function's own test for "am I the scheduled
-            lane" (it is what the commit below branches on), and the scheduled
-            lane's job row carries the exact choice its forced runtime is pinned
-            to (daily-scan.server.ts queues it with `model.modelChoice`), so
-            passing it back to that same runtime is a no-op rather than a
-            re-resolution.
-          */
-          const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
-          const chat = scanDuplicateChat({
-            modelChoice: job.model_choice,
-            reasoningEffort: effortFromJob(job),
-            newsroomId: job.newsroom_id,
-            localModel: scanLocalModel,
-            timeoutMs: dupTimeoutMs,
-          }, runChat);
-          /*
-            Two independent questions, one batch: the old pair check still only
-            reads the pairs the word rule flagged, while the same-story finder
-            reads every new item against the recent desk and paper. They share a
-            provider binding and timeout, and a failure in either leaves the
-            other's answer intact.
-          */
-          const pairCheck: Promise<DupCheckOutcome | null> = collected.pairs.length > 0
-            ? runDupCheck({ pairs: collected.pairs, skipped: collected.skipped, chat })
-            : Promise.resolve(null);
-          const [pairOutcome, sameStoryOutcome] = await Promise.all([
-            pairCheck,
-            runSameStoryCheck({ candidates, existing, printed, chat }),
-          ]);
-          outcome = combineDupCheckOutcomes(pairOutcome, sameStoryOutcome);
+      if (deps.scheduledCommit) {
+        // Scheduled scans keep their old boundary exactly: fetch everything,
+        // then build and run the complete changed-first batch list.
+        await reportStage("Reading the sources with a model", 55);
+        batches = buildBatchesFor(fetched);
+        for (const [batchIndex, batch] of batches.entries()) {
+          await runOneScanBatch(batch, { batchIndex, batches });
         }
-      } catch (error) {
-        if (error instanceof JobCancelledError) throw error;
-        // A check that could not run must not be able to change an answer: the
-        // word rule stands, exactly as it did before this unit (see dup-check.ts).
-        console.error("[scan] duplicate check could not run", error);
+      } else {
+        // Full batches already ran while pages were being fetched. Everything
+        // still ready now forms the tail, bounded by the same builder.
+        const tailBatches = buildBatchesFor(streamingReady);
+        const allBatches = [...batches, ...tailBatches];
+        for (const batch of tailBatches) {
+          const batchIndex = batches.length;
+          batches.push(batch);
+          await runOneScanBatch(batch, { batchIndex, batches: allBatches });
+        }
+        streamingReady = [];
       }
-      if (outcome?.failure) console.error(`[scan] run ${runId}: ${outcome.failure}`);
-      return outcome;
-    };
-
-    /*
-    D162 (Scott, Oct 19 2026: "why don't you update the queue live while it's
-    searching"): a MANUAL scan files each batch's leads as soon as the model has
-    read that batch, in its own short transaction, so they show on the Queue
-    while the scan is still running. Same rules as the one commit at the end:
-    the same-headline drop `mergeScanBatchResults` applies, `fileScanLeads`'
-    same-scan merge (through `filedThisScan`), the existing-lead match and the
-    duplicate check. A scheduled scan is unchanged: everything it writes is held
-    for its one commit with the daily reservation.
-
-    If a batch's filing fails, its leads wait for the final commit instead, so a
-    failed early write never loses a lead. Leads already filed stay filed if the
-    scan is cancelled or fails later; the receipt counts them.
-  */
-    const fileAsRead = !deps.scheduledCommit;
-    const filedThisScan: MatchCandidateLead[] = [];
-    const headlinesFiledThisScan = new Set<string>();
-    let existingForEarlyFiling: MatchCandidateLead[] | null = null;
-    let earlyFiling = emptyScanFilingCounts();
-    const leadsLeftForCommit: import("./schema.ts").ParsedScanResult["leads"] = [];
-    const fileBatchLeads = async (leads: import("./schema.ts").ParsedScanResult["leads"]) => {
-      const fresh = leads.filter((lead) => {
-        const key = scanHeadlineKey(lead.headline);
-        if (!key || headlinesFiledThisScan.has(key)) return false;
-        headlinesFiledThisScan.add(key);
-        return true;
-      });
-      if (!fresh.length) return;
-      const filedBefore = filedThisScan.length;
-      try {
-        existingForEarlyFiling ??= await readExistingLeads();
-        const existing = existingForEarlyFiling;
-        const batchDupCheck = await checkScanDuplicates(fresh, existing);
-        const filed = await withTransaction(async (writeSql) => {
-          if (!(await lockManualScanClaim(writeSql, job)))
-            throw new Error("Scan job claim was superseded; refusing stale result writes.");
-          const openRun = await writeSql<{ id: number }>`
-            select id from scan_runs
-            where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
-            for update
-          `;
-          if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
-          const counts = await fileScanLeads(
-            writeSql,
-            context,
-            owned(context),
-            runId,
-            fresh,
-            existing,
-            scanPlace,
-            batchDupCheck,
-            filedThisScan,
-            fetched,
-          );
-          await refreshManualScanClaim(writeSql, job);
-          return counts;
-        });
-        earlyFiling = addScanFilingCounts(earlyFiling, filed);
-        leadsFiledEarly = earlyFiling.leadsCreated;
-      } catch (error) {
-        if (error instanceof JobCancelledError) throw error;
-        // The transaction rolled back: forget the rows it pushed into the
-        // in-memory lists and re-read the leads next time, then let the final
-        // commit file these.
-        filedThisScan.splice(filedBefore);
-        existingForEarlyFiling = null;
-        leadsLeftForCommit.push(...fresh);
-        console.error(`[scan] run ${runId}: a batch's leads could not be filed early; they wait for the final commit`, error);
-      }
-    };
-    /*
-    The second countable pass. `buildScanBatches` has already split the fetched
-    text into bounded batches, so the model phase knows exactly how many calls
-    it is going to make -- which is the one place in a scan where a percentage
-    is a real fraction of the work rather than a guess.
-  */
-    await reportStage("Reading the sources with a model", 55);
-    for (const [batchIndex, batch] of batches.entries()) {
-      await deps.scheduledGuard?.();
-      await reportStage(
-      countedStep("Reading the sources with a model", batchIndex + 1, batches.length),
-      spanPct(batchIndex + 1, batches.length, 55, 92),
-    );
-      /*
-      Between batch boundaries is where a scan can be stopped: the batches
-      already read are committed, and stopping here leaves the job's real
-      reason ("Cancelled by the editor") on the row rather than a half-read
-      batch's parse error. `executeJob` maps the throw.
-    */
-      await throwIfJobCancelled(job.id);
-      const userMsg = buildScanUserMessage({
-      topics: topicChoices,
-      section: sectionSnapshot,
-      city: paperConfig.city,
-      state: paperConfig.state,
-      reread,
-      memory,
-      published: publishedContext,
-      payload: batch.payload,
-    });
-      /*
-      The same one-shot technical failover Draft uses (see `failOverAndRetry`),
-      except the fetched source text is never re-fetched -- this batch's
-      payload is reused verbatim for the retry by `runScanChatWithFailover`.
-
-      `liveLabel` tracks the rung the batch is actually on: the failover above
-      can hop mid-call, and the ticker below would otherwise keep naming a model
-      that has already failed for the rest of the batch's wait.
-    */
-      let liveLabel = modelChoiceLabel(effectiveStoryModelChoice(job.model_choice));
-      const ai = await waitForModel({
-        jobId: job.id,
-        label: () => liveLabel,
-        run: () => {
-          failureReceipt.modelBatchesUsed += 1;
-          return runScanChatWithFailover({
-            job,
-            newsroomId: job.newsroom_id,
-            localModel: scanOverrides["local-model"]?.localModel,
-            system: scanSystem({
-            name: paperConfig.name,
-            city: paperConfig.city,
-            state: paperConfig.state,
-          }),
-            user: userMsg,
-            /*
-            A reply this batch cannot read is not a success (Unit Y item 3): the
-            helper retries it once on the same rung and then fails over, so the
-            batch's parse below is the second half of the contract rather than the
-            only reader. Same parser as the line after the call, so the two cannot
-            disagree about what "readable" means.
-          */
-            read: (text) =>
-            !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
-            maxTokens: 3500,
-            modelEffort: effortFromJob(job),
-            timeoutMs: batchTimeoutMs,
-            grokChat: runChat,
-            probe: (choice) =>
-              probe(
-                choice,
-                job.newsroom_id,
-                undefined,
-                "scan",
-                choice === "local-model" ? (scanLocalModel ?? undefined) : undefined,
-              ),
-            setModelChoice,
-            setStage,
-            setFailoverNote: setJobFailoverNote,
-            onSwitch: async (receipt) => {
-            liveLabel = receipt.nextLabel;
-            await deps.onModelSwitch?.(receipt);
-          },
-          });
-        },
-      });
-      if (!ai.ok) {
-      batchesFailed += 1;
-      failureReceipt.modelBatchesFailed = batchesFailed;
-      lastBatchError = ai.error;
-      continue;
-    }
-      const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
-      if (parsed.parseError) {
-      batchesFailed += 1;
-      failureReceipt.modelBatchesFailed = batchesFailed;
-      lastBatchError = parsed.parseError;
-      continue;
-    }
-    batchResults.push(parsed);
-    for (const source of batch.sources) {
-      const messageId = newsletterInputs.get(source.url);
-      if (messageId) analyzedNewsletterIds.add(messageId);
-    }
-    failureReceipt.sourcesAnalyzed += batch.sources.length;
-    if (fileAsRead) await fileBatchLeads(parsed.leads);
-    // The row moves phase: from "reading sources — k of n" to "reading the
-    // pages with a model", which is what the editor watching the history sees.
-    await writeLiveRunRow(true);
-  }
 
     const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {
     await writeSql`

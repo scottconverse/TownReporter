@@ -9,7 +9,7 @@ export function scanSourceExcerpt(
   const parts = [{ heading: "PAGE EXCERPT:\n", text }];
   const notice = "[Partial excerpts; read original documents before drafting.]\n";
   let headers = notice.length + parts[0]!.heading.length;
-  for (const extra of extras.slice(0, 4)) {
+  for (const extra of extras.slice(0, 6)) {
     const heading = `\n\nDOCUMENT ${extra.url}\nEXCERPT:\n`;
     // Retain complete attribution and enough space for text in every part.
     if (headers + heading.length + (parts.length + 1) * 80 > maxChars) continue;

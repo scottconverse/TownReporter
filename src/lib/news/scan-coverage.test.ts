@@ -84,7 +84,7 @@ describe("batched analysis replaces the single truncating pass (P0-5)", () => {
   });
 
   it("builds bounded batches and merges their results", () => {
-    assert.match(desk, /buildScanBatches\(\{ sources: batchSources \}\)/);
+    assert.match(desk, /buildScanBatches\(\{ sources: changedFirst\(items\)\.map\(batchSourceFor\) \}\)/);
     assert.match(desk, /mergeScanBatchResults\(batchResults\)/);
     /*
       FB1 changed the loop's shape: it is indexed now, because the batch number

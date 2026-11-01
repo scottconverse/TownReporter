@@ -1350,6 +1350,48 @@ function factsAreTheOnlySharedEvidence(signals: NearDuplicateSignals): boolean {
 }
 
 /**
+ * Oct 31 2026 (dev run 107, lead 975 vs killed 267): one headline can carry
+ * two facts -- "The Inn Between reports 225 people housed in 2025, sets Nov. 5
+ * chili fundraiser at Bootstrap Brewery". A later headline about the fundraiser
+ * alone then has subject words the long one lacks ("lists", "cook") and the
+ * long one has words it lacks ("people", "housed"), so subjectsAgree says no.
+ * It is still the same event when the pair shares at least two subject words,
+ * two names and a specific date or amount, with no fact in conflict. Used only
+ * by the candidate filter, never by nearDuplicateStrong: such a pair is linked
+ * and checked, never stamped on words alone.
+ */
+function oneEventInsideLongerHeadline(signals: NearDuplicateSignals): boolean {
+  return (
+    signals.factsAgree &&
+    signals.sharedSubjects.length >= 2 &&
+    signals.sharedNames >= NAME_ONLY_MIN_SHARED &&
+    signals.sharedSpecificAnchors >= NEAR_DUPLICATE_ANCHOR_MIN_SHARED
+  );
+}
+
+/**
+ * Oct 31 2026 (dev run 107, lead 976 vs held 924): does the candidate cite a
+ * source the lead cites AND restate every specific fact (date, amount, count)
+ * in the lead's headline, at least two of them, with none in conflict? Then a
+ * pair-check "not the same" is not believed: the candidate files held and
+ * linked for the editor instead of returning to the desk as new.
+ */
+export function restatesSourcedFacts(
+  candidateHeadline: string,
+  candidateUrls: string[],
+  leadHeadline: string,
+  leadUrls: string[],
+  place?: NewsroomPlace | null,
+): boolean {
+  if (!sharesUrl(candidateUrls, leadUrls)) return false;
+  const leadAnchors = extractAnchors(leadHeadline, place);
+  const leadFacts = specificAnchors(leadAnchors);
+  if (leadFacts.length < 2) return false;
+  const candidateAnchors = extractAnchors(candidateHeadline, place);
+  return leadFacts.every((fact) => candidateAnchors.has(fact)) && !factsConflict(candidateAnchors, leadAnchors);
+}
+
+/**
  * Unit AO, stage 1: is this pair worth a second look? The filter is deliberately
  * wider than the classifier below -- every pair the classifier calls the same
  * story is a pair this accepts -- and it is the cheap signals that decide it,
@@ -1399,7 +1441,7 @@ function nearDuplicateCandidate(
   if (
     signals.sharedNames < 1 ||
     !signals.factsAgree ||
-    !signals.subjectsAgree ||
+    !(signals.subjectsAgree || oneEventInsideLongerHeadline(signals)) ||
     factsAreTheOnlySharedEvidence(signals)
   ) {
     return false;

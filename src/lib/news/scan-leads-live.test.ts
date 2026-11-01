@@ -72,11 +72,11 @@ const BATCH_TWO = [
   lead("St. Vrain Valley schools cut two bus routes in east Longmont starting Nov. 12"),
 ];
 
-async function seedManualScan(user: string, room: number) {
+async function seedManualScan(user: string, room: number, sourceCount = SOURCE_COUNT) {
   const sql = await getSql();
   await sql`insert into newsrooms(id,name) values(${room},'Live queue fixture')`;
   await sql`insert into newsroom_members(user_id,newsroom_id,role) values(${user},${room},'owner')`;
-  for (let i = 0; i < SOURCE_COUNT; i++) {
+  for (let i = 0; i < sourceCount; i++) {
     await sql`insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
       values(${user},${room},${`https://s${i}-${room}.example.test/agenda`},${`Agenda ${i}`},'page','A','accepted')`;
   }
@@ -171,4 +171,247 @@ it("a scheduled scan still files nothing before its one commit", async () => {
   assert.equal(model.leadsOnQueueWhenBatchTwoSent, 0, "the scheduled lane files nothing early");
   const filed = await sql<{ n: number }>`select count(*)::int as n from leads where scan_run_id = ${runId}`;
   assert.equal(filed[0]!.n, 3, "the one commit files all three stories");
+});
+
+const STREAM_SOURCE_COUNT = 45;
+const STREAM_BATCH_ONE_LEAD = lead(
+  "Longmont council votes Oct. 28 on a new water contract with Northern Water",
+);
+const STREAM_BATCH_THREE_LEAD = lead(
+  "St. Vrain Valley schools cut two bus routes in east Longmont starting Nov. 12",
+);
+
+it("starts a manual scan's first model batch and files its leads before the last source fetch finishes", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room, STREAM_SOURCE_COUNT);
+  const sql = await getSql();
+  let fetchCalls = 0;
+  let firstModelCallAtFetchCalls: number | null = null;
+  let leadWasFiledBeforeLastFetchFinished = false;
+  let scanCalls = 0;
+  let duplicateCalls = 0;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => {
+      fetchCalls += 1;
+      if (fetchCalls === STREAM_SOURCE_COUNT) {
+        const deadline = Date.now() + 3_000;
+        while (Date.now() < deadline) {
+          const [row] = await sql<{ n: number }>`
+            select count(*)::int as n from leads
+            where scan_run_id = ${runId} and headline = ${STREAM_BATCH_ONE_LEAD.headline}
+          `;
+          if (row!.n > 0) {
+            leadWasFiledBeforeLastFetchFinished = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      return { text: pageText(url), titleHint: "Agenda", extras: [] };
+    },
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM) {
+        duplicateCalls += 1;
+        return { ok: true as const, text: "[]" };
+      }
+      scanCalls += 1;
+      if (scanCalls === 1) firstModelCallAtFetchCalls = fetchCalls;
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [STREAM_BATCH_ONE_LEAD] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls} read.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  assert.equal(scanCalls, 3, "45 sources fill three scan batches");
+  assert.ok(duplicateCalls > 0, "the first batch's duplicate check ran");
+  assert.ok(
+    firstModelCallAtFetchCalls !== null && firstModelCallAtFetchCalls < STREAM_SOURCE_COUNT,
+    `the first model call must begin before the last source fetch starts (started at fetch ${firstModelCallAtFetchCalls})`,
+  );
+  assert.equal(
+    leadWasFiledBeforeLastFetchFinished,
+    true,
+    "the first batch's lead must be on the Queue before the last source fetch finishes",
+  );
+});
+
+it("a scheduled scan still waits for every fetch before its first model batch", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { job } = await seedManualScan(user, room);
+  let lastFetchFinished = false;
+  let firstModelCallAfterLastFetch = false;
+  let scanCalls = 0;
+
+  await scan(job, {
+    ingestUrl: async () => {
+      lastFetchFinished = true;
+      return { text: pageText("https://scheduled.example.test/agenda"), titleHint: "Agenda", extras: [] };
+    },
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM)
+        return { ok: true as const, text: "[]" };
+      scanCalls += 1;
+      if (scanCalls === 1) firstModelCallAfterLastFetch = lastFetchFinished;
+      return {
+        ok: true as const,
+        text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: `Batch ${scanCalls}.` }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+    scheduledCommit: (write) => withTransaction(write),
+  });
+
+  assert.ok(scanCalls > 0);
+  assert.equal(firstModelCallAfterLastFetch, true);
+});
+
+it("a failed middle batch keeps the leads from the batches on either side", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room, STREAM_SOURCE_COUNT);
+  let scanCalls = 0;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => ({ text: pageText(url), titleHint: "Agenda", extras: [] }),
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM)
+        return { ok: true as const, text: "[]" };
+      scanCalls += 1;
+      if (scanCalls === 2) return { ok: false as const, error: "Middle scan batch failed." };
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [STREAM_BATCH_ONE_LEAD] : scanCalls === 3 ? [STREAM_BATCH_THREE_LEAD] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls}.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  const sql = await getSql();
+  const filed = await sql<{ headline: string }>`
+    select headline from leads where scan_run_id = ${runId} order by id
+  `;
+  const [receipt] = await sql<{ model_batches_used: number; model_batches_failed: number; leads_created: number }>`
+    select model_batches_used, model_batches_failed, leads_created from scan_runs where id = ${runId}
+  `;
+  assert.equal(scanCalls, 3);
+  assert.deepEqual(filed.map((row) => row.headline), [
+    STREAM_BATCH_ONE_LEAD.headline,
+    STREAM_BATCH_THREE_LEAD.headline,
+  ]);
+  assert.deepEqual(receipt, { model_batches_used: 3, model_batches_failed: 1, leads_created: 2 });
+});
+
+it("an early-filed lead from a cross-domain attachment still links to its source", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room);
+  const sql = await getSql();
+  const parentUrl = `https://s0-${room}.example.test/agenda`;
+  const attachmentUrl = `https://files-${room}.other.test/packet.pdf`;
+  const [parent] = await sql<{ id: number }>`select id from sources where newsroom_id = ${room} and url = ${parentUrl}`;
+  let scanCalls = 0;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => ({
+      text: pageText(url),
+      titleHint: "Agenda",
+      extras: url === parentUrl ? [attachmentUrl] : [],
+    }),
+    grokChat: async (system: string) => {
+      if (system === SAME_STORY_SYSTEM || system === DUP_CHECK_SYSTEM)
+        return { ok: true as const, text: "[]" };
+      scanCalls += 1;
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [{ ...STREAM_BATCH_ONE_LEAD, source_urls: [attachmentUrl] }] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls}.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  const [filed] = await sql<{ source_id: number | null }>`
+    select source_id from leads where scan_run_id = ${runId} and headline = ${STREAM_BATCH_ONE_LEAD.headline}
+  `;
+  assert.ok(filed, "the attachment lead is filed");
+  assert.equal(filed.source_id, parent!.id, "the lead links to the source whose attachment it came from");
+});
+
+/*
+  Scott, Oct 31 2026: one manual scan filed the DA's no-charge decision three
+  times (dev run 107: leads 969, 976, 978), in different batches and in
+  different words. This runs the real scan with two batches. Batch two's
+  reworded copy must reach the AI same-story check together with the lead
+  batch one filed, and the answer must keep it off the Queue as a new lead.
+*/
+const DA_FIRST = lead("Boulder County DA's Office announces no charges against Longmont Officer Joshua Barry in Dariss Yearby shooting");
+const DA_REWORDED = lead("Boulder County DA formally clears Longmont officer in killing of Dariss Yearby");
+
+it("a reworded copy of a story filed in an earlier batch of the same manual scan is not filed as a second new lead", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room);
+  let scanCalls = 0;
+  let batchOneLeadOfferedToFinder = false;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => ({ text: pageText(url), titleHint: "Agenda", extras: [] }),
+    grokChat: async (system: string, user: string) => {
+      if (system === DUP_CHECK_SYSTEM) return { ok: true as const, text: "[]" };
+      if (system === SAME_STORY_SYSTEM) {
+        const data = JSON.parse(user) as {
+          items: { n: number; headline: string }[];
+          leads: { ref: string; headline: string }[];
+        };
+        const first = data.leads.find((row) => row.headline === DA_FIRST.headline);
+        const answers = data.items.map((item) => {
+          if (item.headline === DA_REWORDED.headline && first) {
+            batchOneLeadOfferedToFinder = true;
+            return { n: item.n, same_as: first.ref, why: "same DA decision, reworded" };
+          }
+          return { n: item.n, same_as: null, why: "new" };
+        });
+        return { ok: true as const, text: JSON.stringify(answers) };
+      }
+      scanCalls += 1;
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [DA_FIRST] : scanCalls === 2 ? [DA_REWORDED] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls}.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  const sql = await getSql();
+  assert.equal(scanCalls, 2, "the fixture must make exactly two model batches");
+  assert.equal(batchOneLeadOfferedToFinder, true, "batch two's check must see the lead batch one filed");
+  const open = await sql<{ headline: string }>`
+    select headline from leads where scan_run_id = ${runId} and status = 'new' order by id
+  `;
+  assert.deepEqual(open.map((row) => row.headline), [DA_FIRST.headline], "one story, one open lead");
 });

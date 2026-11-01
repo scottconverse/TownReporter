@@ -6,6 +6,7 @@ import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
   matchStrength,
+  restatesSourcedFacts,
   MATCHABLE_STATUSES,
   newFactsIn,
   normalizeSourceUrl,
@@ -547,7 +548,15 @@ export async function fileScanLeads(
         const leadAnswer = dupCheck?.decisions.get(candidateIndex)?.lead ?? null;
         const verdict =
           leadAnswer && leadAnswer.headline === matched.headline ? leadAnswer.verdict : null;
-        if (verdict && !verdict.same) {
+        /* Oct 31 2026 (dev run 107, lead 976): a "no" is not believed when the
+         * candidate cites the lead's own source and restates every dated or
+         * counted fact in the lead's headline. It files held and linked, and
+         * the "no" stays on the row. See restatesSourcedFacts. */
+        const noOverruled =
+          verdict != null &&
+          !verdict.same &&
+          restatesSourcedFacts(headline, candidateUrls, matched.headline, matched.source_urls, place);
+        if (verdict && !verdict.same && !noOverruled) {
           dupCheckCleared += 1;
         } else if (verdict && verdict.same && !newFactsIn({ headline, why, evidence }, matched, place)) {
           /*
@@ -589,7 +598,7 @@ export async function fileScanLeads(
           continue;
         } else {
           possibleDuplicateOf = matchId;
-          if (matched.status === "killed" || verdict?.same) initialStatus = "held";
+          if (matched.status === "killed" || verdict?.same || noOverruled) initialStatus = "held";
           dupKind = "possible";
           filedCategory = "possible";
         }
@@ -615,10 +624,23 @@ export async function fileScanLeads(
     // would put another pair's answer in `dup_ai_same`/`dup_ai_target`.
     const leadAnswer = decision?.lead ?? null;
     const leadVerdict = leadAnswer && leadAnswer.headline === matchedHeadline ? leadAnswer.verdict : null;
-    const printedVerdict = decision?.printed?.verdict ?? null;
+    const pairPrintedVerdict = decision?.printed?.verdict ?? null;
     const directLeadAnswer = directLead && sameStory?.kind === "lead" ? sameStory : null;
+    /*
+      Oct 31 2026 (dev run 107, leads 969 and 978): the word rule matched one
+      printed story, the pair check said "not the same" about THAT story, and
+      the finder named a DIFFERENT printed story as the same. A "no" about one
+      story is not an answer about another, so it must not cancel the finder's
+      "yes". A "no" about the same story the finder named still wins.
+    */
     const directPrintedAnswer =
-      printedVerdict == null && sameStory?.kind === "printed" ? sameStory : null;
+      sameStory?.kind === "printed" &&
+      (pairPrintedVerdict == null ||
+        (pairPrintedVerdict.same === false && decision?.printed?.slug !== sameStory.slug))
+        ? sameStory
+        : null;
+    // The finder's yes replaces the pair check's no about another story.
+    const printedVerdict = directPrintedAnswer ? null : pairPrintedVerdict;
 
     /* A printed match is a hold, never an Open-list duplicate. This applies to
      * the old pair check's yes and to the direct finder when the old check did
@@ -654,7 +676,7 @@ export async function fileScanLeads(
           ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : directLeadAnswer ? storableText(directLead!.headline).slice(0, 180) || null : null},
           ${printedVerdict ? printedVerdict.same : directPrintedAnswer ? true : null},
           ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : directPrintedAnswer ? storableText(directPrintedAnswer.why).slice(0, 400) || null : null},
-          ${decision?.printed?.slug ?? directPrintedAnswer?.slug ?? null},
+          ${directPrintedAnswer?.slug ?? decision?.printed?.slug ?? null},
           ${aiModel ? storableText(aiModel).slice(0, 120) : null},
           ${aiCheckedAt}
         )
