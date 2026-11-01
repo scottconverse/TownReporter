@@ -356,3 +356,62 @@ it("an early-filed lead from a cross-domain attachment still links to its source
   assert.ok(filed, "the attachment lead is filed");
   assert.equal(filed.source_id, parent!.id, "the lead links to the source whose attachment it came from");
 });
+
+/*
+  Scott, Oct 31 2026: one manual scan filed the DA's no-charge decision three
+  times (dev run 107: leads 969, 976, 978), in different batches and in
+  different words. This runs the real scan with two batches. Batch two's
+  reworded copy must reach the AI same-story check together with the lead
+  batch one filed, and the answer must keep it off the Queue as a new lead.
+*/
+const DA_FIRST = lead("Boulder County DA's Office announces no charges against Longmont Officer Joshua Barry in Dariss Yearby shooting");
+const DA_REWORDED = lead("Boulder County DA formally clears Longmont officer in killing of Dariss Yearby");
+
+it("a reworded copy of a story filed in an earlier batch of the same manual scan is not filed as a second new lead", async () => {
+  const room = roomCounter++;
+  const user = `live-queue-${room}`;
+  const { runId, job } = await seedManualScan(user, room);
+  let scanCalls = 0;
+  let batchOneLeadOfferedToFinder = false;
+
+  await scan(job, {
+    ingestUrl: async (url: string) => ({ text: pageText(url), titleHint: "Agenda", extras: [] }),
+    grokChat: async (system: string, user: string) => {
+      if (system === DUP_CHECK_SYSTEM) return { ok: true as const, text: "[]" };
+      if (system === SAME_STORY_SYSTEM) {
+        const data = JSON.parse(user) as {
+          items: { n: number; headline: string }[];
+          leads: { ref: string; headline: string }[];
+        };
+        const first = data.leads.find((row) => row.headline === DA_FIRST.headline);
+        const answers = data.items.map((item) => {
+          if (item.headline === DA_REWORDED.headline && first) {
+            batchOneLeadOfferedToFinder = true;
+            return { n: item.n, same_as: first.ref, why: "same DA decision, reworded" };
+          }
+          return { n: item.n, same_as: null, why: "new" };
+        });
+        return { ok: true as const, text: JSON.stringify(answers) };
+      }
+      scanCalls += 1;
+      return {
+        ok: true as const,
+        text: JSON.stringify({
+          leads: scanCalls === 1 ? [DA_FIRST] : scanCalls === 2 ? [DA_REWORDED] : [],
+          proposed_sources: [],
+          editor_summary: `Batch ${scanCalls}.`,
+        }),
+      };
+    },
+    setJobStage: async () => {},
+    setJobModelChoice: async () => {},
+  });
+
+  const sql = await getSql();
+  assert.equal(scanCalls, 2, "the fixture must make exactly two model batches");
+  assert.equal(batchOneLeadOfferedToFinder, true, "batch two's check must see the lead batch one filed");
+  const open = await sql<{ headline: string }>`
+    select headline from leads where scan_run_id = ${runId} and status = 'new' order by id
+  `;
+  assert.deepEqual(open.map((row) => row.headline), [DA_FIRST.headline], "one story, one open lead");
+});

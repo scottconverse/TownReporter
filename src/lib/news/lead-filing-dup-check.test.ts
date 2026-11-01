@@ -794,4 +794,68 @@ describe("the direct same-story answer files by what the row would become", () =
     } finally {
       await db.close();
     }
-  });});
+  });
+  /*
+    Dev run 107 (Oct 31 2026): leads 969 and 978, the DA's no-charge decision,
+    filed as NEW although the paper printed it Oct 29. The word rule matched a
+    DIFFERENT printed story (advocates asking for a review) and the pair check
+    rightly said "not the same". That "no" about one story must not cancel the
+    finder's "same" about another printed story.
+  */
+  it("a pair-check no about one printed story does not cancel the finder's yes about a different printed story", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const candidate = {
+        headline: "Boulder County DA formally clears Longmont officer in killing of Dariss Yearby",
+        why: "The DA's office announced the officer faces no criminal charges.",
+        topic: "news",
+        source_urls: ["https://example.com/da-letter"],
+      };
+      const outcome: DupCheckOutcome = {
+        decisions: new Map([[0, { printed: { slug: "advocates-ask-weiser-review", verdict: { same: false, why: "that story is the review request" } } }]]),
+        model: "deepseek-v4.1-flash:cloud",
+        failure: null,
+        asked: 2,
+        skipped: 0,
+        sameStory: new Map([[0, { kind: "printed", slug: "da-wont-charge-officer", why: "same DA decision" } as SameStoryAnswer]]),
+      };
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 916, [candidate], [], PLACE, outcome);
+      assert.equal(result.leadsCreated, 1);
+      const [filed] = await filedRows(sql);
+      assert.equal(filed!.status, "held", "a printed repeat is held, not put back in Open");
+      assert.equal(filed!.dup_ai_printed_same, true);
+      assert.equal(filed!.dup_ai_printed_slug, "da-wont-charge-officer");
+      assert.equal(result.dupCheckHeld, 1);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("a pair-check no about the SAME printed story the finder named still wins", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const candidate = {
+        headline: "HOPE for Longmont sets Nov. 14 fundraiser",
+        why: "The fundraiser is set for Nov. 14.",
+        topic: "news",
+        source_urls: ["https://example.com/hope"],
+      };
+      const outcome: DupCheckOutcome = {
+        decisions: new Map([[0, { printed: { slug: "hope-fundraiser", verdict: { same: false, why: "different year" } } }]]),
+        model: "deepseek-v4.1-flash:cloud",
+        failure: null,
+        asked: 2,
+        skipped: 0,
+        sameStory: new Map([[0, { kind: "printed", slug: "hope-fundraiser", why: "same fundraiser" } as SameStoryAnswer]]),
+      };
+      await fileScanLeads(sql, { userId: "u" }, 1, 917, [candidate], [], PLACE, outcome);
+      const [filed] = await filedRows(sql);
+      assert.equal(filed!.status, "new");
+      assert.equal(filed!.dup_ai_printed_same, false);
+    } finally {
+      await db.close();
+    }
+  });
+});

@@ -615,10 +615,23 @@ export async function fileScanLeads(
     // would put another pair's answer in `dup_ai_same`/`dup_ai_target`.
     const leadAnswer = decision?.lead ?? null;
     const leadVerdict = leadAnswer && leadAnswer.headline === matchedHeadline ? leadAnswer.verdict : null;
-    const printedVerdict = decision?.printed?.verdict ?? null;
+    const pairPrintedVerdict = decision?.printed?.verdict ?? null;
     const directLeadAnswer = directLead && sameStory?.kind === "lead" ? sameStory : null;
+    /*
+      Oct 31 2026 (dev run 107, leads 969 and 978): the word rule matched one
+      printed story, the pair check said "not the same" about THAT story, and
+      the finder named a DIFFERENT printed story as the same. A "no" about one
+      story is not an answer about another, so it must not cancel the finder's
+      "yes". A "no" about the same story the finder named still wins.
+    */
     const directPrintedAnswer =
-      printedVerdict == null && sameStory?.kind === "printed" ? sameStory : null;
+      sameStory?.kind === "printed" &&
+      (pairPrintedVerdict == null ||
+        (pairPrintedVerdict.same === false && decision?.printed?.slug !== sameStory.slug))
+        ? sameStory
+        : null;
+    // The finder's yes replaces the pair check's no about another story.
+    const printedVerdict = directPrintedAnswer ? null : pairPrintedVerdict;
 
     /* A printed match is a hold, never an Open-list duplicate. This applies to
      * the old pair check's yes and to the direct finder when the old check did
@@ -654,7 +667,7 @@ export async function fileScanLeads(
           ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : directLeadAnswer ? storableText(directLead!.headline).slice(0, 180) || null : null},
           ${printedVerdict ? printedVerdict.same : directPrintedAnswer ? true : null},
           ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : directPrintedAnswer ? storableText(directPrintedAnswer.why).slice(0, 400) || null : null},
-          ${decision?.printed?.slug ?? directPrintedAnswer?.slug ?? null},
+          ${directPrintedAnswer?.slug ?? decision?.printed?.slug ?? null},
           ${aiModel ? storableText(aiModel).slice(0, 120) : null},
           ${aiCheckedAt}
         )
