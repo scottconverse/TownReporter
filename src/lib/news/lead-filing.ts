@@ -6,6 +6,7 @@ import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
   matchStrength,
+  restatesSourcedFacts,
   MATCHABLE_STATUSES,
   newFactsIn,
   normalizeSourceUrl,
@@ -547,7 +548,15 @@ export async function fileScanLeads(
         const leadAnswer = dupCheck?.decisions.get(candidateIndex)?.lead ?? null;
         const verdict =
           leadAnswer && leadAnswer.headline === matched.headline ? leadAnswer.verdict : null;
-        if (verdict && !verdict.same) {
+        /* Oct 31 2026 (dev run 107, lead 976): a "no" is not believed when the
+         * candidate cites the lead's own source and restates every dated or
+         * counted fact in the lead's headline. It files held and linked, and
+         * the "no" stays on the row. See restatesSourcedFacts. */
+        const noOverruled =
+          verdict != null &&
+          !verdict.same &&
+          restatesSourcedFacts(headline, candidateUrls, matched.headline, matched.source_urls, place);
+        if (verdict && !verdict.same && !noOverruled) {
           dupCheckCleared += 1;
         } else if (verdict && verdict.same && !newFactsIn({ headline, why, evidence }, matched, place)) {
           /*
@@ -589,7 +598,7 @@ export async function fileScanLeads(
           continue;
         } else {
           possibleDuplicateOf = matchId;
-          if (matched.status === "killed" || verdict?.same) initialStatus = "held";
+          if (matched.status === "killed" || verdict?.same || noOverruled) initialStatus = "held";
           dupKind = "possible";
           filedCategory = "possible";
         }

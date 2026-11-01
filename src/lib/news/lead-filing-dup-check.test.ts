@@ -859,3 +859,52 @@ describe("the direct same-story answer files by what the row would become", () =
     }
   });
 });
+
+/*
+ * Oct 31 2026, dev run 107 (PR 358 at 81238c8c): lead 976 filed NEW although
+ * held lead 924 is the same city budget schedule. Both cite the city's 2027
+ * budget documents page, the word rule linked them, and the pair check said
+ * "not the same". The candidate repeats BOTH dates the held lead's headline
+ * states (Nov. 17 and Dec. 1). A "no" against that evidence must not put the
+ * story back on the desk as new; it files held and linked so the editor sees it.
+ */
+describe("Oct 31 repeat: a pair-check no against a shared source and every dated fact", () => {
+  const BUDGET_PAGE = "https://longmontcolorado.gov/finance/budget-office/2027-budget-documents/";
+  const HELD_924 = "Longmont sets Nov. 17 first reading, Dec. 1 second reading for 2027 budget ordinances";
+  const REPEAT_976 = {
+    headline: "Longmont sets Nov. 17 first reading and Dec. 1 final vote on the $547.5 million 2027 budget",
+    why: "The budget page schedules first reading Nov. 17 and second reading Dec. 1; the budget message puts the proposal at $547.5 million.",
+    topic: "council",
+    source_urls: [BUDGET_PAGE, "https://longmontcolorado.gov/wp-content/uploads/2026/09/2027BudgetMessage-v2.pdf"],
+  };
+
+  it("files the candidate HELD and linked to the held lead, with the no kept on the row", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const urls924 = [BUDGET_PAGE, "https://longmontcolorado.gov/wp-content/uploads/2026/09/BudgetPresentationCityManager_updated.pdf"];
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${HELD_924}, ${"First reading Nov. 17, second reading Dec. 1."},
+                ${"council"}, ${"held"}, ${JSON.stringify(urls924)}, 6)
+        returning id
+      `;
+      const existing = [{ id: seeded[0]!.id, status: "held", headline: HELD_924, source_urls: urls924, topic: "council" }];
+      const { pairs } = collectDupPairs({ candidates: [REPEAT_976], existing, printed: [], place: PLACE });
+      assert.equal(pairs.length, 1, "the word rule asks about this pair");
+      const outcome = await runDupCheck({ pairs, chat: answering(false, "one adds the budget total") });
+
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 907, [REPEAT_976], existing, PLACE, outcome);
+
+      assert.equal(result.leadsCreated, 1);
+      assert.equal(result.dupCheckCleared, 0, "the no did not clear this link");
+      const [filed] = (await filedRows(sql)).filter((r) => r.id !== seeded[0]!.id);
+      assert.equal(filed!.status, "held", "not back on the desk as new");
+      assert.equal(filed!.possible_duplicate_of, seeded[0]!.id);
+      assert.equal(filed!.dup_kind, "possible");
+      assert.equal(filed!.dup_ai_same, false, "the model's answer is still on the row");
+    } finally {
+      await db.close();
+    }
+  });
+});
