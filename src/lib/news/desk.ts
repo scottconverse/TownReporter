@@ -1853,12 +1853,23 @@ export type PerformScanWorkDeps = {
  */
 async function queryDupCheckPrinted(context: { newsroomId: number }): Promise<DupCheckPrinted[]> {
   const sql = await getSql();
-  return sql<DupCheckPrinted>`
-    select slug, headline, dek, topic, published_at
-    from articles
-    where newsroom_id = ${owned(context)} and status = ${"published"}
-    order by published_at desc nulls last, id desc
+  // Nov 1 2026 (G01-DUP-1): each story's own lead rides along, so a new item
+  // that repeats the lead can be paired with the story (see collectDupPairs).
+  const rows = await sql<
+    Omit<DupCheckPrinted, "lead_source_urls"> & { lead_source_urls: string | null }
+  >`
+    select a.slug, a.headline, a.dek, a.topic, a.published_at,
+      l.headline as lead_headline, l.why as lead_why, l.topic as lead_topic,
+      l.source_urls as lead_source_urls, l.created_at::text as lead_created_at
+    from articles a
+    left join leads l on l.id = a.lead_id and l.newsroom_id = a.newsroom_id
+    where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
+    order by a.published_at desc nulls last, a.id desc
   `;
+  return rows.map((row) => ({
+    ...row,
+    lead_source_urls: row.lead_source_urls == null ? null : parseLeadSourceUrls(row.lead_source_urls),
+  }));
 }
 
 /**
