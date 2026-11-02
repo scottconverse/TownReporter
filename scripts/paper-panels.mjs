@@ -221,6 +221,11 @@ const TARGETS = [
     route: null, // resolved below
     selectors: [".articleaside .datespanel", ".datespanel"],
     head: /dates in this story/i,
+    // The Bulletin story page (f14ddfdb, PR 357) prints this panel as a card:
+    // the reader's `--card` ground with an accent top rule, not the old ink
+    // block. The check below still holds the panel to its design token, in both
+    // themes. Finding G01-CI-5, Nov 1 2026.
+    groundToken: "--card",
   },
 ];
 
@@ -342,7 +347,8 @@ function auditPanels(cfg) {
         width: Math.round(panelRect.width),
       },
       panelBgComputed: panelStyle.backgroundColor,
-      blockToken: (panelStyle.getPropertyValue("--block") || "").trim(),
+      groundTokenName: target.groundToken || "--block",
+      blockToken: (panelStyle.getPropertyValue(target.groundToken || "--block") || "").trim(),
       textElements: 0,
       wordsMeasured: 0,
       domainWords: 0,
@@ -355,19 +361,20 @@ function auditPanels(cfg) {
       themeApplied: true,
     };
 
-    // The coarser assertion: the panel is the ink block, in both themes.
+    // The coarser assertion: the panel is painted with its design token
+    // (`groundToken`, default the ink `--block`), in both themes.
     const panelBg = parseColor(panelStyle.backgroundColor);
     const token = parseColor(entry.blockToken);
     if (!token) {
       entry.blockTokenUnreadable = true;
     } else if (!panelBg || panelBg.a !== 1) {
-      entry.blockMismatch = `panel background is ${panelStyle.backgroundColor}, not an opaque --block`;
+      entry.blockMismatch = `panel background is ${panelStyle.backgroundColor}, not an opaque ${entry.groundTokenName}`;
     } else if (
       Math.round(panelBg.r) !== Math.round(token.r) ||
       Math.round(panelBg.g) !== Math.round(token.g) ||
       Math.round(panelBg.b) !== Math.round(token.b)
     ) {
-      entry.blockMismatch = `panel background ${rgbText(panelBg)} is not --block ${entry.blockToken}`;
+      entry.blockMismatch = `panel background ${rgbText(panelBg)} is not ${entry.groundTokenName} ${entry.blockToken}`;
     }
 
     const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
@@ -583,7 +590,9 @@ try {
       await page.goto(`${base}${target.route}`, { waitUntil: "networkidle", timeout: 30000 });
       await page.waitForTimeout(400);
       const measured = await page.evaluate(auditPanels, {
-        targets: [{ name: target.name, selectors: target.selectors, head: target.head.source }],
+        targets: [
+          { name: target.name, selectors: target.selectors, head: target.head.source, groundToken: target.groundToken },
+        ],
         minContrast: MIN_CONTRAST,
         tolerance: EDGE_TOLERANCE_PX,
         wordSplitAllowed: WORD_SPLIT_ALLOWED,
@@ -624,7 +633,7 @@ try {
         report.violations.push({
           where,
           kind: "no-block-token",
-          detail: "could not read --block off the panel; the panel check is blind",
+          detail: `could not read ${panel.groundTokenName} off the panel; the panel check is blind`,
         });
       } else if (panel.blockMismatch) {
         report.violations.push({ where, kind: "not-the-ink-block", detail: panel.blockMismatch });
