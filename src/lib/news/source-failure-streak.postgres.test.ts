@@ -1011,62 +1011,60 @@ it(
     /*
       The counted step is written by the fetch loop and then overwritten by the
       NEXT stage's arrival a few milliseconds later, so it cannot be read off
-      the row once the run is over. It is read while it is still there: the
-      pass is held at the first query after the loop by an exclusive lock on
-      `beat_memory`, which is what that stage reads first.
+      the row once the run is over. A trigger logs every step the card shows,
+      in order. (Until Nov 1 2026 this test held the pass at the first
+      beat_memory read; since 17228b5e the next stage is reported before that
+      read, so the hold point saw the next stage instead of the count.)
     */
-    const holder = new Client({ connectionString: appUrlString });
-    await holder.connect();
-    await holder.query("begin");
-    await holder.query("lock table beat_memory in access exclusive mode");
+    await sql.query("create table if not exists test_step_log (seq bigserial primary key, job_id bigint, step_text text)");
+    await sql.query(`create or replace function test_log_step() returns trigger language plpgsql as $fn$
+      begin
+        if new.step_text is distinct from old.step_text then
+          insert into test_step_log (job_id, step_text) values (new.id, new.step_text);
+        end if;
+        return new;
+      end $fn$`);
+    await sql.query("drop trigger if exists test_log_step on desk_jobs");
+    await sql.query("create trigger test_log_step after update on desk_jobs for each row execute function test_log_step()");
 
-    const run = scan(job, {
-      ingestUrl: async (url: string) => {
-        const fixture = fixtures.find((f) => f.url === url);
-        if (fixture?.delayMs) await new Promise((r) => setTimeout(r, fixture.delayMs));
-        if (fixture?.bad) throw new IngestFetchError(fixture.bad, null);
-        return { text: "The council meets on Tuesday.", titleHint: "Fixture", extras: [] };
-      },
-      grokChat: async () => ({
-        ok: true as const,
-        text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: "Fixture." }),
-      }),
-      setJobModelChoice: async () => {},
-      scheduledCommit: (write) => write(sql),
-    });
-    let step = "";
+    let steps: string[] = [];
     try {
-      const deadline = Date.now() + 60000;
-      while (Date.now() < deadline) {
-        const [row] = await sql.query<{ step_text: string | null }>(
-          "select step_text from desk_jobs where id=$1",
-          [job.id],
-        );
-        step = row?.step_text ?? "";
-        /*
-          The pass is held AT THE FIRST QUERY AFTER THE FETCH LOOP, and that is
-          the moment the counted step is final: no later arrival can overwrite
-          it. A waiting lock on the held table is how the test knows the loop
-          is over without assuming how far the count got -- the count is the
-          question being asked.
-        */
-        const [waiting] = await sql.query<{ n: number }>(
-          `select count(*)::int as n from pg_locks
-           where not granted and relation = 'beat_memory'::regclass`,
-        );
-        if ((waiting?.n ?? 0) > 0) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      await scan(job, {
+        ingestUrl: async (url: string) => {
+          const fixture = fixtures.find((f) => f.url === url);
+          if (fixture?.delayMs) await new Promise((r) => setTimeout(r, fixture.delayMs));
+          if (fixture?.bad) throw new IngestFetchError(fixture.bad, null);
+          return { text: "The council meets on Tuesday.", titleHint: "Fixture", extras: [] };
+        },
+        grokChat: async () => ({
+          ok: true as const,
+          text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: "Fixture." }),
+        }),
+        setJobModelChoice: async () => {},
+        scheduledCommit: (write) => write(sql),
+      }).catch(() => undefined);
+      const rows = await sql.query<{ step_text: string | null }>(
+        "select step_text from test_step_log where job_id=$1 order by seq",
+        [job.id],
+      );
+      steps = rows.map((row) => row.step_text ?? "");
     } finally {
-      await holder.query("rollback");
-      await holder.end();
+      await sql.query("drop trigger if exists test_log_step on desk_jobs");
+      await sql.query("drop function if exists test_log_step()");
+      await sql.query("drop table if exists test_step_log");
     }
-    await run.catch(() => undefined);
 
+    const counts = steps.filter((text) => text.startsWith("Reading sources —"));
     assert.equal(
-      step,
+      counts.at(-1),
       "Reading sources — 4 of 4",
-      "the card must reach the end of the count, parked source included",
+      `the card must reach the end of the count, parked source included (steps seen: ${JSON.stringify(steps)})`,
+    );
+    const lastCount = steps.lastIndexOf("Reading sources — 4 of 4");
+    const modelStage = steps.findIndex((text) => text.startsWith("Reading the sources with a model"));
+    assert.ok(
+      modelStage === -1 || lastCount < modelStage,
+      `the full count must show before the model stage (steps seen: ${JSON.stringify(steps)})`,
     );
   },
 );
