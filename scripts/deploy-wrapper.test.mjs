@@ -94,7 +94,7 @@ test("deploy-production.ps1 ends when promote ends, even while the app keeps run
     assert.ok(run.seconds < 30, `the wrapper took ${run.seconds} s`);
     assert.equal(run.code, 3, "the wrapper must exit with promote's exit code");
 
-    const result = JSON.parse(readFileSync(join(dir, "deploy-result.json"), "utf8").replace(/^﻿/, ""));
+    const result = JSON.parse(readFileSync(join(dir, "deploy-result.json"), "utf8").replace(/^\uFEFF/, ""));
     assert.equal(result.promoteExitCode, 3);
     assert.equal(result.watchdogWasEnabled, true);
     assert.equal(result.watchdogEnabledAfter, true);
