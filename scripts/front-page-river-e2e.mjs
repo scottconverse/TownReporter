@@ -285,6 +285,11 @@ async function theOpinionBoxTakesTheNewestOpinionPiece() {
   step(`the opinion box prints ${shown} and keeps the older opinion out of the river`);
 }
 
+// The archive prints its stories as `.listingrow` rows since the Bulletin
+// redesign (3c97484f); other lists still use `.newsrow`. Read both, so the
+// walk counts the same headings either way. Finding G01-CI-3, Nov 1 2026.
+const ARCHIVE_ROW_HEADINGS = ".listingrow h3, .newsrow h3";
+
 async function theArchiveCarriesTheRestOfThePaper() {
   const printedOnTheFrontPage = await page.locator("body").innerText();
   await page.getByRole("link", { name: "All stories", exact: true }).click();
@@ -311,9 +316,9 @@ async function theArchiveCarriesTheRestOfThePaper() {
     const firstStory = (expectedPage - 1) * pageSize + 1;
     const lastStory = Math.min(expectedPage * pageSize, SEEDED);
     await page.waitForFunction(
-      ({ expectedPage, totalPages, firstStory, lastStory }) => {
+      ({ expectedPage, totalPages, firstStory, lastStory, rowHeadings }) => {
         const pageLabel = document.querySelector(".pagination span")?.textContent?.trim();
-        const headings = Array.from(document.querySelectorAll(".newsrow h3"), (heading) =>
+        const headings = Array.from(document.querySelectorAll(rowHeadings), (heading) =>
           heading.textContent?.trim(),
         );
         return (
@@ -323,10 +328,10 @@ async function theArchiveCarriesTheRestOfThePaper() {
           headings.at(-1) === `River story ${String(lastStory).padStart(2, "0")}`
         );
       },
-      { expectedPage, totalPages, firstStory, lastStory },
+      { expectedPage, totalPages, firstStory, lastStory, rowHeadings: ARCHIVE_ROW_HEADINGS },
       { timeout: 30_000 },
     );
-    for (const text of await page.locator(".newsrow h3").allInnerTexts()) seen.add(text.trim());
+    for (const text of await page.locator(ARCHIVE_ROW_HEADINGS).allInnerTexts()) seen.add(text.trim());
 
     const next = page.getByRole("button", { name: /Next/ });
     if (expectedPage === totalPages) {
