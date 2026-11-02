@@ -206,6 +206,17 @@ export type DupCheckPrinted = {
   dek?: string | null;
   topic?: string | null;
   published_at: string;
+  /**
+   * Nov 1 2026 (G01-DUP-1): the desk lead this story was written from, when
+   * there is one. A printed headline can share no words with a new item that
+   * repeats the lead it came from (lead 974 vs published lead 261). Optional:
+   * a row without it is matched on its own headline only, as before.
+   */
+  lead_headline?: string | null;
+  lead_why?: string | null;
+  lead_topic?: string | null;
+  lead_source_urls?: string[] | null;
+  lead_created_at?: string | null;
 };
 
 /** The desk's identity for "candidate N against the lead with this headline".
@@ -322,6 +333,50 @@ export function collectDupPairs(input: {
         otherWhy: String(row?.dek ?? "").trim(),
         target: printed.slug,
       });
+    } else {
+      /*
+        Nov 1 2026 (G01-DUP-1): published leads stay out of the lead matcher,
+        because a development on a published story is still news. But a new
+        item can repeat the lead a story was written from while sharing no
+        words with the story's own headline. When the lead word rule rates
+        the item against a published lead, ask the pair check about the
+        printed story. A "yes" holds it as printed; a "no" leaves it new.
+      */
+      const publishedLeads: MatchCandidateLead[] = [];
+      const bySlugIndex = new Map<number, DupCheckPrinted>();
+      input.printed.forEach((row, index) => {
+        const leadHeadline = String(row.lead_headline ?? "").trim();
+        if (!leadHeadline) return;
+        const id = -(index + 1);
+        bySlugIndex.set(id, row);
+        publishedLeads.push({
+          id,
+          status: "held",
+          headline: leadHeadline,
+          topic: row.lead_topic ?? null,
+          source_urls: row.lead_source_urls ?? [],
+          created_at: row.lead_created_at ?? row.published_at,
+          why: row.lead_why ?? null,
+        } as MatchCandidateLead);
+      });
+      const publishedMatch = publishedLeads.length > 0
+        ? findMatchingLead({ headline, source_urls: urls, topic: candidate.topic }, publishedLeads, input.place)
+        : null;
+      const row = publishedMatch != null ? bySlugIndex.get(publishedMatch) : undefined;
+      if (row) {
+        take({
+          key: printedPairKey(candidateIndex, row.slug),
+          candidate: candidateIndex,
+          kind: "printed",
+          headline,
+          why,
+          otherHeadline: String(row.lead_headline ?? "").trim(),
+          otherWhy: [String(row.headline ?? "").trim(), String(row.lead_why ?? row.dek ?? "").trim()]
+            .filter(Boolean)
+            .join(" — "),
+          target: row.slug,
+        });
+      }
     }
   });
 
@@ -391,6 +446,16 @@ export function collectSameStoryPromptData(input: {
   return { items, leads, printed };
 }
 
+/**
+ * Does the finder's own sentence say the two items are NOT the same story?
+ * Lead 984 (Nov 1 2026) named L975 and wrote "this parks event is a distinct
+ * food-hall festival with its own date and tickets". Narrow on purpose:
+ * "same vote, different wording" is still a yes.
+ */
+export function whySaysNotSame(why: string): boolean {
+  return /\b(distinct|separate|unrelated)\b|\bnot (the )?same\b|\b(isn't|is not|are not|aren't) the same\b|\bdifferent (event|events|story|stories|item|items|meeting|meetings|development|date|dates|festival|cook-off)\b/i.test(why);
+}
+
 /** The same-story question, using the same bar as `DUP_CHECK_SYSTEM`. */
 export const SAME_STORY_SYSTEM = [
   "You are the copy desk's same-story finder for a local news site.",
@@ -401,6 +466,7 @@ export const SAME_STORY_SYSTEM = [
   "Choose at most one ref. If none is the same story, use null.",
   "Answer once for every new item you were given, echoing its n.",
   "For each answer write one short sentence naming the fact that decides it.",
+  "If your sentence would say the two are different, distinct or separate events or stories, use null, not the nearest ref.",
   'Reply with JSON only, and nothing outside it: [{"n": <item n>, "same_as": "L812" | "P4" | "N1" | null, "why": "<one short sentence>"}]',
 ].join(" ");
 
@@ -438,6 +504,9 @@ export function parseSameStoryReply(
     if (ref == null) continue;
     if (typeof ref !== "string") continue;
     const why = readReason(row.why ?? row.reason ?? row.answer) || "same story";
+    // Nov 1 2026 (G01-DUP-2): a ref whose own sentence says "not the same" is
+    // the nearest item, not an answer. Omitted, so the word rule stands.
+    if (whySaysNotSame(why)) continue;
     const lead = leadRefs.get(ref);
     if (lead) {
       out.set(candidate, { kind: "lead", leadId: lead.id, why });
