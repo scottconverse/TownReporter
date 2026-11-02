@@ -455,13 +455,15 @@ async function verifyFreshDefaults() {
   await page.getByRole("button", { name: "Done" }).click();
   step("changing reader text size leaves the system appearance unset in storage");
 
+  // The reader paints its own white ground, not the desk cream (Bulletin
+  // redesign, PR 357). Finding G01-CI-2, Nov 1 2026.
   await page.emulateMedia({ colorScheme: "light" });
-  await hardLoad("Fresh reader system light (desktop)", "/", LIGHT, "light");
+  await hardLoad("Fresh reader system light (desktop)", "/", READER_LIGHT, "reader-light");
   await assertReaderState(false, "System-light reader");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await hardLoad("Fresh desk default (phone)", "/desk", DESK_DARK, "desk-dark");
-  await hardLoad("Fresh reader system light (phone)", "/", LIGHT, "light");
+  await hardLoad("Fresh reader system light (phone)", "/", READER_LIGHT, "reader-light");
   await assertReaderState(false, "Phone system-light reader");
 
   await page.emulateMedia({ colorScheme: "dark" });
