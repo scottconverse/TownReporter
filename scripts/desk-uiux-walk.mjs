@@ -52,6 +52,12 @@ const THEMES = ["light", "dark"];
 const SIZES = ["normal", "large"];
 const DARK_RGB = { r: 27, g: 25, b: 22 };
 const LIGHT_RGB = { r: 255, g: 253, b: 247 };
+// The Bulletin redesign (PR 357) gave the reader its own page ground: white in
+// light mode, #0f141c in dark mode (src/styles.css, data-appearance reader-*).
+// The desk keeps #fffdf7 / #1b1916 above. Finding G01-CI-1, Nov 1 2026.
+const READER_DARK_RGB = { r: 15, g: 20, b: 28 };
+const READER_LIGHT_RGB = { r: 255, g: 255, b: 255 };
+const hexOf = (rgb) => "#" + [rgb.r, rgb.g, rgb.b].map((n) => n.toString(16).padStart(2, "0")).join("");
 const EXPECTED_CAPTURES = VIEWPORTS.length * THEMES.length * SIZES.length * (SURFACES.length + 2);
 const AUTH_RATE_LIMIT_IDLE_PAUSE_MS = 61_000;
 const RESPONSIVE_BOUNDARY_WIDTHS = [700, 701, 702, 750, 800, 900, 981, 1024, 1099, 1100, 1179, 1180, 1279, 1280, 1281, 1339, 1340];
@@ -1689,7 +1695,9 @@ async function captureSurface(page, scenario, surface) {
   const expectedTheme = surface.kind === "desk"
     ? (scenario.theme === "dark" ? "desk-dark" : "light")
     : (scenario.theme === "dark" ? "reader-dark" : "reader-light");
-  const expectedColor = scenario.theme === "dark" ? DARK_RGB : LIGHT_RGB;
+  const expectedColor = surface.kind === "desk"
+    ? (scenario.theme === "dark" ? DARK_RGB : LIGHT_RGB)
+    : (scenario.theme === "dark" ? READER_DARK_RGB : READER_LIGHT_RGB);
   const violations = [];
   const missingRoleFailure = missingInteractiveRoleFailure(measured);
   if (missingRoleFailure) violations.push(missingRoleFailure);
@@ -1713,8 +1721,7 @@ async function captureSurface(page, scenario, surface) {
   if (measured.seedError) violations.push("pre-paint preference seeding failed: " + measured.seedError);
   if (!closeColor(colorParts(measured.canvasColor), expectedColor)) {
     violations.push(
-      "painted canvas was " + measured.canvasColor + ", expected " +
-        (scenario.theme === "dark" ? "#1b1916" : "#fffdf7"),
+      "painted canvas was " + measured.canvasColor + ", expected " + hexOf(expectedColor),
     );
   }
   if (!Number.isFinite(measured.minFontPx) || measured.minFontPx < 14) {
