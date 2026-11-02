@@ -111,6 +111,21 @@ export function moduleCanConnectToPostgres(file, root = process.cwd(), seen = ne
   });
 }
 
+/**
+ * The local files one module imports (static, dynamic and re-exports), as
+ * absolute paths. Package imports are left out. scripts/test-changed.mjs uses
+ * this to find which tests reach a changed file.
+ */
+export function localImportsOf(file, root = process.cwd()) {
+  const absolute = normalize(file);
+  if (!existsSync(absolute)) return [];
+  const { staticSpecifiers } = sourceModuleSpecifiers(absolute, readFileSync(absolute, "utf8"));
+  return staticSpecifiers
+    .map((specifier) => resolveLocalImport(root, absolute, specifier))
+    .filter(Boolean)
+    .map((dependency) => normalize(dependency));
+}
+
 /** Return the repo-relative database-dependent test files in deterministic order. */
 export function postgresTestFiles(root) {
   const files = new Set(globSync("src/**/*.test.*", { cwd: root }));

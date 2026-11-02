@@ -1,0 +1,237 @@
+{
+ "name": "Nov 1 2026 dev run 107: repeat-check stage (G01-DUP-1, G01-DUP-2)",
+ "recordedAt": "2026-11-01T16:00:00Z",
+ "place": "Longmont, Colorado",
+ "note": "Real rows from the Oct 31 production copy, trimmed to the 2 OUR Center printed stories and the 10 newest others. Answers recorded from deepseek-v4.1-flash:1017 at effort low on Nov 1 2026. The recorded same-story prompt held all 265 printed rows; both answers were null, so the trim does not change them.",
+ "candidates": [
+  {
+   "lead": 974,
+   "headline": "OUR Center tightens residency proof to 60 days for St. Vrain Valley assistance",
+   "why": "The center's published access rules state the residency requirement for financial assistance was cut from 90 days to 60 days as of Aug. 4, 2025 — a change in who qualifies for help.",
+   "source_urls": [
+    "https://www.ourcenter.org/"
+   ]
+  },
+  {
+   "lead": 984,
+   "headline": "Parkway Food Hall sets Nov. 21 Fall Festival and Chili Cook-Off with $20 tickets",
+   "why": "A specific new dated event was posted to the food hall's calendar: a Nov. 21 fall festival and chili cook-off with ticketed admission.",
+   "source_urls": [
+    "https://parkwayfoodhall.com/wp-json/tribe/events/v1/events?per_page=50",
+    "https://www.eventbrite.com/e/parkway-fall-festival-tickets-2004074123652"
+   ]
+  }
+ ],
+ "existing": [
+  {
+   "id": 975,
+   "status": "held",
+   "headline": "Inn Between of Longmont plans Nov. 5 chili cook-off fundraiser at Bootstrap Brewery",
+   "why": "The homeless-services nonprofit is promoting a chili contest at Bootstrap Brewery where residents can enter a recipe or come judge, alongside its note about a 25% tax credit for donations.",
+   "source_urls": [
+    "https://www.theinnbetween.org/"
+   ],
+   "created_at": "2026-11-01T15:20:00Z"
+  }
+ ],
+ "printed": [
+  {
+   "slug": "rtd-says-its-156-million-share-of-the-fort-collins-rail-line-is-unapprov",
+   "headline": "RTD says its $156 million share of the Fort Collins rail line is unapproved",
+   "dek": "It separates the $5.58 million for design work approved in April from the $156 million estimate it has not approved, as voters decide Ballot Issue 7A on Nov. 3.",
+   "topic": "transportation",
+   "published_at": "2026-10-31T17:23:46.214433-06:00",
+   "lead_headline": "RTD clarifies what its board has and has not approved for Front Range rail Joint Service",
+   "lead_why": "RTD published a statement distinguishing board-approved funding from unapproved items for intercity passenger rail Joint Service on the Northwest Corridor, tied to the Front Range Passenger Rail project.",
+   "lead_topic": "transportation",
+   "lead_source_urls": [
+    "https://www.rtd-denver.com/community/news/2026/rtd-s-role-in-intercity-passenger-rail-joint-service"
+   ],
+   "lead_created_at": "2026-10-31 10:35:49.655289-06"
+  },
+  {
+   "slug": "cdot-warns-the-nov-1-clock-change-puts-migrating-wildlife-in-rush-hour",
+   "headline": "CDOT warns the Nov. 1 clock change puts migrating wildlife in rush hour traffic",
+   "dek": "Troopers investigated 3,811 crashes involving wildlife last year, and a new optional $5 vehicle registration fee takes effect Jan. 1 to pay for crossings.",
+   "topic": "transportation",
+   "published_at": "2026-10-31T17:23:31.821387-06:00",
+   "lead_headline": "CDOT warns Nov. 1 clock change puts wildlife on Northern Colorado roads at dusk",
+   "lead_why": "CDOT and Colorado Parks and Wildlife said the end of daylight saving time on Sunday, Nov. 1 shifts dusk earlier and into rush hour as wildlife migrates.",
+   "lead_topic": "transportation",
+   "lead_source_urls": [
+    "https://www.codot.gov/news/2026/october-2026-news/new-colorado-law-wildlife-collision-prevention"
+   ],
+   "lead_created_at": "2026-10-31 10:35:49.655289-06"
+  },
+  {
+   "slug": "boulder-county-guides-offer-free-health-plan-help-as-open-enrollment",
+   "headline": "Boulder County guides offer free health plan help as open enrollment starts Nov. 1",
+   "dek": "Six in-person appointment days in Longmont are part of the county's free help comparing and enrolling in 2027 plans before a Jan. 15 deadline.",
+   "topic": "health-human-services",
+   "published_at": "2026-10-31T17:23:20.433646-06:00",
+   "lead_headline": "Boulder County Health Coverage Guides available as Connect for Health Colorado enrollment opens Nov. 1",
+   "lead_why": "Boulder County announced free help comparing and enrolling in health plans as the state exchange's open enrollment begins Nov. 1.",
+   "lead_topic": "health-human-services",
+   "lead_source_urls": [
+    "https://bouldercounty.gov/news/"
+   ],
+   "lead_created_at": "2026-10-30 06:34:35.17253-06"
+  },
+  {
+   "slug": "colorado-gives-day-early-giving-opens-nov-1-and-aftersight-s-page-is",
+   "headline": "Colorado Gives Day early giving opens Nov. 1, and Aftersight's page is live",
+   "dek": "Donors can give to Aftersight and more than 5,000 other Colorado nonprofits now, nearly six weeks before the Dec. 8 giving day.",
+   "topic": "community",
+   "published_at": "2026-10-31T17:22:36.76424-06:00",
+   "lead_headline": "Colorado Gives Day early giving opens Sunday, Nov. 1; Aftersight says donors can give now",
+   "lead_why": "Aftersight announced that Colorado Gives Day early giving begins Nov. 1 and that its own giving page is already live, a dated statewide fundraising event starting in the next 24 hours.",
+   "lead_topic": "community",
+   "lead_source_urls": [
+    "https://aftersight.org/"
+   ],
+   "lead_created_at": "2026-10-31 01:22:00.063386-06"
+  },
+  {
+   "slug": "shock-art-artists-wrap-up-10-new-boxes-in-longmont",
+   "headline": "Shock Art artists wrap up 10 new boxes in Longmont",
+   "dek": "Ten artists finish painting utility boxes as the Oct. 31 deadline arrives.",
+   "topic": "arts-culture",
+   "published_at": "2026-10-31T10:01:51.732081-06:00",
+   "lead_headline": "New Shock Art artists finish repainting Longmont's electric boxes",
+   "lead_why": "The Times-Call reported Friday that new and returning Shock Art artists put finishing touches on Longmont's utility boxes.",
+   "lead_topic": "arts-culture",
+   "lead_source_urls": [
+    "https://www.timescall.com/location/colorado/front-range/boulder-county/longmont/"
+   ],
+   "lead_created_at": "2026-10-30 21:34:11.414824-06"
+  },
+  {
+   "slug": "routine-today-2026-10-31-1",
+   "headline": "Today in town — Saturday, Oct. 31",
+   "dek": "34 events on Longmont's public calendars today.",
+   "topic": "community",
+   "published_at": "2026-10-31T06:20:43.342436-06:00",
+   "lead_headline": null,
+   "lead_why": null,
+   "lead_topic": null,
+   "lead_source_urls": null,
+   "lead_created_at": null
+  },
+  {
+   "slug": "boulder-county-offices-close-nov-3-elections-office-and-vote-centers",
+   "headline": "Boulder County offices close Nov. 3; elections office and vote centers stay open",
+   "dek": "Longmont voters can use six vote centers and five 24-hour drop boxes that day for ballots on Questions 3C and 3D, which are due at 7 p.m.",
+   "topic": "county-region",
+   "published_at": "2026-10-30T21:11:14.244735-06:00",
+   "lead_headline": "Boulder County government offices close Nov. 3, but the Elections Division stays open for ballot return",
+   "lead_why": "Boulder County announced that its offices — except the Elections Division — will be closed Tuesday, Nov. 3, which is the same day Longmont ballots for Questions 3C and 3D are due back.",
+   "lead_topic": "county-region",
+   "lead_source_urls": [
+    "https://bouldercounty.gov/news/"
+   ],
+   "lead_created_at": "2026-10-30 06:34:35.17253-06"
+  },
+  {
+   "slug": "firehouse-art-center-s-dia-de-muertos-exhibition-closes-sunday-after",
+   "headline": "Firehouse Art Center's Dia de Muertos exhibition closes Sunday after two extra days",
+   "dek": "\"Remembering is Resistance,\" which pairs artists with immigrant storytellers, runs through Nov. 1 at the free downtown Longmont gallery, two days beyond the closing date the city published.",
+   "topic": "arts-culture",
+   "published_at": "2026-10-30T21:11:02.922141-06:00",
+   "lead_headline": "Firehouse Art Center's Día de Muertos exhibition 'Remembering is Resistance' closes Nov. 1",
+   "lead_why": "The gallery posted a stated closing date for a themed exhibition that opened Oct. 9.",
+   "lead_topic": "arts-culture",
+   "lead_source_urls": [
+    "https://firehouseart.org/exhibitions/main-gallery/",
+    "https://firehouseart.org/exhibitions/upcoming-exhibitions/"
+   ],
+   "lead_created_at": "2026-10-30 06:34:35.17253-06"
+  },
+  {
+   "slug": "black-advocacy-group-asks-weiser-to-review-longmont-police-killing-of",
+   "headline": "Black advocacy group asks Weiser to review Longmont police killing of Dariss Yearby",
+   "dek": "The Epitome of Black Excellence and Partnership cited a Taser offer missing from the district attorney's decision letter, and Longmont says its attorney is reading the request.",
+   "topic": "public-safety",
+   "published_at": "2026-10-30T20:56:22.598605-06:00",
+   "lead_headline": "Black advocacy group asks Colorado attorney general to review Longmont police killing of Dariss Yearby",
+   "lead_why": "A day after the Boulder County DA declined to charge Officer Joshua Barry, an advocacy group publicly asked the state attorney general to review the fatal shooting — a new development in a story we filed Oct. 29.",
+   "lead_topic": "public-safety",
+   "lead_source_urls": [
+    "https://www.timescall.com/location/colorado/front-range/boulder-county/longmont/",
+    "https://www.timescall.com/news/crime-public-safety/"
+   ],
+   "lead_created_at": "2026-10-30 06:34:35.17253-06"
+  },
+  {
+   "slug": "longmont-to-show-proposed-sandstone-ranch-phase-4-ballfields-at-nov-10",
+   "headline": "Longmont to show proposed Sandstone Ranch Phase 4 ballfields at Nov. 10 meeting",
+   "dek": "A contractor is already signed to build the four fields, and city staff say the preliminary design is still being adjusted around a creek setback and a sewer line.",
+   "topic": "environment",
+   "published_at": "2026-10-30T09:13:50.568874-06:00",
+   "lead_headline": "Longmont to host Nov. 10 open house on Sandstone Ranch Phase 4 ballfields",
+   "lead_why": "The city announced a 90-minute Nov. 10 public open house to present plans for the final Sandstone Ranch phase, a four-field ballfield complex.",
+   "lead_topic": "environment",
+   "lead_source_urls": [
+    "https://longmontcolorado.gov/news/sandstone-ranch-phase-4-public-open-house/",
+    "https://longmontcolorado.gov/news/"
+   ],
+   "lead_created_at": "2026-10-28 06:34:01.942962-06"
+  },
+  {
+   "slug": "our-center-pages-list-different-community-market-visit-frequencies",
+   "headline": "OUR Center pages list different Community Market visit frequencies",
+   "dek": "Undated service pages say financial-assistance participants need 60 days’ residency in the St. Vrain Valley School District, with Erie excluded and Allenspark included.",
+   "topic": "community",
+   "published_at": "2026-09-25T15:39:10.21596-06:00",
+   "lead_headline": "OUR Center publishes service access requirements, including 60-day St. Vrain residency rule",
+   "lead_why": "A concrete eligibility rule for a Longmont safety-net provider, useful to residents seeking financial assistance and community market access.",
+   "lead_topic": "misc",
+   "lead_source_urls": [
+    "https://www.ourcenter.org/",
+    "https://www.ourcenter.org/about-us/news-reports/"
+   ],
+   "lead_created_at": "2026-09-25 12:05:05.295758-06"
+  },
+  {
+   "slug": "our-center-marks-40-years-in-longmont-with-sept-26-celebration-at-220",
+   "headline": "OUR Center Marks 40 Years in Longmont With Sept. 26 Celebration at 220 Collyer St.",
+   "dek": "The nonprofit that grew out of 26 churches and a wave of 1986 closures now serves thousands of St. Vrain Valley households a year — and says demand still outruns its resources.",
+   "topic": "misc",
+   "published_at": "2026-09-25T11:57:37.126482-06:00",
+   "lead_headline": "Story from www.thompsonscolorado.com/from-26-churches-to-community-lifeline-our-center-celebrates-40-years-serving-longmont/",
+   "lead_why": "Filed from the Write a story box.",
+   "lead_topic": "council",
+   "lead_source_urls": [
+    "https://www.thompsonscolorado.com/from-26-churches-to-community-lifeline-our-center-celebrates-40-years-serving-longmont/"
+   ],
+   "lead_created_at": "2026-09-24 22:47:52.271165-06"
+  }
+ ],
+ "recorded": {
+  "pairCheck": {
+   "model": "deepseek-v4.1-flash:1017",
+   "text": "[{\"id\":1,\"same\":true,\"why\":\"Both are about OUR Center's 60-day St. Vrain Valley residency requirement for assistance.\"}]"
+  },
+  "sameStory": {
+   "model": "deepseek-v4.1-flash:1017",
+   "text": "[{\"n\":1,\"same_as\":null,\"why\":\"No other item mentions the OUR Center's change to its residency requirement for assistance.\"},{\"n\":2,\"same_as\":null,\"why\":\"The lead's chili cook-off is a Nov. 5 Inn Between fundraiser at Bootstrap Brewery, not Parkway Food Hall's Nov. 21 ticketed event.\"}]"
+  }
+ },
+ "expect": {
+  "pairs": [
+   {
+    "candidate": 0,
+    "kind": "printed",
+    "target": "our-center-pages-list-different-community-market-visit-frequencies"
+   }
+  ],
+  "printedRepeats": [
+   {
+    "candidate": 0,
+    "slug": "our-center-pages-list-different-community-market-visit-frequencies"
+   }
+  ],
+  "notRepeats": [
+   1
+  ]
+ }
+}
