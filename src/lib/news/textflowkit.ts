@@ -279,3 +279,18 @@ export function textflowkitStatusLine(input: {
   const version = input.version ? ` ${input.version}` : "";
   return `Speech-to-text: textflowkit${version} found at ${input.cliPath} — ${input.engine ? `engine ${input.engine}, ` : ""}model ${input.model || "engine default"}, language ${input.language}${input.detail ? ` — ${input.detail}` : ""}`;
 }
+
+/**
+ * The note a scan adds to its meeting coverage line after it asks for missing
+ * transcripts. Queued jobs are counted. Audio that waits while the tool is
+ * missing is a warning, not silence: on Nov 2 2026 the live tool folder was
+ * gone and 34 meetings had no transcript for weeks with no word (G32-TFK-1).
+ */
+export function speechCoverageNote(speech: { withAudio: number; queued: number; notInstalled: boolean }): string {
+  if (speech.queued > 0) return ` (speech-to-text: ${speech.queued} queued)`;
+  if (speech.notInstalled && speech.withAudio > 0) {
+    const one = speech.withAudio === 1;
+    return ` (speech-to-text NOT INSTALLED: ${speech.withAudio} ${one ? "meeting" : "meetings"} with audio ${one ? "has" : "have"} no transcript)`;
+  }
+  return "";
+}

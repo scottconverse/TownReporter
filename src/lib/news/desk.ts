@@ -2034,15 +2034,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     one worth transcribing -- but textflowkit is optional and external, so a
     missing or unhappy tool adds a line to the coverage summary instead of
     failing a scan that otherwise did its job. When it is not installed nothing
-    is queued and the coverage line is unchanged.
+    is queued, and the coverage line warns if audio is waiting (G32-TFK-1).
   */
     if (meetingAwareness) {
     try {
       const { enqueueMissingTranscriptions } = await import("./textflowkit-transcribe.server.ts");
       const speech = await enqueueMissingTranscriptions(sql, { newsroomId: owned(context), userId: job.user_id });
-      if (speech.queued > 0) {
-        meetingAwareness.coverageLine = `${meetingAwareness.coverageLine} (speech-to-text: ${speech.queued} queued)`;
-      }
+      const { speechCoverageNote } = await import("./textflowkit.ts");
+      meetingAwareness.coverageLine = `${meetingAwareness.coverageLine}${speechCoverageNote(speech)}`;
     } catch (e) {
       meetingAwareness.failures.push(`speech-to-text: ${e instanceof Error ? e.message : String(e)}`);
     }
