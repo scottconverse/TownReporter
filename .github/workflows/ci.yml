@@ -2,8 +2,12 @@ name: CI
 
 on:
   push:
+    # Docs-only changes start no CI run (docs get push, merge and publish only).
+    paths: ['**', '!**.md', '!**.mdx', '!**.rst', '!**.docx', '!**.pdf', '!**/LICENSE', '!**/LICENSE.*', '!**/NOTICE', '!**/NOTICE.*', '!docs/**.png', '!docs/**.jpg', '!docs/**.svg', '!docs/**.gif', '!docs/**.webp', '!docs/**.html', '!docs/**.css', '**/SKILL.md', '**/skills/**', '**/agents/**', '**/commands/**', '**/prompts/**', '**/references/**', '.claude/**']
     branches: [main]
   pull_request:
+    # Docs-only changes start no CI run (docs get push, merge and publish only).
+    paths: ['**', '!**.md', '!**.mdx', '!**.rst', '!**.docx', '!**.pdf', '!**/LICENSE', '!**/LICENSE.*', '!**/NOTICE', '!**/NOTICE.*', '!docs/**.png', '!docs/**.jpg', '!docs/**.svg', '!docs/**.gif', '!docs/**.webp', '!docs/**.html', '!docs/**.css', '**/SKILL.md', '**/skills/**', '**/agents/**', '**/commands/**', '**/prompts/**', '**/references/**', '.claude/**']
   schedule:
     - cron: '17 9 * * *'
   workflow_dispatch:
@@ -98,7 +102,7 @@ jobs:
               echo "$name=false" >> "$GITHUB_OUTPUT"
             fi
           }
-          check run_lifecycle '^(scripts/lifecycle-e2e\.mjs|scripts/test-server-publish-walk\.mjs)$'
+          check run_lifecycle '^(scripts/lifecycle-e2e\.mjs)$'
           check run_smoke_dev '^(scripts/astra-dialog-e2e\.mjs|scripts/smoke-built-server\.mjs)$'
           check run_desk_flows '^(scripts/desk-flows-e2e\.mjs|scripts/release-h-blockers-e2e\.mjs)$'
           check run_desk_production_regression '^(scripts/desk-production-regression\.mjs)$'
@@ -352,20 +356,7 @@ jobs:
             tail -n 80 /tmp/townreporter-built.log || true
             exit 1
           }
-          node scripts/lifecycle-e2e.mjs | tee /tmp/lifecycle-e2e.json
-      - name: The release walk publishes and follows the story (scripted Test walk)
-        env:
-          TEST_WALK_BASE_URL: http://127.0.0.1:8080
-          TEST_WALK_PASSWORD_FILE: /tmp/lifecycle-e2e.private
-          TEST_WALK_REPORT: /tmp/test-server-publish-walk-report.md
-        run: |
-          # The same script the release path runs on the Test server (:3400),
-          # signed in as the editor the lifecycle step just created.
-          TEST_WALK_EMAIL=$(tail -n 1 /tmp/lifecycle-e2e.json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).email)')
-          export TEST_WALK_EMAIL
-          printf '%s' 'lifecycle-e2e-pass' > /tmp/lifecycle-e2e.private
-          node scripts/test-server-publish-walk.mjs
-          grep -q '^PUBLISH-WALK: PASS$' /tmp/test-server-publish-walk-report.md
+          node scripts/lifecycle-e2e.mjs
 
 
   # The gap that let two Blockers past a green pipeline.
