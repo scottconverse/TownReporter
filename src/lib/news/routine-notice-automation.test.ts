@@ -21,6 +21,7 @@ import {
   tickRoutineNoticeEditions,
 } from "./routine-notice-worker.server.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+import { listWaitingRoundupsFor, publishWaitingRoundupFor } from "./routine-waiting.ts";
 
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
 // applies migrations/*.sql before the file loads; the postgres-integration
@@ -126,6 +127,17 @@ async function activateFixture() {
   return source!;
 }
 
+/** The editor presses Publish on every roundup waiting in the newsroom. */
+async function editorPublishesWaitingRoundups() {
+  const sql = await getSql();
+  const waiting = await listWaitingRoundupsFor(sql, room);
+  for (const roundup of waiting) {
+    const result = await publishWaitingRoundupFor(sql, room, roundup.id);
+    assert.equal(result.ok, true);
+  }
+  return waiting.length;
+}
+
 test("actual scheduled worker atomically publishes one logistics-only article and completes its claim", async () => {
   const source = await activateFixture();
   assert.deepEqual(await tickRoutineNoticeEditions(new Date("2026-09-08T13:00:00Z")), {
@@ -220,6 +232,10 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   assert.match(article!.body, /\n\nSource: \[Events\]\(https:\/\/events\.example\/calendar\)$/);
   assert.equal(`${article?.body} ${article?.source_urls}`.includes("token=secret"), false);
   assert.deepEqual(JSON.parse(article!.source_urls), ["https://events.example/calendar"]);
+
+  // The roundup waits for the editor; nothing went public by itself.
+  assert.equal((await sql.query<{ status: string }>("select status from articles where newsroom_id=$1", [room]))[0]?.status, "waiting");
+  assert.equal(await editorPublishesWaitingRoundups(), 1);
 
   const [receiptArticle] = await sql.query<{ id: number }>(
     "insert into articles(user_id,newsroom_id,slug,headline,body,topic,source_urls) values($1,$2,$3,'Prior deadlines','Prior','deadlines','[]') returning id",
@@ -519,6 +535,7 @@ test("real captured checks publish, correct a changed source revision, and then 
     return checkRoutineNoticeSourceForOwner(actor, input, { ingest: async () => document });
   };
   await performRoutineNoticeWorkWith(firstJob as DeskJob, { now: runNow, check });
+  assert.equal(await editorPublishesWaitingRoundups(), 1);
   title = "Captured concert at seven";
   const nextJob = async (token: string) => (await sql.query<any>(
     "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working',$4) returning *",
@@ -734,6 +751,7 @@ test("six eligible notices save the weekend overflow and put it first in the nex
     check: check(first) as any,
     verifyCheck: async () => {},
   });
+  assert.equal(await editorPublishesWaitingRoundups(), 2);
   const [firstRun] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [firstJob!.subject_id]);
   const saved = JSON.parse(firstRun!.summary_json);
   const deferred = saved.notices.find((notice: any) => notice.line.includes("Z Deferred Concert") && notice.channel === "weekend");
@@ -917,6 +935,7 @@ test("a story printed in the old layout is corrected only for a real change of e
     [room],
   );
   assert.match(first!.content_fingerprint, /^v2:[0-9a-f]{64}$/, "a new story's receipt carries the version prefix");
+  assert.equal(await editorPublishesWaitingRoundups(), 1);
 
   // Make the receipt look like one written before the new layout: a bare hash.
   await sql.query(
