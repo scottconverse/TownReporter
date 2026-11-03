@@ -338,11 +338,20 @@ export interface SchemaWarmupResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+/*
+  G27-WU-1: on the live start after a deploy, editorial-requests took 10,017 ms
+  and was logged "failed" at the 10 s mark although it was still working. A
+  step that is slow but alive now gets one more window on the SAME call (it is
+  not started twice) before it counts as failed.
+*/
+const DEFAULT_GRACE_MS = 20_000;
+
+class WarmupTimeout extends Error {}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new Error(`timed out after ${timeoutMs}ms`)),
+      () => reject(new WarmupTimeout(`timed out after ${timeoutMs}ms`)),
       timeoutMs,
     );
     promise.then(
@@ -390,18 +399,32 @@ export function getSchemaWarmupPromise(): Promise<SchemaWarmupResult[]> {
  * request) log `skipped-by-marker` and do no DDL at all.
  */
 export async function runSchemaWarmup(
-  options: { timeoutMs?: number; log?: (line: string) => void } = {},
+  options: {
+    timeoutMs?: number;
+    graceMs?: number;
+    log?: (line: string) => void;
+    /** Tests only: a stand-in list. Production always runs the registry. */
+    registry?: readonly Pick<SchemaWarmupEntry, "name" | "run">[];
+  } = {},
 ): Promise<SchemaWarmupResult[]> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
   const log = options.log ?? ((line: string) => console.log(line));
   const sql = await getSql();
   const results: SchemaWarmupResult[] = [];
 
-  for (const entry of SCHEMA_WARMUP_REGISTRY) {
+  for (const entry of options.registry ?? SCHEMA_WARMUP_REGISTRY) {
     const started = Date.now();
     const before = await readSchemaEnsureMarker(sql, entry.name);
     try {
-      await withTimeout(entry.run(), timeoutMs);
+      const pending = Promise.resolve(entry.run());
+      try {
+        await withTimeout(pending, timeoutMs);
+      } catch (error) {
+        if (!(error instanceof WarmupTimeout) || graceMs <= 0) throw error;
+        log(`[schema-warmup] ${entry.name} still working after ${timeoutMs}ms; waiting up to ${graceMs}ms more`);
+        await withTimeout(pending, graceMs);
+      }
       const after = await readSchemaEnsureMarker(sql, entry.name);
       const ms = Date.now() - started;
       const status: SchemaWarmupStatus =

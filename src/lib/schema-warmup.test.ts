@@ -156,4 +156,22 @@ describe("runSchemaWarmup", () => {
       void patchedFn;
     }
   });
+
+  it("G27-WU-1: a step slower than the limit but still working finishes, and a stuck one still fails", async () => {
+    const lines: string[] = [];
+    let slowStarts = 0;
+    const results = await runSchemaWarmup({
+      timeoutMs: 40,
+      graceMs: 400,
+      log: (line) => lines.push(line),
+      registry: [
+        { name: "wu1-slow", run: () => { slowStarts += 1; return new Promise<void>((r) => setTimeout(r, 120)); } },
+        { name: "wu1-stuck", run: () => new Promise<void>(() => {}) },
+      ],
+    });
+    assert.notEqual(results[0]!.status, "failed", JSON.stringify(results[0]));
+    assert.equal(slowStarts, 1, "the slow step is waited on, not started twice");
+    assert.equal(results[1]!.status, "failed");
+    assert.ok(lines.some((l) => /wu1-slow still working after 40ms/.test(l)), lines.join(" | "));
+  });
 });
