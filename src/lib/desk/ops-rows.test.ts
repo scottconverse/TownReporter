@@ -510,7 +510,7 @@ describe("Server card rows (CX2)", () => {
     assert.equal(lines.length, ladder.length + 1);
     assert.deepEqual(
       lines.slice(0, ladder.length).map((line) => line.n),
-      ladder.map((id) => String(providerEntry(id)!.ladderRank)),
+      ladder.map((_, i) => String(i + 1)),
     );
     assert.deepEqual(
       lines.slice(0, ladder.length).map((line) => line.name),

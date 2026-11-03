@@ -87,6 +87,32 @@ it("queues a case challenge for the file the editor opened", async () => {
   assert.deepEqual(jobs, [{ kind: "challenge", subject_id: file.investigationId, status: "queued" }]);
 });
 
+// guards G29-DW-15 (rule 22): a file with no run and no brief findings warns, and the second press challenges anyway
+it("warns, then challenges anyway, when the file has no run and no brief findings", async () => {
+  const sql = await getSql();
+  const userId = `challenge-anyway-${Date.now()}`;
+  const newsroomId = 98127;
+  const file = await openInvestigationForEditor(userId, {
+    paste: "Check whether the permit was renewed.",
+    title: "Was the permit renewed?",
+  }, newsroomId);
+  const first = await queueInvestigationChallengeFor({ userId, newsroomId }, file.investigationId, "auto", null, false);
+  assert.equal(first.ok, false);
+  assert.equal((first as { warning?: { key: string } }).warning?.key, "challenge-without-findings");
+  const none = await sql<{ c: number }>`
+    select count(*)::int as c from desk_jobs where newsroom_id = ${newsroomId} and kind = 'challenge'
+  `;
+  assert.equal(none[0].c, 0);
+  const second = await queueInvestigationChallengeFor(
+    { userId, newsroomId }, file.investigationId, "auto", null, false, ["challenge-without-findings"],
+  );
+  assert.equal(second.ok, true);
+  const jobs = await sql<{ subject_id: number; status: string }>`
+    select subject_id, status from desk_jobs where newsroom_id = ${newsroomId} and kind = 'challenge'
+  `;
+  assert.deepEqual(jobs, [{ subject_id: file.investigationId, status: "queued" }]);
+});
+
 // guards: an imported finding must remain challengeable when it has no linked research run
 it("challenges a saved brief when the file has no research run", async () => {
   const sql = await getSql();

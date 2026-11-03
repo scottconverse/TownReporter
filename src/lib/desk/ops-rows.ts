@@ -730,11 +730,15 @@ export function writingModelLines(read?: OpsModelRead): OpsModelLine[] {
     if (chip?.source === "words" && chip.label === "Warning" && chip.help) note = `${note} · ${chip.help}`;
     lines.push(chip ? { n, name: entry.label, note, chip } : { n, name: entry.label, note });
   };
+  /* G27-DOC-4: number the rows 1, 2, 3 in the order the runs try them. The
+     registry's ladderRank can skip a number when a rung leaves the ladder. */
+  let rank = 0;
   for (const id of automaticLadder()) {
     const entry = providerEntry(id);
     /* Unreachable: every id in the ladder came off the registry. */
     if (!entry) continue;
-    add(entry, String(entry.ladderRank), entry.detail);
+    rank += 1;
+    add(entry, String(rank), entry.detail);
   }
   const byName = providerEntry(DRAWN_BY_NAME_PROVIDER);
   if (byName) add(byName, "—", BY_NAME_NOTE);
