@@ -866,6 +866,22 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
     );
   });
 
+  it("names a one-day dek's day by its own clause, not the headline (G29-DW-16)", () => {
+    // Test article 299, Nov 3 2026.
+    const headline = "RTD says its $156 million share of the Fort Collins rail line is unapproved";
+    const items = collectStoryDates([
+      story({
+        slug: "rtd-rail-share",
+        headline,
+        dek: "It separates the $5.58 million for design work approved in April from the $156 million estimate it has not approved, as voters decide Ballot Issue 7A on Nov. 3.",
+        published_on: "2026-10-31",
+      }),
+    ]);
+    const nov3 = items.filter((i) => i.date === "2026-11-03");
+    assert.equal(nov3.length, 1);
+    assert.equal(nov3[0].what, "Voters decide Ballot Issue 7A");
+  });
+
   it("falls back to the headline for a line cut off at a conjunction", () => {
     // "Public Hearing Set while" is this story's line for Oct. 12 -- four words,
     // capitalised, no verb the short-line test knows, so only the trailing

@@ -233,7 +233,10 @@ export function triageAction(
   const name = event.key.toLowerCase();
   if (isTriagePassthrough(event.target)) {
     if (name === "enter") return null;
-    return triageAction({ ...event, target: undefined }, overlayOpen);
+    return triageAction(
+      { key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey, target: undefined },
+      overlayOpen,
+    );
   }
   const rowKill = name === "x" ? rowKillIdOf(event.target) : null;
   const ownRow = name === "x" || name === "h" ? (rowKill ?? rowOwnerIdOf(event.target)) : null;

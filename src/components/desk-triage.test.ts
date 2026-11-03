@@ -314,3 +314,29 @@ describe("G28-KILL-6 — the killed row's Undo holds the focus without taking th
     assert.equal(triageAction(key("j", { target: undo }), true), null);
   });
 });
+
+
+describe("keys pressed on an Undo inside a row (G28-KILL-6)", () => {
+  it("does not throw when key/metaKey/ctrlKey/altKey are prototype getters", () => {
+    class KeyLike {
+      #k: string;
+      constructor(k: string) { this.#k = k; }
+      get key() { return this.#k; }
+      get metaKey() { return false; }
+      get ctrlKey() { return false; }
+      get altKey() { return false; }
+      target: unknown = undefined;
+    }
+    const { document } = parseHTML("<div data-triage-row='77'><div class='recent-kill-message' data-triage-passthrough=''><button>Undo</button></div></div>");
+    const undo = document.querySelector("button");
+    for (const k of ["j", "u"]) {
+      const e = new KeyLike(k);
+      e.target = undo;
+      assert.doesNotThrow(() => triageAction(e as any));
+      assert.deepEqual(triageAction(e as any), triageAction({ key: k, metaKey: false, ctrlKey: false, altKey: false }));
+    }
+    const enter = new KeyLike("Enter");
+    enter.target = undo;
+    assert.equal(triageAction(enter as any), null);
+  });
+});

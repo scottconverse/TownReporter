@@ -537,12 +537,34 @@ function clauseName(text: string, hit: DateHit): string {
  * sentence the panel would be reprinting, and the row falls to the headline.
  */
 function phraseName(clause: string): string {
+  const name = (words: string[]): string => {
+    const opening = words.findIndex((word) => /^[A-Z]/.test(word));
+    const tryWhole = (): string => {
+      if (words.length > NAME_WORDS) return "";
+      const whole = words.join(" ");
+      const cap = whole.charAt(0).toUpperCase() + whole.slice(1);
+      return !isBareFragment(cap) ? cap : "";
+    };
+    const hasVerbBefore = (): boolean => {
+      const before = opening < 0 ? words : words.slice(0, opening);
+      return before.some((word) => KNOWN_VERBS.has(plain(word)));
+    };
+    if (opening < 0) {
+      return hasVerbBefore() ? tryWhole() : "";
+    }
+    if (words.length - opening > NAME_WORDS) return "";
+    const line = words.slice(opening).join(" ");
+    if (!isBareFragment(line)) return line;
+    return hasVerbBefore() ? tryWhole() : "";
+  };
   const words = clause.split(/\s+/).filter(Boolean);
-  const opening = words.findIndex((word) => /^[A-Z]/.test(word));
-  if (opening < 0) return "";
-  if (words.length - opening > NAME_WORDS) return "";
-  const line = words.slice(opening).join(" ");
-  return isBareFragment(line) ? "" : line;
+  const first = name(words);
+  if (first) return first;
+  const comma = clause.lastIndexOf(",");
+  if (comma < 0) return "";
+  const tail = clause.slice(comma + 1).split(/\s+/).filter(Boolean);
+  while (tail.length > 1 && JOINERS.has(plain(tail[0]))) tail.shift();
+  return tail.length ? name(tail) : "";
 }
 
 /**
@@ -562,6 +584,8 @@ const KNOWN_VERBS = new Set([
   "cancels",
   "convene",
   "convenes",
+  "decide",
+  "decides",
   "delay",
   "delays",
   "end",
