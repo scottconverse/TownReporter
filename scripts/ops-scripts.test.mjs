@@ -423,6 +423,50 @@ test(
   },
 );
 
+test("Start-OllamaIfDown starts a shortcut that has no arguments, and one that has some", { skip: !onWindows ? "PowerShell only" : false }, () => {
+  // Oct 26 2026: an empty shortcut Arguments field made Start-Process reject @().
+  const psQuote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  let tempDir;
+
+  try {
+    tempDir = mkdtempSync(join(tmpdir(), "ollama-shortcut-"));
+
+    const script = `
+$ErrorActionPreference = 'Stop'
+. (Join-Path ${psQuote(OPS)} 'lib-ollama.ps1')
+function Test-OllamaProcessRunning { $false }
+$tmp = ${psQuote(tempDir)}
+$shell = New-Object -ComObject WScript.Shell
+$a = $shell.CreateShortcut((Join-Path $tmp 'a.lnk'))
+$a.TargetPath = (Join-Path $env:SystemRoot 'System32\\whoami.exe')
+$a.Arguments = ''
+$a.Save()
+$b = $shell.CreateShortcut((Join-Path $tmp 'b.lnk'))
+$b.TargetPath = (Join-Path $env:SystemRoot 'System32\\whoami.exe')
+$b.Arguments = '/upn'
+$b.Save()
+$ra = Start-OllamaIfDown -Endpoint 'http://127.0.0.1:65533/v1' -Shortcut (Join-Path $tmp 'a.lnk') -OffSwitch '1'
+Write-Output ('a=' + $ra)
+$rb = Start-OllamaIfDown -Endpoint 'http://127.0.0.1:65533/v1' -Shortcut (Join-Path $tmp 'b.lnk') -OffSwitch '1'
+Write-Output ('b=' + $rb)
+`;
+
+    const out = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script,
+    ], { timeout: 60_000, encoding: "utf8" });
+
+    assert.match(out, /a=started/);
+    assert.match(out, /b=started/);
+  } finally {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test(
   "the console never prints NOTE or DOWN in front of a row that answered",
   { skip: !onWindows ? "PowerShell only" : false },
