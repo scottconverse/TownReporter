@@ -76,10 +76,11 @@ test("plans bounded Today, Friday weekend, and approaching-deadline editions wit
   const plans = planRoutineEditions(result.eligible, "2026-09-08");
   assert.equal(plans.length, 3);
   assert.match(plans[0]!.body, /Source: \[source\.example\]\(https:\/\/source\.example\/a\)/);
-  // The other two editions keep their bullet list and raw Source line.
-  assert.match(plans[1]!.body, /^- Walk: /);
-  assert.match(plans[1]!.body, /Source: https:\/\/source\.example\/b$/);
-  assert.match(plans[2]!.body, /Source: https:\/\/source\.example\/c$/);
+  // The weekend and deadline editions name their sources as links too (G25-RT-1).
+  assert.match(plans[1]!.body, /^## Friday, Sept\. 11$/m);
+  assert.match(plans[1]!.body, /Source: \[source\.example\]\(https:\/\/source\.example\/b\)$/);
+  assert.match(plans[2]!.body, /^\*\*Sign up by Saturday, Sept\. 12\*\*\nEMT/m);
+  assert.match(plans[2]!.body, /Source: \[source\.example\]\(https:\/\/source\.example\/c\)$/);
   assert.equal(planRoutineEditions([], "2026-09-08").length, 0);
 });
 test("assigns offset timestamps by the configured newsroom local day", () => {

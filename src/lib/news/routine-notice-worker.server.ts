@@ -1077,7 +1077,7 @@ export async function performRoutineNoticeWorkWith(
           : [];
         if (
           !article ||
-          article.status !== "published" ||
+          (article.status !== "published" && article.status !== "waiting") ||
           (await sha256(article.body)) !== existing.article_body_hash
         ) {
           needsReview += 1;
@@ -1108,15 +1108,17 @@ export async function performRoutineNoticeWorkWith(
               run.newsroom_id,
             ],
           );
-          await tx.query(
-            "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
-            [
-              run.actor,
-              run.newsroom_id,
-              existing.article_id,
-              routineEditionUpdateNote(addedCount),
-            ],
-          );
+          if (article.status === "published") {
+            await tx.query(
+              "insert into corrections(user_id,newsroom_id,article_id,body) values($1,$2,$3,$4)",
+              [
+                run.actor,
+                run.newsroom_id,
+                existing.article_id,
+                routineEditionUpdateNote(addedCount),
+              ],
+            );
+          }
         }
         await tx.query(
           "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4,article_body_hash=$5 where id=$1",
@@ -1134,7 +1136,7 @@ export async function performRoutineNoticeWorkWith(
       }
       const slug = `routine-${plan.channel}-${localDate}-${run.newsroom_id}`;
       const [article] = await tx.query<{ id: number }>(
-        "insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at) values($1,$2,$3,$4,$5,$6,$7,$8,'published',now()) returning id",
+        "insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at) values($1,$2,$3,$4,$5,$6,$7,$8,'waiting',now()) returning id",
         [
           run.actor,
           run.newsroom_id,

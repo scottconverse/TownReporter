@@ -428,7 +428,7 @@ test("a repeat from two sites prints once with both source credits", async () =>
   await performRoutineNoticeWorkWith(job, { now, check: fakeCheck as any, verifyCheck: async () => {} });
   const sql = await getSql();
   const [article] = await sql.query<{ body: string; source_urls: string }>(
-    "select body,source_urls from articles where newsroom_id=$1 and status='published'",
+    "select body,source_urls from articles where newsroom_id=$1 and status='waiting'",
     [room],
   );
   assert.equal(article!.body.match(/STONE CUP SHOW!/g)?.length, 1);
@@ -478,7 +478,7 @@ test("a skipped source's stored rows stay and still print in the day's story", a
   };
   await performRoutineNoticeWorkWith(job, { now, check: fakeCheck as any, verifyCheck: async () => {} });
   const [article] = await sql.query<{ body: string }>(
-    "select body from articles where newsroom_id=$1 and status='published'",
+    "select body from articles where newsroom_id=$1 and status='waiting'",
     [room],
   );
   assert.match(article!.body, /Skipped source show/);
@@ -506,7 +506,7 @@ test("a table event with postponed status is held for review", async () => {
   });
   const sql = await getSql();
   assert.equal(
-    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status in ('published','waiting')", [room]))[0]?.n,
     0,
     "the postponed event is not printed in Today",
   );
@@ -534,7 +534,7 @@ test("a table event with cancellation set is held for review", async () => {
   });
   const sql = await getSql();
   assert.equal(
-    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status in ('published','waiting')", [room]))[0]?.n,
     0,
     "the cancelled event is not printed in Today",
   );
@@ -562,7 +562,7 @@ test("a table event keeps Free and Sign up on its Today line", async () => {
     verifyCheck: async () => {},
   });
   const sql = await getSql();
-  const [article] = await sql.query<{ body: string }>("select body from articles where newsroom_id=$1 and status='published'", [room]);
+  const [article] = await sql.query<{ body: string }>("select body from articles where newsroom_id=$1 and status='waiting'", [room]);
   assert.ok(article!.body.includes("Free"));
   assert.ok(article!.body.includes("Sign up: " + registrationUrl));
 });
@@ -588,7 +588,7 @@ test("a skipped source keeps its stored cancelled event out of Today on the next
   });
   const sql = await getSql();
   assert.equal(
-    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status in ('published','waiting')", [room]))[0]?.n,
     0,
     "the first run held the cancelled event",
   );
@@ -602,7 +602,7 @@ test("a skipped source keeps its stored cancelled event out of Today on the next
     verifyCheck: async () => {},
   });
   assert.equal(
-    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status='published'", [room]))[0]?.n,
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1 and status in ('published','waiting')", [room]))[0]?.n,
     0,
     "the skipped source stored row stayed out of Today",
   );
@@ -790,6 +790,7 @@ test("deduplicating Today leaves the weekend edition's library notice unchanged"
     [room],
   );
   assert.equal((todayArticle!.body.match(/Halloween Storytime/gi) ?? []).length, 1);
-  assert.ok(weekendArticle!.body.includes("- All Ages Halloween Storytime: "));
-  assert.ok(weekendArticle!.body.includes(`Source: ${libraryEventsUrl}`));
+  assert.match(weekendArticle!.body, /^All Ages Halloween Storytime$/m);
+  const escapedUrl = libraryEventsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(weekendArticle!.body, new RegExp(`^Source: \\[.*\\]\\(${escapedUrl}\\)$`, "m"));
 });

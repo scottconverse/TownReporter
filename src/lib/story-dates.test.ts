@@ -846,6 +846,26 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
     );
   });
 
+  it("does not hang a no-day headline on every day a many-day dek names (G29-DW-16)", () => {
+    // Test article 146, Oct 29 2026. The headline names no day; the dek names
+    // three. The headline is about the reduced service, not Oct. 11, when the
+    // normal service comes back. A row that cannot say which day is dropped.
+    const headline = "RTD scheduled 30-minute A Line service for York/Josephine repairs";
+    const items = collectStoryDates([
+      story({
+        slug: "rtd-a-line",
+        headline,
+        dek: "Trains were to run every 30 minutes, seven days a week, from Sept. 29 through Oct. 10, with no bus shuttles and 15-minute service due back Oct. 11.",
+        published_on: "2026-09-23",
+      }),
+    ]);
+    assert.deepEqual(
+      items.filter((i) => i.what.startsWith(headline)).map((i) => i.date),
+      [],
+      "a no-day headline was printed beside a day it does not name",
+    );
+  });
+
   it("falls back to the headline for a line cut off at a conjunction", () => {
     // "Public Hearing Set while" is this story's line for Oct. 12 -- four words,
     // capitalised, no verb the short-line test knows, so only the trailing

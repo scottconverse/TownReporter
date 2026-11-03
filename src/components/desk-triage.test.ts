@@ -298,3 +298,19 @@ describe("TNB-1 — X and H act on the row the focus is in", () => {
     assert.equal(triageAction(key("x", { target: element("<button>Kill</button>") })), null);
   });
 });
+
+describe("G28-KILL-6 — the killed row's Undo holds the focus without taking the keys", () => {
+  it("lets J, K, X, H and U act on the list from the Undo, and leaves Enter to the button", () => {
+    const { document } = parseHTML(
+      "<div data-triage-row='77'><div class='recent-kill-message' data-triage-passthrough=''><button>Undo</button></div></div>",
+    );
+    const undo = document.querySelector("button");
+    assert.deepEqual(triageAction(key("j", { target: undo })), { kind: "move", delta: 1 });
+    assert.deepEqual(triageAction(key("k", { target: undo })), { kind: "move", delta: -1 });
+    assert.deepEqual(triageAction(key("x", { target: undo })), { kind: "kill" });
+    assert.deepEqual(triageAction(key("h", { target: undo })), { kind: "hold" });
+    assert.deepEqual(triageAction(key("u", { target: undo })), { kind: "undo" });
+    assert.equal(triageAction(key("Enter", { target: undo })), null);
+    assert.equal(triageAction(key("j", { target: undo }), true), null);
+  });
+});

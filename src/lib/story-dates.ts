@@ -865,7 +865,12 @@ function wordedDates(
   ctx: { headline: string; headlineHits: DateHit[]; whole: string; offset: number },
 ): { date: string; what: string }[] {
   const found: { date: string; what: string }[] = [];
-  for (const hit of scanDates(text, publishedOn)) {
+  const hits = scanDates(text, publishedOn);
+  /* G29-DW-16: a headline that names no day can stand for the one day its text
+     names. When the text names several days, the headline does not say which
+     one it is about, so it is not printed beside any of them. */
+  const oneDay = new Set(hits.flatMap((hit) => hit.days)).size === 1;
+  for (const hit of hits) {
     /* The name is answered per day, not per expression: one expression may name
        several days ("Oct. 1 and 8"), and whether the headline is about a day is
        a question about that day. */
@@ -881,7 +886,7 @@ function wordedDates(
         // print (unit BZ, item 5).
         const said = ctx.headline.trim();
         const names = ctx.headlineHits.length > 0;
-        what = said && (!names || inHeadline) ? said : "";
+        what = said && ((!names && oneDay) || inHeadline) ? said : "";
       }
       if (!what) continue;
       const clock = clockNear(ctx.whole, ctx.offset + hit.start, ctx.offset + hit.end);

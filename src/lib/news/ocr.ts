@@ -216,7 +216,7 @@ async function resolveVisionLocal(
   after these rungs by the builders below rather than named in this list.
 */
 const NO_VISION_AVAILABLE =
-  "No vision-capable model is available to read this scan. OCR's unattended order is Codex Terra, then Claude (an ANTHROPIC_API_KEY when one is set, otherwise the signed-in Claude Code CLI), then a local model marked vision (· vision in the picker) — and none of them answered.";
+  "No vision-capable model is available to read this scan. OCR's unattended order is Codex Sol 6.1, then Claude (an ANTHROPIC_API_KEY when one is set, otherwise the signed-in Claude Code CLI), then a local model marked vision (· vision in the picker) — and none of them answered.";
 
 function injectedAutomaticPlans(opts: OcrOptions): Plan[] {
   const adapters = opts.adapters as OcrAdapters | undefined;

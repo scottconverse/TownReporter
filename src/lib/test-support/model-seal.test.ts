@@ -13,7 +13,10 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { spawn } from "node:child_process";
 import {
+  agentCliStartRefusal,
+  installAgentCliSeal,
   REAL_MODEL_OPT_IN_ENV,
   TEST_RUN_ENV,
   assertModelRequestAllowed,
@@ -159,3 +162,25 @@ async function withTestEnvAsync<T>(
     }
   }
 }
+
+describe("G31-T-1: the seal also refuses real agent CLI starts", () => {
+  const on = { [TEST_RUN_ENV]: "1" } as NodeJS.ProcessEnv;
+  it("names claude, codex, gemini and agy, with or without a path or extension", () => {
+    for (const cmd of ["claude", String.raw`C:\Users\x\.local\bin\claude.exe`, "/usr/bin/codex", "codex.cmd", "gemini", "agy"]) {
+      assert.match(agentCliStartRefusal(cmd, ["-p"], on) ?? "", /Refusing to start the real/, cmd);
+    }
+    assert.match(agentCliStartRefusal("node", [String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`], on) ?? "", /real codex/);
+  });
+  it("lets a fake CLI, other programs, a non-test process and the opt-in through", () => {
+    assert.equal(agentCliStartRefusal(process.execPath, ["scripts/fakes/fake-claude-cli.mjs"], on), null);
+    assert.equal(agentCliStartRefusal("taskkill", ["/pid", "1"], on), null);
+    assert.equal(agentCliStartRefusal("claude", ["-p"], {}), null);
+    assert.equal(agentCliStartRefusal("claude", ["-p"], { ...on, [REAL_MODEL_OPT_IN_ENV]: "1" }), null);
+  });
+  it("makes an imported spawn of the real CLI throw, so callers see CLI missing", async () => {
+    await withTestEnvAsync({ [TEST_RUN_ENV]: "1", [REAL_MODEL_OPT_IN_ENV]: undefined }, async () => {
+      installAgentCliSeal();
+      assert.throws(() => spawn("claude", ["-p", "--model", "claude-opus-5-5"]), (e: Error & { code?: string }) => e.code === "ETESTSEAL");
+    });
+  });
+});

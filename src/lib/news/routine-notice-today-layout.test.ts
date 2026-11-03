@@ -375,7 +375,7 @@ test("notices with no clock time (hours, closures, collection days) list first, 
   ]);
 });
 
-test("This weekend and Deadlines approaching keep their bullet list and raw Source line", () => {
+test("This weekend and Deadlines approaching get a real dek, day order and named source links (G25-RT-1, G25-RT-2)", () => {
   const friday = "2026-10-30";
   const { eligible } = eligibleRoutineNotices(
     [
@@ -402,14 +402,58 @@ test("This weekend and Deadlines approaching keep their bullet list and raw Sour
   );
   assert.equal(
     plans[0]!.body,
-    `- Concert: Oct 31, 2026 at 6:00 PM at Park\n\nSource: ${LIBRARY_CALENDAR}`,
+    "Here is what is on Longmont's public calendars for the weekend of Friday, Oct. 30, to Sunday, Nov. 1.\n\n" +
+      "## Saturday, Oct. 31\n\n**6 p.m.**\nConcert\nPark\n\n" +
+      `Source: [City of Longmont library events calendar](${LIBRARY_CALENDAR})`,
   );
   assert.equal(
     plans[1]!.body,
-    "- EMT: applications close Nov 2, 2026\n\nSource: https://college.example/dates",
+    "These sign-up deadlines on Longmont's public calendars fall in the next seven days.\n\n" +
+      "**Sign up by Monday, Nov. 2**\nEMT\nSign up: https://college.example/apply\n\n" +
+      "Source: [college.example](https://college.example/dates)",
   );
-  assert.equal(plans[0]!.dek, undefined);
-  assert.equal(plans[1]!.dek, undefined);
+  assert.equal(plans[0]!.dek, "1 event on Longmont's public calendars this weekend.");
+  assert.equal(plans[1]!.dek, "1 sign-up deadline in the next week.");
+});
+
+test("This weekend lists Friday, Saturday and Sunday in time order, not name order (G25-RT-2)", () => {
+  const friday = "2026-10-30";
+  const { eligible } = eligibleRoutineNotices(
+    [
+      arts("Apple fair", "2026-11-01T18:00:00-06:00", "Park", "sun-late"),
+      arts("Zumba", "2026-10-31T09:00:00-06:00", "Gym", "sat-early"),
+      arts("Bingo", "2026-10-31T19:00:00-06:00", "Hall", "sat-late"),
+      arts("Movie", "2026-10-30T20:00:00-06:00", "Theater", "fri"),
+    ],
+    friday,
+    ZONE,
+  );
+  const [weekend] = planRoutineEditions(eligible, friday, options).filter((p) => p.channel === "weekend");
+  const order = weekend!.body
+    .split("\n")
+    .filter((line) => /^(## |Movie|Zumba|Bingo|Apple fair)/.test(line));
+  assert.deepEqual(order, [
+    "## Friday, Oct. 30",
+    "Movie",
+    "## Saturday, Oct. 31",
+    "Zumba",
+    "Bingo",
+    "## Sunday, Nov. 1",
+    "Apple fair",
+  ]);
+});
+
+test("Deadlines approaching lists the soonest deadline first, not name order (G25-RT-2)", () => {
+  const today = "2026-10-28";
+  const deadline = (program: string, day: string, id: string) =>
+    notice("registration-deadline", { issuer: "College", program, deadline: day }, id, "https://college.example/dates");
+  const { eligible } = eligibleRoutineNotices(
+    [deadline("Art class", "2026-11-03", "a"), deadline("Zoo camp", "2026-10-29", "z")],
+    today,
+    ZONE,
+  );
+  const [plan] = planRoutineEditions(eligible, today, options).filter((p) => p.channel === "deadlines");
+  assert.ok(plan!.body.indexOf("Zoo camp") < plan!.body.indexOf("Art class"));
 });
 
 test("a day with no events plans no Today in town story", () => {

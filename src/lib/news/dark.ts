@@ -3150,9 +3150,18 @@ export async function queueInvestigationChallengeFor(
     } catch {
       brief = null;
     }
-    if (!brief || (!brief.supports.length && !brief.contradictions.length))
-      return { ok: false as const, error: "Save a brief with findings before challenging the case." ,
-      };
+    /* G29-DW-15 (rule 22): warn, never block. The second press names this key
+       in `override`, and the challenge runs on what the file has. */
+    if (!brief || (!brief.supports.length && !brief.contradictions.length)) {
+      const warning = await editorWarning(
+        { userId: context.userId, newsroomId },
+        override,
+        "challenge-without-findings",
+        "This file has no saved run and no brief findings yet. The challenge has little to test.",
+        { kind: "investigation", id },
+      );
+      if (warning) return warning;
+    }
   }
   const assignment = await (
     await import("./job-model-runtime.server.ts")

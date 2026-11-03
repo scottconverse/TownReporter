@@ -5435,6 +5435,26 @@
   align-items: center;
 }
 
+/*
+  G30-Q-2: the one-line title cut "Scanning the watch list" to "Scannin..."
+  and the model to "DeepSee...". In the narrow rail the clock now gets its own
+  line under the title, so the title and the model can wrap at word breaks and
+  every word stays readable. Long single words still break (overflow-wrap).
+*/
+.desk-ltr.astra .job-card.compact .job-card-head {
+  grid-template-columns: minmax(0, 1fr);
+}
+.desk-ltr.astra .job-card.compact .job-card-elapsed {
+  justify-self: start;
+}
+.desk-ltr.astra .job-card.compact .job-card-title,
+.desk-ltr.astra .job-card.compact .job-card-model {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
 .desk-ltr.astra .job-card-stages {
   display: flex;
   flex-wrap: wrap;

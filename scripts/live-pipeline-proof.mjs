@@ -23,8 +23,8 @@ let editorPassword;
 
 const MODEL_LABELS = {
   auto: "Automatic",
-  "codex-balanced": "Codex Terra",
-  "codex-frontier": "Codex Sol",
+  "codex-balanced": "Codex Sol 6.1 (balanced)",
+  "codex-frontier": "Codex Sol 6.1",
   "claude-frontier": "Claude Opus 5.5",
   "local-model": "Local model",
 };

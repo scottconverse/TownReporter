@@ -3,7 +3,7 @@ import {
   DraftItemBoundary,
   DraftStateChip,
 } from "@/components/draft-item-boundary";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
@@ -12,6 +12,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
+import { listWaitingRoundups, publishWaitingRoundup, type WaitingRoundup } from "@/lib/news/routine-waiting";
 import { editorTitle } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
@@ -193,6 +194,7 @@ function DraftsPage() {
         </Link>
       }
     >
+      <WaitingRoundups />
       <div className="seg-strip" role="group" aria-label="Filter drafts">
         {FILTERS.map((f) => (
           <button
@@ -346,5 +348,84 @@ function DraftsPage() {
         </div>
       )}
     </DeskShell>
+  );
+}
+
+function WaitingRoundups() {
+  const queryClient = useQueryClient();
+  const [publishing, setPublishing] = useState<number | null>(null);
+  const [results, setResults] = useState<
+    Record<number, { ok: true; slug: string } | { ok: false; error: string }>
+  >({});
+  const waiting = useQuery({
+    queryKey: ["desk", "waiting-roundups"],
+    queryFn: () => listWaitingRoundups(),
+  });
+
+  if (waiting.isLoading || !waiting.data || waiting.data.length === 0) {
+    return null;
+  }
+
+  const channels: Record<WaitingRoundup["channel"], string> = {
+    today: "Today in town",
+    weekend: "This weekend",
+    deadlines: "Deadlines",
+  };
+
+  async function handlePublish(id: number) {
+    setPublishing(id);
+    try {
+      const result = await publishWaitingRoundup({ data: id });
+      setResults((prev) => ({ ...prev, [id]: result }));
+      if (result.ok) {
+        await queryClient.invalidateQueries({ queryKey: ["desk", "waiting-roundups"] });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not publish.";
+      setResults((prev) => ({ ...prev, [id]: { ok: false, error: message } }));
+    } finally {
+      setPublishing(null);
+    }
+  }
+
+  return (
+    <section aria-label="Roundups waiting">
+      <h2 className="hl-head">Roundups waiting</h2>
+      <p className="wire-sum">These roundups print only when you press Publish.</p>
+      {waiting.data.map((roundup) => {
+        const result = results[roundup.id];
+        const isPublishing = publishing === roundup.id;
+        return (
+          <div className="drafts-row" key={roundup.id}>
+            <div className="drafts-main">
+              <p className="drafts-overline">
+                {channels[roundup.channel]} · {roundup.issueDate}
+              </p>
+              <h3 className="hl-head">{roundup.headline}</h3>
+              {result && !result.ok && <p role="alert">{result.error}</p>}
+              {result && result.ok && (
+                <p>
+                  Published.{" "}
+                  <Link to="/articles/$slug" params={{ slug: result.slug }}>
+                    Open the story
+                  </Link>
+                </p>
+              )}
+            </div>
+            <div className="drafts-side">
+              <button
+                type="button"
+                className="btn solid"
+                aria-label={`Publish: ${roundup.headline}`}
+                disabled={isPublishing}
+                onClick={() => handlePublish(roundup.id)}
+              >
+                {isPublishing ? "Publishing…" : "Publish"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }
