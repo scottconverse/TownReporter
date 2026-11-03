@@ -333,7 +333,7 @@ describe("keys pressed on an Undo inside a row (G28-KILL-6)", () => {
       const e = new KeyLike(k);
       e.target = undo;
       assert.doesNotThrow(() => triageAction(e as any));
-      assert.deepEqual(triageAction(e as any), triageAction({ key: k }));
+      assert.deepEqual(triageAction(e as any), triageAction({ key: k, metaKey: false, ctrlKey: false, altKey: false }));
     }
     const enter = new KeyLike("Enter");
     enter.target = undo;
