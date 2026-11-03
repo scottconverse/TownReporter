@@ -43,6 +43,9 @@
   (`scripts/model-seal-ci.test.mjs` fails the build if it ever does).
 */
 
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+
 /** Set by `scripts/test-environment.mjs` on every test process. */
 export const TEST_RUN_ENV = "TOWNREPORTER_TEST_ENV_VERIFIED";
 
@@ -225,3 +228,67 @@ export function installModelSeal(): () => void {
   outside a test run, so importing it from anywhere is safe.
 */
 if (process.env[TEST_RUN_ENV] === "1") installModelSeal();
+
+/*
+  G31-T-1 / G26-T-1: the fetch seal did not cover program starts. A test that
+  picked a Claude, Codex or Gemini rung and injected no fake runner started
+  the REAL `claude.exe -p` on a developer machine (10+ minutes, real quota).
+  CI has no such program, so there the same test saw "CLI missing". The seal
+  now makes every test machine see what CI sees: a start of one of those
+  programs throws, and the callers already turn a throw from `spawn` into
+  their "CLI missing" result. A fake CLI (scripts/fakes/fake-claude-cli.mjs,
+  named by CLAUDE_CLI_PATH) is not one of those names and still runs.
+*/
+const AGENT_CLI_NAMES = new Set(["claude", "codex", "gemini", "agy"]);
+
+function programName(path: unknown): string {
+  if (typeof path !== "string") return "";
+  const base = path.split(/[\\/]/).pop() ?? "";
+  return base.toLowerCase().replace(/\.(exe|cmd|bat|ps1|js|mjs|cjs)$/, "");
+}
+
+/** Why this program start is refused in a test process, or null when it may run. */
+export function agentCliStartRefusal(
+  command: unknown,
+  args: readonly unknown[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (env[TEST_RUN_ENV] !== "1") return null;
+  if (env[REAL_MODEL_OPT_IN_ENV] === "1") return null;
+  const names = [programName(command)];
+  // An npm shim runs `node .../codex.js`; read the script it names too.
+  if (/^node(\.exe)?$/.test(programName(command)) || command === process.execPath) names.push(programName(args[0]));
+  const hit = names.find((name) => AGENT_CLI_NAMES.has(name));
+  if (!hit) return null;
+  return (
+    `Refusing to start the real ${hit} program during the test suite: it is a live model and spends real quota. ` +
+    `Inject a fake runner, or point the *_CLI_PATH variable at a fake CLI. ` +
+    `Set ${REAL_MODEL_OPT_IN_ENV}=1 to allow it deliberately (never in CI).`
+  );
+}
+
+const SPAWN_SEAL_MARK = Symbol.for("townreporter.agentCliSealInstalled");
+
+/** Wrap `child_process.spawn` so a test cannot start a real agent CLI. Idempotent. */
+export function installAgentCliSeal(): void {
+  const cp = childProcess as typeof childProcess & { [SPAWN_SEAL_MARK]?: true };
+  if (cp[SPAWN_SEAL_MARK]) return;
+  const original = cp.spawn;
+  const sealed = function sealedSpawn(this: unknown, command: unknown, ...rest: unknown[]) {
+    const args = Array.isArray(rest[0]) ? (rest[0] as unknown[]) : [];
+    const refusal = agentCliStartRefusal(command, args);
+    if (refusal) {
+      const error = new Error(refusal) as Error & { code?: string };
+      error.code = "ETESTSEAL";
+      throw error;
+    }
+    return (original as (...a: unknown[]) => unknown).apply(this, [command, ...rest]);
+  } as unknown as typeof childProcess.spawn;
+  cp.spawn = sealed;
+  cp[SPAWN_SEAL_MARK] = true;
+  // `import { spawn } from "node:child_process"` reads the builtin's ESM
+  // exports; this copies the patched function into them.
+  syncBuiltinESMExports();
+}
+
+if (process.env[TEST_RUN_ENV] === "1") installAgentCliSeal();
