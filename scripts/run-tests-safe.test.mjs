@@ -35,6 +35,20 @@ test("ordinary test command still runs both isolated suite groups", () => {
   assert.ok(calls[1].args.includes("src/**/*.test.ts"));
 });
 
+test("G28-CI-2: every suite group gets a per-test time limit", () => {
+  const result = invoke([]);
+  assert.equal(result.status, 0, result.stderr);
+  const calls = result.stdout.split("\n").filter(line => line.startsWith("SPAWN:"))
+    .map(line => JSON.parse(line.slice(6)));
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    const flag = call.args.find(arg => arg.startsWith("--test-timeout="));
+    assert.ok(flag, "each group must carry --test-timeout");
+    const ms = Number(flag.split("=")[1]);
+    assert.ok(ms > 0 && ms < 20 * 60 * 1000, "the limit must end a stuck test before the 20-minute job limit");
+  }
+});
+
 for (const args of [["--run", "src/lib/news/search-web.test.ts"], ["src/lib/news/search-web.test.ts"]]) {
   test(`unsupported filtering refuses before spawning: ${args.join(" ")}`, () => {
     const result = invoke(args);

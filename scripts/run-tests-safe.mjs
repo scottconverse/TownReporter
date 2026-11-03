@@ -81,14 +81,24 @@ function run(args) {
   });
 }
 
+/**
+ * G28-CI-2: one stuck test once held a CI shard silent until the job's
+ * 20-minute limit cancelled it, with no test named. Each test now gets its
+ * own limit, so a stuck test fails by name and the shard carries on. A test
+ * that sets its own `timeout` keeps it.
+ */
+export const PER_TEST_TIMEOUT_MS = 5 * 60 * 1000;
+const perTestTimeout = `--test-timeout=${PER_TEST_TIMEOUT_MS}`;
+
 for (const args of [
   // The scripts group is static analysis of the scripts themselves -- it
   // opens no database, so it gets no schema preload.
-  ["--test", "--import", modelSealPreload, ...slice, "scripts/**/*.test.mjs"],
+  ["--test", perTestTimeout, "--import", modelSealPreload, ...slice, "scripts/**/*.test.mjs"],
   [
     "--experimental-strip-types",
     "--test",
     "--test-concurrency=1",
+    perTestTimeout,
     "--import",
     modelSealPreload,
     "--import",
