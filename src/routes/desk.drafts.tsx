@@ -412,7 +412,7 @@ function WaitingRoundups() {
               {result && result.ok && (
                 <p>
                   Published.{" "}
-                  <Link to="/articles/$slug" params={{ slug: result.slug }}>
+                  <Link to="/articles/$slug" params={{ slug: result.slug }} className="inline-link">
                     Open the story
                   </Link>
                 </p>
@@ -435,7 +435,7 @@ function WaitingRoundups() {
       {published
         .filter((p) => !rows.some((r) => r.id === p.id))
         .map((p) => (
-          <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }}>Open the story</Link></p></div></div>
+          <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }} className="inline-link">Open the story</Link></p></div></div>
         ))}
     </section>
   );
