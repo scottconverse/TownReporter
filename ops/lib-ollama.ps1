@@ -162,9 +162,10 @@ function Start-OllamaIfDown {
   if (Test-OllamaProcessRunning) { return 'starting' }
   $launch = Get-OllamaLaunch -Shortcut $Shortcut
   if (-not $launch) { return 'absent' }
-  $arguments = @()
-  if ($launch.Arguments) { $arguments = @($launch.Arguments) }
-  $options = @{ FilePath = $launch.Target; ArgumentList = $arguments; WindowStyle = "Hidden" }
+  # Oct 26 2026: empty shortcut Arguments made Start-Process reject -ArgumentList @().
+  # Only add ArgumentList when the shortcut has non-empty arguments.
+  $options = @{ FilePath = $launch.Target; WindowStyle = "Hidden" }
+  if ($launch.Arguments) { $options.ArgumentList = $launch.Arguments }
   if ($launch.WorkingDir) { $options.WorkingDirectory = $launch.WorkingDir }
   Start-Process @options
   return 'started'
