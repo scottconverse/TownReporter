@@ -790,6 +790,7 @@ test("deduplicating Today leaves the weekend edition's library notice unchanged"
     [room],
   );
   assert.equal((todayArticle!.body.match(/Halloween Storytime/gi) ?? []).length, 1);
-  assert.ok(weekendArticle!.body.includes("- All Ages Halloween Storytime: "));
-  assert.ok(weekendArticle!.body.includes(`Source: ${libraryEventsUrl}`));
+  assert.match(weekendArticle!.body, /^All Ages Halloween Storytime$/m);
+  const escapedUrl = libraryEventsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(weekendArticle!.body, new RegExp(`^Source: \\[.*\\]\\(${escapedUrl}\\)$`, "m"));
 });
