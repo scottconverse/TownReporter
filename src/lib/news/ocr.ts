@@ -358,7 +358,7 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   const provider = opts.provider;
   if (!provider || provider === "auto") {
     // Automatic follows OCR's OWN unattended order (OCR_AUTOMATIC_ORDER):
-    // Codex Terra, then Claude, then a discovered local vision model. This is
+    // Codex Sol 6.1, then Claude, then a discovered local vision model. This is
     // NOT provider-registry.ts's writing/research ladder and must not be
     // re-pointed when that one changes -- see the constant's comment.
     return (await productionAutomaticPlans(opts, true))[0] ?? {

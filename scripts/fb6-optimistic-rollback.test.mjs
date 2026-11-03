@@ -169,6 +169,8 @@ async function mount(element) {
     async click() {
       await React.act(async () => {
         container.querySelector("#press").dispatchEvent(new window.Event("click", { bubbles: true }));
+        // G28-CI-2: React Query tells React about the new state on a setTimeout(0) tick.
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
     },
     async close() {
@@ -255,6 +257,8 @@ test("a Hold moves the row before the desk has answered", async () => {
       "one success bar, and no failure",
     );
   } finally {
+    // G28-CI-2: settle the gate so no call stays open (and the file can exit) when an assert fails.
+    await React.act(async () => gate.resolve({ ok: true }));
     await page.close();
   }
 });
