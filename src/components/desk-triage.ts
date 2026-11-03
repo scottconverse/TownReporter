@@ -148,6 +148,21 @@ export function rowKillIdOf(target: unknown): string | null {
  * and H on its checkbox, its Hold or its menu act on THAT row, the way a row's
  * own Kill does (THT-8), and not on whichever row the cursor happens to be on.
  */
+/**
+ * G28-KILL-6: the killed row's Undo takes the focus after a kill, so a keyboard
+ * editor reaches it at once. While it holds the focus, the triage keys still
+ * act on the list (J, K, X, H, U), as if no control had the focus. Enter stays
+ * the button's own key.
+ */
+export const TRIAGE_PASSTHROUGH_ATTR = "data-triage-passthrough";
+
+export function isTriagePassthrough(target: unknown): boolean {
+  const el = target as Element | null;
+  if (!el) return false;
+  const closest = (el as Element).closest;
+  return typeof closest === "function" && closest.call(el, `[${TRIAGE_PASSTHROUGH_ATTR}]`) != null;
+}
+
 export function rowOwnerIdOf(target: unknown): string | null {
   const el = target as Element | null;
   if (!el) return null;
@@ -216,6 +231,10 @@ export function triageAction(
   // THT-8: X on a focused row Kill button is the row's kill, not a stray press on a control.
   // TNB-1: X and H on any other control inside a row act on that row too (its checkbox, its Hold).
   const name = event.key.toLowerCase();
+  if (isTriagePassthrough(event.target)) {
+    if (name === "enter") return null;
+    return triageAction({ ...event, target: undefined }, overlayOpen);
+  }
   const rowKill = name === "x" ? rowKillIdOf(event.target) : null;
   const ownRow = name === "x" || name === "h" ? (rowKill ?? rowOwnerIdOf(event.target)) : null;
   if (isInteractiveTarget(event.target) && name !== "h" && ownRow === null) return null;

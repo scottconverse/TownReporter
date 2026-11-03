@@ -1,5 +1,5 @@
 import { deskWarning } from "../lib/news/desk-warning.ts";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
@@ -20,7 +20,7 @@ import {
   type PrintedDup,
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
-import { isInteractiveTarget } from "@/components/desk-triage";
+import { isInteractiveTarget, isTypingTarget, TRIAGE_PASSTHROUGH_ATTR } from "@/components/desk-triage";
 import { ModelPicker } from "@/components/model-picker";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
@@ -62,8 +62,16 @@ export function KilledRowNotice({
   onUndo?: () => void;
 }) {
   const title = editorTitle(headline);
+  const box = useRef<HTMLDivElement>(null);
+  /* G28-KILL-6: after a kill, the Undo takes the focus, unless the editor is
+     typing somewhere. The triage keys pass through it (desk-triage.ts). */
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (isTypingTarget(document.activeElement)) return;
+    box.current?.querySelector("button")?.focus({ preventScroll: true });
+  }, []);
   return (
-    <div className="recent-kill-message">
+    <div className="recent-kill-message" ref={box} {...{ [TRIAGE_PASSTHROUGH_ATTR]: "" }}>
       <span className="recent-kill-copy" role="status" aria-live="polite" aria-atomic="true">
         <strong>Killed.</strong>{" "}
         <span className="recent-kill-headline">{title}</span>
