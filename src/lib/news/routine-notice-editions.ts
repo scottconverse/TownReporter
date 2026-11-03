@@ -468,6 +468,81 @@ function todayEdition(
     body: parts.join("\n\n"),
   };
 }
+type DatedEntry = { day: string; entry: TodayEntry };
+/** Day first, then clock time (all-day first), then name: the order a reader plans by. */
+function compareDated(a: DatedEntry, b: DatedEntry) {
+  return (
+    a.day.localeCompare(b.day) ||
+    (a.entry.startMinutes ?? -1) - (b.entry.startMinutes ?? -1) ||
+    a.entry.name.localeCompare(b.entry.name) ||
+    a.entry.details.join("\n").localeCompare(b.entry.details.join("\n"))
+  );
+}
+function entryBlock(entry: TodayEntry, nameTown: boolean) {
+  return [
+    entry.timeLine,
+    nameTown && entry.town ? `${entry.name} (${entry.town})` : entry.name,
+    ...entry.details,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+/** "This weekend": the Friday-to-Sunday events, one heading per day, each day in time order. */
+function weekendEdition(
+  rows: EligibleRoutineNotice[],
+  localDate: string,
+  sourceUrls: string[],
+  options: RoutineEditionOptions,
+) {
+  const timezone = options.timezone ?? "UTC";
+  const town = plainField(options.town);
+  const calendars = town ? `${town}'s public calendars` : "the public calendars";
+  const [fri, sun] = weekendRange(localDate);
+  const dated = rows
+    .map((row) => ({
+      // A run of days that began before Friday is listed on Friday.
+      day: row.occurrenceDate < fri ? fri : row.occurrenceDate,
+      entry: todayEntry(row, timezone),
+    }))
+    .sort(compareDated);
+  const parts = [
+    `Here is what is on ${calendars} for the weekend of ${readerDate(fri)}, to ${readerDate(sun)}.`,
+  ];
+  for (const day of [...new Set(dated.map((item) => item.day))]) {
+    parts.push(`## ${readerDate(day)}`);
+    for (const item of dated.filter((x) => x.day === day))
+      parts.push(entryBlock(item.entry, item.entry.area !== HOME_AREA));
+  }
+  parts.push(sourceUrls.map((url) => sourceLine(url, options.sourceNames)).join("\n"));
+  const count = `${dated.length} ${dated.length === 1 ? "event" : "events"}`;
+  return { dek: `${count} on ${calendars} this weekend.`, body: parts.join("\n\n") };
+}
+/** "Deadlines approaching": each sign-up deadline in the next week, soonest first. */
+function deadlinesEdition(
+  rows: EligibleRoutineNotice[],
+  sourceUrls: string[],
+  options: RoutineEditionOptions,
+) {
+  const timezone = options.timezone ?? "UTC";
+  const town = plainField(options.town);
+  const calendars = town ? `${town}'s public calendars` : "the public calendars";
+  const dated = rows
+    .map((row) => {
+      const f = row.notice.normalizedFields;
+      const clock = localClock(f.deadline, timezone, f.timezone);
+      const due = `**Sign up by ${readerDate(row.occurrenceDate)}${clock ? `, ${apTimeRange(clock.minutes)}` : ""}**`;
+      return {
+        day: row.occurrenceDate,
+        entry: { ...todayEntry(row, timezone), startMinutes: clock ? clock.minutes : null, timeLine: due },
+      };
+    })
+    .sort(compareDated);
+  const parts = [`These sign-up deadlines on ${calendars} fall in the next seven days.`];
+  for (const item of dated) parts.push(entryBlock(item.entry, item.entry.area !== HOME_AREA));
+  parts.push(sourceUrls.map((url) => sourceLine(url, options.sourceNames)).join("\n"));
+  const count = `${dated.length} sign-up ${dated.length === 1 ? "deadline" : "deadlines"}`;
+  return { dek: `${count} in the next week.`, body: parts.join("\n\n") };
+}
 export function planRoutineEditions(
   items: EligibleRoutineNotice[],
   localDate: string,
@@ -488,12 +563,10 @@ export function planRoutineEditions(
     let body: string;
     if (channel === "today") {
       ({ dek, body } = todayEdition(rows, localDate, sourceUrls, options));
+    } else if (channel === "weekend") {
+      ({ dek, body } = weekendEdition(rows, localDate, sourceUrls, options));
     } else {
-      body = [
-        ...rows.map((row) => `- ${row.line}`),
-        "",
-        ...sourceUrls.map((url) => `Source: ${url}`),
-      ].join("\n");
+      ({ dek, body } = deadlinesEdition(rows, sourceUrls, options));
     }
     return [
       {

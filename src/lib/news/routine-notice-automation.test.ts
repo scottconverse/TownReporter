@@ -851,11 +851,11 @@ test("a Friday run with eight events today and seven more on Saturday prints all
     todayStory!.body.split("\n\n").filter((block) => block.startsWith("## ")),
     ["## Morning", "## Afternoon", "## Evening"],
   );
-  const [weekendStory] = await sql.query<{ body: string }>(
-    "select a.body from articles a join routine_notice_publications p on p.article_id=a.id where p.newsroom_id=$1 and p.channel='weekend'",
+  const [weekendStory] = await sql.query<{ dek: string; body: string }>(
+    "select a.dek,a.body from articles a join routine_notice_publications p on p.article_id=a.id where p.newsroom_id=$1 and p.channel='weekend'",
     [room],
   );
-  assert.equal(weekendStory!.body.match(/^- /gm)?.length, 5);
+  assert.match(weekendStory!.dek, /^5 events on .+ this weekend\.$/);
 
   const [run] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [job.subject_id]);
   const summary = JSON.parse(run!.summary_json);
