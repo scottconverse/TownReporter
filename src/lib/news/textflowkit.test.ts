@@ -379,3 +379,33 @@ describe("a tool that talks on stderr while it works (0.1.7 and later)", () => {
     assert.equal(probe.version, "0.1.11");
   });
 });
+
+/*
+  G32-TFK-1 (Nov 2 2026). The live tool folder vanished and 34 meetings sat
+  untranscribed for weeks with no word on the desk: the scan's coverage line
+  only spoke when jobs were queued. A scan that finds audio waiting and no tool
+  must now say so.
+*/
+describe("speechCoverageNote", async () => {
+  const { speechCoverageNote } = await import("./textflowkit.ts");
+
+  it("says how many jobs were queued", () => {
+    assert.equal(speechCoverageNote({ withAudio: 3, queued: 2, notInstalled: false }), " (speech-to-text: 2 queued)");
+  });
+
+  it("warns when audio is waiting and the tool is missing", () => {
+    assert.equal(
+      speechCoverageNote({ withAudio: 34, queued: 0, notInstalled: true }),
+      " (speech-to-text NOT INSTALLED: 34 meetings with audio have no transcript)",
+    );
+    assert.equal(
+      speechCoverageNote({ withAudio: 1, queued: 0, notInstalled: true }),
+      " (speech-to-text NOT INSTALLED: 1 meeting with audio has no transcript)",
+    );
+  });
+
+  it("stays quiet when nothing waits", () => {
+    assert.equal(speechCoverageNote({ withAudio: 0, queued: 0, notInstalled: false }), "");
+    assert.equal(speechCoverageNote({ withAudio: 4, queued: 0, notInstalled: false }), "");
+  });
+});
