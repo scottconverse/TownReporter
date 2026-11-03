@@ -357,12 +357,14 @@ function WaitingRoundups() {
   const [results, setResults] = useState<
     Record<number, { ok: true; slug: string } | { ok: false; error: string }>
   >({});
+  const [published, setPublished] = useState<{ id: number; headline: string; slug: string }[]>([]);
   const waiting = useQuery({
     queryKey: ["desk", "waiting-roundups"],
     queryFn: () => listWaitingRoundups(),
   });
 
-  if (waiting.isLoading || !waiting.data || waiting.data.length === 0) {
+  const rows = waiting.data ?? [];
+  if (waiting.isLoading || (rows.length === 0 && published.length === 0)) {
     return null;
   }
 
@@ -376,6 +378,10 @@ function WaitingRoundups() {
     setPublishing(id);
     try {
       const result = await publishWaitingRoundup({ data: id });
+      if (result.ok) {
+        const headline = waiting.data?.find((r) => r.id === id)?.headline ?? "";
+        setPublished((prev) => [...prev.filter((p) => p.id !== id), { id, headline, slug: result.slug }]);
+      }
       setResults((prev) => ({ ...prev, [id]: result }));
       if (result.ok) {
         await queryClient.invalidateQueries({ queryKey: ["desk", "waiting-roundups"] });
@@ -392,7 +398,7 @@ function WaitingRoundups() {
     <section aria-label="Roundups waiting">
       <h2 className="hl-head">Roundups waiting</h2>
       <p className="wire-sum">These roundups print only when you press Publish.</p>
-      {waiting.data.map((roundup) => {
+      {rows.map((roundup) => {
         const result = results[roundup.id];
         const isPublishing = publishing === roundup.id;
         return (
@@ -426,6 +432,11 @@ function WaitingRoundups() {
           </div>
         );
       })}
+      {published
+        .filter((p) => !rows.some((r) => r.id === p.id))
+        .map((p) => (
+          <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }}>Open the story</Link></p></div></div>
+        ))}
     </section>
   );
 }
