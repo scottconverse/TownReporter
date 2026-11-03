@@ -1275,6 +1275,15 @@ if (Skip-Step 'ff') {
       }
       Say "moved $($head.Substring(0,7)) -> $($target.Substring(0,7))"
       $ffDetail = "moved $($head.Substring(0,7)) -> $($target.Substring(0,7))"
+      # G27-PR-2 (Oct 28 2026): the helpers were loaded at the top, from the
+      # OLD checkout. A fix to them (PR 335) then only took effect on the NEXT
+      # deploy, and this one hung in verify on the old code. Load them again
+      # now, so the rest of this run uses the code it just moved to. They hold
+      # only functions and values read from settings, so a second load is safe.
+      . (Join-Path $ops "lib-port.ps1")
+      . (Join-Path $ops "lib-backup.ps1")
+      . (Join-Path $ops "lib-promote.ps1")
+      Say "reloaded the promote helpers from $($target.Substring(0,7))"
     }
   }
   Complete-PromoteStep -Log $log -Name 'ff' -Seconds ((Get-Date) - $t0).TotalSeconds -Detail $ffDetail
