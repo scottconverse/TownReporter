@@ -2315,6 +2315,12 @@
   font-size: calc(0.9375rem * var(--ts));
   color: var(--fg2);
 }
+/* Dialog buttons get the 16px desk floor (rule 30, found on Dev Nov 4 2026):
+   the portal has `desk-ltr` but not `astra`, so the astra 16px button rule
+   never reached them and they drew at the base 14px. */
+.desk-ltr.astra-modal-layer .btn {
+  font-size: calc(1rem * var(--ts));
+}
 /* The close control is a quiet InkButton -- a 1px `--line` outline -- but it
    is a square glyph button, not a labeled one, so it is width-constrained
    here rather than given a second button style. */
