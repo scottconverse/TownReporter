@@ -65,13 +65,20 @@
   --job-warn: #8a4b00;
   --font-serif: var(--fb);
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  /*
+    G33-UI-4 (walk note, Nov 4 2026): this rail was 230px, which left the
+    Running box about 146px of usable width -- a lead's title wrapped to one
+    to three words a line, and on the story page the same job card ("Now: …",
+    "Last activity …") was squeezed the same way. 280px gives the Running box
+    about 252px, enough for a readable title and its model line at 1440.
+  */
+  grid-template-columns: 280px minmax(0, 1fr);
   /* The first track above, as a length the fixed chrome can read. A fixed
      element's `left` is measured from the viewport, so anything pinned at the
      bottom of the desk has to be told where the content column starts; the
      three values here and in the two breakpoints below are the only ones that
      know. See `.astra-unsaved-bar`. */
-  --desk-nav-w: 230px;
+  --desk-nav-w: 280px;
   align-items: start;
   min-height: 100dvh;
   font-family: var(--fd);
@@ -1526,6 +1533,16 @@
 .desk-ltr.astra .astra-inspector .side-url {
   overflow-wrap: anywhere;
 }
+/*
+  G33-UI-4 (rule 30, walk note Nov 4 2026): the lead's why line, the note and
+  its source addresses in the story side panel were still 14px from
+  styles.css -- measured 14px at #bdbab3 in the dark theme, below the desk's
+  16px body floor. They are prose the editor reads, so they scale with the
+  rest of the panel. The base rules stay as they are for any non-astra surface.
+*/
+.desk-ltr.astra .story-side :is(.side-why, .side-note, .side-url) {
+  font-size: calc(16px * var(--ts));
+}
 .desk-ltr.astra .astra-inspector .btn {
   padding: 8px 10px;
   font-size: calc(16px * var(--ts));
@@ -2323,8 +2340,10 @@
 }
 @media (max-width: 1200px) {
   .desk-ltr.astra {
-    grid-template-columns: 206px minmax(0, 1fr);
-    --desk-nav-w: 206px;
+    /* G33-UI-4: 248px, not 206px -- the same Running box, two words narrower
+       than the 280px desktop rail but still a readable column. */
+    grid-template-columns: 248px minmax(0, 1fr);
+    --desk-nav-w: 248px;
   }
   .desk-ltr.astra .deskmain {
     padding: 28px 26px 60px;
@@ -3251,7 +3270,14 @@
   no border, no fill, the page's own background, and only the accent rule on the
   left -- which is the one part of the card's frame that carries meaning.
 */
-.desk-ltr.astra .astra-running-job .job-card {
+/*
+  G33-UI-4: `.job-card.compact` in the job-card block further down is four
+  classes deep and comes later in the file, so this four-class rule lost the
+  padding and the card kept 12px of its own on each side inside the rail --
+  another 24px the title could not use. The fifth class wins on specificity,
+  which is what this rule always meant: the rail draws the card flat.
+*/
+.desk-ltr.astra .astra-running-job .job-card.compact {
   padding: 0;
   border: none;
   border-left: 3px solid var(--job-col, var(--a));
@@ -5097,8 +5123,8 @@
   the Queue drew a table whose columns cannot be narrower than 756px of
   content -- 44 + 52 + 180 + 150 + the 202px actions track, five 16px gaps and
   the row's own 24px inset either side -- into a main column that is only
-  `viewport - 258px` wide once the 206px nav rail and the 26px page padding
-  have taken their share (766 at 1024, 642 at 900, 510 at 768).
+  `viewport - 300px` wide once the 248px nav rail (G33-UI-4) and the 26px
+  page padding have taken their share (724 at 1024, 600 at 900, 468 at 768).
 
   At 1280px and below, move the supporting cells and actions under the lead
   to leave room for its headline and the paper's full section name.
@@ -8455,7 +8481,7 @@
    stylesheet copy of it would be a second, silently-drifting authority for the
    one value that decides whether a toast covers the publish bar. The offset to
    the right of the nav is `calc(var(--desk-nav-w, 0px) + 16px)`, and that
-   variable IS this stylesheet's: it is 230px, 206px under 1200px and 0px at
+   variable IS this stylesheet's: it is 280px, 248px under 1200px and 0px at
    the phone breakpoint where the nav goes off-canvas.
 */
 

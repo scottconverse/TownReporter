@@ -123,7 +123,7 @@ export const DESK_TOAST_LIFT = 96;
   them to their rules -- the position, the lift and the nav-aware left offset
   are the three things M6 is about, and all three are data. `offset.left` is
   `--desk-nav-w` plus a gutter rather than a number because the sidebar is
-  230px, 206px under 1200px and 0px on a phone, where the nav is off-canvas.
+  280px, 248px under 1200px and 0px on a phone, where the nav is off-canvas.
 */
 export const DESK_TOASTER_POSITION = "bottom-left" as const;
 /**
