@@ -195,7 +195,21 @@
   top: 0;
   background: var(--bg2);
   border-right: 1px solid var(--line);
-  padding: 20px 14px 18px;
+  /*
+    Covered footer (walk note, Oct 31 2026). The Test server puts a fixed
+    orange "TEST SERVER" bar across the bottom of the viewport on every desk
+    page, and it sat over the rail's last line ("Press ? for keyboard
+    shortcuts"). That banner is not drawn by this repository -- it is added by
+    the Test server's own wrapper -- so the sidebar cannot detect it and this
+    sheet cannot move it. What the sidebar CAN do is leave room at the end of
+    its own scroll: `--desk-bottom-banner` is the clearance (a little over the
+    banner's own height), added after the footer's 18px. On the live paper the
+    extra padding is below the last control and changes nothing visible; when
+    the rail does scroll, the footer can now scroll clear of the bar instead of
+    ending underneath it. The banner itself is left in place, as asked.
+  */
+  --desk-bottom-banner: 48px;
+  padding: 20px 14px calc(18px + var(--desk-bottom-banner));
   display: flex;
   flex-direction: column;
   z-index: 40;
