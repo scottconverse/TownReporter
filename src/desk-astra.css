@@ -590,14 +590,20 @@
 }
 /* The same hairline problem on the gated disabled press: a dashed `--line`
    edge on a button that says "not yet" is indistinguishable from no button at
-   all. `--fg2` dashed keeps the "this exists but is not usable yet" reading
-   and clears the floor. */
+   all. `--fg2` keeps the "this exists but is not usable yet" reading and
+   clears the floor.
+
+   Dashed chip boxes (walk note, Oct 31 2026): "Add suggested focus (0)" and
+   the disabled "Batch started" press were the dashed outlines the reporter saw
+   as unfinished. The edge is solid now; the muted `--fg2` ink and the disabled
+   cursor still say it cannot be pressed, and `disabled` itself says so to a
+   screen reader. */
 .desk-ltr.astra .btn.gated {
-  border: 2px dashed var(--fg2);
+  border: 2px solid var(--fg2);
   color: var(--fg2);
 }
 .desk-ltr.astra :is(.btn, .document-add-button):disabled:not([data-phase="done"]) {
-  border: 2px dashed var(--fg2);
+  border: 2px solid var(--fg2);
   background: transparent;
   color: var(--fg2);
   opacity: 1;
@@ -855,9 +861,18 @@
   The state colors themselves are set once, in `.desk-ltr .chip.*` in
   styles.css; this shell only has to stop overriding them with a filled teal
   pill. A chip here is now the same chip as on every other desk surface: a 1px
-  outline, dashed when the state is not settled, yellow fill only for `new`.
-  The score badge keeps its filled look on the neutral panel ground, so it reads
-  as a number on a card rather than as a second accent.
+  solid outline, yellow fill only for `new`. The score badge keeps its filled
+  look on the neutral panel ground, so it reads as a number on a card rather
+  than as a second accent.
+
+  Dashed chip boxes (walk note, Oct 31 2026): a status chip such as
+  "Writing · 0:34" or "Queued · 0:34" was drawn with a dashed edge, and the
+  reporter read that as an unfinished box. The words already carry the state
+  ("Writing", "Queued"), so the dash was decoration and not information; the
+  quiet tone still reads through its `--fg2` colour and its one-pixel weight.
+  The dashed shapes that DO mean something -- a failed check
+  (`.astra-evidence-chip.is-fail`, `.desk-toast-err`) -- stay dashed, because
+  there the shape says "this is a hole, not a pass" and colour alone would not.
 */
 .desk-ltr.astra .chip {
   display: inline-flex;
@@ -3648,7 +3663,7 @@
   color: var(--danger);
 }
 .desk-ltr.astra .chip.d-quiet {
-  border-style: dashed;
+  border-style: solid;
   border-color: var(--fg2);
   color: var(--fg2);
 }
@@ -8034,11 +8049,14 @@
   border: 2px solid var(--warn);
   color: var(--warn);
 }
-/* Unit U9: a check that never ran. The dashed outline is the desk home's
-   "not run" chip (.chip.d-quiet), so the one chip on this bar that is not
-   about something the editor has to do still cannot be read as a pass. */
+/* Unit U9: a check that never ran. The outline is the desk home's "not run"
+   chip (.chip.d-quiet), so the one chip on this bar that is not about something
+   the editor has to do still cannot be read as a pass. It is solid, like that
+   chip now (dashed chip boxes, walk note Oct 31 2026) -- the word "not run" and
+   the `--fg2` ink carry the state, and the solid edge no longer reads as an
+   unfinished box. */
 .desk-ltr.astra .astra-gate.is-quiet {
-  border-style: dashed;
+  border-style: solid;
   border-color: var(--fg2);
   color: var(--fg2);
 }
