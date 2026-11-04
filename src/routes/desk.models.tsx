@@ -837,8 +837,9 @@ function JobRow({
 /**
  * The prototype's select box (`sel` in `design/Desk Models.dc.html`), shared by
  * the model select and the effort select beside it: 44px tall, one ink rule,
- * 15px at weight 700 on the page's own background, and the prototype's own 8px
- * side padding.
+ * 16px at weight 700 on the page's own background (G36-UI-1 raised it from the
+ * prototype's 15px to rule 30's desk floor), and the prototype's own 8px side
+ * padding.
  *
  * Not `inputClass`, whose 14px text and 12px side padding are sized for a form.
  * The 8px is measured rather than copied: an earlier version used 18px on the
@@ -867,7 +868,8 @@ const SELECT_STYLE: CSSProperties = {
   borderRadius: 0,
   fontFamily: "inherit",
   fontWeight: 700,
-  fontSize: "15px",
+  /* G36-UI-1: rule 30's desk floor is 16px for labels and buttons. */
+  fontSize: "calc(16px * var(--ts))",
 };
 
 /** Job identity and status span three readable picker columns. */

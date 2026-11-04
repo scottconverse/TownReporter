@@ -82,7 +82,7 @@
   align-items: start;
   min-height: 100dvh;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.6;
   background: var(--bg);
   color: var(--fg);
@@ -242,7 +242,7 @@
 /* The tag is yellow with ink text in both themes (design-system README §3). */
 .desk-ltr.astra .astra-brand span {
   display: block;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -260,7 +260,7 @@
   flex: 1;
 }
 .desk-ltr.astra .astra-nav-label {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   text-transform: uppercase;
   letter-spacing: 1.45px;
   color: var(--mut);
@@ -294,7 +294,7 @@
 .desk-ltr.astra .astra-nav.sub {
   padding-left: 26px;
   font-weight: 600;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-nav:hover {
   background: var(--hover);
@@ -314,7 +314,7 @@
   font-weight: 700;
 }
 .desk-ltr.astra .astra-nav-count {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
@@ -347,7 +347,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   min-width: 0;
   overflow: hidden;
@@ -383,10 +383,10 @@
   border: 0;
   padding: 10px 0;
   color: var(--mut);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra kbd {
-  font: 500 calc(14px * var(--ts)) var(--fd);
+  font: 500 calc(16px * var(--ts)) var(--fd);
   border: 1px solid var(--line);
   border-radius: 0;
   padding: 2px 5px;
@@ -417,7 +417,7 @@
   border-radius: 0;
   background: var(--surface);
   color: var(--fg);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   text-decoration: none;
 }
@@ -446,7 +446,7 @@
   flex-wrap: wrap;
 }
 .desk-ltr.astra .kick {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--adeep);
@@ -467,7 +467,7 @@
 */
 .desk-ltr.astra .dark-lede,
 .desk-ltr.astra .lede {
-  font: 500 calc(14px * var(--ts))/1.7 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.7 var(--fd);
   color: var(--mut);
   max-width: 760px;
   margin: 0 0 22px;
@@ -480,7 +480,7 @@
 .desk-ltr.astra :is(.meta, .wire-sum, .note, .side-note, .src-url, .meta-inline) {
   font-family: var(--fd);
   font-style: normal;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.65;
   color: var(--mut);
 }
@@ -535,7 +535,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--fg);
-  font: 700 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   text-decoration: none;
   transition: background var(--motion-fast);
   white-space: normal;
@@ -646,7 +646,7 @@
 .desk-ltr.astra .btn.small {
   min-height: 44px;
   padding: 7px 11px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 /*
   UI1a: THE FOUR PHASES OF A PRESS, PAINTED IN ONE PLACE.
@@ -718,7 +718,7 @@
 .desk-ltr.astra .action-reason {
   display: inline-block;
   min-width: 0;
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--danger);
 }
 @keyframes astra-action-spin {
@@ -739,7 +739,7 @@
   padding: 11px 12px;
   min-height: 42px;
   max-width: 100%;
-  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
+  font: 400 calc(16px * var(--ts))/1.6 var(--fb);
 }
 .desk-ltr.astra textarea {
   resize: vertical;
@@ -764,7 +764,7 @@
   padding: 11px 12px;
   min-height: 44px;
   max-width: 100%;
-  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
+  font: 400 calc(16px * var(--ts))/1.6 var(--fb);
 }
 .desk-ltr.astra input::placeholder,
 .desk-ltr.astra textarea::placeholder {
@@ -784,14 +784,14 @@
   margin-bottom: 16px;
 }
 .desk-ltr.astra :is(.field > span, .field > label, .field-label) {
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   text-transform: none;
   letter-spacing: 0;
   color: var(--fg);
   margin-bottom: 8px;
 }
 .desk-ltr.astra :is(.field small, .hint) {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   font-style: normal;
 }
@@ -809,7 +809,7 @@
   display: list-item;
   min-height: 28px;
   line-height: 28px;
-  font: 700 calc(14px * var(--ts))/28px var(--fd);
+  font: 700 calc(16px * var(--ts))/28px var(--fd);
   color: var(--adeep);
 }
 .desk-ltr.astra .file-form[open] summary {
@@ -829,7 +829,7 @@
   border-bottom: 2px solid transparent;
   background: none;
   color: var(--mut);
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   min-height: 44px;
@@ -862,7 +862,7 @@
   border-radius: 0;
   background: var(--accent-soft);
   color: var(--adeep);
-  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   letter-spacing: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -971,7 +971,7 @@
   margin-bottom: 5px;
 }
 .desk-ltr.astra .astra-metrics span {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
 }
 /*
@@ -1069,7 +1069,7 @@
   padding: 10px 0;
   border: 0;
   border-top: 1px solid var(--line);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   text-decoration: none;
   color: var(--adeep);
 }
@@ -1085,10 +1085,10 @@
   margin: 0;
 }
 .desk-ltr.astra .recent-story-heading a {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .recent-story-work > p {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   margin-bottom: 14px;
 }
@@ -1117,13 +1117,13 @@
   text-decoration: none;
 }
 .desk-ltr.astra .recent-story-status {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   color: var(--adeep);
   margin-bottom: 5px;
   display: block;
 }
 .desk-ltr.astra .recent-story-row p {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   margin: 7px 0 0;
 }
@@ -1132,7 +1132,7 @@
   margin: 6px 0;
 }
 .desk-ltr.astra .composer-heading p {
-  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
+  font: 400 calc(16px * var(--ts))/1.7 var(--fb);
   color: var(--mut);
 }
 .desk-ltr.astra .composer-sources {
@@ -1163,12 +1163,12 @@
 }
 .desk-ltr.astra .document-dropzone h3 {
   grid-column: 2;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   margin: 0 0 6px;
 }
 .desk-ltr.astra .document-dropzone p {
   grid-column: 2;
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
   color: var(--mut);
   margin: 0;
 }
@@ -1193,14 +1193,14 @@
   align-items: center;
 }
 .desk-ltr.astra .document-file-detail strong {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .document-file-detail span {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
 }
 .desk-ltr.astra .document-remove {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   min-height: 36px;
   color: var(--danger);
 }
@@ -1211,11 +1211,11 @@
 }
 .desk-ltr.astra :is(.composer-pasted, .composer-instructions) label {
   display: block;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   margin-bottom: 8px;
 }
 .desk-ltr.astra :is(.composer-pasted, .composer-instructions) > p {
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
   color: var(--mut);
   margin-bottom: 9px;
 }
@@ -1234,7 +1234,7 @@
   background: none;
 }
 .desk-ltr.astra .composer-options summary {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg);
 }
 .desk-ltr.astra .composer-footer {
@@ -1248,7 +1248,7 @@
   background: none;
 }
 .desk-ltr.astra .composer-submit p {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   margin-top: 7px;
 }
@@ -1380,12 +1380,12 @@
   padding: 0;
 }
 .desk-ltr.astra .ltable {
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
   width: 100%;
   background: var(--surface);
 }
 .desk-ltr.astra .ltable th {
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0.7px;
   text-transform: uppercase;
   color: var(--mut);
@@ -1398,7 +1398,7 @@
   border-bottom: 1px solid var(--line);
 }
 .desk-ltr.astra .src-t {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .scan-bar {
   background: var(--surface);
@@ -1427,7 +1427,7 @@
   gap: 20px;
 }
 .desk-ltr.astra .crumb {
-  font: 500 calc(14px * var(--ts)) var(--fd);
+  font: 500 calc(16px * var(--ts)) var(--fd);
   margin-bottom: 18px;
 }
 /*
@@ -1707,7 +1707,7 @@
 }
 .desk-ltr.astra .astra-evidence-ran {
   margin: 2px 0 6px;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.4;
   color: var(--mut);
 }
@@ -1759,7 +1759,7 @@
 .desk-ltr.astra .astra-evidence-note {
   grid-column: 2;
   margin: 0;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.4;
   color: var(--mut);
 }
@@ -1813,7 +1813,7 @@
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   color: var(--fg);
   cursor: pointer;
@@ -1850,7 +1850,7 @@
   position: relative;
 }
 .desk-ltr.astra .astra-save-state {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   margin-right: auto;
 }
@@ -1963,7 +1963,7 @@
   margin: 0;
   padding: 9px 12px;
   border-bottom: 1px solid var(--line);
-  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .evidence-check-compare pre,
@@ -1974,7 +1974,7 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 400 calc(15px * var(--ts))/1.65 var(--fb);
+  font: 400 calc(16px * var(--ts))/1.65 var(--fb);
   color: var(--fg);
   background: var(--bg2);
 }
@@ -2072,7 +2072,7 @@
   position: absolute;
   top: 13px;
   right: 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   letter-spacing: 0.7px;
   text-transform: uppercase;
@@ -2119,7 +2119,7 @@
 .desk-ltr.astra .head-edit label {
   display: block;
   margin-bottom: 8px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.5;
   color: var(--mut);
 }
@@ -2186,7 +2186,7 @@
 .desk-ltr.astra .astra-ops-card-sub {
   margin: 4px 0 0;
   font-family: var(--fd);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 500;
   line-height: 1.5;
   color: var(--mut);
@@ -2261,7 +2261,7 @@
 }
 .desk-ltr.astra[data-desk-page="stats"] table {
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra[data-desk-page="stats"] .font-display.text-3xl {
   font-family: var(--fd);
@@ -2323,8 +2323,8 @@
   scrollbar-gutter: stable;
 }
 .desk-ltr.astra .astra-dialog-foot { flex: none; padding: 16px 26px; }
-.desk-ltr.astra .astra-dialog :is(button, input, select, textarea, .astra-search-result) { min-height: 44px; font-size: max(14px, calc(14px * var(--ts))); }
-.desk-ltr.astra .astra-dialog small { font-size: max(14px, calc(14px * var(--ts))); }
+.desk-ltr.astra .astra-dialog :is(button, input, select, textarea, .astra-search-result) { min-height: 44px; font-size: max(16px, calc(16px * var(--ts))); }
+.desk-ltr.astra .astra-dialog small { font-size: max(16px, calc(16px * var(--ts))); }
 .desk-ltr.astra .astra-dialog .field {
   display: grid;
   gap: 8px;
@@ -2338,7 +2338,7 @@
   text-decoration: none;
   border-radius: 0;
   color: var(--fg);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-search-result:hover {
   background: var(--hover);
@@ -2346,7 +2346,7 @@
 .desk-ltr.astra .astra-search-result small {
   display: block;
   color: var(--mut);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   margin-top: 4px;
 }
 .desk-ltr.astra .astra-preview {
@@ -2589,7 +2589,7 @@
   align-items: center;
 }
 .desk-ltr.astra .sec-sub {
-  font: 500 calc(14px * var(--ts))/1.65 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.65 var(--fd);
   color: var(--mut);
   font-style: normal;
 }
@@ -2602,10 +2602,10 @@
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.np-kind, .np-meta, .np-n, .worth-sub) {
   color: var(--mut);
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.worth-t, .deskfile .worth-t) {
-  font: 500 15px/1.5 var(--fd);
+  font: 500 16px/1.5 var(--fd);
   color: inherit;
 }
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.deskfile, .worth-item) {
@@ -2655,7 +2655,7 @@
 .desk-ltr.astra[data-desk-page="opinion"] main > section .tracking-\[0\.14em\] {
   letter-spacing: 0;
   text-transform: none;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
 }
 .desk-ltr.astra[data-desk-page="dark"] :is(.tipbox.top, .nightpanel, .deskfile, .of-grid) {
@@ -2809,7 +2809,7 @@
   display: block;
 }
 .desk-ltr.astra .f > span {
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2822,7 +2822,7 @@
    the `display: block` an inline label does not have by default. */
 .desk-ltr.astra .f > label {
   display: block;
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2852,7 +2852,7 @@
 }
 .desk-ltr.astra .f-head > label {
   display: block;
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2860,7 +2860,7 @@
 .desk-ltr.astra .f-aside {
   margin-left: auto;
   text-align: right;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--mut);
 }
 /* The drawn right edge survives the narrow screens: the aside drops to its own
@@ -2880,12 +2880,12 @@
   margin: 6px 0;
 }
 .desk-ltr.astra .story-composer-heading > p {
-  font: 500 calc(14px * var(--ts))/1.7 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.7 var(--fd);
   color: var(--mut);
   margin-top: 8px;
 }
 .desk-ltr.astra .story-composer-heading .composer-kicker {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   letter-spacing: 1.5px;
   color: var(--adeep);
 }
@@ -2965,7 +2965,7 @@
   font: 700 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .dd-pile-note {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .dd-pile-count {
@@ -2984,7 +2984,7 @@
   padding: 0 14px;
   border: 2px solid currentcolor;
   color: inherit;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-decoration: none;
 }
 .desk-ltr.astra .dd-more {
@@ -2994,13 +2994,13 @@
   display: flex;
   align-items: center;
   min-height: 44px;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 /* The rail's own explaining line -- 14px, never smaller: it is the sentence
    that tells the editor what the panel does and does not do yet. */
 .desk-ltr.astra .rail-note {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.5;
   color: var(--fg2);
   margin: 0 0 6px;
@@ -3020,7 +3020,7 @@
   border-top: 1px solid var(--line);
 }
 .desk-ltr.astra .wire-source-name {
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3028,7 +3028,7 @@
 }
 .desk-ltr.astra .wire-source-note {
   grid-column: 1 / -1;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.45;
   color: var(--fg2);
   margin: 0;
@@ -3062,7 +3062,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   padding-top: 8px;
   margin: 0;
@@ -3087,7 +3087,7 @@
   display: flex;
   align-items: center;
   min-height: 44px;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 
@@ -3101,23 +3101,23 @@
 }
 .desk-ltr.astra .story-name-check li {
   margin: 14px 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .story-name-check strong {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .model-picker {
   min-width: 0;
   max-width: 100%;
 }
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-label {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-transform: none;
   letter-spacing: 0;
 }
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-help {
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
 }
 .desk-ltr.astra .astra-inspector .model-picker {
   display: flex;
@@ -3174,7 +3174,7 @@
   both exist at once.
 */
 .desk-ltr.astra .ov-head .kick {
-  font: 700 calc(15px * var(--ts))/1.3 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.3 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--fg2);
@@ -3275,7 +3275,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
 }
 /* The "this is working" pulse. trPulse lives in src/styles.css and the
@@ -3321,7 +3321,7 @@
    under it, and the rail is the one place the temptation to go smaller is
    strongest. */
 .desk-ltr.astra .astra-running-job .job-card-title {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-running-job .job-card-actions .btn {
   width: 100%;
@@ -3352,7 +3352,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--fg);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   text-decoration: none;
 }
@@ -3369,7 +3369,7 @@
   background: transparent;
   color: var(--fg);
   font-family: inherit;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   text-align: center;
   cursor: pointer;
@@ -3390,7 +3390,7 @@
   background: transparent;
   color: var(--fg2);
   font-family: inherit;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 400;
   text-align: left;
   cursor: pointer;
@@ -3452,7 +3452,7 @@
   margin-left: auto;
   min-height: 44px;
   gap: 6px;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   flex-shrink: 0;
 }
@@ -3469,13 +3469,13 @@
   margin: 0;
 }
 .desk-ltr.astra .astra-keys dt {
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
   white-space: nowrap;
 }
 .desk-ltr.astra .astra-keys dd {
   margin: 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 
@@ -3583,7 +3583,7 @@
   background: none;
   border: 0;
   border-bottom: 1px solid var(--line);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
   cursor: pointer;
 }
@@ -3663,11 +3663,11 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  font-size: max(14px, calc(14px * var(--ts)));
+  font-size: max(16px, calc(16px * var(--ts)));
 }
 .desk-ltr.astra :is(.more-menu, .row-more-panel) :is(button, select, input:not([type="checkbox"]):not([type="radio"])) {
   min-height: 44px;
-  font-size: max(14px, calc(14px * var(--ts)));
+  font-size: max(16px, calc(16px * var(--ts)));
 }
 
 /* Top-layer menus escape list clipping and the sidebar's stacking context. */
@@ -3703,7 +3703,7 @@
 .desk-ltr.astra .job-slot-meta {
   display: block;
   margin-top: 4px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   overflow-wrap: anywhere;
 }
@@ -3788,7 +3788,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line);
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .today-step.now .today-step-n {
   background: var(--a);
@@ -3796,7 +3796,7 @@
   color: #111;
 }
 .desk-ltr.astra .today-step-name {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--fg2);
@@ -3806,7 +3806,7 @@
   line-height: 1;
 }
 .desk-ltr.astra .today-step-unit {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 /*
@@ -3872,7 +3872,7 @@
   margin: 0;
 }
 .desk-ltr.astra .today-edition-sub {
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   margin: 0;
 }
@@ -3895,7 +3895,7 @@
   min-width: 0;
 }
 .desk-ltr.astra .today-edition-sec {
-  font: 800 calc(14px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--fg2);
@@ -3948,7 +3948,7 @@
   border-top-color: var(--a);
 }
 .desk-ltr.astra .today-card-stage {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   /* UI1b-5: the stage is a state in words, and the designer ruled the states
      sentence case -- "Ready to edit" was arriving as READY TO EDIT. This is
      the same one-CSS-rule case the chips had; the words in the markup were
@@ -3987,7 +3987,7 @@
   margin: 0;
 }
 .desk-ltr.astra .today-leads-title span {
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 /*
@@ -4049,7 +4049,7 @@
   border-left: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 .desk-ltr.astra .today-seg:hover {
@@ -4071,7 +4071,7 @@
   padding: 10px 0;
   margin: 0;
   border-bottom: 1px solid var(--line);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra :is(.today-legend, .queue-legend) .today-legend-label {
@@ -4079,7 +4079,7 @@
   color: var(--fg);
 }
 .desk-ltr.astra :is(.today-legend, .queue-legend) kbd {
-  font: 800 calc(14px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
 }
 .desk-ltr.astra .today-lead {
@@ -4127,7 +4127,7 @@
 .desk-ltr.astra .today-lead-evidence {
   display: inline-flex;
   align-items: center;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
 }
 /* The row's own gap is the drawing's meter-to-count space, so the margin the
@@ -4156,7 +4156,7 @@
 /* A lead already acted on offers only the way back: the state word, then
    Undo -- the drawing's doneLabel beside the one press. */
 .desk-ltr.astra .today-lead-done {
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
 }
 /* The last thing on the panel: every lead, in the Queue. */
@@ -4169,7 +4169,7 @@
   padding: 0 16px;
   border: 2px solid var(--fg);
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-decoration: none;
 }
 .desk-ltr.astra .today-lead-why {
@@ -4239,7 +4239,7 @@
 /* The key badge inside a press reads as the key, not as a letter in the
    label: quieter than the label, same size, so nothing drops under 14px. */
 .desk-ltr.astra .btn kbd {
-  font: 800 calc(14px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: inherit;
   opacity: 0.75;
 }
@@ -4290,7 +4290,7 @@
 }
 .desk-ltr.astra .drafts-overline {
   display: block;
-  font: 800 calc(14px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg2);
@@ -4309,7 +4309,7 @@
   overflow-wrap: anywhere;
 }
 .desk-ltr.astra .drafts-meta {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   margin: 0;
   overflow-wrap: anywhere;
@@ -4332,7 +4332,7 @@
 .desk-ltr.astra .queue-scan-model .model-picker-label,
 .desk-ltr.astra .queue-scan-model .model-picker-help {
   color: var(--fg);
-  font-size: max(14px, calc(14px * var(--ts)));
+  font-size: max(16px, calc(16px * var(--ts)));
   opacity: 1;
   overflow-wrap: anywhere;
 }
@@ -4359,7 +4359,7 @@
   gap: 4px;
 }
 .desk-ltr.astra .bulk-start-note {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--fg);
 }
 /* TMA-3: the Start caption sits on the gold bulk strip (--a), and the rule above
@@ -4373,7 +4373,7 @@
 .desk-ltr.astra .queue-tab-note {
   display: block;
   margin-top: 6px;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--fg);
 }
 .desk-ltr.astra .queue-filters {
@@ -4406,7 +4406,7 @@
   border: 1px solid var(--fg);
   background: none;
   color: var(--fg2);
-  font: 400 calc(15px * var(--ts)) var(--fb);
+  font: 400 calc(16px * var(--ts)) var(--fb);
   flex: 1 1 200px;
   min-width: 100px;
   box-sizing: border-box;
@@ -4420,7 +4420,7 @@
   border: 1px solid var(--fg);
   background: none;
   white-space: nowrap;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -4573,7 +4573,7 @@
   border-right: 1px solid var(--fg2);
   background: none;
   color: var(--fg);
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 .desk-ltr.astra .seg-strip > button:hover {
@@ -4612,7 +4612,7 @@
   display: none;
 }
 .desk-ltr.astra .queue-bulk-what {
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
 }
 /* THU-6 / TJA-2: THU-6 gave the strip's picker labels the astra body colour
    (`--fg`) and that is dark ink in light mode but near-white in dark mode
@@ -4757,7 +4757,7 @@
   height: 24px;
   background: transparent;
   color: var(--bg);
-  font: 800 calc(14px * var(--ts))/1 var(--fd);
+  font: 800 calc(16px * var(--ts))/1 var(--fd);
   /* The glyph sits on the mark's centre, not on the box's baseline. */
   line-height: 1;
   pointer-events: none;
@@ -4780,7 +4780,7 @@
 }
 .desk-ltr.astra .queue-evidence,
 .desk-ltr.astra .queue-filed {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .queue-filed {
@@ -4905,7 +4905,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .queue-bulk-reason input {
   min-height: 44px;
@@ -4913,7 +4913,7 @@
   border: 2px solid var(--fg);
   background: var(--bg);
   color: var(--fg);
-  font: 500 calc(14px * var(--ts)) var(--fb);
+  font: 500 calc(16px * var(--ts)) var(--fb);
   min-width: 22rem;
 }
 .desk-ltr.astra .lead-list.roomy .lead-chips {
@@ -5005,7 +5005,7 @@
   align-items: center;
   padding: 0 24px 8px;
   border-bottom: 2px solid var(--fg);
-  font: 800 calc(14px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--fg2);
@@ -5015,7 +5015,7 @@
 }
 
 .desk-ltr.astra .queue-bulk-count {
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .queue-bulk-acts {
   display: flex;
@@ -5369,7 +5369,7 @@
 }
 .desk-ltr.astra .model-job-label {
   display: block;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
 }
 /* Preserve accessible names; nested Local picker labels remain visible. */
 .desk-ltr.astra .model-job-field > .model-picker > .model-picker-label {
@@ -5416,7 +5416,7 @@
   }
   .desk-ltr.astra .model-job-label {
     display: block;
-    font-size: calc(0.875rem * var(--ts));
+    font-size: calc(1rem * var(--ts));
     font-weight: 800;
     color: var(--fg2);
   }
@@ -5516,7 +5516,7 @@
   overflow-wrap: anywhere;
 }
 .desk-ltr.astra .job-card-model {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .job-card-elapsed {
@@ -5630,7 +5630,7 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 4px 12px;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
 }
 .desk-ltr.astra .job-card-now {
   font-weight: 700;
@@ -5646,7 +5646,7 @@
 /* The cause behind "the model server did not answer", opened on demand.
    Same size and ink as the card's main text: editors have old eyes. */
 .desk-ltr.astra .job-card-detail {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--ink);
 }
 .desk-ltr.astra .job-card-detail summary {
@@ -5661,7 +5661,7 @@
   border: 2px solid var(--job-warn);
 }
 .desk-ltr.astra .job-card-stall-note {
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 700;
   color: var(--job-warn);
 }
@@ -5688,7 +5688,7 @@
 }
 .desk-ltr.astra .st-error {
   margin: 0;
-  font: 700 calc(15px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--danger);
 }
 .desk-ltr.astra .st-head {
@@ -5702,7 +5702,7 @@
 }
 .desk-ltr.astra .st-kick {
   margin: 0 0 6px;
-  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-h1 {
@@ -5730,7 +5730,7 @@
   border-left: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 .desk-ltr.astra .st-range:hover {
@@ -5750,7 +5750,7 @@
   border: 2px solid var(--fg);
   background: transparent;
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 .desk-ltr.astra .st-export:disabled {
@@ -5810,7 +5810,7 @@
 }
 .desk-ltr.astra .st-hint {
   margin: 0 0 0 auto;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-livecount {
@@ -5819,7 +5819,7 @@
   flex-wrap: wrap;
   gap: 14px;
   margin: 0;
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-livecount strong {
@@ -5857,7 +5857,7 @@
 .desk-ltr.astra .st-livehead3 {
   padding-bottom: 8px;
   border-bottom: 2px solid var(--fg);
-  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -5865,7 +5865,7 @@
 .desk-ltr.astra .st-liverow {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
 }
 .desk-ltr.astra .st-livepage {
   overflow: hidden;
@@ -5882,7 +5882,7 @@
 }
 .desk-ltr.astra .st-note {
   margin: 0;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 /* The heatmap's one-line caption. The drawing puts it under the grid rather
@@ -5890,12 +5890,12 @@
    -- it is the line an editor is meant to leave with. */
 .desk-ltr.astra .st-takeaway {
   margin: 12px 0 6px;
-  font: 600 calc(15px * var(--ts))/1.5 var(--fd);
+  font: 600 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg);
 }
 .desk-ltr.astra .st-empty {
   margin: 0;
-  font: 500 calc(15px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-h2 {
@@ -5916,12 +5916,12 @@
 }
 .desk-ltr.astra .st-aside {
   margin: 0;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-panel-body {
   margin: 0;
-  font: 500 calc(15px * var(--ts))/1.55 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.55 var(--fd);
   color: var(--fg);
 }
 .desk-ltr.astra .st-big {
@@ -5931,7 +5931,7 @@
   font-variant-numeric: tabular-nums;
 }
 .desk-ltr.astra .st-big span {
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-num {
@@ -5959,7 +5959,7 @@
 }
 .desk-ltr.astra .st-kpi-l {
   margin: 0;
-  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.3 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-kpi-v {
@@ -5970,7 +5970,7 @@
 }
 .desk-ltr.astra .st-kpi-d {
   margin: 0;
-  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.3 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-kpi-d.up {
@@ -5981,7 +5981,7 @@
 }
 .desk-ltr.astra .st-kpi-note {
   margin: 0;
-  font: 500 calc(14px * var(--ts))/1.35 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.35 var(--fd);
   color: var(--fg2);
 }
 
@@ -6016,7 +6016,7 @@
   display: flex;
   justify-content: space-between;
   margin-top: 8px;
-  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 
@@ -6034,7 +6034,7 @@
 .desk-ltr.astra .st-story-head {
   padding-bottom: 8px;
   border-bottom: 2px solid var(--fg);
-  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -6042,7 +6042,7 @@
 .desk-ltr.astra .st-story {
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
 }
 @media (max-width: 699px) {
   .desk-ltr.astra .st-story-head,
@@ -6063,7 +6063,7 @@
   }
   .desk-ltr.astra :is(.st-story, .st-liverow) > [data-label]::before {
     content: attr(data-label) ":";
-    font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+    font: 700 calc(16px * var(--ts))/1.4 var(--fd);
     color: var(--fg2);
     margin-right: auto;
   }
@@ -6081,7 +6081,7 @@
 }
 .desk-ltr.astra .st-story-sec {
   margin: 0 0 4px;
-  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.3 var(--fd);
   color: var(--fg2);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -6119,12 +6119,12 @@
 .desk-ltr.astra .st-depth-pct {
   align-self: center;
   margin-left: 8px;
-  font: 800 calc(15px * var(--ts))/1.3 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.3 var(--fd);
   font-variant-numeric: tabular-nums;
 }
 .desk-ltr.astra .st-footnote {
   margin: 10px 0 0;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 
@@ -6139,7 +6139,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 54px;
   gap: 10px;
   align-items: center;
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
 }
 .desk-ltr.astra .st-arrive {
   grid-template-columns: 150px minmax(0, 1fr) 36px;
@@ -6164,7 +6164,7 @@
   align-items: center;
   padding-left: 8px;
   overflow: hidden;
-  font: 800 calc(14px * var(--ts))/1 var(--fd);
+  font: 800 calc(16px * var(--ts))/1 var(--fd);
 }
 /* The drawing's last row: the hour-by-day grid wide on the left, the trust
    signals beside it, the gap the same as the three panels above. */
@@ -6181,7 +6181,7 @@
   margin-top: 12px;
 }
 .desk-ltr.astra .st-heat-day {
-  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-heat-cell {
@@ -6194,9 +6194,9 @@
   justify-content: space-between;
   padding-left: 42px;
   margin-top: 8px;
-  /* 14px, not the drawing's smaller axis type: the desk's floor is 14px at
+  /* 16px, not the drawing's smaller axis type: the desk's floor is 16px at
      Normal text size and this is a rule an editor has to be able to read. */
-  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-trust {
@@ -6206,7 +6206,7 @@
   gap: 10px;
   padding: 8px 0;
   border-top: 1px solid var(--line);
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
 }
 .desk-ltr.astra .st-bottom {
   display: grid;
@@ -6220,7 +6220,7 @@
   border: 2px solid var(--fg);
   background: transparent;
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 /* UI1b-4: "Read report" is a real press, so it wears the Quiet edge. `--line`
@@ -6231,7 +6231,7 @@
      floor; the 44px blanket at the foot of this file raises it. */
   border: 1px solid var(--fg2);
   padding: 0 calc(12px * var(--ts));
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .st-btn:disabled {
   opacity: 0.55;
@@ -6245,7 +6245,7 @@
   gap: 10px;
   padding: 8px 0;
   border-top: 1px solid var(--line);
-  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
 }
 .desk-ltr.astra .st-report-reader {
   margin-top: 12px;
@@ -6329,7 +6329,7 @@
   align-items: center;
   min-height: 44px;
   padding: 0 14px;
-  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg);
   background: transparent;
   border: 0;
@@ -6400,7 +6400,7 @@
 
 .desk-ltr.astra .fu-method,
 .desk-ltr.astra .fu-meta {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .fu-q {
@@ -6424,7 +6424,7 @@
    own outcome. The left rule is the card's own accent colour at low weight so
    it reads as part of the card rather than as an error. */
 .desk-ltr.astra .fu-watch-notice {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   padding-left: 8px;
   border-left: 2px solid var(--line);
@@ -6466,11 +6466,11 @@
 }
 .desk-ltr.astra .fu-finding-summary {
   font-family: var(--fb);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.5;
 }
 .desk-ltr.astra .fu-finding-meta {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   word-break: break-word;
 }
@@ -6544,7 +6544,7 @@
   margin: 0;
 }
 .desk-ltr.astra .astra-label {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -6552,7 +6552,7 @@
   margin: 0;
 }
 .desk-ltr.astra .astra-note {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg2);
   margin: 0;
 }
@@ -6577,7 +6577,7 @@
   align-items: center;
   gap: 12px;
   padding-top: 16px;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .astra-list-more {
@@ -6590,7 +6590,7 @@
   background: transparent;
   color: var(--fg);
   font-family: inherit;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   cursor: pointer;
 }
@@ -6656,7 +6656,7 @@
 }
 .desk-ltr.astra .astra-panel-h.lg { font-size: calc(1.375rem * var(--ts)); }
 .desk-ltr.astra .astra-panel-sub {
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg2);
   margin: 0;
 }
@@ -6689,7 +6689,7 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 12px;
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
 }
 .desk-ltr.astra .astra-kv.ruled {
   padding: 8px 0;
@@ -6742,7 +6742,7 @@
   min-width: 0;
 }
 .desk-ltr.astra .astra-bound-k {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 800;
   color: var(--fg2);
 }
@@ -6797,7 +6797,7 @@
   text-transform: uppercase;
   letter-spacing: 1.1px;
   font-weight: 700;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg);
   line-height: 1.4;
 }
@@ -6908,7 +6908,7 @@
 /* The drawn name is 15/700 (README 332-334), not the 17px `.astra-row-t` gives
    the other desks -- and at 598px of column the two sizes are the difference
    between "City of Longmont" and "City of Lo…". */
-.desk-ltr.astra .astra-row.src .astra-row-t { font-size: calc(0.9375rem * var(--ts)); }
+.desk-ltr.astra .astra-row.src .astra-row-t { font-size: calc(1rem * var(--ts)); }
 /* Line heights are pinned so the row's height is the 44px button and nothing
    else: chip 20.8 + 3 + note 18.2 = 42, name 18.75 + 3 + 18.2 = 40, both under
    the button, so the box is 69px whether a row is failed, changed or paused. */
@@ -6922,7 +6922,7 @@
   .desk-ltr.astra .astra-row.src .astra-row-acts .btn { padding: 10px 10px; }
   .desk-ltr.astra .astra-row.src .astra-row-acts > .row-more > summary {
     padding: 10px 6px;
-    font-size: calc(0.875rem * var(--ts));
+    font-size: calc(1rem * var(--ts));
   }
 }
 @media (max-width: 1099px) {
@@ -6952,7 +6952,7 @@
 */
 .desk-ltr.astra .astra-kill { padding: 0 0 12px 2px; }
 .desk-ltr.astra .astra-kill .astra-msg {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 600;
   color: var(--fg2);
 }
@@ -6971,11 +6971,11 @@
   min-width: 0;
 }
 .desk-ltr.astra .astra-kill .astra-item-label {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 700;
 }
 .desk-ltr.astra .astra-kill .astra-item-note {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg2);
   line-height: 1.4;
 }
@@ -6993,7 +6993,7 @@
   background: color-mix(in srgb, var(--a) 12%, transparent);
 }
 .desk-ltr.astra .astra-row.pubhead > * {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -7021,7 +7021,7 @@
 }
 .desk-ltr.astra .astra-row-t.sm { font-weight: 800; font-size: calc(1rem * var(--ts)); }
 .desk-ltr.astra .astra-row-meta {
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg2);
 }
 /* Unit U24: what the press on one source row answered. A result, not a status:
@@ -7076,7 +7076,7 @@
   align-items: center;
   min-height: 44px;
   padding: 0 14px;
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 700;
   color: var(--fg);
   background: transparent;
@@ -7108,7 +7108,7 @@
   border: 1px solid var(--fg);
   background: var(--bg);
   color: var(--fg);
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
 }
 .desk-ltr.astra .astra-search::placeholder { color: var(--fg2); }
 .desk-ltr.astra .astra-search:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
@@ -7159,7 +7159,7 @@
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 700;
   text-align: left;
   white-space: normal;
@@ -7167,7 +7167,7 @@
 .desk-ltr.astra .row-more-panel > :last-child { border-bottom: 0; }
 .desk-ltr.astra .row-more-panel .row-more-h {
   padding: 10px 14px 2px;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -7224,7 +7224,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 14px 16px 6px;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -7288,13 +7288,13 @@
 .desk-ltr.astra .astra-set-aside-meta {
   flex: 0 0 auto;
   color: var(--fg2);
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   white-space: nowrap;
 }
 .desk-ltr.astra .astra-set-aside-row.on { background: var(--bg); box-shadow: inset 4px 0 0 var(--sel); }
 .desk-ltr.astra .astra-set-aside-row:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-file-t { font-weight: 700; font-size: calc(1rem * var(--ts)); line-height: 1.3; }
-.desk-ltr.astra .astra-file-m { font-size: calc(0.875rem * var(--ts)); color: var(--fg2); }
+.desk-ltr.astra .astra-file-m { font-size: calc(1rem * var(--ts)); color: var(--fg2); }
 .desk-ltr.astra .astra-file.on { background: var(--bg); box-shadow: inset 4px 0 0 var(--sel); }
 .desk-ltr.astra .astra-file:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-piles-foot { padding: 14px 16px; }
@@ -7371,7 +7371,7 @@
   cursor: pointer;
 }
 .desk-ltr.astra .astra-settings-panel .astra-depth-option:last-child { border-right: 0; }
-.desk-ltr.astra .astra-settings-panel .astra-depth-option span { font-size: calc(0.875rem * var(--ts)); line-height: 1.35; }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option span { font-size: calc(1rem * var(--ts)); line-height: 1.35; }
 .desk-ltr.astra .astra-settings-panel .astra-depth-option:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-settings-panel .astra-depth-option.on { color: var(--bg); background: var(--sel); }
 .desk-ltr.astra .astra-settings-panel .astra-depth-option.on span { color: inherit; }
@@ -7399,9 +7399,9 @@
   cursor: pointer;
 }
 .desk-ltr.astra .astra-settings-panel .astra-watch-open strong { max-width: 100%; overflow-wrap: anywhere; font-weight: 800; }
-.desk-ltr.astra .astra-settings-panel .astra-watch-open span { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .astra-settings-panel .astra-watch-open span { color: var(--fg2); font-size: calc(1rem * var(--ts)); }
 .desk-ltr.astra .astra-settings-panel .astra-watch-open:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-.desk-ltr.astra .astra-settings-panel .astra-watch-stopped { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .astra-settings-panel .astra-watch-stopped { color: var(--fg2); font-size: calc(1rem * var(--ts)); }
 .desk-ltr.astra .astra-settings-panel .astra-watch-model { max-width: 620px; min-width: 0; }
 .desk-ltr.astra .astra-settings-panel .page-watch .work-form { margin-top: 2px; }
 .desk-ltr.astra .astra-settings-panel .page-watch .openfile { padding: 14px 0 0; border-top: 1px solid var(--line); }
@@ -7441,7 +7441,7 @@
   gap: 10px;
   padding: 1px 0;
   border-bottom: 1px solid var(--line);
-  font-size: calc(0.9375rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
 }
 .desk-ltr.astra .astra-log-t {
   color: var(--fg2);
@@ -7458,21 +7458,21 @@
   padding: 4px 0;
   border-bottom: 1px solid var(--line);
 }
-.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-case-v { font-size: calc(1rem * var(--ts)); line-height: 1.4; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-deep-file .side-item { overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-pair .of-block { margin-top: 8px; padding-top: 4px; }
 .desk-ltr.astra .astra-case-compact > .side-item { margin-top: 0; }
 .desk-ltr.astra .astra-pair .of-trail { margin-top: 4px; }
 .desk-ltr.astra .astra-pair .astra-case-compact .of-trail > summary { line-height: 1.3; }
 .desk-ltr.astra .astra-records > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
-.desk-ltr.astra .astra-flow { margin: 8px 0 0; color: var(--fg2); font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .astra-flow { margin: 8px 0 0; color: var(--fg2); font-size: calc(1rem * var(--ts)); line-height: 1.4; }
 .desk-ltr.astra .astra-flow-current { color: var(--fg); font-weight: 700; }
 .desk-ltr.astra .dark-round-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; }
-.desk-ltr.astra .dark-round-head { display: flex; justify-content: space-between; gap: 12px; font-size: calc(0.9375rem * var(--ts)); }
-.desk-ltr.astra .dark-round-steps { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .dark-round-head { display: flex; justify-content: space-between; gap: 12px; font-size: calc(1rem * var(--ts)); }
+.desk-ltr.astra .dark-round-steps { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; font-size: calc(1rem * var(--ts)); }
 .desk-ltr.astra .dark-round-steps .done { color: var(--fg2); }
 .desk-ltr.astra .dark-round-steps .current { color: var(--fg); font-weight: 700; border-bottom: 2px solid var(--sel); }
-.desk-ltr.astra .dark-round-message { margin: 8px 0; font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .dark-round-message { margin: 8px 0; font-size: calc(1rem * var(--ts)); line-height: 1.4; }
 .desk-ltr.astra .dark-round-stall { border-left: 4px solid var(--warn); background: var(--panel2); padding: 12px; }
 .desk-ltr.astra .dark-round-stall > p { margin: 0 0 10px; font-weight: 700; }
 
@@ -7579,7 +7579,7 @@
   margin: 0;
   padding: 6px 0;
   border-top: 1px solid var(--line);
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   white-space: normal;
 }
 .desk-ltr.astra .astra-piles .row-more-panel > p:first-child { border-top: 0; }
@@ -7865,7 +7865,7 @@
   padding: 0 12px;
   border: 1px solid var(--fg2);
   color: var(--fg);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-decoration: none;
 }
 .desk-ltr.astra .astra-wb-back:hover {
@@ -7885,7 +7885,7 @@
   align-items: center;
   min-height: 44px;
   padding: 0 14px;
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: var(--fg2);
   white-space: nowrap;
 }
@@ -7907,7 +7907,7 @@
   gap: 8px 12px;
   padding: 12px 32px;
   border-bottom: 1px solid var(--line);
-  font: 700 calc(15px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
 }
 
@@ -7920,7 +7920,7 @@
   padding: 12px 14px;
   border: 1px solid var(--line);
   background: var(--surface);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-wb-writer .astra-wb-writer-label {
   font-family: var(--fd);
@@ -8008,7 +8008,7 @@
   margin-left: 8px;
   padding: 0 5px;
   border: 1px solid currentColor;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
 }
 /*
   The save line at the head of the Story field (unit CW). `.astra-wb-saved` is
@@ -8056,7 +8056,7 @@
   align-items: center;
   min-height: 44px;
   color: var(--adeep);
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .astra-story-details > summary:hover,
 .desk-ltr.astra .astra-story-details > summary:focus-visible {
@@ -8115,7 +8115,7 @@
   padding: 2px 8px;
   border: 1px solid var(--ok);
   color: var(--ok);
-  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 800 calc(16px * var(--ts))/1.4 var(--fd);
   white-space: nowrap;
 }
 .desk-ltr.astra .astra-gate.is-todo {
@@ -8268,7 +8268,7 @@
 .desk-ltr .transcript-path,
 .desk-ltr .transcript-hash {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   overflow-wrap: anywhere;
 }
 .desk-ltr .transcript-path {
@@ -8287,7 +8287,7 @@
   gap: 10px;
   padding: 3px 0;
   border-top: 1px solid var(--line);
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   color: var(--fg);
 }
 .desk-ltr .transcript-line:first-child {
@@ -8321,7 +8321,7 @@
   color: var(--fg);
   padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: calc(0.875rem * var(--ts));
+  font-size: calc(1rem * var(--ts));
   line-height: 1.5;
 }
 
@@ -8414,7 +8414,7 @@
 .desk-ltr.astra :is(.story-redraft-overflow, .story-check-overflow) { display: none; }
 .desk-ltr.astra :is(.story-redraft-overflow, .story-check-overflow) > .btn { width: 100%; }
 @media (max-width: 699px) {
-  .desk-ltr.astra .r2-published-label { display: inline; font-size: 14px; font-weight: 700; }
+  .desk-ltr.astra .r2-published-label { display: inline; font-size: 16px; font-weight: 700; }
   .desk-ltr.astra .astra-row.pub > .astra-cell { gap: 14px; }
 }
 @media (max-width: 980px) {
@@ -8998,7 +8998,7 @@
   border-bottom-width: 3px;
 }
 .desk-ltr.astra[data-desk-page="dark"] .astra-head .kick {
-  font: 700 calc(15px * var(--ts))/1.3 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.3 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--fg2);
@@ -9075,7 +9075,7 @@
   .desk-ltr.astra[data-desk-page="dark"] :is(button, select, summary) {
     min-height: 44px;
     padding-block: 10px;
-    font-size: max(14px, calc(14px * var(--ts)));
+    font-size: max(16px, calc(16px * var(--ts)));
   }
 
   .desk-ltr.astra[data-desk-page="dark"]
@@ -9094,6 +9094,6 @@
     align-items: center;
     min-height: 44px;
     padding-block: 10px;
-    font-size: max(14px, calc(14px * var(--ts)));
+    font-size: max(16px, calc(16px * var(--ts)));
   }
 }
