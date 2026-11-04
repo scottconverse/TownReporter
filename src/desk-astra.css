@@ -1380,12 +1380,12 @@
   padding: 0;
 }
 .desk-ltr.astra .ltable {
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
   width: 100%;
   background: var(--surface);
 }
 .desk-ltr.astra .ltable th {
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0.7px;
   text-transform: uppercase;
   color: var(--mut);
@@ -1398,7 +1398,7 @@
   border-bottom: 1px solid var(--line);
 }
 .desk-ltr.astra .src-t {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .scan-bar {
   background: var(--surface);
@@ -1427,7 +1427,7 @@
   gap: 20px;
 }
 .desk-ltr.astra .crumb {
-  font: 500 calc(14px * var(--ts)) var(--fd);
+  font: 500 calc(16px * var(--ts)) var(--fd);
   margin-bottom: 18px;
 }
 /*
@@ -1707,7 +1707,7 @@
 }
 .desk-ltr.astra .astra-evidence-ran {
   margin: 2px 0 6px;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.4;
   color: var(--mut);
 }
@@ -1759,7 +1759,7 @@
 .desk-ltr.astra .astra-evidence-note {
   grid-column: 2;
   margin: 0;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.4;
   color: var(--mut);
 }
@@ -1813,7 +1813,7 @@
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   color: var(--fg);
   cursor: pointer;
@@ -1850,7 +1850,7 @@
   position: relative;
 }
 .desk-ltr.astra .astra-save-state {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--mut);
   margin-right: auto;
 }
@@ -1963,7 +1963,7 @@
   margin: 0;
   padding: 9px 12px;
   border-bottom: 1px solid var(--line);
-  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .evidence-check-compare pre,
@@ -1974,7 +1974,7 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 400 calc(15px * var(--ts))/1.65 var(--fb);
+  font: 400 calc(16px * var(--ts))/1.65 var(--fb);
   color: var(--fg);
   background: var(--bg2);
 }
@@ -2072,7 +2072,7 @@
   position: absolute;
   top: 13px;
   right: 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   letter-spacing: 0.7px;
   text-transform: uppercase;
@@ -2119,7 +2119,7 @@
 .desk-ltr.astra .head-edit label {
   display: block;
   margin-bottom: 8px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.5;
   color: var(--mut);
 }
@@ -2186,7 +2186,7 @@
 .desk-ltr.astra .astra-ops-card-sub {
   margin: 4px 0 0;
   font-family: var(--fd);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 500;
   line-height: 1.5;
   color: var(--mut);
@@ -2261,7 +2261,7 @@
 }
 .desk-ltr.astra[data-desk-page="stats"] table {
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra[data-desk-page="stats"] .font-display.text-3xl {
   font-family: var(--fd);
@@ -2323,8 +2323,8 @@
   scrollbar-gutter: stable;
 }
 .desk-ltr.astra .astra-dialog-foot { flex: none; padding: 16px 26px; }
-.desk-ltr.astra .astra-dialog :is(button, input, select, textarea, .astra-search-result) { min-height: 44px; font-size: max(14px, calc(14px * var(--ts))); }
-.desk-ltr.astra .astra-dialog small { font-size: max(14px, calc(14px * var(--ts))); }
+.desk-ltr.astra .astra-dialog :is(button, input, select, textarea, .astra-search-result) { min-height: 44px; font-size: max(16px, calc(16px * var(--ts))); }
+.desk-ltr.astra .astra-dialog small { font-size: max(16px, calc(16px * var(--ts))); }
 .desk-ltr.astra .astra-dialog .field {
   display: grid;
   gap: 8px;
@@ -2338,7 +2338,7 @@
   text-decoration: none;
   border-radius: 0;
   color: var(--fg);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-search-result:hover {
   background: var(--hover);
@@ -2346,7 +2346,7 @@
 .desk-ltr.astra .astra-search-result small {
   display: block;
   color: var(--mut);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   margin-top: 4px;
 }
 .desk-ltr.astra .astra-preview {
@@ -2589,7 +2589,7 @@
   align-items: center;
 }
 .desk-ltr.astra .sec-sub {
-  font: 500 calc(14px * var(--ts))/1.65 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.65 var(--fd);
   color: var(--mut);
   font-style: normal;
 }
@@ -2602,10 +2602,10 @@
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.np-kind, .np-meta, .np-n, .worth-sub) {
   color: var(--mut);
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.worth-t, .deskfile .worth-t) {
-  font: 500 15px/1.5 var(--fd);
+  font: 500 16px/1.5 var(--fd);
   color: inherit;
 }
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.deskfile, .worth-item) {
@@ -2655,7 +2655,7 @@
 .desk-ltr.astra[data-desk-page="opinion"] main > section .tracking-\[0\.14em\] {
   letter-spacing: 0;
   text-transform: none;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
 }
 .desk-ltr.astra[data-desk-page="dark"] :is(.tipbox.top, .nightpanel, .deskfile, .of-grid) {
@@ -2809,7 +2809,7 @@
   display: block;
 }
 .desk-ltr.astra .f > span {
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2822,7 +2822,7 @@
    the `display: block` an inline label does not have by default. */
 .desk-ltr.astra .f > label {
   display: block;
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2852,7 +2852,7 @@
 }
 .desk-ltr.astra .f-head > label {
   display: block;
-  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -2860,7 +2860,7 @@
 .desk-ltr.astra .f-aside {
   margin-left: auto;
   text-align: right;
-  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--mut);
 }
 /* The drawn right edge survives the narrow screens: the aside drops to its own
@@ -2880,12 +2880,12 @@
   margin: 6px 0;
 }
 .desk-ltr.astra .story-composer-heading > p {
-  font: 500 calc(14px * var(--ts))/1.7 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.7 var(--fd);
   color: var(--mut);
   margin-top: 8px;
 }
 .desk-ltr.astra .story-composer-heading .composer-kicker {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   letter-spacing: 1.5px;
   color: var(--adeep);
 }
@@ -2965,7 +2965,7 @@
   font: 700 calc(16px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .dd-pile-note {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 .desk-ltr.astra .dd-pile-count {
@@ -2984,7 +2984,7 @@
   padding: 0 14px;
   border: 2px solid currentcolor;
   color: inherit;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-decoration: none;
 }
 .desk-ltr.astra .dd-more {
@@ -2994,13 +2994,13 @@
   display: flex;
   align-items: center;
   min-height: 44px;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 /* The rail's own explaining line -- 14px, never smaller: it is the sentence
    that tells the editor what the panel does and does not do yet. */
 .desk-ltr.astra .rail-note {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.5;
   color: var(--fg2);
   margin: 0 0 6px;
@@ -3020,7 +3020,7 @@
   border-top: 1px solid var(--line);
 }
 .desk-ltr.astra .wire-source-name {
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3028,7 +3028,7 @@
 }
 .desk-ltr.astra .wire-source-note {
   grid-column: 1 / -1;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.45;
   color: var(--fg2);
   margin: 0;
@@ -3062,7 +3062,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
   padding-top: 8px;
   margin: 0;
@@ -3087,7 +3087,7 @@
   display: flex;
   align-items: center;
   min-height: 44px;
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   cursor: pointer;
 }
 
@@ -3101,23 +3101,23 @@
 }
 .desk-ltr.astra .story-name-check li {
   margin: 14px 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .story-name-check strong {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .model-picker {
   min-width: 0;
   max-width: 100%;
 }
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-label {
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   text-transform: none;
   letter-spacing: 0;
 }
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-help {
-  font: 500 calc(14px * var(--ts))/1.6 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.6 var(--fd);
 }
 .desk-ltr.astra .astra-inspector .model-picker {
   display: flex;
@@ -3174,7 +3174,7 @@
   both exist at once.
 */
 .desk-ltr.astra .ov-head .kick {
-  font: 700 calc(15px * var(--ts))/1.3 var(--fd);
+  font: 700 calc(16px * var(--ts))/1.3 var(--fd);
   letter-spacing: 0;
   text-transform: none;
   color: var(--fg2);
@@ -3275,7 +3275,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
 }
 /* The "this is working" pulse. trPulse lives in src/styles.css and the
@@ -3321,7 +3321,7 @@
    under it, and the rail is the one place the temptation to go smaller is
    strongest. */
 .desk-ltr.astra .astra-running-job .job-card-title {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-running-job .job-card-actions .btn {
   width: 100%;
@@ -3352,7 +3352,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--fg);
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   text-decoration: none;
 }
@@ -3369,7 +3369,7 @@
   background: transparent;
   color: var(--fg);
   font-family: inherit;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   text-align: center;
   cursor: pointer;
@@ -3390,7 +3390,7 @@
   background: transparent;
   color: var(--fg2);
   font-family: inherit;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 400;
   text-align: left;
   cursor: pointer;
@@ -3452,7 +3452,7 @@
   margin-left: auto;
   min-height: 44px;
   gap: 6px;
-  font-size: calc(15px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   flex-shrink: 0;
 }
@@ -3469,13 +3469,13 @@
   margin: 0;
 }
 .desk-ltr.astra .astra-keys dt {
-  font: 800 calc(15px * var(--ts)) var(--fd);
+  font: 800 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
   white-space: nowrap;
 }
 .desk-ltr.astra .astra-keys dd {
   margin: 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   color: var(--fg2);
 }
 
@@ -3583,7 +3583,7 @@
   background: none;
   border: 0;
   border-bottom: 1px solid var(--line);
-  font: 700 calc(15px * var(--ts)) var(--fd);
+  font: 700 calc(16px * var(--ts)) var(--fd);
   color: var(--fg);
   cursor: pointer;
 }
