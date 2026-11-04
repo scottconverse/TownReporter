@@ -202,6 +202,50 @@ describe("starting our own copy", () => {
   });
 });
 
+describe("one check at a time", () => {
+  /** A fetch that takes a moment, so two calls really overlap. */
+  function slowFetch(answering: Set<string>) {
+    return async (url: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: answering.has(new URL(url).origin) };
+    };
+  }
+
+  it("two checks at once start exactly one copy and both get the same answer", async () => {
+    const { spawn, calls } = spawnRecording();
+    const deps = {
+      fetch: slowFetch(new Set([OWN_ROOT])),
+      spawn,
+      exists: () => true,
+      now: atSixFiftyTwo,
+      sleep: async () => undefined,
+      waitMs: 2_000,
+    };
+    const [first, second] = await Promise.all([ensureOllama(deps), ensureOllama(deps)]);
+    assert.equal(calls.length, 1, "the second caller waited for the first check");
+    assert.equal(first.outcome, "started");
+    assert.deepEqual(second, first);
+  });
+
+  it("'Check again' (force) joins a check already running", async () => {
+    const { spawn, calls } = spawnRecording();
+    const deps = {
+      fetch: slowFetch(new Set([OWN_ROOT])),
+      spawn,
+      exists: () => true,
+      now: atSixFiftyTwo,
+      sleep: async () => undefined,
+      waitMs: 2_000,
+    };
+    const running = ensureOllama(deps);
+    const forced = await ensureOllama({ ...deps, force: true });
+    const first = await running;
+    assert.equal(calls.length, 1);
+    assert.equal(forced.outcome, "started");
+    assert.deepEqual(forced, first);
+  });
+});
+
 describe("shutdown and discovery", () => {
   it("never stops an Ollama this process did not start", () => {
     mkdirSync(join(root, "logs"), { recursive: true });

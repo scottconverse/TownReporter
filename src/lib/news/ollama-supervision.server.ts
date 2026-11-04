@@ -110,6 +110,12 @@ type OwnState = { pid: number; port: number; startedAt: number };
 let ownChild: { pid: number; startedAt: number } | null = null;
 let shutdownHooked = false;
 let cache: { at: number; result: OllamaEnsureResult } | null = null;
+/**
+ * The check that is running right now, if any. Job lanes run several jobs at
+ * once; without this, two callers that both miss the cache would both start a
+ * copy on 11435, and the losing one would overwrite the PID we need to stop.
+ */
+let inFlight: Promise<OllamaEnsureResult> | null = null;
 
 function envValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = env[key];
@@ -388,11 +394,29 @@ export async function ensureOllama(options: OllamaDeps = {}): Promise<OllamaEnsu
   if (env[TEST_ENV] === "1") {
     return result({ outcome: "skipped" });
   }
+  // One check at a time: a second caller (including "Check again") waits for
+  // the check already running rather than probing and spawning its own copy.
+  if (inFlight) return inFlight;
   const now = options.now ?? Date.now;
   if (!options.force && cache && now() - cache.at < OLLAMA_CHECK_CACHE_MS) {
     return cache.result;
   }
 
+  const run = runOllamaCheck(options, env, now);
+  inFlight = run;
+  void run
+    .catch(() => undefined)
+    .finally(() => {
+      if (inFlight === run) inFlight = null;
+    });
+  return run;
+}
+
+async function runOllamaCheck(
+  options: OllamaDeps,
+  env: NodeJS.ProcessEnv,
+  now: () => number,
+): Promise<OllamaEnsureResult> {
   const fetchImpl = options.fetch ?? (fetch as unknown as FetchLike);
   const dataRoot = options.dataRoot ?? ollamaDataRoot(env);
   const statePath = ownStatePath(dataRoot);
@@ -497,5 +521,6 @@ export async function ensureOllama(options: OllamaDeps = {}): Promise<OllamaEnsu
 export function resetOllamaSupervisionForTests(): void {
   cache = null;
   ownChild = null;
+  inFlight = null;
   shutdownHooked = false;
 }
