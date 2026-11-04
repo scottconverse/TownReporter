@@ -1543,6 +1543,39 @@
 .desk-ltr.astra .story-side :is(.side-why, .side-note, .side-url) {
   font-size: calc(16px * var(--ts));
 }
+/*
+  G35-UI-1 (rule 30, walk note Nov 4 2026): the story side panel's prose was
+  at 16px after G27-IN-1 and G33-UI-4, but the elements below it were still at
+  the 14px floor -- measured at 1440 on /desk/story/<id>:
+
+    LABEL.mt-3 / LABEL.min-w-56 / LABEL.min-w-44   styles.css `.desk-ltr .text-sm`
+                                                   (0,2,0), inherited by the
+                                                   select and its options
+    LI.note-one                                    styles.css `.desk-ltr .note-one`
+                                                   (0,2,0)
+    SUMMARY                                        desk-astra `.astra-evidence-more
+                                                   > summary` (0,3,1) and the
+                                                   styles.css `.side-label` /
+                                                   `.gate-claim-queries` rules
+                                                   (0,2,0); `.gate-claim-queries
+                                                   code` was the 15px one
+    B                                              inherited from the 14px parents
+    PRE.meeting-notes-full                         styles.css `.desk-ltr
+                                                   .meeting-notes-full` (0,2,0)
+    OPTION in selects                              inherited from `.text-sm`
+
+  Two classes on the aside (`.story-side.astra-inspector`) plus the two on the
+  desk root make this 0,4,0, so it beats every rule named above, including the
+  one-element-higher `.astra-evidence-more > summary` (0,3,1) -- the Nov 4 dialog
+  fix's lesson was that a later, heavier rule wins silently, so the weight is
+  raised here rather than relying on source order. Chips (`.chip`,
+  `.astra-blocker-chip`, `.astra-evidence-chip`, `.style-tick-t`) are spans and
+  are deliberately not in this list; 14px chips are the agreed design.
+*/
+.desk-ltr.astra .story-side.astra-inspector
+  :is(label, summary, option, select, b, .note-one, .meeting-notes-full) {
+  font-size: calc(16px * var(--ts));
+}
 .desk-ltr.astra .astra-inspector .btn {
   padding: 8px 10px;
   font-size: calc(16px * var(--ts));

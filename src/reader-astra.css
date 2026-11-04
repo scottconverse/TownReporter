@@ -5570,6 +5570,12 @@
   font-weight: 700;
   line-height: 1.3;
   letter-spacing: 0;
+  /* G35-R-1: a long unbroken source title (a file name, a URL-shaped string)
+     ran past the card's right edge, because a grid item's default min-width is
+     its content's intrinsic width. `anywhere` lets the line break inside a
+     word and lowers that intrinsic width, so the title wraps inside the card
+     and the card stays in its track. Nothing else about the card moves. */
+  overflow-wrap: anywhere;
 }
 .reader .sourcecard-new .sourcehost {
   color: var(--ink2);

@@ -171,6 +171,43 @@ describe("readable source-card titles", () => {
     }
   });
 
+  /*
+    G35-R-1 (walk note, Nov 4 2026). A CDN file name is not a page title. A
+    captured document can land as `id_Name.pdf`, where `%20` makes the name one
+    unbroken token and the id and the name are joined by `_` (or `-`), so the
+    space-splitting hex check above never saw an id at all. The card printed
+    the whole file name. Decode the escapes, drop the id, use the name -- and
+    the file extension, which says what the file is rather than what it is
+    about, is dropped too. Every word is the stored title's own.
+  */
+  it("reads a CMS file name as the document's name, without the id or extension", () => {
+    const cdn =
+      "https://cdn.prod.website-files.com/6a96045e7fe1e956bc0f4d58/6a96045e7fe1e956bc0f4d58_Rise%20Against%20ED%20Job%20Description%202026.pdf";
+    const stored = "6a96045e7fe1e956bc0f4d58_Rise%20Against%20ED%20Job%20Description%202026.pdf";
+    assert.equal(readableSourceTitle(stored, cdn), "Rise Against ED Job Description 2026");
+    assert.equal(
+      readableSourceTitle("6a96045e7fe1e956bc0f4d58_Rise Against ED Job Description 2026.pdf", cdn),
+      "Rise Against ED Job Description 2026",
+      "an unescaped name reads the same way",
+    );
+    assert.equal(
+      readableSourceTitle("6a96045e7fe1e956bc0f4d58-Rise%20Against%20ED%20Job%20Description.pdf", cdn),
+      "Rise Against ED Job Description",
+      "a hyphen joins the id just as a file field's underscore does",
+    );
+  });
+
+  it("falls back to the host when the id prefix leaves junk behind", () => {
+    const cdn = "https://cdn.prod.website-files.com/docs";
+    assert.equal(readableSourceTitle("6a96045e7fe1e956bc0f4d58_Portal", cdn), "cdn.prod.website-files.com");
+    assert.equal(readableSourceTitle("6a96045e7fe1e956bc0f4d58_1.pdf", cdn), "cdn.prod.website-files.com");
+  });
+
+  it("leaves a broken escape as it was instead of throwing", () => {
+    assert.equal(readableSourceTitle("100% off sale", url), "100% off sale");
+    assert.equal(readableSourceTitle("Budget 100%25 growth", url), "Budget 100% growth");
+  });
+
   it("keeps real titles that share the shape's words", () => {
     for (const title of [
       "Joint Service Term Sheet Redacted",
