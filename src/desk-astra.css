@@ -8384,9 +8384,12 @@
      3. Square, ruled, flat: no radius, no shadow (§11 item 8, §12).
 
    Every size is `calc(Npx * var(--ts))` so Text: Large reaches the toast too,
-   and every one of them is at or above the 14px floor
-   (scripts/desk-min-font.test.mjs) -- the walk measures computed type across
-   the whole body, so a 12px toast would fail it exactly like a 12px label.
+   and every one of them is at or above the desk's 16px text floor
+   (scripts/desk-min-font.test.mjs holds the mechanical 14px minimum; rule 30
+   sets 16px for body text and buttons, and G27-KILL-5 raised the card, the
+   sentence, the chips and both presses to it). The walk measures computed type
+   across the whole body, so a 12px toast would fail it exactly like a 12px
+   label.
 --------------------------------------------------------------------------- */
 
 /*
@@ -8444,7 +8447,10 @@
   background: var(--a);
   color: #111;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  /* G27-KILL-5: 16px, the desk's body and button floor (rule 30). The card
+     wraps its actions under the sentence (D3 below), so the larger sentence
+     grows the card downward instead of clipping. */
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   line-height: 1.35;
 }
@@ -8453,7 +8459,7 @@
 .desk-ltr .desk-toaster [data-title] {
   flex: 1;
   min-width: 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   color: inherit;
   overflow-wrap: anywhere;
@@ -8515,7 +8521,7 @@
 }
 .desk-ltr .desk-toaster .desk-chips-ask,
 .desk-ltr .desk-toaster .desk-chips-kept {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   color: inherit;
 }
@@ -8540,7 +8546,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
@@ -8581,7 +8587,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   cursor: pointer;
   /* The two things an editor presses take pointer events back; see above. */
@@ -8618,7 +8624,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
