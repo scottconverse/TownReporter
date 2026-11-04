@@ -5215,6 +5215,12 @@
 }
 .reader .articlehead .bylinenames {
   display: flex;
+  /* Stray dot (walk note, Oct 31 2026): the base `.bylinenames` above is a
+     COLUMN, and this override never reset the direction, so the desktop byline
+     stacked the name and the date on two lines and the separator stayed behind
+     on the name's line with nothing after it. A row is what the drawing shows:
+     name, dot, date, read time. */
+  flex-direction: row;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 6px;
@@ -5224,6 +5230,15 @@
   line-height: 1.4;
 }
 .reader .articlehead .bylinenames .bylineident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+/* The dot and the date are one unit. `nowrap` keeps the separator from being
+   the last thing on a line when the pair wraps at phone width; the name's own
+   group above carries the same promise for the name (G31-B-3). */
+.reader .articlehead .bylinenames .bylinemeta {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;

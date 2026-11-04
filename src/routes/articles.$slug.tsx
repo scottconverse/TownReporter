@@ -395,15 +395,26 @@ function ArticlePage() {
           <h1>{article.headline}</h1>
           {dekText ? <p className="dek">{dekText}</p> : null}
           <div className="bylinebar">
+            {/*
+              Stray dot (walk note, Oct 31 2026). The separator used to live in
+              `bylineident`, the name's own `white-space: nowrap` group, so the
+              desktop column stack (`.bylinenames` was `flex-direction: column`
+              in its base rule) pushed the date to the next line and left
+              "TownReporter ·" hanging with nothing after it. The dot moves into
+              the date group, which is drawn as one nowrap unit: it can only
+              appear immediately before the date, never at the end of the name's
+              line. The name group keeps the G31-B-3 behaviour at phone width --
+              a name that wraps mid-word is worse than a wrapped line.
+            */}
             <span className="bylinenames">
               <span className="bylineident">
                 <strong>
                   {paper.name}
                   {isOpinion ? " · Opinion" : ""}
                 </strong>
-                <span aria-hidden="true">·</span>
               </span>
-              <span>
+              <span className="bylinemeta">
+                <span aria-hidden="true">·</span>
                 {formatDate(article.published_at)} · {readMinutes(article.body)} min read
               </span>
             </span>
