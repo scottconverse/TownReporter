@@ -1307,6 +1307,17 @@ function DarkPage() {
                     "This round did not finish."
                   : null
               }
+              /*
+                The date the failed round finished. The sentence is a PAST
+                run's, so the workspace draws it as "Past run, <date>: …" (rule
+                25: history is labelled, not hidden). Null on a file whose
+                latest job is not failed.
+              */
+              darkJobFinishedAt={
+                detail.data?.darkJob?.status === "failed"
+                  ? detail.data.darkJob.finishedAt
+                  : null
+              }
               phase={liveJobStage || cardPhase || liveLine}
               notice={noticeFor === openId ? notice : null}
               noticeOk={noticeOk}
@@ -1635,6 +1646,7 @@ function InvestigationWorkspace({
   keepPendingLabel,
   stalled,
   darkJobError,
+  darkJobFinishedAt,
   phase,
   notice,
   noticeOk,
@@ -1673,6 +1685,11 @@ function InvestigationWorkspace({
   keepPendingLabel: string | null;
   stalled: boolean;
   darkJobError: string | null;
+  /**
+   * When the failed round finished, so the saved error can be stamped as
+   * history ("Past run, Sep 2 2026: …"). Null when there is no failed job.
+   */
+  darkJobFinishedAt?: string | null;
   phase: string;
   notice: string | null;
   noticeOk: boolean;
@@ -1701,7 +1718,7 @@ function InvestigationWorkspace({
   modelEffort: ModelEffort | null;
   onModelEffort: (effort: ModelEffort | null) => void;
 }) {
-  const { formatListDateTime, formatListDate, formatClockTime } = usePaperDateFormatters();
+  const { formatListDateTime, formatListDate, formatClockTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [frN, setFrN] = useState(6);
   const [followUpOpen, setFollowUpOpen] = useState(false);
@@ -2104,7 +2121,24 @@ function InvestigationWorkspace({
             {stalledRunCopy("dark")}
           </p>
         ) : null}
-        {darkJobError && !failedDarkJob ? <p className="note err" role="alert">{darkJobError}</p> : null}
+        {/*
+          Old error shown as current (walk note, Oct 31 2026; rule 25). This
+          line draws the SAVED error of the latest dark job, which can be from a
+          round that finished days ago -- the code that produced the Sep 2 2026
+          "Refusing to pass 11961 characters" message was fixed that day, and
+          the old sentence was still reading as a live failure. The error is
+          kept (rule 25: never hide it), but stamped with the round's own date
+          and the words "Past run", so it reads as history rather than as
+          something that just happened.
+        */}
+        {darkJobError && !failedDarkJob ? (
+          <p className="note err" role="alert">
+            {darkJobFinishedAt
+              ? `Past run, ${formatShortDate(darkJobFinishedAt)}: `
+              : "Past run: "}
+            {darkJobError}
+          </p>
+        ) : null}
         {digging && !digJob ? <Busy label={phase || "Searching records…"} /> : null}
         {/*
           Unit DD1, item 3. The acknowledgement belongs here, above the notice

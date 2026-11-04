@@ -195,7 +195,21 @@
   top: 0;
   background: var(--bg2);
   border-right: 1px solid var(--line);
-  padding: 20px 14px 18px;
+  /*
+    Covered footer (walk note, Oct 31 2026). The Test server puts a fixed
+    orange "TEST SERVER" bar across the bottom of the viewport on every desk
+    page, and it sat over the rail's last line ("Press ? for keyboard
+    shortcuts"). That banner is not drawn by this repository -- it is added by
+    the Test server's own wrapper -- so the sidebar cannot detect it and this
+    sheet cannot move it. What the sidebar CAN do is leave room at the end of
+    its own scroll: `--desk-bottom-banner` is the clearance (a little over the
+    banner's own height), added after the footer's 18px. On the live paper the
+    extra padding is below the last control and changes nothing visible; when
+    the rail does scroll, the footer can now scroll clear of the bar instead of
+    ending underneath it. The banner itself is left in place, as asked.
+  */
+  --desk-bottom-banner: 48px;
+  padding: 20px 14px calc(18px + var(--desk-bottom-banner));
   display: flex;
   flex-direction: column;
   z-index: 40;
@@ -590,14 +604,20 @@
 }
 /* The same hairline problem on the gated disabled press: a dashed `--line`
    edge on a button that says "not yet" is indistinguishable from no button at
-   all. `--fg2` dashed keeps the "this exists but is not usable yet" reading
-   and clears the floor. */
+   all. `--fg2` keeps the "this exists but is not usable yet" reading and
+   clears the floor.
+
+   Dashed chip boxes (walk note, Oct 31 2026): "Add suggested focus (0)" and
+   the disabled "Batch started" press were the dashed outlines the reporter saw
+   as unfinished. The edge is solid now; the muted `--fg2` ink and the disabled
+   cursor still say it cannot be pressed, and `disabled` itself says so to a
+   screen reader. */
 .desk-ltr.astra .btn.gated {
-  border: 2px dashed var(--fg2);
+  border: 2px solid var(--fg2);
   color: var(--fg2);
 }
 .desk-ltr.astra :is(.btn, .document-add-button):disabled:not([data-phase="done"]) {
-  border: 2px dashed var(--fg2);
+  border: 2px solid var(--fg2);
   background: transparent;
   color: var(--fg2);
   opacity: 1;
@@ -855,9 +875,18 @@
   The state colors themselves are set once, in `.desk-ltr .chip.*` in
   styles.css; this shell only has to stop overriding them with a filled teal
   pill. A chip here is now the same chip as on every other desk surface: a 1px
-  outline, dashed when the state is not settled, yellow fill only for `new`.
-  The score badge keeps its filled look on the neutral panel ground, so it reads
-  as a number on a card rather than as a second accent.
+  solid outline, yellow fill only for `new`. The score badge keeps its filled
+  look on the neutral panel ground, so it reads as a number on a card rather
+  than as a second accent.
+
+  Dashed chip boxes (walk note, Oct 31 2026): a status chip such as
+  "Writing · 0:34" or "Queued · 0:34" was drawn with a dashed edge, and the
+  reporter read that as an unfinished box. The words already carry the state
+  ("Writing", "Queued"), so the dash was decoration and not information; the
+  quiet tone still reads through its `--fg2` colour and its one-pixel weight.
+  The dashed shapes that DO mean something -- a failed check
+  (`.astra-evidence-chip.is-fail`, `.desk-toast-err`) -- stay dashed, because
+  there the shape says "this is a hole, not a pass" and colour alone would not.
 */
 .desk-ltr.astra .chip {
   display: inline-flex;
@@ -1455,7 +1484,10 @@
   border: 0;
   border-left: 1px solid var(--fg2);
   padding: 15px 0;
-  font-size: calc(14px * var(--ts));
+  /* G27-IN-1: a tab is a press, and rule 30 puts every desk button at 16px.
+     The strip is a flex row of equal cells (`flex: 1` below), so the longer
+     word grows the cell rather than clipping it. */
+  font-size: calc(16px * var(--ts));
   min-height: 46px;
   color: var(--mut);
 }
@@ -1471,12 +1503,21 @@
 .desk-ltr.astra .astra-inspector > section {
   padding: 20px;
 }
+/*
+  G27-IN-1 (rule 30, Oct 28 2026): the inspector's body copy and headings were
+  14px -- the old floor, and below the 16px body floor this brief sets. A
+  heading is one step over its body (18px) and the prose is 16px. Both still
+  carry `var(--ts)`, so Text: Large scales them with the rest of the desk.
+  Nothing here sets a fixed height: a heading or paragraph that grows takes
+  its section taller, and the panel is the scrolling column (`.story-side` has
+  `overflow: auto`), so no line is clipped at 390px or 1440px.
+*/
 .desk-ltr.astra .astra-inspector :is(h2, h3) {
-  font: 700 14px/1.5 var(--fd);
+  font: 700 calc(18px * var(--ts))/1.4 var(--fd);
   margin-bottom: 10px;
 }
 .desk-ltr.astra .astra-inspector p {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .astra-inspector .side-h {
@@ -1487,7 +1528,7 @@
 }
 .desk-ltr.astra .astra-inspector .btn {
   padding: 8px 10px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 /*
   Find evidence (DEF-1) sits in the inspector, whose text above is 14px. Its
@@ -1585,7 +1626,7 @@
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-blocker-clear {
   display: flex;
@@ -1688,7 +1729,7 @@
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
 }
 .desk-ltr.astra .astra-inspector .astra-evidence-compare {
@@ -1697,7 +1738,7 @@
   align-items: center;
   margin-top: 14px;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   border: 2px solid var(--fg);
 }
@@ -3636,7 +3677,7 @@
   color: var(--danger);
 }
 .desk-ltr.astra .chip.d-quiet {
-  border-style: dashed;
+  border-style: solid;
   border-color: var(--fg2);
   color: var(--fg2);
 }
@@ -4163,6 +4204,30 @@
 }
 .desk-ltr.astra .drafts-main {
   min-width: 0;
+}
+/*
+  Faint toast (walk note, Oct 31 2026). "Published. Open the story" is the
+  confirmation the Drafts page draws after a Publish. It used to be a bare <p>
+  that inherited the row's colour -- in the dark desk that read as dark maroon
+  on near black -- and it carried the page's 14px base. Both halves are ink
+  now (`--fg`, 16px), and the link is ink too rather than `--adeep`, so the
+  line and its way on are the same high-contrast pair in both themes. The
+  link's underline is what keeps it a link without relying on colour.
+
+  Contrast, against both grounds this row can sit on (`--bg` and `--surface`;
+  they are #fffdf7/#f6f2e7 in light and #1b1916/#27231f in night):
+    light  #111111 on #f6f2e7 = 16.9:1, on #fffdf7 = 18.6:1
+    night  #e8e6e1 on #27231f = 12.5:1, on #1b1916 = 14.1:1
+  All four clear WCAG AA's 4.5:1 for normal text.
+*/
+.desk-ltr.astra .published-line {
+  margin: 6px 0 0;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.5;
+  color: var(--fg);
+}
+.desk-ltr.astra .published-line .inline-link {
+  color: var(--fg);
 }
 .desk-ltr.astra .drafts-overline {
   display: block;
@@ -7998,11 +8063,14 @@
   border: 2px solid var(--warn);
   color: var(--warn);
 }
-/* Unit U9: a check that never ran. The dashed outline is the desk home's
-   "not run" chip (.chip.d-quiet), so the one chip on this bar that is not
-   about something the editor has to do still cannot be read as a pass. */
+/* Unit U9: a check that never ran. The outline is the desk home's "not run"
+   chip (.chip.d-quiet), so the one chip on this bar that is not about something
+   the editor has to do still cannot be read as a pass. It is solid, like that
+   chip now (dashed chip boxes, walk note Oct 31 2026) -- the word "not run" and
+   the `--fg2` ink carry the state, and the solid edge no longer reads as an
+   unfinished box. */
 .desk-ltr.astra .astra-gate.is-quiet {
-  border-style: dashed;
+  border-style: solid;
   border-color: var(--fg2);
   color: var(--fg2);
 }
@@ -8018,7 +8086,10 @@
   flex: 1;
   min-height: 48px;
   padding: 0 8px;
-  font-size: calc(15px * var(--ts));
+  /* G27-IN-1: 16px, the desk's button floor (rule 30). Three equal cells in a
+     panel only 340px wide at the 1200px step leave ~113px each; the longest
+     tab word is "Reporting", which still fits at 16px. */
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   text-align: center;
 }
@@ -8369,9 +8440,12 @@
      3. Square, ruled, flat: no radius, no shadow (§11 item 8, §12).
 
    Every size is `calc(Npx * var(--ts))` so Text: Large reaches the toast too,
-   and every one of them is at or above the 14px floor
-   (scripts/desk-min-font.test.mjs) -- the walk measures computed type across
-   the whole body, so a 12px toast would fail it exactly like a 12px label.
+   and every one of them is at or above the desk's 16px text floor
+   (scripts/desk-min-font.test.mjs holds the mechanical 14px minimum; rule 30
+   sets 16px for body text and buttons, and G27-KILL-5 raised the card, the
+   sentence, the chips and both presses to it). The walk measures computed type
+   across the whole body, so a 12px toast would fail it exactly like a 12px
+   label.
 --------------------------------------------------------------------------- */
 
 /*
@@ -8429,7 +8503,10 @@
   background: var(--a);
   color: #111;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  /* G27-KILL-5: 16px, the desk's body and button floor (rule 30). The card
+     wraps its actions under the sentence (D3 below), so the larger sentence
+     grows the card downward instead of clipping. */
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   line-height: 1.35;
 }
@@ -8438,7 +8515,7 @@
 .desk-ltr .desk-toaster [data-title] {
   flex: 1;
   min-width: 0;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   color: inherit;
   overflow-wrap: anywhere;
@@ -8500,7 +8577,7 @@
 }
 .desk-ltr .desk-toaster .desk-chips-ask,
 .desk-ltr .desk-toaster .desk-chips-kept {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 600;
   color: inherit;
 }
@@ -8525,7 +8602,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
@@ -8566,7 +8643,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   cursor: pointer;
   /* The two things an editor presses take pointer events back; see above. */
@@ -8603,7 +8680,7 @@
   background: transparent;
   color: inherit;
   font-family: var(--fd);
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 700;
   line-height: 1;
   cursor: pointer;

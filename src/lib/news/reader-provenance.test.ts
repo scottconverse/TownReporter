@@ -4,6 +4,7 @@ import {
   readableSourceTitle,
   readerProvenanceItems,
   readerSourceKey,
+  readerSourceUrlLabel,
 } from "./reader-provenance.ts";
 import type { ProvenanceItem } from "./findings.ts";
 
@@ -120,7 +121,9 @@ describe("the reader's source list", () => {
 
 describe("readable source-card titles", () => {
   const url = "https://www.longmontcolorado.gov/council/agendas/";
-  const fallback = "longmontcolorado.gov / council / agendas";
+  /* G31-W-2: the fallback is the host alone, not host + path. The full link
+     stays on the card itself, so the title reads like the name of a source. */
+  const fallback = "longmontcolorado.gov";
 
   it("keeps a captured page title when it is readable", () => {
     assert.equal(
@@ -129,7 +132,7 @@ describe("readable source-card titles", () => {
     );
   });
 
-  it("replaces the real bad titles with the website and page path", () => {
+  it("names the site by its host alone when the captured title is junk", () => {
     for (const title of [
       "SV 9pEFkEi66KN71gG",
       "Portal",
@@ -154,5 +157,20 @@ describe("readable source-card titles", () => {
     const items = readerProvenanceItems([], [url]);
     assert.equal(items.length, 1);
     assert.equal(items[0]!.title, fallback);
+  });
+
+  /*
+    G31-W-2, the fallback alone. This is the walk's own case: a portal page
+    whose captured title was junk printed `longmont.primegov.com / public /
+    portal` as the card's title. The title is the host; the path is not a name.
+    The card keeps its `url` untouched, so nothing is lost by dropping it here.
+  */
+  it("falls back to a host a reader can name, and keeps the full link on the card", () => {
+    const portal = "https://longmont.primegov.com/public/portal";
+    assert.equal(readableSourceTitle("Portal", portal), "longmont.primegov.com");
+    assert.equal(readerSourceUrlLabel(portal), "longmont.primegov.com");
+    const items = readerProvenanceItems([], [portal]);
+    assert.equal(items[0]!.title, "longmont.primegov.com");
+    assert.equal(items[0]!.url, portal, "the full address must stay on the card");
   });
 });
