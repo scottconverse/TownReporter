@@ -1158,6 +1158,13 @@
    scanner. It says so on the row, so "where did this come from?" is answered
    without opening the lead. */
 .desk-ltr .chip.imported {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
+/* G26-HP-1: a lead whose source is a home page, a section list or a feed
+   rather than the story page. The link stays; the chip says what it is. It
+   wraps like the topic-unchosen chip because the words are the point, and it
+   is a warning shape (dashed) with no colour of its own -- it never blocks,
+   so it must not read like an error. */
+.desk-ltr .chip.source-home {border-style:dashed;border-color:var(--fg2);color:var(--fg2);display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.desk-ltr .lead-flags .chip.source-home {margin:0}
 .desk-ltr .lead-flags .chip.imported {margin:0}
 .desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--fg2);color:var(--fg2);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--adeep)}
@@ -2327,8 +2334,20 @@
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
+/*
+  Narrow rail in the start-a-story dialog (walk note, Oct 31 2026).
+
+  The footer's left status line ("The AI reads everything, drafts, and files it
+  to Drafts…") sat in a `280px` flex basis beside the action buttons, so on a
+  wide dialog with two or three presses it was squeezed until it wrapped every
+  three or four words. A line of prose needs a measure, not a leftover: the
+  basis is now 30em, and when that plus the buttons does not fit the footer's
+  own `flex-wrap` moves the whole line above them. The 700px block below takes
+  it to the full width so a phone never sees the narrow version.
+*/
 .desk-ltr.astra-modal-layer .astra-modal-note {
-  flex: 1 1 280px;
+  flex: 1 1 30em;
+  min-width: min(100%, 20em);
   font-family: var(--fd);
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg2);
@@ -2471,6 +2490,22 @@
     max-height: calc(100dvh - 24px);
     padding: 16px;
     gap: 12px;
+  }
+  /*
+    Narrow rail in the start-a-story dialog (walk note, Oct 31 2026): below
+    700px the status line goes above the buttons at the full dialog width,
+    left-aligned with them, instead of being squeezed into a narrow column
+    beside them. Nothing shrinks and no word is dropped at 390px.
+  */
+  .desk-ltr.astra-modal-layer .astra-modal-foot {
+    align-items: stretch;
+  }
+  .desk-ltr.astra-modal-layer .astra-modal-note {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .desk-ltr.astra-modal-layer .astra-modal-actions {
+    justify-content: flex-start;
   }
 }
 /*

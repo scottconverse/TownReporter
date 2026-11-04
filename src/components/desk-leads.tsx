@@ -4,6 +4,13 @@ import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { formatAge, parseUrlList } from "@/lib/paper";
+/* A relative import, like `desk-warning.ts` above: the render harness in
+   scripts/lead-badge-render.test.mjs resolves `@/` only for the modules it
+   stubs, and a new `@/` import there is an unresolved specifier. */
+import {
+  HOME_OR_LIST_SOURCE_WARNING,
+  homeOrListSourceUrls,
+} from "../lib/news/lead-source-page.ts";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   editorTitle,
@@ -895,6 +902,16 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
   const savedLinkStale =
     lead.possible_duplicate_of != null &&
     duplicateLinkState(lead, lead.possible_duplicate, paper) === "stale";
+  /*
+    G26-HP-1 (rule 22): the scan filed leads whose only source was a front
+    page, a section list or a feed -- `timescall.com/local-news/`,
+    `bouldercounty.gov/`, `svvsd.org/feed/`. The link stays exactly where it
+    is; this only says what it is, so an editor opening the lead to check it
+    knows they will land on a list rather than the story. Computed from the
+    row's own stored URLs, so leads filed before this check existed are marked
+    too. Warn, never block: no status, no gate, nothing refused.
+  */
+  const listPageSources = homeOrListSourceUrls(parseUrlList(lead.source_urls));
   return (
     <div className="lead-flags">
       <Chip s={lead.status} />
@@ -910,6 +927,14 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           title="The scan filed this lead under a section the model did not choose. Open the story and confirm the section it belongs in."
         >
           Section not chosen — pick one
+        </span>
+      ) : null}
+      {listPageSources.length > 0 ? (
+        <span
+          className="chip source-home"
+          title={`${HOME_OR_LIST_SOURCE_WARNING}: ${listPageSources.join(" ")} — the link is kept on the lead; open the story's own page before you rely on it.`}
+        >
+          {HOME_OR_LIST_SOURCE_WARNING}
         </span>
       ) : null}
       {lead.origin === "import" ? (

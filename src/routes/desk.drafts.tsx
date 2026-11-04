@@ -410,7 +410,16 @@ function WaitingRoundups() {
               <h3 className="hl-head">{roundup.headline}</h3>
               {result && !result.ok && <p role="alert">{result.error}</p>}
               {result && result.ok && (
-                <p>
+                /*
+                  Faint toast (walk note, Oct 31 2026): this confirmation was an
+                  unstyled <p> -- it inherited whatever colour the row was
+                  given, so in the dark desk it read as dark maroon on near
+                  black, and at the desk's 14px base it was small too.
+                  `.published-line` gives it 16px and the high-contrast ink
+                  (`--fg`), and its link is underlined ink as well. The class is
+                  shared with the second copy of this line below.
+                */
+                <p className="published-line" role="status">
                   Published.{" "}
                   <Link to="/articles/$slug" params={{ slug: result.slug }} className="inline-link">
                     Open the story
@@ -435,7 +444,7 @@ function WaitingRoundups() {
       {published
         .filter((p) => !rows.some((r) => r.id === p.id))
         .map((p) => (
-          <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }} className="inline-link">Open the story</Link></p></div></div>
+          <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p className="published-line" role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }} className="inline-link">Open the story</Link></p></div></div>
         ))}
     </section>
   );

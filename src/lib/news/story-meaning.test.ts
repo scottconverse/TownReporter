@@ -76,6 +76,8 @@ async function story(
     status?: string;
     publishedAt?: string;
     leadId?: number | null;
+    /** G27-MS-1: the paper files an opinion piece under topic "opinion". */
+    topic?: string;
   } = {},
 ): Promise<number> {
   counter += 1;
@@ -83,7 +85,8 @@ async function story(
   const [row] = await sql<{ id: number }>`
     insert into articles (user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, status, published_at)
     values ('def1-user', ${options.room ?? ROOM}, ${options.leadId ?? null}, ${`def1-story-${counter}`},
-            ${headline}, ${options.dek ?? ""}, ${options.body ?? "Plain body text for the story."}, 'council',
+            ${headline}, ${options.dek ?? ""}, ${options.body ?? "Plain body text for the story."},
+            ${options.topic ?? "council"},
             ${options.status ?? "published"}, ${options.publishedAt ?? "2026-10-03T18:00:00Z"}::timestamptz)
     returning id
   `;
@@ -391,6 +394,30 @@ describe("C: the Find evidence panel", () => {
     assert.equal(result.pastStoriesStatus.ready, true);
     assert.deepEqual(result.pastStoriesStatus.stories, { covered: 1, total: 1 });
     assert.deepEqual(result.pastStoriesStatus.files, { covered: 1, total: 1 });
+  });
+
+  /*
+    G27-MS-1 (2026-11-03, desk only): the walk found opinion pieces at the top
+    of "Our past stories close in meaning" with nothing saying they were
+    columns. The two stories below are equally close to the query (the fake
+    embedder scores subject words, so both land on the same score and band),
+    and the opinion piece is listed after the reporting and marked.
+  */
+  it("marks an opinion piece and lists it after a news story that is just as close", async () => {
+    await story("Council raises water rates", { dek: "Utility bills rise." });
+    await story("Opinion: the water rate board got it wrong", { dek: "Utility bills rise.", topic: "opinion" });
+    await fillStoryMeaningOnce({ articles: 5, documents: 5 });
+
+    const result = await searchEvidence({ newsroomId: ROOM }, "water rates");
+    assert.ok(result.ok);
+    assert.deepEqual(
+      result.pastStories.map((r) => [r.headline, r.isOpinion]),
+      [
+        ["Council raises water rates", false],
+        ["Opinion: the water rate board got it wrong", true],
+      ],
+      "the reporting first, the column after it, and the column marked",
+    );
   });
 
   it("warns and does not block: if the model cannot load, the exact-words list still works", async () => {

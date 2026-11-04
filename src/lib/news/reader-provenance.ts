@@ -70,24 +70,21 @@ function isJunkSourceTitle(title: string, url: string): boolean {
 }
 
 /**
- * The website and path a reader can recognize when a page did not supply a
- * usable title. This is the last resort, not an editable desk label.
+ * The website a reader can recognize when a page did not supply a usable
+ * title. This is the last resort, not an editable desk label.
+ *
+ * G31-W-2 (walk note, Oct 31 2026): the fallback used to be the host plus every
+ * path segment -- `longmont.primegov.com / public / portal`. It worked, but it
+ * read as a web address rather than as the name of a source, and the card
+ * already prints the full link underneath. So the fallback is the bare host
+ * (`longmont.primegov.com`): a name a reader can recognize, with the address
+ * still one click away on the card. No site is given a name this code invents.
  */
 export function readerSourceUrlLabel(url: string): string {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
-    const segments = parsed.pathname
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => {
-        try {
-          return decodeURIComponent(segment);
-        } catch {
-          return segment;
-        }
-      });
-    return segments.length ? `${hostname} / ${segments.join(" / ")}` : hostname;
+    return hostname || url.trim() || "Source";
   } catch {
     return url.trim() || "Source";
   }

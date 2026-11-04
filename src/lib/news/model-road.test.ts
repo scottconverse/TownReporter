@@ -80,6 +80,17 @@ describe("G24-FO-3: a CLI timeout after a 429 is a usage-limit failover", () => 
     assert.equal(automaticFailoverReason(result.error), "quota");
   });
 
+  it("a CLI timeout that wrote nothing at all says no reply and may be out of quota", async () => {
+    const cli = await fakeCli(HANG);
+    const result = await withEnv({ CLAUDE_CLI_PATH: cli }, () =>
+      claudeCodeChat({ system: "S", user: "U", model: "claude-sonnet-4-5", timeoutMs: 1500 }));
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.error, /timed out after 2s, 0 bytes out/);
+    assert.match(result.error, /No reply in 2s; the model may be out of quota/);
+    assert.equal(automaticFailoverReason(result.error), "timeout-no-reply");
+  });
+
   it("with no quota sign a timeout still reads as a timeout", async () => {
     const cli = await fakeCli([
       `process.stdout.write(JSON.stringify({ type: "system", subtype: "init" }) + "\\n");`,

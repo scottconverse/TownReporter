@@ -269,7 +269,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_unit == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { getSql } from "../db.ts";
 import { bytesToVector, dotProduct, EVIDENCE_DIMS } from "./evidence-embed.server.ts";
 import { PARTS_VERSION, documentParts } from "./story-meaning-parts.ts";
+import { isOpinionTopic, orderPastStories } from "./past-story-order.ts";
 import { siteUrl } from "../paper.ts";
 
 /**
@@ -43,6 +44,13 @@ export type PastStoryRow = {
   url: string;
   /** The lead the story came from, so the desk can open it; null for imports. */
   leadId: number | null;
+  /**
+   * G27-MS-1: the published piece is an opinion piece (`articles.topic` is
+   * "opinion"). The desk prints "Opinion" beside it and keeps it after the
+   * reporting in the same score band -- see ./past-story-order.ts for why
+   * this is a label and an order, not a cut.
+   */
+  isOpinion: boolean;
   score: number;
 };
 
@@ -209,8 +217,9 @@ export async function searchPastStories(
     headline: string;
     published_at: string;
     lead_id: number | null;
+    topic: string | null;
   }>(
-    `select a.id, a.slug, a.headline, a.published_at::text as published_at, a.lead_id
+    `select a.id, a.slug, a.headline, a.published_at::text as published_at, a.lead_id, a.topic
      from articles a
      where a.id = any($1::int[]) and a.newsroom_id = $2 and a.status = 'published'`,
     [ids, newsroomId],
@@ -228,11 +237,18 @@ export async function searchPastStories(
       publishedAt: row.published_at,
       url: siteUrl(`/articles/${row.slug}`),
       leadId: row.lead_id,
+      isOpinion: isOpinionTopic(row.topic),
       score: candidate.score,
     });
-    if (out.length >= limit) break;
   }
-  return out;
+  /*
+    G27-MS-1: the list is ordered AFTER every candidate is read, then cut to
+    `limit`, so an opinion piece cannot take the slot a same-band news story
+    would have had. See ./past-story-order.ts: closer band first, then
+    reporting before opinion inside a band, then closer first. Nothing is
+    dropped that the ranker did not already drop.
+  */
+  return orderPastStories(out).slice(0, limit);
 }
 
 const EXCERPT_CHARS = 200;

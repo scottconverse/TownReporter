@@ -286,6 +286,27 @@ describe("failoverReasonPhrase", () => {
     assert.equal(failoverReasonPhrase("Claude Opus", "timeout"), "Claude Opus timed out");
   });
 
+  it("reads a silent timeout as out of quota, not a bare timeout (G24-FO-3)", () => {
+    const detail = "Claude Code request timed out after 45s, 0 bytes out — No reply in 45s; the model may be out of quota";
+    assert.equal(automaticFailoverReason(detail), "timeout-no-reply");
+    assert.equal(
+      failoverReasonPhrase("Claude Sonnet", "timeout-no-reply"),
+      "Claude Sonnet timed out with no reply; the model may be out of quota",
+    );
+  });
+
+  it("keeps failover moving on after a silent timeout", async () => {
+    const detail = "Claude Code request timed out after 45s, 0 bytes out — No reply in 45s; the model may be out of quota";
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "deepseek-flash",
+      error: detail,
+      probe: async (choice) => ({ ok: true, choice: choice as import("./model-choice.ts").EffectiveStoryModelChoice, label: "Next rung" }),
+    });
+    assert.equal(plan?.next, "qwen-local");
+    assert.equal(plan?.reason, "timeout-no-reply");
+  });
+
   it("reads as a lapsed sign-in for reason 'auth'", () => {
     assert.equal(failoverReasonPhrase("Claude Opus", "auth"), "Claude Opus sign-in lapsed");
   });
