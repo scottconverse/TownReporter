@@ -308,6 +308,8 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
     "desk-leads.tsx",
     {
       "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
+      // G26-HP-1: the real home/list-page check the row now renders.
+      "../lib/news/lead-source-page.ts": await sharedModuleUrl("src/lib/news/lead-source-page.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
@@ -974,6 +976,8 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
     "desk-lead-compare.tsx",
     {
       "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
+      // G26-HP-1: the real home/list-page check the row now renders.
+      "../lib/news/lead-source-page.ts": await sharedModuleUrl("src/lib/news/lead-source-page.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-toast": deskToastStub,

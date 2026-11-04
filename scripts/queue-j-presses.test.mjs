@@ -952,6 +952,8 @@ const rowUrl = await (async () => {
     `),
     "@/lib/news/desk-copy": copy,
     "../lib/news/desk-warning.ts": stub("export const deskWarning = () => null;"),
+    // G26-HP-1: the real home/list-page check the row now renders, not a stub.
+    "../lib/news/lead-source-page.ts": await moduleUrl("src/lib/news/lead-source-page.ts"),
     "@/components/desk-triage": triageUrl,
     "@/components/model-picker": stub("export const ModelPicker = () => null;"),
     "@/components/use-job-model-assignment": stub("export const useJobModelAssignment = () => ({ hasAssignment: false });"),

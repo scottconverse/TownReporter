@@ -206,6 +206,8 @@ const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
 });
 
 const deskLeadsUrl = await moduleUrl("src/components/desk-leads.tsx", {
+  // G26-HP-1: the real home/list-page check the row now renders, not a stub.
+  "../lib/news/lead-source-page.ts": await moduleUrl("src/lib/news/lead-source-page.ts"),
   "@/components/desk-triage": await moduleUrl("src/components/desk-triage.ts", {}),
   "@tanstack/react-router": reactRouterStub,
   "@/components/desk-chrome": deskChromeUrl,

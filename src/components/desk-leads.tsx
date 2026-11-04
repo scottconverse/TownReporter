@@ -4,10 +4,13 @@ import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { formatAge, parseUrlList } from "@/lib/paper";
+/* A relative import, like `desk-warning.ts` above: the render harness in
+   scripts/lead-badge-render.test.mjs resolves `@/` only for the modules it
+   stubs, and a new `@/` import there is an unresolved specifier. */
 import {
   HOME_OR_LIST_SOURCE_WARNING,
   homeOrListSourceUrls,
-} from "@/lib/news/lead-source-page";
+} from "../lib/news/lead-source-page.ts";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   editorTitle,
