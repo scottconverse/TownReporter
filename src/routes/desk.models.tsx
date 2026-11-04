@@ -47,6 +47,8 @@ import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { ProviderStatusCard } from "@/components/provider-status-card";
+import { OllamaWarning } from "@/components/ollama-warning";
+import { OllamaSignInCard } from "@/components/ollama-signin-card";
 import { ModelPicker } from "@/components/model-picker";
 import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
@@ -287,6 +289,9 @@ function ModelsPage() {
           {note}
         </p>
       ) : null}
+
+      {/* DEF-2: the same loud warning Today draws, on the page where models are set up. */}
+      <OllamaWarning />
 
       <div
         className="mt-4 flex self-start border border-rule"
@@ -1014,6 +1019,8 @@ function ConnectionsTab({
       >
         <SignInConnections onNote={onNote} />
         <GeminiPlanConnection />
+        {/* DEF-2: optional, skip-able, and on this machine -- `ollama signin`. */}
+        <OllamaSignInCard isOwner={isOwner} />
       </ConnectionGroup>
 
       <ConnectionGroup
@@ -1593,9 +1600,9 @@ function LocalServers({ onNote, isOwner }: { onNote: (text: string) => void; isO
             </>
           }
         >
-          <p className="text-sm text-ink-2">
-            Start LM Studio or Ollama and check again — TownReporter never starts a server and never
-            loads a model for you.
+          <p className="text-base text-ink-2">
+            If Ollama is installed but stopped, TownReporter starts its own copy on port 11435. It
+            never loads a model for you and never starts LM Studio.
           </p>
         </ConnectionCard>
       </>
