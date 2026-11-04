@@ -58,6 +58,8 @@ export const OLLAMA_START_WAIT_MS = 60_000;
 /** "Do not check more than once every 30 seconds (cache the answer)." */
 export const OLLAMA_CHECK_CACHE_MS = 30_000;
 const PROBE_TIMEOUT_MS = 1_500;
+/** A second, slower look at 11434 just before we would start a copy of our own. */
+const RECHECK_TIMEOUT_MS = 5_000;
 const START_POLL_MS = 1_000;
 
 const TEST_ENV = "TOWNREPORTER_TEST_ENV_VERIFIED";
@@ -196,15 +198,15 @@ export function resolveOllamaExecutable(
 }
 
 /** A plain GET that never throws: answers, timeout and refusal all mean "no". */
-async function answers(fetchImpl: FetchLike, root: string): Promise<boolean> {
+async function answers(fetchImpl: FetchLike, root: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
   try {
-    const res = await fetchImpl(`${root}/api/version`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const res = await fetchImpl(`${root}/api/version`, { signal: AbortSignal.timeout(timeoutMs) });
     if (res.ok) return true;
   } catch {
     /* try the second endpoint below */
   }
   try {
-    const res = await fetchImpl(`${root}/api/tags`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const res = await fetchImpl(`${root}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
     return res.ok;
   } catch {
     return false;
@@ -461,6 +463,22 @@ async function runOllamaCheck(
   // 3. Installed but stopped: start our own copy on 11435 and wait for it.
   if (!executable) {
     const answer = result({ outcome: "not-installed", installed: false });
+    recordSupervision(answer);
+    cache = { at: now(), result: answer };
+    return answer;
+  }
+
+  // A busy machine can make the 1.5s first probe time out even though the
+  // user's own Ollama is there. Look once more, patiently, before starting a
+  // second copy nobody needs.
+  if (await answers(fetchImpl, OLLAMA_DEFAULT_ROOT, RECHECK_TIMEOUT_MS)) {
+    const answer = result({
+      outcome: "running",
+      running: true,
+      root: OLLAMA_DEFAULT_ROOT,
+      endpoint: OLLAMA_DEFAULT_ENDPOINT,
+      installed,
+    });
     recordSupervision(answer);
     cache = { at: now(), result: answer };
     return answer;

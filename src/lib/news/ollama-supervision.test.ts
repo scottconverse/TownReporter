@@ -246,6 +246,31 @@ describe("one check at a time", () => {
   });
 });
 
+describe("a busy machine whose Ollama answers slowly", () => {
+  it("probes 11434 again before spawning and uses it when it answers", async () => {
+    let probes = 0;
+    const fetch = async (url: string) => {
+      if (new URL(url).origin !== DEFAULT_ROOT) return { ok: false };
+      probes += 1;
+      if (probes === 1) throw new DOMException("The operation was aborted.", "AbortError");
+      if (probes === 2) return { ok: false };
+      return { ok: true };
+    };
+    const { spawn, calls } = spawnRecording();
+    const answer = await ensureOllama({
+      fetch,
+      spawn,
+      exists: () => true,
+      now: atSixFiftyTwo,
+    });
+    assert.equal(probes, 3, "first quick probe (2 requests), then the patient recheck");
+    assert.equal(answer.outcome, "running");
+    assert.equal(answer.endpoint, OLLAMA_DEFAULT_ENDPOINT);
+    assert.equal(answer.supervised, false);
+    assert.equal(calls.length, 0, "no second copy is started");
+  });
+});
+
 describe("shutdown and discovery", () => {
   it("never stops an Ollama this process did not start", () => {
     mkdirSync(join(root, "logs"), { recursive: true });
