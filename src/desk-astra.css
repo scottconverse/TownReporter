@@ -4176,6 +4176,30 @@
 .desk-ltr.astra .drafts-main {
   min-width: 0;
 }
+/*
+  Faint toast (walk note, Oct 31 2026). "Published. Open the story" is the
+  confirmation the Drafts page draws after a Publish. It used to be a bare <p>
+  that inherited the row's colour -- in the dark desk that read as dark maroon
+  on near black -- and it carried the page's 14px base. Both halves are ink
+  now (`--fg`, 16px), and the link is ink too rather than `--adeep`, so the
+  line and its way on are the same high-contrast pair in both themes. The
+  link's underline is what keeps it a link without relying on colour.
+
+  Contrast, against both grounds this row can sit on (`--bg` and `--surface`;
+  they are #fffdf7/#f6f2e7 in light and #1b1916/#27231f in night):
+    light  #111111 on #f6f2e7 = 16.9:1, on #fffdf7 = 18.6:1
+    night  #e8e6e1 on #27231f = 12.5:1, on #1b1916 = 14.1:1
+  All four clear WCAG AA's 4.5:1 for normal text.
+*/
+.desk-ltr.astra .published-line {
+  margin: 6px 0 0;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.5;
+  color: var(--fg);
+}
+.desk-ltr.astra .published-line .inline-link {
+  color: var(--fg);
+}
 .desk-ltr.astra .drafts-overline {
   display: block;
   font: 800 calc(14px * var(--ts)) var(--fd);
