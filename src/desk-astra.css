@@ -6194,9 +6194,9 @@
   justify-content: space-between;
   padding-left: 42px;
   margin-top: 8px;
-  /* 14px, not the drawing's smaller axis type: the desk's floor is 14px at
+  /* 16px, not the drawing's smaller axis type: the desk's floor is 16px at
      Normal text size and this is a rule an editor has to be able to read. */
-  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  font: 500 calc(16px * var(--ts))/1.4 var(--fd);
   color: var(--fg2);
 }
 .desk-ltr.astra .st-trust {
