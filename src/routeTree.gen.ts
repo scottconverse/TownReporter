@@ -38,6 +38,7 @@ import { Route as DeskOpsRouteImport } from './routes/desk.ops'
 import { Route as DeskPublishedRouteImport } from './routes/desk.published'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
+import { Route as DeskScansRouteImport } from './routes/desk.scans'
 import { Route as DeskSetupRouteImport } from './routes/desk.setup'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as DeskStatsRouteImport } from './routes/desk.stats'
@@ -196,6 +197,11 @@ const DeskScanRoute = DeskScanRouteImport.update({
   path: '/scan',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskScansRoute = DeskScansRouteImport.update({
+  id: '/scans',
+  path: '/scans',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskSetupRoute = DeskSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -287,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/desk/stats': typeof DeskStatsRoute
@@ -329,6 +336,7 @@ export interface FileRoutesByTo {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/desk/stats': typeof DeskStatsRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/desk/stats': typeof DeskStatsRoute
@@ -418,6 +427,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/scans'
     | '/desk/setup'
     | '/desk/sources'
     | '/desk/stats'
@@ -460,6 +470,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/scans'
     | '/desk/setup'
     | '/desk/sources'
     | '/desk/stats'
@@ -503,6 +514,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/scans'
     | '/desk/setup'
     | '/desk/sources'
     | '/desk/stats'
@@ -745,6 +757,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskScanRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/scans': {
+      id: '/desk/scans'
+      path: '/scans'
+      fullPath: '/desk/scans'
+      preLoaderRoute: typeof DeskScansRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/setup': {
       id: '/desk/setup'
       path: '/setup'
@@ -846,6 +865,7 @@ interface DeskRouteChildren {
   DeskPublishedRoute: typeof DeskPublishedRoute
   DeskQueueRoute: typeof DeskQueueRoute
   DeskScanRoute: typeof DeskScanRoute
+  DeskScansRoute: typeof DeskScansRoute
   DeskSetupRoute: typeof DeskSetupRoute
   DeskSourcesRoute: typeof DeskSourcesRoute
   DeskStatsRoute: typeof DeskStatsRoute
@@ -871,6 +891,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskPublishedRoute: DeskPublishedRoute,
   DeskQueueRoute: DeskQueueRoute,
   DeskScanRoute: DeskScanRoute,
+  DeskScansRoute: DeskScansRoute,
   DeskSetupRoute: DeskSetupRoute,
   DeskSourcesRoute: DeskSourcesRoute,
   DeskStatsRoute: DeskStatsRoute,
