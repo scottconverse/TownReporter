@@ -52,7 +52,7 @@ export type AutomaticFailoverInput = {
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
-export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable" | "cutoff" | "empty";
+export type AutomaticFailoverReason = "auth" | "timeout" | "timeout-no-reply" | "quota" | "unavailable" | "unreadable" | "cutoff" | "empty";
 
 export type AutomaticFailoverPlan = {
   next: StoryModelChoice;
@@ -136,6 +136,15 @@ export function looksLikeContentRefusal(detail: string | null | undefined): bool
 }
 
 /**
+ * G24-FO-3: the CLI wrote nothing at all before the clock ended. The real CLI
+ * can retry a 429 quietly, so this silence is the shape a quota stop takes;
+ * `ai-claude-code.server.ts`'s `cliNoReplyQuotaNote` writes the sentence.
+ */
+export function looksLikeSilentTimeoutQuota(detail: string | null | undefined): boolean {
+  return Boolean(detail) && /\bno reply in \d+s\b/i.test(detail!) && /\bout of quota\b/i.test(detail!);
+}
+
+/**
  * G24-FO-3: a timeout that had already shown a quota sign. The Claude CLI
  * retries a 429 (usage / rate limit) quietly until the desk's clock runs out,
  * so the desk's own "timed out" text then carries the real cause after it: the
@@ -158,6 +167,10 @@ export function automaticFailoverReason(
   if (/reply was cut off/i.test(detail ?? "")) return "cutoff";
   if (looksLikeUnreadableReply(detail)) return "unreadable";
   if (/returned an empty draft/i.test(detail ?? "")) return "empty";
+  // G24-FO-3: a CLI timeout that wrote nothing at all may be a quiet 429
+  // retry. It is still a timeout, but the reason says what the silence may
+  // mean rather than a bare "timed out".
+  if (looksLikeTimeoutOrNoOutput(detail) && looksLikeSilentTimeoutQuota(detail)) return "timeout-no-reply";
   // A timeout that had already shown a 429 / usage-limit sign is a quota stop
   // (G24-FO-3); with no such sign it still reads "timed out".
   if (timeoutShowedQuotaSign(detail)) return "quota";
@@ -226,6 +239,7 @@ export function failoverReasonPhrase(
 ): string {
   if (reason === "cutoff") return `${previousLabel}: reply was cut off`;
   if (reason === "timeout") return `${previousLabel} timed out`;
+  if (reason === "timeout-no-reply") return `${previousLabel} timed out with no reply; the model may be out of quota`;
   if (reason === "auth") return `${previousLabel} sign-in lapsed`;
   if (reason === "quota") return `${previousLabel} reached its usage limit`;
   if (reason === "unreadable") return `${previousLabel} sent a reply the desk could not read`;
