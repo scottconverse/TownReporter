@@ -651,6 +651,56 @@ export async function fileScanLeads(
       filedCategory ??= "printed";
     }
 
+    /*
+      G26-DU-1 (2026-11-03): one story, filed two or three times in ONE run.
+
+      Scan 97 filed leads 837, 853 and 858 for the Lyons school ranking. Every
+      one of them was a "possible duplicate" of the same older lead 782 -- two
+      from `svvsd.org/feed/`, one from the article -- and none of them was
+      merged with the others. The same-story finder above could not catch them:
+      they share no STORY page (a feed is an index page, see isIndexPageUrl)
+      and their wording is only a "possible" match, so sameStoryForMerge said
+      no to every pair.
+
+      What those sightings DO share is the older lead they all restate. Two
+      rows this run filed against the same prior story are two rows for one
+      story -- the editor's Queue then shows the same finding two or three
+      times and must kill each copy by hand. So a candidate that is about to be
+      filed LINKED to an older lead (a "possible" match, or a development the
+      duplicate check found) is folded into any row this run already filed
+      against that SAME lead: its source URLs are unioned onto the kept row
+      (nothing is dropped), `mergedSameScan` is counted, and no row is written.
+
+      Deliberately NOT covered: two in-run sightings that are only a prose
+      "possible" match of each other with no older lead in common and no shared
+      story page. Merging those is exactly the pair QA-1 spent three rounds
+      proving are different stories (NEG-7 east/west county schools, NEG-8
+      ambulance/brush truck -- see sameStoryForMerge's doc comment), and they
+      share a meeting page, not a story. Today's behaviour for them is two
+      linked rows, which is still what they get.
+
+      Across runs nothing changes: a later scan's sighting is still filed as its
+      own lead carrying `possible_duplicate_of` for the editor to judge. This
+      rule only ever looks at rows this scan run filed -- never at a row an
+      editor has already seen.
+    */
+    if (possibleDuplicateOf != null) {
+      const twin = [...(insertedEarlier ?? []), ...insertedThisRun].find(
+        (prior) => prior.possible_duplicate_of === possibleDuplicateOf,
+      );
+      if (twin) {
+        const merged = mergeSourceUrls(twin.source_urls, candidateUrls);
+        await sql`
+            update leads set source_urls = ${JSON.stringify(merged)}
+            where id = ${twin.id} and newsroom_id = ${newsroomId}
+          `;
+        twin.source_urls = merged;
+        filedByCandidate.set(candidateIndex, twin);
+        mergedSameScan += 1;
+        continue;
+      }
+    }
+
     const aiModel = decision || directLeadAnswer || directPrintedAnswer ? (dupCheck?.model ?? null) : null;
     const aiCheckedAt = decision || directLeadAnswer || directPrintedAnswer ? new Date().toISOString() : null;
 
@@ -705,6 +755,10 @@ export async function fileScanLeads(
       // no `why` at all must still read as absent here, exactly as before.
       why: lead.why == null ? null : why,
       evidence: lead.evidence == null ? null : evidence,
+      // G26-DU-1: carried on the in-memory row so a later sighting in this
+      // same run (or, for a batched scan, in a later batch) can see which
+      // older lead this one was filed against.
+      possible_duplicate_of: possibleDuplicateOf,
     };
     existing.push(insertedRow);
     insertedThisRun.push(insertedRow);

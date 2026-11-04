@@ -1579,6 +1579,13 @@ export type MatchCandidateLead = {
    * lead can show the old reason; never used in matching. */
   killed_at?: string | null;
   kill_reason?: string | null;
+  /** G26-DU-1 (2026-11-03): the lead this row was filed as a "possible
+   * duplicate" OF, or null for a plain new lead. Only `fileScanLeads`
+   * (./lead-filing.ts) writes it, and only so a scan that files its leads in
+   * several batches (`insertedEarlier`) can still see that two sightings in
+   * one run were both linked to the same older lead. Never read by the
+   * matcher itself; absent means "not recorded", exactly as before. */
+  possible_duplicate_of?: number | null;
 };
 
 /**
