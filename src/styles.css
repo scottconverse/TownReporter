@@ -2568,9 +2568,11 @@
 }
 /* Dialog buttons get the 16px desk floor (rule 30, G34-UI-2, found on Dev
    Nov 4 2026). The portal has `desk-ltr` but not `astra`, so the astra 16px
-   button rule never reached it, and the 14px control floor above won. Same
-   specificity, so this must stay after that rule. */
-.desk-ltr.astra-modal-layer .astra-modal :is(button, [role="button"]) {
+   button rule never reached it, and the 14px control floor above won. That
+   rule's `input:not(...):not(...)` branch gives its whole :is() a weight of
+   (0,2,1); the button branch here carries the same two :not()s so the weights
+   tie, and this rule wins by coming after it. Keep it after that rule. */
+.desk-ltr.astra-modal-layer .astra-modal :is(button:not([type="checkbox"]):not([type="radio"]), [role="button"]) {
   font-size: max(16px, calc(1rem * var(--ts)));
 }
 .desk-ltr.astra-modal-layer .astra-modal :is(small, .meta, .astra-field-hint, .astra-choice-note, .model-picker-help) {
