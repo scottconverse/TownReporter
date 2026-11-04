@@ -1455,7 +1455,10 @@
   border: 0;
   border-left: 1px solid var(--fg2);
   padding: 15px 0;
-  font-size: calc(14px * var(--ts));
+  /* G27-IN-1: a tab is a press, and rule 30 puts every desk button at 16px.
+     The strip is a flex row of equal cells (`flex: 1` below), so the longer
+     word grows the cell rather than clipping it. */
+  font-size: calc(16px * var(--ts));
   min-height: 46px;
   color: var(--mut);
 }
@@ -1471,12 +1474,21 @@
 .desk-ltr.astra .astra-inspector > section {
   padding: 20px;
 }
+/*
+  G27-IN-1 (rule 30, Oct 28 2026): the inspector's body copy and headings were
+  14px -- the old floor, and below the 16px body floor this brief sets. A
+  heading is one step over its body (18px) and the prose is 16px. Both still
+  carry `var(--ts)`, so Text: Large scales them with the rest of the desk.
+  Nothing here sets a fixed height: a heading or paragraph that grows takes
+  its section taller, and the panel is the scrolling column (`.story-side` has
+  `overflow: auto`), so no line is clipped at 390px or 1440px.
+*/
 .desk-ltr.astra .astra-inspector :is(h2, h3) {
-  font: 700 14px/1.5 var(--fd);
+  font: 700 calc(18px * var(--ts))/1.4 var(--fd);
   margin-bottom: 10px;
 }
 .desk-ltr.astra .astra-inspector p {
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .astra-inspector .side-h {
@@ -1487,7 +1499,7 @@
 }
 .desk-ltr.astra .astra-inspector .btn {
   padding: 8px 10px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 /*
   Find evidence (DEF-1) sits in the inspector, whose text above is 14px. Its
@@ -1585,7 +1597,7 @@
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .astra-blocker-clear {
   display: flex;
@@ -1688,7 +1700,7 @@
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
 }
 .desk-ltr.astra .astra-inspector .astra-evidence-compare {
@@ -1697,7 +1709,7 @@
   align-items: center;
   margin-top: 14px;
   padding: 0 12px;
-  font-size: calc(14px * var(--ts));
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   border: 2px solid var(--fg);
 }
@@ -8018,7 +8030,10 @@
   flex: 1;
   min-height: 48px;
   padding: 0 8px;
-  font-size: calc(15px * var(--ts));
+  /* G27-IN-1: 16px, the desk's button floor (rule 30). Three equal cells in a
+     panel only 340px wide at the 1200px step leave ~113px each; the longest
+     tab word is "Reporting", which still fits at 16px. */
+  font-size: calc(16px * var(--ts));
   font-weight: 800;
   text-align: center;
 }
