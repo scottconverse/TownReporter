@@ -228,7 +228,16 @@ export function JobCard({
       ) : null}
 
       {failoverNote && job.failoverNote ? (
-        <p className="job-card-quiet">Model switch: {noteWords?.text ?? job.failoverNote}</p>
+        <p className="job-card-quiet">
+          {/*
+            DEF-2's line is its own sentence, not a model switch: "Ollama was
+            down. TownReporter started it at 6:52 AM." It goes on the card
+            exactly as written; every other note keeps the label it had.
+          */}
+          {job.failoverNote.startsWith("Ollama was down")
+            ? noteWords?.text ?? job.failoverNote
+            : `Model switch: ${noteWords?.text ?? job.failoverNote}`}
+        </p>
       ) : null}
 
       {noteWords?.detail ? (

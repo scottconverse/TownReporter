@@ -2,6 +2,7 @@ import { writeStoryFromInput } from "@/components/scoped-actions";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
 import { TodayInProgress } from "@/components/today-in-progress";
+import { OllamaWarning } from "@/components/ollama-warning";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
@@ -1361,6 +1362,13 @@ function DeskHome() {
         already set up (the live shape) renders nothing here, and a fresh
         install that found a loaded model has a model and no card.
       */}
+      {/*
+        DEF-2: the loud Ollama warning, full width, above everything else on
+        Today. It says why a missing Ollama means paid models; it never blocks
+        a scan or a draft. See components/ollama-warning.tsx.
+      */}
+      <OllamaWarning />
+
       <FirstRunModelCard />
 
       {/*

@@ -24,9 +24,10 @@
   `scripts/with-app-env.mjs node --test` run and for the real-Postgres lane) a
   request is refused when it names:
 
-    - one of the three addresses a local model server listens on by default --
-      127.0.0.1/localhost on 1234 (LM Studio), 11434 (Ollama) or 8080
-      (llama.cpp's llama-server);
+    - one of the four addresses a local model server listens on by default --
+      127.0.0.1/localhost on 1234 (LM Studio), 11434 (Ollama), 11435 (the copy
+      of Ollama TownReporter starts for itself) or 8080 (llama.cpp's
+      llama-server);
     - any non-loopback host at all, which is every real network destination;
     - a cloud model API host, named explicitly so the refusal can say which
       one and why rather than just "not loopback".
@@ -56,14 +57,20 @@ export const TEST_RUN_ENV = "TOWNREPORTER_TEST_ENV_VERIFIED";
 export const REAL_MODEL_OPT_IN_ENV = "TOWNREPORTER_TEST_ALLOW_REAL_MODELS";
 
 /**
- * The three ports a local model server listens on by default, and the name of
+ * The four ports a local model server listens on by default, and the name of
  * the server on each. The addresses themselves are
  * `provider-registry.ts`'s `DISCOVERED_LOCAL_ADDRESSES`; this is the same list
  * keyed by port so a refusal can name the server it just refused.
+ *
+ * 11435 is not a server default: it is the port TownReporter's own supervised
+ * Ollama copy listens on (DEF-2, Scott Nov 4 2026). Discovery probes it, so the
+ * seal has to refuse it too -- otherwise a test that resolved a provider could
+ * reach the copy this app started.
  */
 export const DEFAULT_LOCAL_MODEL_PORTS: Readonly<Record<number, string>> = {
   1234: "LM Studio",
   11434: "Ollama",
+  11435: "Ollama (TownReporter's own copy)",
   8080: "llama.cpp",
 };
 
