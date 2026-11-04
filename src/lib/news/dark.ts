@@ -1527,8 +1527,22 @@ export const getInvestigation = createServerFn({ method: "GET" })
     return {
       investigation: inv[0],
       stalled,
+      /*
+        Rule 25 / old-error defect (walk note, Oct 31 2026): the page draws the
+        saved `error` of the latest dark job. When that job is a past round,
+        the sentence needs the round's own date so it reads as history -- "Past
+        run, Sep 2 2026: …" -- rather than as something that just failed.
+        `finishedAt` falls back to `createdAt` for a job that never got to
+        finish, so the line always has the round's date rather than none.
+      */
       darkJob: job
-        ? { id: job.id, status: job.status, stage: job.stage, error: job.error }
+        ? {
+            id: job.id,
+            status: job.status,
+            stage: job.stage,
+            error: job.error,
+            finishedAt: job.finished_at ?? job.created_at,
+          }
         : null,
       run: runRows[0] ? presentDarkRun(runRows[0]) : null,
       briefJob: brief_job
