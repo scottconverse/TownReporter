@@ -63,7 +63,7 @@ const COMPACT_ID_TITLE = /^[A-Za-z0-9_-]{10,}$/;
  * Sheet Redacted", "Detail Meeting" -- contain no such token and are untouched.
  */
 const HEX_ID_TOKEN = /^[0-9a-f]{16,}$/i;
-const SHORT_HEX_TOKEN = /^(?=[0-9a-f]{6,}$)(?=.*\d)[0-9a-f]+$/i;
+const SHORT_HEX_TOKEN = /^(?=[0-9a-f]{6,}$)(?=.*\d)(?=.*[a-f])[0-9a-f]+$/i;
 
 function sourceHostname(url: string): string {
   try {

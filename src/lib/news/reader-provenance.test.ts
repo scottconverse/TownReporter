@@ -177,6 +177,8 @@ describe("readable source-card titles", () => {
       "Detail Meeting",
       "Decade Facade",
       "Chapter 2026 11 04",
+      "Agenda 20261104",
+      "Ordinance 202611",
     ]) {
       assert.equal(readableSourceTitle(title, url), title);
     }
