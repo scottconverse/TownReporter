@@ -620,9 +620,19 @@ export async function claudeCodeChat(opts: {
         automaticFailoverReason reads it as a usage limit, not "timed out".
       */
       const quota = quotaSign || textShowsQuota(stderr) ? ` — ${CLI_QUOTA_RETRY_NOTE}` : "";
+      /*
+        G24-FO-3: the real CLI can spend the whole clock silently retrying a
+        429, so neither stream ever shows a quota sign. A timeout that wrote
+        nothing at all is that shape; say so instead of a bare "timed out", so
+        the editor (and Automatic's failover reason) know the model may be out
+        of quota. Failover still moves on.
+      */
+      const silent = !quota && stdoutBytes === 0 && !stderr.trim()
+        ? ` — ${cliNoReplyQuotaNote(opts.timeoutMs)}`
+        : "";
       finish({
         ok: false,
-        error: `Claude Code request timed out after ${seen}${quota}${tail ? ` — ${tail}` : ""}`,
+        error: `Claude Code request timed out after ${seen}${quota}${silent}${tail ? ` — ${tail}` : ""}`,
         meta: baseMeta(true),
       });
     }, opts.timeoutMs);
@@ -750,6 +760,17 @@ function toolUseNames(event: unknown): string[] {
 
 /** The note a timed-out CLI call carries when it had already shown a quota sign. */
 export const CLI_QUOTA_RETRY_NOTE = "the provider answered with a usage limit (429) and the CLI was still retrying";
+
+/**
+ * G24-FO-3: the note a CLI timeout carries when it wrote nothing at all. The
+ * real CLI retries a 429 quietly, so the desk's clock can end first with no
+ * quota sign to read; the wording says what is known (no reply) and what the
+ * silence may mean, so the failover reason is not a bare "timed out".
+ */
+export function cliNoReplyQuotaNote(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  return `No reply in ${seconds}s; the model may be out of quota`;
+}
 
 /** A 429 / rate-limit / usage-limit sign in free text (the CLI's stderr). */
 function textShowsQuota(text: string): boolean {
