@@ -315,9 +315,8 @@ describe("small helpers", () => {
     );
   });
 
-  it("names the outside-AI and person disclosure lines, and leaves other wording to the editor", () => {
+  it("leaves the outside-AI choice blank and other wording to the editor", () => {
     assert.equal(disclosureLine("outside-ai"), "");
-    assert.match(disclosureLine("person"), /A person wrote this/);
     assert.equal(disclosureLine("other", "  Written with a helper.  "), "Written with a helper.");
   });
 });

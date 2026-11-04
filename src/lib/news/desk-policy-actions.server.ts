@@ -10,7 +10,7 @@ type Context = { userId: string; newsroomId?: number };
 type Refusal = { ok: false; error: string };
 export type FileLeadRequest = {
   headline: string; why: string; topic: string; url?: string; urls?: string[];
-  disclosureKey?: "outside-ai" | "person" | "other"; disclosureOther?: string;
+  disclosureKey?: "outside-ai" | "other"; disclosureOther?: string;
   importedText?: boolean; origin?: "import"; override?: string[];
 };
 export type FiledLead = {

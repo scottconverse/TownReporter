@@ -176,10 +176,11 @@ describe("pasteOneStoryCard: one story, exactly as pasted", () => {
     assert.equal(card.body.startsWith("Council votes to bring marijuana hospitality rules back"), true);
   });
 
-  it("says a person wrote it, and prints the line when the editor says otherwise", () => {
-    assert.equal(pasteOneStoryCard({ text: PASTED }).disclosureKey, "person");
-    const ai = pasteOneStoryCard({ text: PASTED, disclosureKey: "outside-ai" });
-    assert.equal(ai.disclosureKey, "outside-ai");
+  it("defaults to the outside-AI choice, which prints no line, and keeps the editor's own wording", () => {
+    assert.equal(pasteOneStoryCard({ text: PASTED }).disclosureKey, "outside-ai");
+    const other = pasteOneStoryCard({ text: PASTED, disclosureKey: "other", disclosureOther: "Written by a colleague." });
+    assert.equal(other.disclosureKey, "other");
+    assert.equal(other.disclosureOther, "Written by a colleague.");
   });
 
   it("marks a pasted lead with the import path's own word", () => {

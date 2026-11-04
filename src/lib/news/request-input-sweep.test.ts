@@ -35,6 +35,7 @@ import {
   findSourcesInput,
   followUpsInput,
   holdLeadInput,
+  importStorySelection,
   jobIdInput,
   leadIdInput,
   leadStatusInput,
@@ -1206,5 +1207,23 @@ describe("every swept .validator() calls the schema, not a cast", () => {
     for (const name of ["artifactOcrRequest", "validateResearchPreferences"]) {
       assert.ok(dark.includes(name), `dark.ts lost ${name}`);
     }
+  });
+});
+
+describe("the removed \"A person\" disclosure choice", () => {
+  it("reads an old fileLead's \"person\" as the no-line choice instead of refusing it", () => {
+    const parsed = fileLeadInput.parse({
+      headline: "Council delays the budget",
+      why: "The vote moved it to next month.",
+      topic: "council",
+      disclosureKey: "person",
+    });
+    assert.equal(parsed.disclosureKey, "outside-ai");
+  });
+
+  it("does the same for an old import card and keeps the two choices that remain", () => {
+    assert.equal(importStorySelection.parse({ disclosureKey: "person" }).disclosureKey, "outside-ai");
+    assert.equal(importStorySelection.parse({ disclosureKey: "outside-ai" }).disclosureKey, "outside-ai");
+    assert.equal(importStorySelection.parse({ disclosureKey: "other" }).disclosureKey, "other");
   });
 });

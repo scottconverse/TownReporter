@@ -36,7 +36,7 @@ const SELECTION: ImportSelection = {
   readiness: 0,
   notes: "",
   hold: false,
-  disclosureKey: "person",
+  disclosureKey: "outside-ai",
   disclosureOther: "",
 };
 

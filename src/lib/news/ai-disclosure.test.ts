@@ -12,6 +12,7 @@ describe("a published story never gets an AI line", () => {
     "An editor approved this story for publication. AI tools helped write the first draft. The records we used are listed under Sources.",
     "An editor published this story. AI tools helped write the first draft. Some claims in it were not checked against sources. The records we used are listed under Sources.",
     "An outside AI research tool wrote this from public records; an editor reviewed it.",
+    "A person wrote this from public records; an editor reviewed it.",
   ];
 
   it("derives no line from drafting, research, approval or unreviewed claims", () => {
@@ -33,8 +34,17 @@ describe("a published story never gets an AI line", () => {
     }
   });
 
+  it("drops the removed \"A person wrote this\" line saved on an old article", () => {
+    // Scott, Nov 4 2026: the import screen's "A person" choice is gone and the
+    // line it printed must never reach a reader again, including from an
+    // article that already carries it in `disclosure_text`.
+    const personLine = "A person wrote this from public records; an editor reviewed it.";
+    assert.equal(disclosureForReader({ text: personLine }), "");
+    assert.equal(disclosureForPublishedStory({ text: personLine }), "");
+  });
+
   it("keeps a line the editor typed", () => {
-    const own = "A person wrote this from public records; an editor reviewed it.";
+    const own = "Written by our reporter from the council packet.";
     assert.equal(disclosureForReader({ text: own, modelBody, researchJson: researched }), own);
     assert.equal(disclosureForReader({ text: own, modelBody, researchJson: "{}", pastedByEditor: true }), own);
   });

@@ -393,7 +393,7 @@ export type ParsedReport = {
   warnings: string[];
 };
 
-export type DisclosureKey = "outside-ai" | "person" | "other";
+export type DisclosureKey = "outside-ai" | "other";
 
 export const IMPORT_DISCLOSURES: { key: DisclosureKey; label: string; line: string }[] = [
   {
@@ -401,11 +401,6 @@ export const IMPORT_DISCLOSURES: { key: DisclosureKey; label: string; line: stri
     label: "An outside AI tool",
     // Scott, Oct 12 2026: no AI wording on the paper, so this choice prints no line.
     line: "",
-  },
-  {
-    key: "person",
-    label: "A person",
-    line: "A person wrote this from public records; an editor reviewed it.",
   },
   { key: "other", label: "Other wording", line: "" },
 ];
@@ -1660,7 +1655,7 @@ export function parsePlainStory(
     isStory: true,
     raw: text,
     paragraphs: rest,
-    disclosureKey: opts.disclosureKey ?? "person",
+    disclosureKey: opts.disclosureKey ?? "outside-ai",
   });
 }
 

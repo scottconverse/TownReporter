@@ -314,11 +314,12 @@ The council voted to delay it until November ([minutes](https://records.example/
       `disclosure_text` (`publishLead`, `desk.ts:3659`), so without these two a
       story pasted this way published with an empty Sources section and the
       paper's own AI line, on a page that promises "Sources shown" -- the same
-      defect the hand-filed lead had (`desk.ts:486-493`). "A person" is the old
-      one-story paste panel's default (`paste-one-story.ts:49`).
+      defect the hand-filed lead had (`desk.ts:486-493`). "An outside AI tool"
+      is the one-story paste panel's default, and it prints no line
+      (`paste-one-story.ts:47`).
     */
     assert.deepEqual(file.urls, ["https://records.example/minutes"]);
-    assert.equal(file.disclosureKey, "person");
+    assert.equal(file.disclosureKey, "outside-ai");
     /*
       Unit BW3: and it is an editor's paste, not model prose. Unmarked, the
       desk's evidence gate (`draft-evidence.ts:36`) stops the publish of a

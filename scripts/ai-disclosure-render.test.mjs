@@ -21,7 +21,7 @@ import { howRoute, renderArticle } from "./article-page-render.mjs";
 */
 
 // Scott, Oct 12 2026: no AI line on the paper. The only line a page can carry is one an editor typed.
-const EDITOR_LINE = "A person wrote this from public records; an editor reviewed it.";
+const EDITOR_LINE = "Written by our reporter from the council packet.";
 
 test("a manual article page does not claim AI found records or wrote its first draft", () => {
   const html = renderArticle({ disclosure_text: "" });
