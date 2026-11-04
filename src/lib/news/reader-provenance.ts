@@ -49,6 +49,21 @@ export function readerSourceKey(url: string): string {
 const GENERIC_SOURCE_TITLES = new Set(["portal", "home", "index", "untitled", "document"]);
 const ID_LIKE_TITLE = /^[A-Z]{1,4}\s?[A-Za-z0-9]{10,}$/i;
 const COMPACT_ID_TITLE = /^[A-Za-z0-9_-]{10,}$/;
+/**
+ * G34-R-1 (walk note, Nov 4 2026): a capture whose page had no `<title>` can
+ * land with a title built from the URL's own path, and an id-addressed path is
+ * all hex: `3f188e D228cf26794f408c829804aab32016c1`. That passed the checks
+ * above -- it has letters, it is not a host, and it is not one compact token --
+ * so a reader saw two hex strings where a source name belongs.
+ *
+ * A token of sixteen or more hex characters is a random id, not a word; a title
+ * that is mostly such tokens (a short path prefix plus the id) is the same junk
+ * spelled with a space. Either way the card falls back to the host, and the
+ * full link stays underneath it (G31-W-2). Real titles -- "Joint Service Term
+ * Sheet Redacted", "Detail Meeting" -- contain no such token and are untouched.
+ */
+const HEX_ID_TOKEN = /^[0-9a-f]{16,}$/i;
+const SHORT_HEX_TOKEN = /^(?=[0-9a-f]{6,}$)(?=.*\d)(?=.*[a-f])[0-9a-f]+$/i;
 
 function sourceHostname(url: string): string {
   try {
@@ -58,6 +73,14 @@ function sourceHostname(url: string): string {
   }
 }
 
+function isMostlyHexIdTokens(text: string): boolean {
+  const tokens = text.split(" ").filter(Boolean);
+  if (tokens.some((token) => HEX_ID_TOKEN.test(token))) return true;
+  if (tokens.length < 2) return false;
+  const idTokens = tokens.filter((token) => SHORT_HEX_TOKEN.test(token)).length;
+  return idTokens * 2 >= tokens.length;
+}
+
 function isJunkSourceTitle(title: string, url: string): boolean {
   const text = title.trim().replace(/\s+/g, " ");
   const letters = text.match(/[A-Za-z]/g)?.length ?? 0;
@@ -65,6 +88,7 @@ function isJunkSourceTitle(title: string, url: string): boolean {
   if (GENERIC_SOURCE_TITLES.has(text.toLowerCase())) return true;
   if (/^https?:\/\//i.test(text)) return true;
   if (text.toLowerCase().replace(/^www\./, "") === sourceHostname(url)) return true;
+  if (isMostlyHexIdTokens(text)) return true;
   if (!/\d/.test(text)) return false;
   return ID_LIKE_TITLE.test(text) || (!/\s/.test(text) && COMPACT_ID_TITLE.test(text));
 }

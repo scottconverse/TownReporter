@@ -1097,11 +1097,20 @@
    (solid danger fill), not the same low-emphasis outline as every other
    secondary action next to it. */
 .desk-ltr .btn.danger.solid {background:var(--danger);color:var(--bg);border-color:var(--danger)}
-/* The gated variant: a control that exists but cannot be used yet -- dashed,
-   so it never reads as a second kind of disabled button. */
-.desk-ltr .btn.gated {border:2px dashed var(--fg2);color:var(--fg2)}
+/* The gated variant: a control that exists but cannot be used yet. The edge is
+   SOLID (G33-UI-3, walk note Nov 4 2026): the dash read as an unfinished box on
+   "Add suggested focus (0)" and the disabled "Batch started" press in the
+   batch dialog. Dashed is reserved for shapes that mean failed / could not
+   check -- chips, notices -- not for a button that simply is not usable. The
+   muted `--fg2` ink still says it cannot be pressed, and `disabled` says so to
+   a screen reader. */
+.desk-ltr .btn.gated {border:2px solid var(--fg2);color:var(--fg2)}
 .desk-ltr .btn.danger.solid:hover:not(:disabled) {opacity:.85}
-.desk-ltr .btn:disabled {opacity:1;cursor:not-allowed;border:2px dashed var(--fg2);background:transparent;color:var(--fg2)}
+/* A disabled press is solid too, for the same reason. This is the rule the
+   dialog portal gets: the portal wrapper carries `desk-ltr`, not `astra`, so
+   the astra-scoped solid rule in desk-astra.css never reached the batch
+   dialog's buttons. */
+.desk-ltr .btn:disabled {opacity:1;cursor:not-allowed;border:2px solid var(--fg2);background:transparent;color:var(--fg2)}
 .desk-ltr .btn.queue-done {text-decoration:none;border-color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
 .desk-ltr .btn.queue-done:hover {background:color-mix(in srgb,var(--fg) 18%,transparent)}
 .desk-ltr .inline-link {color:var(--adeep);text-decoration:underline;text-underline-offset:3px;font-size:inherit}
@@ -2556,6 +2565,15 @@
 .desk-ltr.astra-modal-layer .astra-modal :is(button, select, textarea, summary, [role="button"], input:not([type="checkbox"]):not([type="radio"])) {
   min-height: 44px;
   font-size: max(14px, calc(0.875rem * var(--ts)));
+}
+/* Dialog buttons get the 16px desk floor (rule 30, G34-UI-2, found on Dev
+   Nov 4 2026). The portal has `desk-ltr` but not `astra`, so the astra 16px
+   button rule never reached it, and the 14px control floor above won. That
+   rule's `input:not(...):not(...)` branch gives its whole :is() a weight of
+   (0,2,1); the button branch here carries the same two :not()s so the weights
+   tie, and this rule wins by coming after it. Keep it after that rule. */
+.desk-ltr.astra-modal-layer .astra-modal :is(button:not([type="checkbox"]):not([type="radio"]), [role="button"]) {
+  font-size: max(16px, calc(1rem * var(--ts)));
 }
 .desk-ltr.astra-modal-layer .astra-modal :is(small, .meta, .astra-field-hint, .astra-choice-note, .model-picker-help) {
   font-size: max(14px, calc(0.875rem * var(--ts)));

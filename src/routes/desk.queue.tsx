@@ -2317,6 +2317,20 @@ function QueuePage() {
         onClose={closePanel}
         title="Draft the selected leads"
         subtitle="Choose leads and one writing runtime. A usual batch has one to five leads; a larger batch asks for your approval. Each lead keeps its own stored research scope."
+        /*
+          G34-UI-1 (walk note, Nov 4 2026). After a successful start this dialog
+          deliberately stays open: it IS the batch's own panel (Unit BS), and
+          its "Draft batch results" block below is where the queued work's
+          progress, elapsed time, Redraft and Dismiss are read. Closing it on
+          Start would hide the batch the press just queued.
+
+          What was missing was a plain way out. The only exits were Cancel -- a
+          word for the thing the editor is NOT doing -- and the ✕. "Done" sits
+          beside "Batch started" only once the batch has started, and does what
+          every close does. Escape, ✕ and Cancel keep working exactly as before.
+        */
+        altLabel={batchQueuedNow ? "Done" : undefined}
+        onAlt={closePanel}
         primaryLabel={
           batchQueuedNow
             ? "Batch started"

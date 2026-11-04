@@ -24,7 +24,7 @@
  *    back on top there -- below the sticky phone topbar -- because a phone's
  *    keyboard and browser chrome own the bottom of a small screen.
  *  - `offset.left` clears the nav: `--desk-nav-w` plus a gutter, since the
- *    sidebar is 230px, 206px under 1200px and 0px on a phone.
+ *    sidebar is 280px, 248px under 1200px and 0px on a phone.
  *  - `zIndex: 55`. Above the sticky publish bar (3), the sticky row menus and
  *    the phone topbar (30), the nav scrim (35) and the sidebar (40); below the
  *    Radix modal layer (60, `styles.css` `.desk-ltr.astra-modal-layer`) so a
