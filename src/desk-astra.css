@@ -9097,3 +9097,37 @@
     font-size: max(16px, calc(16px * var(--ts)));
   }
 }
+
+/* ===========================================================================
+   G36-UI-1 follow-up: THE DECIDE BOX FITS THE FIRST SCREEN IN LARGE TYPE.
+
+   G36-UI-1 raised the desk's body text, labels and buttons to 16px, and the
+   Large setting scales type by 1.2 (--ts). On the Dark Desk file screen with a
+   large saved file open that made the stack above the decision controls taller
+   than the first 1100px screen: measured at 1440x1100 after G36-UI-1, Decide
+   sat at 1012.88px and its first action row ended at 1121.08px -- the editor's
+   own controls were below the fold on a screen that had room for them before.
+
+   Nothing here shrinks: no font size, no line height, no control, no block.
+   Only the empty space above and inside the decision box gets tighter, and
+   only in Large -- Normal measures 862.52px / 960.86px and keeps the roomier
+   spacing:
+     - the 4px gaps between the file's stacked sections go (5 x 4px);
+     - the file's 16px padding becomes 12px;
+     - the Decide panel's own top padding 16px -> 12px and the action row's
+       6px -> 4px, which pulls the buttons up without moving the box.
+   Measured after: Decide 988.88px, first action row bottom 1091.08px.
+--------------------------------------------------------------------------- */
+:root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file,
+.desk-ltr.astra.large[data-desk-page="dark"] .astra-deep-file {
+  gap: 0;
+  padding: 12px;
+}
+:root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file .astra-panel.decide,
+.desk-ltr.astra.large[data-desk-page="dark"] .astra-deep-file .astra-panel.decide {
+  padding-top: 12px;
+}
+:root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file .astra-panel-acts,
+.desk-ltr.astra.large[data-desk-page="dark"] .astra-deep-file .astra-panel-acts {
+  padding-top: 4px;
+}
