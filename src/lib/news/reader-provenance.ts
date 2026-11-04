@@ -64,6 +64,21 @@ const COMPACT_ID_TITLE = /^[A-Za-z0-9_-]{10,}$/;
  */
 const HEX_ID_TOKEN = /^[0-9a-f]{16,}$/i;
 const SHORT_HEX_TOKEN = /^(?=[0-9a-f]{6,}$)(?=.*\d)(?=.*[a-f])[0-9a-f]+$/i;
+/**
+ * G35-R-1 (walk note, Nov 4 2026): a CDN file name lands as the source title
+ * when the captured page was a document rather than an HTML page:
+ * `6a96045e7fe1e956bc0f4d58_Rise%20Against%20ED%20Job%20Description%202026.pdf`.
+ * The id and the name are joined by `_` (a CMS file field) or `-`, so
+ * `isMostlyHexIdTokens` -- which splits on spaces only -- saw one token that
+ * was not all hex and let the whole thing through as a title.
+ *
+ * The id prefix is dropped and the rest is judged by the same rules as any
+ * other title; the words are the stored title's own. See `stripHexIdPrefix`.
+ */
+const HEX_ID_PREFIX = /^[0-9a-f]{16,}[_-]/i;
+/** A file extension says what the file is, not what it is about. Only ever
+ * dropped from a name this module already had to strip an id from. */
+const DOCUMENT_FILE_EXTENSION = /\.(pdf|docx?|xlsx?|pptx?|txt|rtf|csv)$/i;
 
 function sourceHostname(url: string): string {
   try {
@@ -79,6 +94,33 @@ function isMostlyHexIdTokens(text: string): boolean {
   if (tokens.length < 2) return false;
   const idTokens = tokens.filter((token) => SHORT_HEX_TOKEN.test(token)).length;
   return idTokens * 2 >= tokens.length;
+}
+
+/**
+ * A URL-spelled file name (`Rise%20Against`) read as words. A title with a
+ * broken escape (`100% off`) is left exactly as it was: `decodeURIComponent`
+ * throws on it, and the reader should see the words the page stored, not a
+ * mangled line.
+ */
+function decodeTitleEscapes(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Drop a leading CMS file id joined to the rest of the name by `_` or `-`.
+ * Returns the text unchanged when there is no such prefix, and the bare id
+ * (which the junk rules then reject) when the prefix left nothing behind.
+ */
+function stripHexIdPrefix(text: string): { text: string; stripped: boolean } {
+  const match = text.match(HEX_ID_PREFIX);
+  if (!match) return { text, stripped: false };
+  const rest = text.slice(match[0].length).trim();
+  if (!rest) return { text: match[0].slice(0, -1), stripped: false };
+  return { text: rest, stripped: true };
 }
 
 function isJunkSourceTitle(title: string, url: string): boolean {
@@ -123,7 +165,9 @@ export function readerSourceUrlLabel(url: string): string {
  * exists, so this stays a pure, testable display rule.
  */
 export function readableSourceTitle(title: string, url: string): string {
-  const text = title.trim().replace(/\s+/g, " ");
+  const decoded = decodeTitleEscapes(title.trim()).replace(/\s+/g, " ");
+  const { text: stripped, stripped: hadIdPrefix } = stripHexIdPrefix(decoded);
+  const text = hadIdPrefix ? stripped.replace(DOCUMENT_FILE_EXTENSION, "").trim() : stripped;
   return isJunkSourceTitle(text, url) ? readerSourceUrlLabel(url) : text;
 }
 
