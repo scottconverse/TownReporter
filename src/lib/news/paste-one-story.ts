@@ -40,13 +40,11 @@ import { type ReviewCard } from "./import-review.ts";
 /**
  * Who wrote a pasted story, until the editor says otherwise.
  *
- * "A person" and not "An outside AI tool": the box says *paste a story I
- * already have*, and the common case is the editor's own words or a colleague's
- * — the same reading the report reader takes for a story with no report format
- * around it (`parsePlainStory`, import-stories.ts:433). It is one select away
- * from being changed, and the line it prints is shown next to it.
+ * "An outside AI tool", which prints no line (Scott, Oct 12 2026: no AI
+ * wording on the paper). It is one select away from being changed to "Other
+ * wording", and the line that choice prints is shown next to it.
  */
-export const PASTE_ONE_DISCLOSURE: DisclosureKey = "person";
+export const PASTE_ONE_DISCLOSURE: DisclosureKey = "outside-ai";
 
 /** The card key for the one card this screen ever has. */
 export const PASTE_ONE_KEY = "pasted-story";

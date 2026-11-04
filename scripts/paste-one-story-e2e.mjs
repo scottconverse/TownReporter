@@ -118,8 +118,8 @@ const SECOND_BODY = SECOND.split("\n").slice(2).join("\n");
 /** What the editor retitles the second story to, after the duplicate warning. */
 const SECOND_TITLE = "Hospitality licence rules come back for a second reading";
 
-/** The line the panel defaults to, and the line a reader must see on the paper. */
-const PERSON_LINE = "A person wrote this from public records; an editor reviewed it.";
+/** The removed "A person" line; the panel no longer offers it and it must not print (Scott, Nov 4 2026). */
+const REMOVED_PERSON_LINE = "A person wrote this from public records; an editor reviewed it.";
 /** The desk's own AI line, which would be a lie over a story no model touched. */
 const DESK_AI_LINE = "AI tools helped find records and write the first draft";
 /** What the page says when a story carries no separate source records. */
@@ -676,9 +676,9 @@ async function theReaderGetsTheStory(printed, sectionChoice) {
     "a story with a source record does not print the heading over it",
   );
   const printedPage = await page.locator("body").innerText();
-  must(printedPage.includes(PERSON_LINE), "the disclosure line the desk showed did not print");
+  must(!printedPage.includes(REMOVED_PERSON_LINE), "the removed \"A person\" line printed on the paper");
   must(!printedPage.includes(DESK_AI_LINE), "the desk's own AI line printed over a pasted story");
-  step("the reader gets the story as pasted, its cited page and the honest line");
+  step("the reader gets the story as pasted, its cited page and no disclosure line");
 }
 
 /**

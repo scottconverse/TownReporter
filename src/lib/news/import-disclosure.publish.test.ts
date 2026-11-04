@@ -42,7 +42,9 @@ after(async () => vite.close());
 const NEWSROOM = 98433;
 const USER = "import-disclosure-editor";
 
-const PERSON_LINE = "A person wrote this from public records; an editor reviewed it.";
+// The editor's own wording ("Other wording" on the import screen). The old
+// "A person" preset is gone (Scott, Nov 4 2026).
+const EDITOR_LINE = "Written by our reporter from the council packet.";
 
 /**
  * An imported lead and its draft: origin "import", provenance recorded, the
@@ -90,7 +92,7 @@ async function importedFixture(disclosureText: string) {
 }
 
 it("prints the imported story under the line the editor chose, and needs no AI pass", async () => {
-  const { leadId } = await importedFixture(PERSON_LINE);
+  const { leadId } = await importedFixture(EDITOR_LINE);
   const ctx = { userId: USER, newsroomId: NEWSROOM };
   const warned = await performPublish(ctx, leadId);
   assert.ok(!warned.ok && warned.warnings?.some(row => row.key === "unchecked"));
@@ -109,7 +111,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
   );
   assert.equal(
     article.disclosure_text,
-    PERSON_LINE,
+    EDITOR_LINE,
     "the line the editor chose reaches the published article, word for word",
   );
   assert.equal(

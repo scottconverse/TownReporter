@@ -316,7 +316,7 @@ type FileLeadStepIn = {
   url?: string;
   /** Unit BW3: the pages the pasted story cites (see `newStoryRequest`). */
   urls?: string[];
-  disclosureKey?: "outside-ai" | "person" | "other";
+  disclosureKey?: "outside-ai" | "other";
   disclosureOther?: string;
   /** Unit BW3: the body is an editor's paste (`draft-evidence.ts:36`). */
   importedText?: boolean;

@@ -1009,7 +1009,13 @@ export const fileLeadInput = z.object({
    * it is and `fileLead` carries it. Absent -- every other caller -- writes
    * nothing.
    */
-  disclosureKey: z.enum(["outside-ai", "person", "other"]).optional(),
+  /* "person" is the choice this form used to offer; a saved form or an old
+     client may still send it. It means no line now, so it reads as
+     "outside-ai" rather than failing the request (Scott, Nov 4 2026). */
+  disclosureKey: z
+    .enum(["outside-ai", "person", "other"])
+    .optional()
+    .transform((key) => (key === "person" ? ("outside-ai" as const) : key)),
   disclosureOther: z.string().max(LIMITS.disclosureOther).optional(),
   /**
    * The body is a story an editor pasted, not prose a model wrote beside the
@@ -1953,7 +1959,12 @@ export const importStorySelection = z.looseObject({
   notes: z.string().max(4_000).catch(""),
   /** A "Hold" triage imports with a visible Hold flag. */
   hold: z.boolean().catch(false),
-  disclosureKey: z.enum(["outside-ai", "person", "other"]).catch("outside-ai"),
+  /* "person" was the removed choice; an old client that still sends it gets
+     the no-line choice, never a failed import (Scott, Nov 4 2026). */
+  disclosureKey: z
+    .enum(["outside-ai", "person", "other"])
+    .catch("outside-ai")
+    .transform((key) => (key === "person" ? ("outside-ai" as const) : key)),
   disclosureOther: z.string().max(LIMITS.disclosureOther).catch(""),
 });
 

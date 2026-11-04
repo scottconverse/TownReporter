@@ -31,9 +31,13 @@ const AI_RESEARCHED_UNCHECKED_LINE = "A person wrote and edited this story. AI t
 // The import screen's old "An outside AI tool" preset line. Like the lines above
 // it was never an editor's own words, so a copy saved on an article is dropped.
 const OUTSIDE_AI_IMPORT_LINE = "An outside AI research tool wrote this from public records; an editor reviewed it.";
+// Scott, Nov 4 2026: the old import preset's "A person" line. The choice is
+// gone, and a copy saved on an article before then is dropped on read too.
+const PERSON_IMPORT_LINE = "A person wrote this from public records; an editor reviewed it.";
 
 const DERIVED_LINES = [
   OUTSIDE_AI_IMPORT_LINE,
+  PERSON_IMPORT_LINE,
   AI_DRAFTED_AND_RESEARCHED_LINE,
   AI_DRAFTED_LINE,
   AI_RESEARCHED_LINE,

@@ -403,11 +403,11 @@ export function newStoryRequest(
         ...(link && /^https?:\/\//i.test(link) ? { url: link } : {}),
         ...(cited.length ? { urls: cited } : {}),
         /*
-          Who wrote it. The old one-story paste panel asked this question and
-          defaulted to "A person" (`desk.index.tsx:348`, `paste-one-story.ts:49`),
-          and the answer is what the reader sees under the story
+          Who wrote it. The one-story paste panel defaults to "An outside AI
+          tool" (`desk.index.tsx:348`, `paste-one-story.ts:47`), which prints
+          no line, and the answer is what the reader sees under the story
           (`ai-disclosure.tsx:33`). The drawn tab draws no such control -- see
-          the BW3 report -- so it sends the same default the panel sent.
+          the BW3 report -- so it sends the same default the panel sends.
         */
         disclosureKey: PASTE_ONE_DISCLOSURE,
         /*
