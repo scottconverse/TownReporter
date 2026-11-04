@@ -7,6 +7,7 @@ import { withEditorWarningAction } from "@/components/editor-warning-consent.ts"
 import { askDeskToastOverride } from "@/components/desk-toast.ts";
 import type { EvidenceRow, EvidenceSearchResult } from "@/lib/news/evidence-search.server";
 import type { PastStoryRow } from "@/lib/news/story-meaning-search.server";
+import { OPINION_PAST_STORY_LABEL } from "@/lib/news/past-story-order";
 
 /**
  * "Find evidence" on the Story page's Sources tab (D285/D286).
@@ -72,7 +73,21 @@ function PastStoriesList({ rows }: { rows: PastStoryRow[] }) {
       {rows.map((row) => (
         <li key={row.articleId} className="evidence-row">
           <p className="evidence-title">{row.headline}</p>
-          <p className="evidence-meta">Published {formatShortDate(row.publishedAt)}</p>
+          <p className="evidence-meta">
+            {/*
+              G27-MS-1: an opinion piece is the paper's own column, not its
+              reporting, and the list used to print the two in the same type.
+              The word is the desk's own ("Opinion", see past-story-order.ts),
+              and the server has already put it after the reporting in the
+              same score band.
+            */}
+            {row.isOpinion ? (
+              <>
+                <span className="evidence-badge">{OPINION_PAST_STORY_LABEL}</span> ·{" "}
+              </>
+            ) : null}
+            Published {formatShortDate(row.publishedAt)}
+          </p>
           <div className="evidence-actions">
             <a className="btn" href={`/articles/${row.slug}`} target="_blank" rel="noreferrer">
               Open story
