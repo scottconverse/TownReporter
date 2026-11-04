@@ -153,6 +153,35 @@ describe("readable source-card titles", () => {
     assert.equal(readableSourceTitle("www.longmontcolorado.gov", url), fallback);
   });
 
+  /*
+    G34-R-1 (walk note, Nov 4 2026). A page with no `<title>` can be captured
+    with a title built from its URL path, and an id-addressed path is all hex.
+    The card showed `3f188e D228cf26794f408c829804aab32016c1` where the name of
+    the source belongs. A random id is not a title; the host is (G31-W-2).
+  */
+  it("drops hex-id path titles and names the site by its host", () => {
+    const rtd = "https://www.rtd-denver.com/schedules/3f188e/D228cf26794f408c829804aab32016c1";
+    for (const title of [
+      "3f188e D228cf26794f408c829804aab32016c1",
+      "3f188e 81fe6114861f41efa56fc00d0d69a3cc",
+      "D228cf26794f408c829804aab32016c1",
+      "3f188e 81fe6114861f41efa56fc00d0d69a3cc 9b2f0d3a7c1e4f6a8b0c2d4e6f8a0b2c",
+    ]) {
+      assert.equal(readableSourceTitle(title, rtd), "rtd-denver.com", `${JSON.stringify(title)} leaked to a card`);
+    }
+  });
+
+  it("keeps real titles that share the shape's words", () => {
+    for (const title of [
+      "Joint Service Term Sheet Redacted",
+      "Detail Meeting",
+      "Decade Facade",
+      "Chapter 2026 11 04",
+    ]) {
+      assert.equal(readableSourceTitle(title, url), title);
+    }
+  });
+
   it("gives a cited URL with no record card the same readable fallback", () => {
     const items = readerProvenanceItems([], [url]);
     assert.equal(items.length, 1);
