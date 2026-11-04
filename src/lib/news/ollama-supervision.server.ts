@@ -38,7 +38,7 @@
   this module pass fakes and never touch the machine.
 */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import type { OllamaStatus } from "./ollama-status.ts";
@@ -326,14 +326,31 @@ function startOwnCopy(
   }
 }
 
+export type StopOwnedOllamaOptions = {
+  env?: NodeJS.ProcessEnv;
+  dataRoot?: string;
+  platform?: NodeJS.Platform;
+  /** Runs a command to completion. Injected in tests; hidden window in real use. */
+  runSync?: (command: string, args: string[]) => void;
+};
+
+/** `exit` handlers may only run synchronous work, so this is `spawnSync`. */
+function runSyncHidden(command: string, args: string[]): void {
+  spawnSync(command, args, { windowsHide: true, stdio: "ignore" });
+}
+
 /**
  * Stop ONLY the copy this process started, by the PID it saved.
  *
  * Called from the app's shutdown hook. Never by program name, never a PID we
  * did not record. A copy left by an earlier process is left alone: it is not
  * ours to kill, and the next check reuses it on 11435.
+ *
+ * On Windows `ollama serve` starts a child for every loaded model, and a plain
+ * SIGTERM would end only the parent and leave the model runners holding
+ * memory. `taskkill /T` ends the whole tree, by that one PID.
  */
-export function stopOwnedOllama(options: { env?: NodeJS.ProcessEnv; dataRoot?: string } = {}): boolean {
+export function stopOwnedOllama(options: StopOwnedOllamaOptions = {}): boolean {
   const env = options.env ?? process.env;
   const path = ownStatePath(options.dataRoot ?? ollamaDataRoot(env));
   const saved = readOwnState(path);
@@ -343,7 +360,13 @@ export function stopOwnedOllama(options: { env?: NodeJS.ProcessEnv; dataRoot?: s
     return false;
   }
   try {
-    if (isAlive(pid)) process.kill(pid, "SIGTERM");
+    if (isAlive(pid)) {
+      if ((options.platform ?? process.platform) === "win32") {
+        (options.runSync ?? runSyncHidden)("taskkill", ["/PID", String(pid), "/T", "/F"]);
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+    }
   } catch (err) {
     console.error(`[ollama] could not stop its own copy (pid ${pid}): ${String(err)}`);
   }

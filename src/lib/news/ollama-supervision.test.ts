@@ -272,6 +272,63 @@ describe("a busy machine whose Ollama answers slowly", () => {
 });
 
 describe("shutdown and discovery", () => {
+  it("stops its own copy on Windows with taskkill by PID and its tree", async () => {
+    // The fake spawn reports this test process's PID, which is alive, so the
+    // alive check passes; runSync is injected, so nothing is really killed.
+    const spawn = ((_command: string, _args: string[], _options: Record<string, unknown>) => ({
+      pid: process.pid,
+      unref() {},
+    })) as unknown as typeof import("node:child_process").spawn;
+    await ensureOllama({
+      fetch: fetchAnswering(new Set([OWN_ROOT])),
+      spawn,
+      exists: () => true,
+      now: atSixFiftyTwo,
+      sleep: async () => undefined,
+      waitMs: 2_000,
+    });
+    const killed: { command: string; args: string[] }[] = [];
+    const stopped = stopOwnedOllama({
+      dataRoot: root,
+      platform: "win32",
+      runSync: (command, args) => {
+        killed.push({ command, args });
+      },
+    });
+    assert.equal(stopped, true);
+    assert.equal(killed.length, 1);
+    assert.equal(killed[0].command, "taskkill");
+    assert.deepEqual(killed[0].args, ["/PID", String(process.pid), "/T", "/F"]);
+  });
+
+  it("does nothing when the saved PID is not the one it recorded", async () => {
+    const { spawn } = spawnRecording();
+    await ensureOllama({
+      fetch: fetchAnswering(new Set([OWN_ROOT])),
+      spawn,
+      exists: () => true,
+      now: atSixFiftyTwo,
+      sleep: async () => undefined,
+      waitMs: 2_000,
+    });
+    // The state file now names a different PID than the one we started.
+    writeFileSync(
+      ownStatePath(root),
+      JSON.stringify({ pid: process.pid, port: 11435, startedAt: atSixFiftyTwo() }),
+      "utf8",
+    );
+    const killed: { command: string; args: string[] }[] = [];
+    const stopped = stopOwnedOllama({
+      dataRoot: root,
+      platform: "win32",
+      runSync: (command, args) => {
+        killed.push({ command, args });
+      },
+    });
+    assert.equal(stopped, false);
+    assert.equal(killed.length, 0, "a PID we did not record is never killed");
+  });
+
   it("never stops an Ollama this process did not start", () => {
     mkdirSync(join(root, "logs"), { recursive: true });
     writeFileSync(
