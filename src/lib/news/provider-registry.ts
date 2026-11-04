@@ -342,6 +342,28 @@ export function resetLocalDiscoveryReachableForTests(): void {
   localDiscoveryReachable = false;
 }
 
+/*
+  The OpenAI-compatible face of the Ollama copy TownReporter started itself
+  (DEF-2). Null means "the ordinary Ollama on 11434 is the one to use".
+
+  Ollama's app listens on 11434. A copy TownReporter starts uses 11435 so the
+  two never fight when the app comes up later. The supervisor
+  (`ollama-supervision.server.ts`) owns that decision and writes it here after
+  every check, because `providerEndpoint` is synchronous, pure and imported by
+  the browser. This is the same shape as `localDiscoveryReachable` above: a
+  plain flag, one writer on the server, one reader below.
+*/
+let supervisedOllamaBaseUrl: string | null = null;
+
+export function setSupervisedOllamaBaseUrl(url: string | null): void {
+  supervisedOllamaBaseUrl = url ? trimSlash(url) : null;
+}
+
+/** Test-only: put the override back to its start state between test files. */
+export function resetSupervisedOllamaBaseUrlForTests(): void {
+  supervisedOllamaBaseUrl = null;
+}
+
 /** `TOWNREPORTER_X=0` means "pretend this machine does not have it". */
 function notSwitchedOff(key: string): boolean {
   return env(key) !== "0";
@@ -351,15 +373,24 @@ function notSwitchedOff(key: string): boolean {
  * The local model servers this desk looks for on its own, by address.
  *
  * THE one list, and it has two readers: `local-models.ts` probes exactly these
- * three ports (its own doc comment says the same three), and
+ * ports (its own doc comment says the same set), and
  * `providerEndpointWatched` below reads it to answer "did anything look at
  * that address?" for a rung that ships one. Two lists that drifted would mean
  * the Server page telling an owner that nothing answered at an address the
  * desk never visited -- a claim about a probe that never ran.
+ *
+ * DEF-2 added 11435: the copy TownReporter starts for itself when Ollama is
+ * installed but stopped. Leaving it out would make discovery blind to the one
+ * Ollama this app is responsible for.
  */
+export const OLLAMA_DEFAULT_ENDPOINT = "http://127.0.0.1:11434/v1";
+/** The port a copy TownReporter starts for itself uses (DEF-2, Scott Nov 4 2026). */
+export const OLLAMA_OWN_ENDPOINT = "http://127.0.0.1:11435/v1";
+
 export const DISCOVERED_LOCAL_ADDRESSES: readonly string[] = [
   "http://127.0.0.1:1234/v1",
-  "http://127.0.0.1:11434/v1",
+  OLLAMA_DEFAULT_ENDPOINT,
+  OLLAMA_OWN_ENDPOINT,
   "http://127.0.0.1:8080/v1",
 ];
 
@@ -1230,7 +1261,18 @@ function trimSlash(url: string): string {
 export function providerEndpoint(entry: ProviderEntry): string | null {
   const override = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
   const baseUrl = override || entry.baseUrl;
-  return baseUrl ? trimSlash(baseUrl) : null;
+  if (!baseUrl) return null;
+  const trimmed = trimSlash(baseUrl);
+  /*
+    DEF-2: while TownReporter's own Ollama copy (port 11435) is the one that
+    answers, a rung whose endpoint is the ordinary Ollama address goes there
+    instead. An installation setting that names an address always wins -- the
+    operator pointed somewhere on purpose.
+  */
+  if (!override && trimmed === OLLAMA_DEFAULT_ENDPOINT && supervisedOllamaBaseUrl) {
+    return supervisedOllamaBaseUrl;
+  }
+  return trimmed;
 }
 
 /**

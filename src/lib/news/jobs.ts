@@ -1054,6 +1054,24 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
       before the claim.
     */
     await throwIfJobCancelled(job.id);
+    /*
+      DEF-2: look after Ollama before the worker asks any model for anything.
+
+      One call, cached for 30 seconds, and one shared helper (see
+      ollama-supervision.server.ts). It never throws and never blocks past 60
+      seconds, so a missing or broken Ollama can only ever mean "the ladder
+      moves on", never "the job failed". A job that is not asking a model for
+      anything (a source pull) is left alone.
+    */
+    if (job.kind !== "pull") {
+      try {
+        const { ensureOllama } = await import("./ollama-supervision.server.ts");
+        const ollama = await ensureOllama();
+        if (ollama.note) await setJobFailoverNote(job.id, ollama.note);
+      } catch (err) {
+        console.error(`[ollama] check before job ${job.id} failed: ${String(err)}`);
+      }
+    }
     await runWork({ ...seeded, claim_token: token });
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.

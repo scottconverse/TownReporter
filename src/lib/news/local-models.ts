@@ -2,10 +2,11 @@
   Finds a local, OpenAI-compatible model server on the machine running this
   desk, without asking the operator to type anything.
 
-  Three probes, always at the same three ports, plus whatever LLM_BASE_URL
-  already names: LM Studio's default (http://127.0.0.1:1234/v1), Ollama's
-  default (http://127.0.0.1:11434/v1), and llama.cpp's llama-server default
-  (http://127.0.0.1:8080/v1). Those three addresses are written down once, in
+  Probes, always at the same ports, plus whatever LLM_BASE_URL already names:
+  LM Studio's default (http://127.0.0.1:1234/v1), Ollama's default
+  (http://127.0.0.1:11434/v1), the copy TownReporter may start for itself
+  (http://127.0.0.1:11435/v1, DEF-2), and llama.cpp's llama-server default
+  (http://127.0.0.1:8080/v1). Those addresses are written down once, in
   `provider-registry.ts` as `DISCOVERED_LOCAL_ADDRESSES` (unit CX3, 0.6.81),
   because the Server page has to be able to say whether a rung's address was
   ever looked at and the two answers must come from one list. Owner rule "out
@@ -105,7 +106,8 @@ function isThinking(id: string): boolean {
 
 function inferKind(baseUrl: string): LocalServerKind {
   if (/:1234\b/.test(baseUrl)) return "lmstudio";
-  if (/:11434\b/.test(baseUrl)) return "ollama";
+  // 11435 is the copy TownReporter starts for itself (DEF-2); it is Ollama too.
+  if (/:11434\b/.test(baseUrl) || /:11435\b/.test(baseUrl)) return "ollama";
   if (/:8080\b/.test(baseUrl)) return "llamacpp";
   return "openai-compatible";
 }
@@ -492,6 +494,17 @@ export async function refreshLocalCatalog(force = false): Promise<LocalCatalog> 
     if (typeof timer.unref === "function") timer.unref();
   }
   return catalog;
+}
+
+/**
+ * Drop the cached catalog so the next caller probes the ports again.
+ *
+ * Used by the Ollama supervisor (DEF-2) the moment it starts its own copy on
+ * 11435: without this, a catalog read up to 20 seconds old would still say
+ * "no server answered" and a rung would skip a server that is running now.
+ */
+export function forgetLocalCatalogCache(): void {
+  cache = null;
 }
 
 /** Test-only: drop the cache and the lazy-timer flag between test files. */

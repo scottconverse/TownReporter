@@ -10,7 +10,7 @@ function serverLabel(server: LocalServer): string {
   if (server.kind === "llamacpp") return "llama.cpp";
   try {
     const port = new URL(server.baseUrl).port;
-    if (port === "11434") return "Ollama";
+    if (port === "11434" || port === "11435") return "Ollama";
     if (port === "1234") return "LM Studio";
   } catch {
     /* ignore */
