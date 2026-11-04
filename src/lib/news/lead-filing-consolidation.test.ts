@@ -1175,3 +1175,142 @@ test("the names-only fallback needs BOTH headlines to be nameless: a names-only 
   );
   assert.equal(findMatchingLead(namesOnly, [{ id: 1, status: "killed", ...withSubjects }], SCAN66_PLACE), null);
 });
+
+/*
+  G26-DU-1 (2026-11-03): one scan filed ONE story two or three times.
+
+  Scan 97 filed leads 837, 853 and 858 for the Lyons school ranking. Each was a
+  "possible duplicate" of the same older lead 782, but they were never merged
+  with each other: two cited `svvsd.org/feed/` (an index page, so no shared
+  story page) and the third cited the article. `sameStoryForMerge` merges only
+  a strong match or a shared story page, so every sighting became its own row.
+
+  What they DID share is the older lead they restate, and that is now enough
+  inside one run: a candidate about to be filed linked to an older lead is
+  folded into any row this run already filed against that same lead. The first
+  test is the live shape (three sightings of the Lyons ranking, one older lead,
+  one feed URL and one article URL); the second is its negative control -- a
+  different story in the same run is still its own lead.
+*/
+
+const LYONS_FEED = "https://svvsd.org/feed/";
+const LYONS_ARTICLE = "https://svvsd.org/news/lyons-school-ranking-2026/";
+const LYONS_782 = "Lyons schools post strong showing in new state ranking";
+/*
+  The three real sightings, worded the way the scan worded them: each one is a
+  "possible" match of 782 and NONE is a strong match of another, which is why
+  the same-story finder above let all three through as separate rows.
+*/
+const LYONS_837 = "Lyons schools post strong showing in the state's newest ranking of performance";
+const LYONS_853 = "Lyons schools post strong showing, state's new ranking of performance finds";
+const LYONS_858 = "Lyons schools post strong showing as the state's new ranking of performance lands";
+const LYONS_782_WHY = "The state published its annual school performance ranking.";
+
+test("G26-DU-1: three sightings of one story in one run, all possible duplicates of the same older lead, are ONE lead", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(782,1,80,$1,$2,'State report.','new',$3,0)`,
+      [LYONS_782, LYONS_782_WHY, JSON.stringify([LYONS_FEED])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      97,
+      [
+        {
+          headline: LYONS_837,
+          why: "The new state report puts Lyons near the top.",
+          evidence: "State ranking, released this week.",
+          topic: "schools",
+          source_urls: [LYONS_FEED],
+        },
+        {
+          headline: LYONS_853,
+          why: "Lyons students scored well in the state's new comparison.",
+          evidence: "State ranking, released this week.",
+          topic: "schools",
+          source_urls: [LYONS_FEED],
+        },
+        {
+          headline: LYONS_858,
+          why: "The district highlighted the Lyons results.",
+          evidence: "District news release, this week.",
+          topic: "schools",
+          source_urls: [LYONS_ARTICLE],
+        },
+      ],
+      [{ id: 782, status: "new", headline: LYONS_782, source_urls: [LYONS_FEED], why: LYONS_782_WHY }],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 1, "one story found three times in one run is ONE lead");
+    assert.equal(result.mergedSameScan, 2, "both later sightings are counted, not silently dropped");
+    assert.equal(result.possibleMatched, 1, "the kept row is still marked as a possible duplicate");
+    const rows = (
+      await db.query<{
+        id: number;
+        headline: string;
+        source_urls: string;
+        possible_duplicate_of: number | null;
+        status: string;
+      }>("select id, headline, source_urls, possible_duplicate_of, status from leads order by id")
+    ).rows;
+    assert.equal(rows.length, 2, "the older lead 782 and the one row this run filed");
+    const filed = rows.filter((r) => r.id !== 782);
+    assert.equal(filed.length, 1);
+    assert.equal(filed[0]!.headline, LYONS_837, "the first sighting of the story is the one kept");
+    assert.equal(filed[0]!.possible_duplicate_of, 782, "and it still says which lead it restates");
+    assert.deepEqual(
+      JSON.parse(filed[0]!.source_urls),
+      [LYONS_FEED, LYONS_ARTICLE],
+      "every sighting's source links survive on the one kept lead -- add, never drop",
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test("G26-DU-1: a different story in the same run is still filed as its own lead", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(782,1,80,$1,$2,'State report.','new',$3,0)`,
+      [LYONS_782, LYONS_782_WHY, JSON.stringify([LYONS_FEED])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      98,
+      [
+        {
+          headline: LYONS_837,
+          why: "The new state report puts Lyons near the top.",
+          evidence: "State ranking, released this week.",
+          topic: "schools",
+          source_urls: [LYONS_FEED],
+        },
+        {
+          headline: "Longmont police seek a man in a hit-and-run on Main Street",
+          why: "Police asked the public for help finding the driver.",
+          evidence: "Police release, this week.",
+          topic: "council",
+          source_urls: ["https://longmontcolorado.gov/news/hit-and-run-main-street/"],
+        },
+      ],
+      [{ id: 782, status: "new", headline: LYONS_782, source_urls: [LYONS_FEED], why: LYONS_782_WHY }],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 2, "two different stories are two leads");
+    assert.equal(result.mergedSameScan, 0, "nothing was folded together");
+  } finally {
+    await db.close();
+  }
+});

@@ -1158,6 +1158,13 @@
    scanner. It says so on the row, so "where did this come from?" is answered
    without opening the lead. */
 .desk-ltr .chip.imported {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
+/* G26-HP-1: a lead whose source is a home page, a section list or a feed
+   rather than the story page. The link stays; the chip says what it is. It
+   wraps like the topic-unchosen chip because the words are the point, and it
+   is a warning shape (dashed) with no colour of its own -- it never blocks,
+   so it must not read like an error. */
+.desk-ltr .chip.source-home {border-style:dashed;border-color:var(--fg2);color:var(--fg2);display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.desk-ltr .lead-flags .chip.source-home {margin:0}
 .desk-ltr .lead-flags .chip.imported {margin:0}
 .desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--fg2);color:var(--fg2);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--adeep)}
