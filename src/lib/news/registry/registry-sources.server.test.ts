@@ -10,6 +10,7 @@ import {
 } from "./registry-sources.server.ts";
 import {
   ensureRegistryBackboneSources,
+  isBackboneRegion,
   registryBackboneSources,
 } from "../source-seeds.server.ts";
 
@@ -86,12 +87,24 @@ test("the spec 22 backbone is five directories with the intended tiers", () => {
   assert.equal(byHost.get("www.ourcenter.org"), "B");
 });
 
+test("the backbone region is Longmont or Boulder County, Colorado", () => {
+  assert.equal(isBackboneRegion({ city: "Longmont", state: "Colorado", county: null }), true);
+  assert.equal(isBackboneRegion({ city: "  longmont ", state: " CO ", county: null }), true);
+  assert.equal(isBackboneRegion({ city: "", state: "Colorado", county: "Boulder County" }), true);
+  assert.equal(isBackboneRegion({ city: "", state: "co", county: " Boulder " }), true);
+  assert.equal(isBackboneRegion({ city: "Riverbend", state: "Oregon", county: null }), false);
+  assert.equal(isBackboneRegion({ city: "Longmont", state: "Wyoming", county: null }), false);
+  assert.equal(isBackboneRegion({ city: "", state: "", county: null }), false);
+  assert.equal(isBackboneRegion(null), false);
+});
+
 test("seeding the backbone twice adds nothing the second time", async () => {
   const sql = await getSql();
   const newsroomId = 9205;
-  await sql.query("insert into paper_settings (newsroom_id, onboarded) values ($1, true)", [
-    newsroomId,
-  ]);
+  await sql.query(
+    "insert into paper_settings (newsroom_id, city, state, onboarded) values ($1, 'Longmont', 'Colorado', true)",
+    [newsroomId],
+  );
 
   assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 5);
   assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 0);
@@ -130,9 +143,10 @@ test("the backbone is not seeded into a newsroom that was never onboarded", asyn
 test("a second editor's seed reuses the newsroom's rows, and a rejected one stays rejected", async () => {
   const sql = await getSql();
   const newsroomId = 9207;
-  await sql.query("insert into paper_settings (newsroom_id, onboarded) values ($1, true)", [
-    newsroomId,
-  ]);
+  await sql.query(
+    "insert into paper_settings (newsroom_id, city, state, onboarded) values ($1, 'Longmont', 'Colorado', true)",
+    [newsroomId],
+  );
 
   assert.equal(await ensureRegistryBackboneSources("first-editor", newsroomId), 5);
   assert.equal(await ensureRegistryBackboneSources("second-editor", newsroomId), 0);
@@ -157,4 +171,25 @@ test("a second editor's seed reuses the newsroom's rows, and a rejected one stay
   assert.equal(rows.length, 1, "the rejected URL is not duplicated");
   assert.equal(rows[0]!.status, "rejected", "its status is not flipped back");
   assert.equal(rows[0]!.user_id, "first-editor");
+});
+
+test("the backbone seeds only into a Longmont / Boulder County paper", async () => {
+  const sql = await getSql();
+  await sql.query(
+    `insert into paper_settings (newsroom_id, city, state, onboarded)
+     values (9208, 'Riverbend', 'Oregon', true),
+            (9209, 'Longmont', 'Colorado', true),
+            (9210, 'Lyons', 'CO', true)`,
+  );
+  await sql.query("insert into dark_settings (newsroom_id, county) values (9210, 'Boulder County')");
+
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", 9208), 0);
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", 9209), 5);
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", 9210), 5);
+
+  assert.deepEqual(await listRegistrySources(sql, 9208), [], "Riverbend gets no backbone");
+  const [longmont] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from sources where newsroom_id = 9209 and status = 'accepted'",
+  );
+  assert.equal(Number(longmont!.count), 5);
 });

@@ -1,8 +1,8 @@
 import type { SourceRow } from "./types.ts";
-import { withTransaction, type Sql } from "../db.ts";
+import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
+import { getPaperConfig, getPaperPlace, isOnboarded } from "./paper-settings.ts";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { markRegistrySource } from "./registry/registry-sources.server.ts";
 import { storableText } from "./storable-text.ts";
@@ -93,6 +93,48 @@ export function registryBackboneSources() {
   });
 }
 
+/** The place fields the backbone decision reads. */
+export type BackbonePlace = {
+  city?: string | null;
+  state?: string | null;
+  county?: string | null;
+};
+
+/**
+ * Spec 22 lists the five backbone directories under Longmont / Boulder
+ * County, so they belong to a paper in that place and nowhere else. This is
+ * the one place that decides "that place": state Colorado (accepted as
+ * "Colorado" or "CO"), and either the city Longmont or the county Boulder /
+ * Boulder County. Everything is trimmed and case-insensitive, and a paper
+ * that names no place gets no backbone.
+ */
+export function isBackboneRegion(place: BackbonePlace | null | undefined): boolean {
+  const state = (place?.state ?? "").trim().toLowerCase();
+  if (state !== "colorado" && state !== "co") return false;
+  const city = (place?.city ?? "").trim().toLowerCase();
+  const county = (place?.county ?? "").trim().toLowerCase();
+  return city === "longmont" || county === "boulder" || county === "boulder county";
+}
+
+/**
+ * The paper's own place for the backbone check.
+ *
+ * City and state come straight from the newsroom's `paper_settings` row, NOT
+ * from `getPaperPlace`: that read merges a blank row with the shipped
+ * Longmont identity (`mergeRow` in paper-settings.ts), so a paper that never
+ * named a place would look like Longmont's. A blank place is no place. The
+ * county has no such fallback -- `getPaperPlace` reads it from
+ * `dark_settings` -- so it is taken from there.
+ */
+async function backboneRegionPlace(newsroomId: number): Promise<BackbonePlace> {
+  const sql = await getSql();
+  const [row] = await sql<{ city: string | null; state: string | null }>`
+    select city, state from paper_settings where newsroom_id = ${newsroomId} limit 1
+  `;
+  const { county } = await getPaperPlace(newsroomId);
+  return { city: row?.city ?? null, state: row?.state ?? null, county };
+}
+
 /**
  * Seed the spec 22 registry backbone for an onboarded newsroom.
  *
@@ -111,6 +153,12 @@ export async function ensureRegistryBackboneSources(
   newsroomId = DEFAULT_NEWSROOM_ID,
 ): Promise<number> {
   if (!(await isOnboarded(newsroomId))) return 0;
+  /*
+    Spec 22 lists these five under Longmont / Boulder County, and the app
+    keeps Longmont data out of papers for other towns. The check stays here,
+    not at the callers, so every seeding path gets it.
+  */
+  if (!isBackboneRegion(await backboneRegionPlace(newsroomId))) return 0;
   return withTransaction(async (sql) => {
     await sql`
       select newsroom_id
