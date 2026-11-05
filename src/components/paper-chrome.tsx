@@ -209,6 +209,7 @@ export function PaperShell({
                 <b>THE NEWSROOM</b>
                 <Link to="/about">About us</Link>
                 <Link to="/how-we-report">How we report</Link>
+                <Link to="/registry">Community resources</Link>
                 <Link to="/corrections">Corrections</Link>
                 {/*
                   Boundary entry: leave the reader app with a document

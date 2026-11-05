@@ -2751,6 +2751,20 @@ export function tierFromKind(kind: string): "A" | "B" | "C" {
 }
 
 /**
+ * The evidence tier of a registry change in plain words (spec 9.3, 14).
+ *
+ * The registry desk draws this line on every change, so the editor reads what
+ * the tier means rather than a bare letter -- and the same words the sources
+ * desk uses for its own tier legend. An unknown value is the weakest claim,
+ * never promoted.
+ */
+export function evidenceTierLabel(tier: string): string {
+  if (tier === "A") return "Tier A: official record";
+  if (tier === "B") return "Tier B: established source";
+  return "Tier C: community signal, not checked";
+}
+
+/**
  * Who suggested a source, in words (migration 0097's `proposed_by`).
  *
  * "Not recorded" is a real answer and not a fallback to hide: 175 rows were

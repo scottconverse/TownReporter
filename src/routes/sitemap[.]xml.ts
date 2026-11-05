@@ -36,7 +36,7 @@ function siteOrigin(request: Request): string {
   return `${proto}://${host}`;
 }
 
-const STATIC_PATHS = ["/", "/about", "/how-we-report", "/corrections"] as const;
+const STATIC_PATHS = ["/", "/about", "/how-we-report", "/corrections", "/registry"] as const;
 
 export const Route = createFileRoute("/sitemap.xml")({
   server: {

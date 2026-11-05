@@ -102,6 +102,9 @@ create table if not exists organizations (
   verification_method text
     check (verification_method in ('scan', 'editor', 'org-confirmed', 'imported')),
   last_verified_by text,
+  -- Spec 18.2: the public entry shows an editor note where one exists. Written
+  -- by an editor, never by an import.
+  editor_note text,
   resource_import_id bigint references resource_imports(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -136,6 +139,8 @@ create table if not exists services (
   verification_method text
     check (verification_method in ('scan', 'editor', 'org-confirmed', 'imported')),
   last_verified_by text,
+  -- Spec 18.2: an editor's note for this entry, shown with it in public.
+  editor_note text,
   field_provenance jsonb not null default '{}'::jsonb,
   resource_import_id bigint references resource_imports(id) on delete set null,
   created_at timestamptz not null default now(),
