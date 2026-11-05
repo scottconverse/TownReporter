@@ -28,11 +28,14 @@ async function seedNewsroom(
     serviceStatus?: string;
     taxonomyName?: string;
     verifiedAt?: string | null;
+    /** Child rows follow the service's published flag unless set here. */
+    childPublished?: boolean;
     /** Keeps the HSDS identifiers unique when one newsroom is seeded twice. */
     suffix?: string;
   } = {},
 ): Promise<Seeded> {
   const sql = await getSql();
+  const childPublished = options.childPublished ?? options.published ?? false;
   const key = (name: string) => `${name}-${newsroomId}${options.suffix ?? ""}`;
   const [source] = await sql.query<{ id: number }>(
     `insert into sources (user_id, newsroom_id, url, title, kind, tier, status, last_fetched_at)
@@ -77,29 +80,29 @@ async function seedNewsroom(
   );
 
   await sql.query(
-    `insert into contacts (newsroom_id, hsds_id, service_id, phone)
-     values ($1, $2, $3, '555-0100')`,
-    [newsroomId, key("ct"), service!.id],
+    `insert into contacts (newsroom_id, hsds_id, service_id, phone, published)
+     values ($1, $2, $3, '555-0100', $4)`,
+    [newsroomId, key("ct"), service!.id, childPublished],
   );
   await sql.query(
-    `insert into languages (newsroom_id, hsds_id, service_id, language)
-     values ($1, $2, $3, 'Spanish')`,
-    [newsroomId, key("lang"), service!.id],
+    `insert into languages (newsroom_id, hsds_id, service_id, language, published)
+     values ($1, $2, $3, 'Spanish', $4)`,
+    [newsroomId, key("lang"), service!.id, childPublished],
   );
   const [location] = await sql.query<{ id: number }>(
-    `insert into locations (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code)
-     values ($1, $2, $3, '100 Main St', 'Longmont', 'CO', '80501') returning id`,
-    [newsroomId, key("loc"), org!.id],
+    `insert into locations (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, published)
+     values ($1, $2, $3, '100 Main St', 'Longmont', 'CO', '80501', $4) returning id`,
+    [newsroomId, key("loc"), org!.id, childPublished],
   );
   await sql.query(
-    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id)
-     values ($1, $2, $3, $4)`,
-    [newsroomId, key("sal"), service!.id, location!.id],
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, published)
+     values ($1, $2, $3, $4, $5)`,
+    [newsroomId, key("sal"), service!.id, location!.id, childPublished],
   );
   await sql.query(
-    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at)
-     values ($1, $2, $3, 'Monday', '09:00', '11:00')`,
-    [newsroomId, key("sch"), service!.id],
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, $2, $3, 'Monday', '09:00', '11:00', $4)`,
+    [newsroomId, key("sch"), service!.id, childPublished],
   );
 
   return {
@@ -152,6 +155,74 @@ test("a row with published = false never appears in the public list", async () =
   assert.deepEqual(page.categories, [], "an unpublished service adds no category either");
 });
 
+test("a published service shows only its published children", async () => {
+  const sql = await getSql();
+  const newsroomId = 9410;
+  const seeded = await seedNewsroom(newsroomId, {
+    published: true,
+    childPublished: true,
+    suffix: "a",
+  });
+
+  // Unpublished phones, schedules, languages and address all stay off the page.
+  await sql.query(
+    `insert into contacts (newsroom_id, hsds_id, service_id, phone, published)
+     values ($1, 'ct-unpub', $2, '555-9999', false)`,
+    [newsroomId, seeded.serviceId],
+  );
+  await sql.query(
+    `insert into languages (newsroom_id, hsds_id, service_id, language, published)
+     values ($1, 'lang-unpub', $2, 'French', false)`,
+    [newsroomId, seeded.serviceId],
+  );
+  await sql.query(
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-unpub', $2, 'Sunday', '14:00', '16:00', false)`,
+    [newsroomId, seeded.serviceId],
+  );
+  const [unpublishedLocation] = await sql.query<{ id: number }>(
+    `insert into locations
+       (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, published)
+     values ($1, 'loc-unpub', $2, '9 Wrong St', 'Boulder', 'CO', '80301', false) returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, published)
+     values ($1, 'sal-unpub', $2, $3, true)`,
+    [newsroomId, seeded.serviceId, unpublishedLocation!.id],
+  );
+  // A published service_at_location whose location is unpublished, and a
+  // schedule reached through it that is also unpublished.
+  const [secondLocation] = await sql.query<{ id: number }>(
+    `insert into locations
+       (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, published)
+     values ($1, 'loc-unpub-sal', $2, '8 Wrong St', 'Boulder', 'CO', '80301', false) returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  const [linkedSchedule] = await sql.query<{ id: number }>(
+    `insert into schedules (newsroom_id, hsds_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-sal', 'Tuesday', '10:00', '12:00', false) returning id`,
+    [newsroomId],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, schedule_id, published)
+     values ($1, 'sal-unpub-location', $2, $3, $4, true)`,
+    [newsroomId, seeded.serviceId, secondLocation!.id, linkedSchedule!.id],
+  );
+
+  const page = await listPublicRegistry(sql, newsroomId);
+  assert.equal(page.entries.length, 1);
+  const entry = page.entries[0]!;
+  assert.equal(entry.phone, "555-0100", "only the published phone is shown");
+  assert.equal(
+    entry.address,
+    "100 Main St, Longmont, CO, 80501",
+    "only the published address is shown",
+  );
+  assert.equal(entry.hours, "Monday, 09:00–11:00", "only the published schedule is shown");
+  assert.deepEqual(entry.languages, ["Spanish"], "only the published language is shown");
+});
+
 test("a published service under an unpublished organization stays out of the public list", async () => {
   const sql = await getSql();
   const newsroomId = 9403;
@@ -163,6 +234,21 @@ test("a published service under an unpublished organization stays out of the pub
 
   const page = await listPublicRegistry(sql, newsroomId);
   assert.deepEqual(page.entries, []);
+});
+
+test("a category whose only service sits under an unpublished organization is not offered", async () => {
+  const sql = await getSql();
+  const newsroomId = 9411;
+  const seeded = await seedNewsroom(newsroomId, { published: true });
+  // The service is published and active; its organization is not, so the list
+  // rule drops the service and the category nav must drop its category too.
+  await sql.query("update organizations set status = 'inactive' where id = $1", [
+    seeded.organizationId,
+  ]);
+
+  const page = await listPublicRegistry(sql, newsroomId);
+  assert.deepEqual(page.entries, []);
+  assert.deepEqual(page.categories, []);
 });
 
 test("the category filter returns only that category's published rows", async () => {

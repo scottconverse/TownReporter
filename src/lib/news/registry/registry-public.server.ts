@@ -84,8 +84,11 @@ export async function listPublicRegistryCategories(
        from taxonomies t
        join services s
          on s.taxonomy_id = t.id and s.newsroom_id = t.newsroom_id
+       join organizations o
+         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
       where t.newsroom_id = $1
         and s.published = true and s.status = 'active'
+        and o.published = true and o.status = 'active'
       order by t.name`,
     [newsroomId],
   );
@@ -167,6 +170,7 @@ export async function listPublicRegistry(
          from service_at_locations sal
          join locations l on l.id = sal.location_id and l.newsroom_id = sal.newsroom_id
         where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
+          and sal.published = true and l.published = true
         order by sal.id`,
       [newsroomId, serviceIds],
     ),
@@ -174,6 +178,7 @@ export async function listPublicRegistry(
       `select service_id, phone
          from contacts
         where newsroom_id = $1 and service_id = any($2::int[])
+          and published = true
           and phone is not null and phone <> ''
         order by id`,
       [newsroomId, serviceIds],
@@ -183,6 +188,7 @@ export async function listPublicRegistry(
          from contacts
         where newsroom_id = $1 and service_id is null
           and organization_id = any($2::int[])
+          and published = true
           and phone is not null and phone <> ''
         order by id`,
       [newsroomId, organizationIds],
@@ -198,11 +204,13 @@ export async function listPublicRegistry(
       `select sc.service_id, sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from schedules sc
         where sc.newsroom_id = $1 and sc.service_id = any($2::int[])
+          and sc.published = true
         union
        select sal.service_id, sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from service_at_locations sal
          join schedules sc on sc.id = sal.schedule_id and sc.newsroom_id = sal.newsroom_id
         where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
+          and sal.published = true and sc.published = true
         order by service_id`,
       [newsroomId, serviceIds],
     ),
@@ -210,6 +218,7 @@ export async function listPublicRegistry(
       `select service_id, language
          from languages
         where newsroom_id = $1 and service_id = any($2::int[])
+          and published = true
         order by id`,
       [newsroomId, serviceIds],
     ),
