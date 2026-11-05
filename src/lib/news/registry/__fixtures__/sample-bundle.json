@@ -1,0 +1,262 @@
+{
+  "organizations": [
+    {
+      "id": "org-st-vrain-pantry",
+      "name": "St. Vrain Community Pantry",
+      "alternate_name": null,
+      "description": "A food pantry serving households in the St. Vrain valley.",
+      "email": "help@example.org",
+      "website": "https://example.org/pantry",
+      "legal_status": "nonprofit",
+      "status": "unverified",
+      "phones": [
+        {
+          "id": "phone-org-1",
+          "name": "Front desk",
+          "role": null,
+          "department": null,
+          "phone": "303-555-0100",
+          "phone_extension": null,
+          "email": null,
+          "website": null
+        }
+      ],
+      "services": [
+        {
+          "id": "svc-pantry",
+          "name": "Weekly grocery pickup",
+          "description": "One bag of groceries per household per week.",
+          "url": "https://example.org/pantry/pickup",
+          "status": "unverified",
+          "taxonomy_id": "tax-pantry",
+          "fees": null,
+          "application_process": "Walk in during open hours.",
+          "crisis": false,
+          "phones": [
+            {
+              "id": "phone-svc-1",
+              "name": null,
+              "role": "Coordinator",
+              "department": null,
+              "phone": "303-555-0101",
+              "phone_extension": "2",
+              "email": null,
+              "website": null
+            }
+          ],
+          "schedules": [
+            {
+              "id": "sch-pantry",
+              "by_appointment": false,
+              "days": "Tu,Th",
+              "opens_at": "09:00",
+              "closes_at": "12:00",
+              "notes": "Arrive before 11:30."
+            }
+          ],
+          "eligibilities": [
+            {
+              "id": "elig-pantry",
+              "description": "Households at or below 185% of the federal poverty level.",
+              "criteria": {
+                "income_max_percent_fpl": 185,
+                "county": ["Boulder", "Weld"]
+              }
+            }
+          ],
+          "required_documents": [
+            {
+              "id": "doc-pantry-1",
+              "document": "Photo ID",
+              "description": null,
+              "required": true
+            }
+          ],
+          "languages": [
+            {
+              "id": "lang-pantry-en",
+              "language": "en",
+              "note": null
+            },
+            {
+              "id": "lang-pantry-es",
+              "language": "es",
+              "note": "Spanish-speaking volunteer on Tuesdays."
+            }
+          ],
+          "accessibilities": [
+            {
+              "id": "acc-pantry-wheelchair",
+              "accessibility": "wheelchair",
+              "details": null
+            }
+          ],
+          "service_at_locations": [
+            {
+              "id": "sal-pantry",
+              "location_id": "loc-longmont",
+              "description": "Back entrance on the alley.",
+              "schedule_id": null
+            }
+          ]
+        },
+        {
+          "id": "svc-delivery",
+          "name": "Home delivery",
+          "description": "Delivery for residents who cannot leave home.",
+          "url": null,
+          "status": "unverified",
+          "taxonomy_id": "tax-pantry",
+          "fees": null,
+          "application_process": "Call the front desk.",
+          "crisis": false,
+          "phones": [],
+          "schedules": [],
+          "eligibilities": [],
+          "required_documents": [],
+          "languages": [],
+          "accessibilities": [],
+          "service_at_locations": [
+            {
+              "id": "sal-delivery",
+              "location_id": "loc-longmont",
+              "description": null,
+              "schedule_id": null
+            }
+          ]
+        }
+      ],
+      "locations": [
+        {
+          "id": "loc-longmont",
+          "name": "Longmont pantry",
+          "description": null,
+          "address_1": "100 Main St",
+          "address_2": "Suite 2",
+          "city": "Longmont",
+          "state_province": "CO",
+          "postal_code": "80501",
+          "country": "US",
+          "latitude": 40.1672,
+          "longitude": -105.1019,
+          "accessibility_notes": "Ramp at the back entrance.",
+          "transportation_notes": "On the 323 bus line.",
+          "status": "unverified",
+          "phones": [
+            {
+              "id": "phone-loc-1",
+              "name": null,
+              "role": null,
+              "department": null,
+              "phone": "303-555-0199",
+              "phone_extension": null,
+              "email": null,
+              "website": null
+            }
+          ],
+          "schedules": [
+            {
+              "id": "sch-loc-office",
+              "by_appointment": true,
+              "days": null,
+              "opens_at": null,
+              "closes_at": null,
+              "notes": "Office hours by appointment."
+            }
+          ],
+          "accessibilities": [
+            {
+              "id": "acc-loc-parking",
+              "accessibility": "parking",
+              "details": "Two accessible spaces."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "org-city-housing",
+      "name": "City of Longmont Housing Office",
+      "alternate_name": "Housing & Community Investment",
+      "description": null,
+      "email": null,
+      "website": "https://example.gov/housing",
+      "legal_status": "government",
+      "status": "unverified",
+      "phones": [],
+      "services": [
+        {
+          "id": "svc-rent-help",
+          "name": "Emergency rent assistance",
+          "description": "One-time help with back rent.",
+          "url": "https://example.gov/housing/rent",
+          "status": "unverified",
+          "taxonomy_id": null,
+          "fees": "None",
+          "application_process": "Apply online.",
+          "crisis": true,
+          "phones": [],
+          "schedules": [],
+          "eligibilities": [],
+          "required_documents": [
+            {
+              "id": "doc-rent-1",
+              "document": "Lease",
+              "description": "Current signed lease.",
+              "required": true
+            },
+            {
+              "id": "doc-rent-2",
+              "document": "Proof of income",
+              "description": null,
+              "required": false
+            }
+          ],
+          "languages": [],
+          "accessibilities": [],
+          "service_at_locations": [
+            {
+              "id": "sal-rent",
+              "location_id": "loc-civic",
+              "description": null,
+              "schedule_id": null
+            }
+          ]
+        }
+      ],
+      "locations": [
+        {
+          "id": "loc-civic",
+          "name": "Civic Center",
+          "description": null,
+          "address_1": "350 Kimbark St",
+          "address_2": null,
+          "city": "Longmont",
+          "state_province": "CO",
+          "postal_code": "80501",
+          "country": "US",
+          "latitude": null,
+          "longitude": null,
+          "accessibility_notes": null,
+          "transportation_notes": null,
+          "status": "unverified",
+          "phones": [],
+          "schedules": [],
+          "accessibilities": []
+        }
+      ]
+    }
+  ],
+  "taxonomies": [
+    {
+      "id": "tax-pantry",
+      "name": "Food Pantries",
+      "parent_id": "tax-food"
+    },
+    {
+      "id": "tax-food",
+      "name": "Food",
+      "parent_id": null
+    }
+  ]
+}

@@ -123,18 +123,41 @@ export function scanHeadlineKey(headline: string): string {
   return headline.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+/**
+ * The shape a registry change needs to be merged and de-duplicated across
+ * batches. Generic so `scan-batches.ts` stays free of the scan schema.
+ */
+export type MergeableResourceChange = {
+  entity_type: string;
+  field_name: string;
+  before_value: string | null;
+  after_value: string | null;
+  entity_hsds_id?: string | null;
+  entity_name?: string | null;
+  source_url?: string | null;
+};
+
 export function mergeScanBatchResults<
   TLead extends { headline: string; source_urls: string[] },
   TProposed extends { url: string },
->(results: { leads: TLead[]; proposed_sources: TProposed[]; editor_summary: string }[]): {
+  TChange extends MergeableResourceChange = MergeableResourceChange,
+>(results: {
   leads: TLead[];
   proposed_sources: TProposed[];
   editor_summary: string;
+  resource_changes?: TChange[];
+}[]): {
+  leads: TLead[];
+  proposed_sources: TProposed[];
+  editor_summary: string;
+  resource_changes: TChange[];
 } {
   const leads: TLead[] = [];
   const seenHeadlines = new Set<string>();
   const proposed: TProposed[] = [];
   const seenUrls = new Set<string>();
+  const resourceChanges: TChange[] = [];
+  const seenChanges = new Set<string>();
   const summaries: string[] = [];
   for (const result of results) {
     for (const lead of result.leads) {
@@ -149,6 +172,25 @@ export function mergeScanBatchResults<
       seenUrls.add(key);
       proposed.push(row);
     }
+    /*
+      A change is "the same" across batches when it is about the same entity,
+      the same field, and lands on the same value. A proposed value repeated
+      by two batches (a service and its schedule page both naming the new
+      phone number) is one proposal, not two.
+    */
+    for (const change of result.resource_changes ?? []) {
+      const entity = change.entity_hsds_id || change.entity_name || "";
+      const key = [
+        change.entity_type,
+        entity.toLowerCase(),
+        change.field_name,
+        change.after_value ?? "",
+        change.source_url ?? "",
+      ].join("|");
+      if (seenChanges.has(key)) continue;
+      seenChanges.add(key);
+      resourceChanges.push(change);
+    }
     const summary = result.editor_summary.trim();
     if (summary) summaries.push(summary);
   }
@@ -156,5 +198,6 @@ export function mergeScanBatchResults<
     leads,
     proposed_sources: proposed,
     editor_summary: cutAtSentenceEnd(summaries.join(" "), SCAN_SUMMARY_CHAR_LIMIT),
+    resource_changes: resourceChanges,
   };
 }

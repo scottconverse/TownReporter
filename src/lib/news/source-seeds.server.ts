@@ -1,9 +1,10 @@
 import type { SourceRow } from "./types.ts";
-import { withTransaction, type Sql } from "../db.ts";
+import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
-import { parseHttpUrl } from "./source-lines.ts";
+import { getPaperConfig, getPaperPlace, isOnboarded } from "./paper-settings.ts";
+import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { markRegistrySource } from "./registry/registry-sources.server.ts";
 import { storableText } from "./storable-text.ts";
 import { assertHttpUrl, isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
 
@@ -33,6 +34,180 @@ export async function ensureNewsroomSources(userId: string, newsroomId = DEFAULT
         )
         on conflict(user_id,newsroom_id,url) do nothing
       `;
+  });
+  // Spec 22: the registry backbone rides the same seeding path, so an
+  // onboarded newsroom gets it whenever its sources are seeded.
+  await ensureRegistryBackboneSources(userId, newsroomId);
+}
+
+/**
+ * The registry backbone (spec 22), in the same line format the "add sources"
+ * box parses. Seeded as accepted sources and marked with the `directory`
+ * registry role.
+ *
+ * Tier here is editorial, not incidental. The two government navigation pages
+ * are official records (tier A under the existing kind rule); 211, Boulder
+ * County Help and the OUR Center referral page are established secondary
+ * directories (tier B). None of the five is a Reddit/forum/social page, so
+ * none is seeded tier C.
+ *
+ * The sixth item in spec 22 -- the Longmont Community Foundation nonprofit
+ * directory and its parser-compatible seed file -- is not in this repository,
+ * so it is deliberately not invented here.
+ *
+ * The standards links and findhelp.org in spec 22 are references, not registry
+ * sources, and are not seeded.
+ */
+const REGISTRY_BACKBONE_SOURCE_LINES = `
+211 Colorado - https://www.211colorado.org/
+Boulder County Family Resource Network - https://bouldercounty.gov/departments/human-services/navigation-resources/
+BoulderCountyHelp.org - https://www.bouldercountyhelp.org/
+City of Longmont Resource Navigation - https://longmontcolorado.gov/community-and-neighborhood-resources/community-relations/resource-navigation/
+OUR Center Referral Program - https://www.ourcenter.org/referral-program/
+`;
+
+/**
+ * Tier per host. `parseSourceLines` would file the three .org directories as
+ * tier C (its kind rule only promotes official and news hosts), but a
+ * maintained directory is established secondary evidence, not a tip.
+ */
+const REGISTRY_BACKBONE_TIER_BY_HOST: Record<string, "A" | "B"> = {
+  "bouldercounty.gov": "A",
+  "longmontcolorado.gov": "A",
+  "www.211colorado.org": "B",
+  "www.bouldercountyhelp.org": "B",
+  "www.ourcenter.org": "B",
+};
+
+/** The five backbone directories, parsed through the watch-list line format. */
+export function registryBackboneSources() {
+  return parseSourceLines(REGISTRY_BACKBONE_SOURCE_LINES).map((source) => {
+    let host = "";
+    try {
+      host = new URL(source.url).hostname;
+    } catch {
+      /* parseSourceLines already guarantees a valid URL */
+    }
+    const tier = REGISTRY_BACKBONE_TIER_BY_HOST[host];
+    return tier ? { ...source, tier } : source;
+  });
+}
+
+/** The place fields the backbone decision reads. */
+export type BackbonePlace = {
+  city?: string | null;
+  state?: string | null;
+  county?: string | null;
+};
+
+/**
+ * Spec 22 lists the five backbone directories under Longmont / Boulder
+ * County, so they belong to a paper in that place and nowhere else. This is
+ * the one place that decides "that place": state Colorado (accepted as
+ * "Colorado" or "CO"), and either the city Longmont or the county Boulder /
+ * Boulder County. Everything is trimmed and case-insensitive, and a paper
+ * that names no place gets no backbone.
+ */
+export function isBackboneRegion(place: BackbonePlace | null | undefined): boolean {
+  const state = (place?.state ?? "").trim().toLowerCase();
+  if (state !== "colorado" && state !== "co") return false;
+  const city = (place?.city ?? "").trim().toLowerCase();
+  const county = (place?.county ?? "").trim().toLowerCase();
+  return city === "longmont" || county === "boulder" || county === "boulder county";
+}
+
+/**
+ * The paper's own place for the backbone check.
+ *
+ * The default newsroom is the shipped Longmont paper. Its live
+ * `paper_settings` row has an empty city and state, and the app reads those
+ * blanks as the shipped Longmont identity (`mergeRow`, and the note above
+ * PAPER_NOT_SET_UP_SENTENCE in paper-settings.ts). So for that newsroom the
+ * place is `getPaperPlace`, the same read its masthead uses.
+ *
+ * Any other newsroom gets the city and state straight from its own row. A
+ * blank there is no place: `getPaperPlace` would fold it into Longmont and a
+ * paper for another town would get Longmont's directories. The county has no
+ * Longmont fallback (`getPaperPlace` reads it from `dark_settings`), so it
+ * comes from there for every newsroom.
+ */
+async function backboneRegionPlace(newsroomId: number): Promise<BackbonePlace> {
+  const place = await getPaperPlace(newsroomId);
+  if (newsroomId === DEFAULT_NEWSROOM_ID) return place;
+  const sql = await getSql();
+  const [row] = await sql<{ city: string | null; state: string | null }>`
+    select city, state from paper_settings where newsroom_id = ${newsroomId} limit 1
+  `;
+  return { city: row?.city ?? null, state: row?.state ?? null, county: place.county };
+}
+
+/**
+ * Seed the spec 22 registry backbone for an onboarded newsroom.
+ *
+ * Idempotent newsroom-wide: before inserting, each backbone URL is looked up
+ * by (newsroom_id, url) -- the same check `ensureNewsroomSources` uses -- so a
+ * second editor in the same newsroom reuses the first editor's row instead of
+ * creating a second accepted copy. The role insert is guarded by
+ * (newsroom_id, source_id, registry_role), so a second run adds nothing.
+ * Returns how many role rows this call created.
+ *
+ * It does not flip an existing source's status: if the editor already dropped
+ * or re-titled one of these pages, that decision stands (rule 25).
+ */
+export async function ensureRegistryBackboneSources(
+  userId: string,
+  newsroomId = DEFAULT_NEWSROOM_ID,
+): Promise<number> {
+  if (!(await isOnboarded(newsroomId))) return 0;
+  /*
+    Spec 22 lists these five under Longmont / Boulder County, and the app
+    keeps Longmont data out of papers for other towns. The check stays here,
+    not at the callers, so every seeding path gets it.
+  */
+  if (!isBackboneRegion(await backboneRegionPlace(newsroomId))) return 0;
+  return withTransaction(async (sql) => {
+    await sql`
+      select newsroom_id
+      from paper_settings
+      where newsroom_id=${newsroomId}
+      for update
+    `;
+    let added = 0;
+    for (const source of registryBackboneSources()) {
+      /*
+        Look the URL up across the whole newsroom first, whatever user or
+        status it carries. The (user_id, newsroom_id, url) key is per editor,
+        so on its own it would let a second editor create a second accepted
+        copy -- and would resurrect a source the first editor rejected. The
+        paper_settings lock taken above serializes this read-then-write.
+      */
+      const [existing] = await sql<{ id: number }>`
+        select id from sources
+        where newsroom_id=${newsroomId} and url=${source.url}
+        order by id
+        limit 1
+      `;
+      let rowId: number | null = existing ? Number(existing.id) : null;
+      if (rowId === null) {
+        const inserted = await sql<{ id: number }>`
+          insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+          values(${userId},${newsroomId},${source.url},${source.title},${source.kind},${source.tier},'accepted')
+          on conflict(user_id,newsroom_id,url) do nothing
+          returning id
+        `;
+        if (inserted[0]) rowId = Number(inserted[0].id);
+      }
+      if (rowId === null) continue;
+      const row = { id: rowId };
+      const created = await markRegistrySource(sql, {
+        newsroomId,
+        sourceId: row.id,
+        registryRole: "directory",
+        directoryName: source.title,
+      });
+      if (created) added += 1;
+    }
+    return added;
   });
 }
 

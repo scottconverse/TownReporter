@@ -42,6 +42,7 @@ export const DESK_NAV: readonly DeskNavItem[] = [
   { to: "/desk/follow-ups", label: "Follow-ups" },
   { to: "/desk/dark", label: "Dark Desk" },
   { to: "/desk/sources", label: "Sources & scan" },
+  { to: "/desk/registry", label: "Registry" },
   { to: "/desk/models", label: "Models" },
   { to: "/desk/ops", label: "Server" },
   { to: "/desk/stats", label: "Stats" },

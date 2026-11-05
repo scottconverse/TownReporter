@@ -18,6 +18,7 @@ import { Route as FeedRouteImport } from './routes/feed'
 import { Route as GetTheCodeRouteImport } from './routes/get-the-code'
 import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as RegistryRouteImport } from './routes/registry'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ApiReadRouteImport } from './routes/api/read'
@@ -37,6 +38,7 @@ import { Route as DeskOpinionRouteImport } from './routes/desk.opinion'
 import { Route as DeskOpsRouteImport } from './routes/desk.ops'
 import { Route as DeskPublishedRouteImport } from './routes/desk.published'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
+import { Route as DeskRegistryRouteImport } from './routes/desk.registry'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskScansRouteImport } from './routes/desk.scans'
 import { Route as DeskSetupRouteImport } from './routes/desk.setup'
@@ -95,6 +97,11 @@ const HowWeReportRoute = HowWeReportRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegistryRoute = RegistryRouteImport.update({
+  id: '/registry',
+  path: '/registry',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
@@ -192,6 +199,11 @@ const DeskQueueRoute = DeskQueueRouteImport.update({
   path: '/queue',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskRegistryRoute = DeskRegistryRouteImport.update({
+  id: '/registry',
+  path: '/registry',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskScanRoute = DeskScanRouteImport.update({
   id: '/scan',
   path: '/scan',
@@ -274,6 +286,7 @@ export interface FileRoutesByFullPath {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/registry': typeof RegistryRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
@@ -292,6 +305,7 @@ export interface FileRoutesByFullPath {
   '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
+  '/desk/registry': typeof DeskRegistryRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
@@ -317,6 +331,7 @@ export interface FileRoutesByTo {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/registry': typeof RegistryRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
@@ -335,6 +350,7 @@ export interface FileRoutesByTo {
   '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
+  '/desk/registry': typeof DeskRegistryRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
@@ -362,6 +378,7 @@ export interface FileRoutesById {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/registry': typeof RegistryRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
@@ -380,6 +397,7 @@ export interface FileRoutesById {
   '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
+  '/desk/registry': typeof DeskRegistryRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/scans': typeof DeskScansRoute
   '/desk/setup': typeof DeskSetupRoute
@@ -408,6 +426,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/registry'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
@@ -426,6 +445,7 @@ export interface FileRouteTypes {
     | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
+    | '/desk/registry'
     | '/desk/scan'
     | '/desk/scans'
     | '/desk/setup'
@@ -451,6 +471,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/registry'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
@@ -469,6 +490,7 @@ export interface FileRouteTypes {
     | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
+    | '/desk/registry'
     | '/desk/scan'
     | '/desk/scans'
     | '/desk/setup'
@@ -495,6 +517,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/registry'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
@@ -513,6 +536,7 @@ export interface FileRouteTypes {
     | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
+    | '/desk/registry'
     | '/desk/scan'
     | '/desk/scans'
     | '/desk/setup'
@@ -540,6 +564,7 @@ export interface RootRouteChildren {
   GetTheCodeRoute: typeof GetTheCodeRoute
   HowWeReportRoute: typeof HowWeReportRoute
   LoginRoute: typeof LoginRoute
+  RegistryRoute: typeof RegistryRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiReadRoute: typeof ApiReadRoute
@@ -615,6 +640,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/registry': {
+      id: '/registry'
+      path: '/registry'
+      fullPath: '/registry'
+      preLoaderRoute: typeof RegistryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/robots.txt': {
@@ -750,6 +782,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskQueueRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/registry': {
+      id: '/desk/registry'
+      path: '/registry'
+      fullPath: '/desk/registry'
+      preLoaderRoute: typeof DeskRegistryRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/scan': {
       id: '/desk/scan'
       path: '/scan'
@@ -864,6 +903,7 @@ interface DeskRouteChildren {
   DeskOpsRoute: typeof DeskOpsRoute
   DeskPublishedRoute: typeof DeskPublishedRoute
   DeskQueueRoute: typeof DeskQueueRoute
+  DeskRegistryRoute: typeof DeskRegistryRoute
   DeskScanRoute: typeof DeskScanRoute
   DeskScansRoute: typeof DeskScansRoute
   DeskSetupRoute: typeof DeskSetupRoute
@@ -890,6 +930,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskOpsRoute: DeskOpsRoute,
   DeskPublishedRoute: DeskPublishedRoute,
   DeskQueueRoute: DeskQueueRoute,
+  DeskRegistryRoute: DeskRegistryRoute,
   DeskScanRoute: DeskScanRoute,
   DeskScansRoute: DeskScansRoute,
   DeskSetupRoute: DeskSetupRoute,
@@ -915,6 +956,7 @@ const rootRouteChildren: RootRouteChildren = {
   GetTheCodeRoute: GetTheCodeRoute,
   HowWeReportRoute: HowWeReportRoute,
   LoginRoute: LoginRoute,
+  RegistryRoute: RegistryRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiReadRoute: ApiReadRoute,

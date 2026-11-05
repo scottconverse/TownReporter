@@ -1,0 +1,281 @@
+/**
+ * The read-only desk view of the registry (spec 24, Phase 1).
+ *
+ * Phase 1 has no review actions: spec 24 puts accept / reject / needs-editor /
+ * redraft in Phase 2. So everything here is a read. The three lists the desk
+ * page draws are:
+ *
+ *  - the changes the scan detected (`resource_changes`), newest first, with the
+ *    entity they name, the before and after values, the evidence tier, the
+ *    source and the capture the change rests on;
+ *  - the HSDS imports (`resource_imports`);
+ *  - the registry sources (`resource_sources` joined to `sources`).
+ *
+ * The query functions take the `Sql` they should use so a test can drive them
+ * against PGlite and a server function can drive them against the live desk.
+ * Nothing is written anywhere in this module.
+ */
+
+import type { Sql } from "../../db.ts";
+
+/** A timestamp as the driver hands it back: pg gives a Date, PGlite a Date. */
+export type WhenValue = string | Date | null;
+
+export interface DeskRegistryChange {
+  id: number;
+  reviewState: string;
+  entityType: string;
+  entityId: number | null;
+  /** The entity's own name when it has one; null for a new-entry proposal. */
+  entityName: string | null;
+  fieldName: string;
+  beforeValue: string | null;
+  afterValue: string | null;
+  changeKind: string;
+  summary: string | null;
+  evidenceTier: string;
+  sourceTitle: string | null;
+  sourceUrl: string | null;
+  captureDate: WhenValue;
+  scanRunId: number | null;
+  createdAt: WhenValue;
+}
+
+export interface DeskRegistryImport {
+  id: number;
+  directoryName: string;
+  format: string;
+  sourceUrl: string | null;
+  importedAt: WhenValue;
+  recordCount: number;
+  conflictCount: number;
+  report: string | null;
+}
+
+export interface DeskRegistrySource {
+  id: number;
+  registryRole: string;
+  directoryName: string | null;
+  title: string;
+  url: string;
+  lastFetchedAt: WhenValue;
+  lastError: string | null;
+}
+
+/**
+ * Every detected change in one newsroom, newest first.
+ *
+ * The entity's name is read with a `case` of scalar subqueries rather than a
+ * join per entity type: `entity_type` decides which table holds the row, and a
+ * scan of eleven left joins would be both wider and slower than the eleven
+ * short lookups Postgres actually evaluates (one case branch runs). A child row
+ * that has no name of its own -- a schedule, an eligibility rule -- shows the
+ * name of the service it belongs to, which is the thing the editor needs to
+ * recognise.
+ */
+export async function listDeskChanges(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistryChange[]> {
+  const rows = await sql.query<{
+    id: number;
+    review_state: string;
+    entity_type: string;
+    entity_id: number | null;
+    entity_name: string | null;
+    stored_entity_name: string | null;
+    field_name: string;
+    before_value: string | null;
+    after_value: string | null;
+    change_kind: string;
+    summary: string | null;
+    evidence_tier: string;
+    source_title: string | null;
+    source_url: string | null;
+    capture_date: WhenValue;
+    scan_run_id: number | null;
+    created_at: WhenValue;
+  }>(
+    `select rc.id, rc.review_state, rc.entity_type, rc.entity_id,
+            case rc.entity_type
+              when 'organization' then (select o.name from organizations o
+                 where o.id = rc.entity_id and o.newsroom_id = rc.newsroom_id)
+              when 'service' then (select sv.name from services sv
+                 where sv.id = rc.entity_id and sv.newsroom_id = rc.newsroom_id)
+              when 'location' then (select l.name from locations l
+                 where l.id = rc.entity_id and l.newsroom_id = rc.newsroom_id)
+              when 'contact' then (select c.name from contacts c
+                 where c.id = rc.entity_id and c.newsroom_id = rc.newsroom_id)
+              when 'taxonomy' then (select t.name from taxonomies t
+                 where t.id = rc.entity_id and t.newsroom_id = rc.newsroom_id)
+              when 'service_at_location' then (
+                 select sv.name from service_at_locations sal
+                   join services sv on sv.id = sal.service_id and sv.newsroom_id = sal.newsroom_id
+                  where sal.id = rc.entity_id and sal.newsroom_id = rc.newsroom_id)
+              when 'schedule' then (
+                 select sv.name from schedules sc
+                   join services sv on sv.id = sc.service_id and sv.newsroom_id = sc.newsroom_id
+                  where sc.id = rc.entity_id and sc.newsroom_id = rc.newsroom_id)
+              when 'eligibility' then (
+                 select sv.name from eligibilities e
+                   join services sv on sv.id = e.service_id and sv.newsroom_id = e.newsroom_id
+                  where e.id = rc.entity_id and e.newsroom_id = rc.newsroom_id)
+              when 'required_document' then (
+                 select sv.name from required_documents d
+                   join services sv on sv.id = d.service_id and sv.newsroom_id = d.newsroom_id
+                  where d.id = rc.entity_id and d.newsroom_id = rc.newsroom_id)
+              when 'language' then (
+                 select sv.name from languages lg
+                   join services sv on sv.id = lg.service_id and sv.newsroom_id = lg.newsroom_id
+                  where lg.id = rc.entity_id and lg.newsroom_id = rc.newsroom_id)
+            end as entity_name,
+            rc.entity_name as stored_entity_name,
+            rc.field_name, rc.before_value, rc.after_value, rc.change_kind, rc.summary,
+            rc.evidence_tier, rc.created_at, rc.scan_run_id,
+            src.title as source_title, src.url as source_url,
+            snap.created_at as capture_date
+       from resource_changes rc
+       left join sources src
+         on src.id = rc.source_id and src.newsroom_id = rc.newsroom_id
+       left join snapshots snap on snap.id = rc.evidence_capture_id
+      where rc.newsroom_id = $1
+      order by rc.created_at desc, rc.id desc
+      limit 500`,
+    [newsroomId],
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    reviewState: row.review_state,
+    entityType: row.entity_type,
+    entityId: row.entity_id == null ? null : Number(row.entity_id),
+    // An unresolved proposal has no entity row to read a name from, so the
+    // model's own name for the entity is the fallback the desk shows.
+    entityName: row.entity_name ?? row.stored_entity_name ?? null,
+    fieldName: row.field_name,
+    beforeValue: row.before_value,
+    afterValue: row.after_value,
+    changeKind: row.change_kind,
+    summary: row.summary,
+    evidenceTier: row.evidence_tier,
+    sourceTitle: row.source_title,
+    sourceUrl: row.source_url,
+    captureDate: row.capture_date,
+    scanRunId: row.scan_run_id == null ? null : Number(row.scan_run_id),
+    createdAt: row.created_at,
+  }));
+}
+
+/** One jsonb value that may arrive as an object, a string, or null. */
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function asArrayLength(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+/** Every HSDS import in this newsroom, newest first. */
+export async function listRegistryImports(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistryImport[]> {
+  const rows = await sql.query<{
+    id: number;
+    directory_name: string;
+    format: string;
+    source_url: string | null;
+    imported_at: WhenValue;
+    record_counts: unknown;
+    conflicts: unknown;
+    report: string | null;
+  }>(
+    `select id, directory_name, format, source_url, imported_at,
+            record_counts, conflicts, report
+       from resource_imports
+      where newsroom_id = $1
+      order by imported_at desc, id desc
+      limit 50`,
+    [newsroomId],
+  );
+
+  return rows.map((row) => {
+    const counts = asRecord(row.record_counts);
+    const recordCount = Object.values(counts).reduce<number>((total, value) => {
+      const n = Number(value);
+      return total + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    return {
+      id: Number(row.id),
+      directoryName: row.directory_name,
+      format: row.format,
+      sourceUrl: row.source_url,
+      importedAt: row.imported_at,
+      recordCount,
+      conflictCount: asArrayLength(row.conflicts),
+      report: row.report,
+    };
+  });
+}
+
+/** Every source bound to a registry role, with its last fetch and last error. */
+export async function listRegistrySourcesWithHealth(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistrySource[]> {
+  const rows = await sql.query<{
+    id: number;
+    registry_role: string;
+    directory_name: string | null;
+    title: string;
+    url: string;
+    last_fetched_at: WhenValue;
+    last_error: string | null;
+  }>(
+    `select r.id, r.registry_role, r.directory_name,
+            s.title, s.url, s.last_fetched_at, s.last_error
+       from resource_sources r
+       join sources s on s.id = r.source_id and s.newsroom_id = r.newsroom_id
+      where r.newsroom_id = $1
+      order by s.title, r.registry_role`,
+    [newsroomId],
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    registryRole: row.registry_role,
+    directoryName: row.directory_name,
+    title: row.title,
+    url: row.url,
+    lastFetchedAt: row.last_fetched_at,
+    lastError: row.last_error,
+  }));
+}
+
+export interface RegistryDeskView {
+  changes: DeskRegistryChange[];
+  imports: DeskRegistryImport[];
+  sources: DeskRegistrySource[];
+}

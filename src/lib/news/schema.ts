@@ -57,9 +57,81 @@ export const ScanLeadSchema = z.object({
   ),
 });
 
+/*
+  NAV-P1 (spec 14 steps 4-6): a batch that read a registry source may also
+  propose registry changes next to its leads.
+
+  Every value here came out of a page the batch just read; nothing is applied.
+  `entity_type` and `change_kind` are the same closed sets migration 0160's
+  check constraints use, so an unreadable proposal is dropped at parse time
+  rather than failing the scan's commit. The entity is named, not numbered:
+  the model cannot know a database id, so the desk resolves it (and stores
+  null when nothing matches, which is the new-entity proposal the spec
+  requires). `source_url` names which fetched page the change was read on, so
+  the desk can bind the change to that source's retained capture.
+*/
+export const SCAN_RESOURCE_ENTITY_TYPES = [
+  "organization",
+  "service",
+  "location",
+  "service_at_location",
+  "schedule",
+  "contact",
+  "eligibility",
+  "required_document",
+  "language",
+  "accessibility",
+  "taxonomy",
+] as const;
+
+export const SCAN_RESOURCE_CHANGE_KINDS = [
+  "field_change",
+  "eligibility_change",
+  "hours_change",
+  "closure",
+  "move",
+  "contact_change",
+  "funding_change",
+  "non_informational",
+] as const;
+
+const trimmed = (v: unknown, max: number) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+
+const nullableText = (max: number) =>
+  z.preprocess(
+    (v) => (v == null ? null : typeof v === "string" ? v.slice(0, max) : String(v).slice(0, max)),
+    z.string().max(max).nullable().optional().default(null),
+  );
+
+export const ScanResourceChangeSchema = z.object({
+  entity_type: z.preprocess(
+    (v) => (typeof v === "string" ? v.trim().toLowerCase() : ""),
+    z.enum(SCAN_RESOURCE_ENTITY_TYPES),
+  ),
+  entity_hsds_id: z.preprocess((v) => trimmed(v, 120), z.string().max(120).optional().default("")),
+  entity_name: z.preprocess((v) => trimmed(v, 200), z.string().max(200).optional().default("")),
+  field_name: z.preprocess((v) => trimmed(v, 80), z.string().min(1).max(80)),
+  before_value: nullableText(2000),
+  after_value: nullableText(2000),
+  change_kind: z.preprocess(
+    (v) => (typeof v === "string" ? v.trim().toLowerCase() : ""),
+    z.enum(SCAN_RESOURCE_CHANGE_KINDS),
+  ),
+  summary: z.preprocess((v) => trimmed(v, 400), z.string().max(400).optional().default("")),
+  model_confidence: z.preprocess((v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
+  }, z.number().min(0).max(1).nullable().optional().default(null)),
+  source_url: z.preprocess((v) => trimmed(v, 500), z.string().max(500).optional().default("")),
+});
+
+export type ParsedResourceChange = z.infer<typeof ScanResourceChangeSchema>;
+
 export const ScanResultSchema = z.object({
   editor_summary: z.string().max(2000).optional().default(""),
   leads: z.array(ScanLeadSchema).max(12).optional().default([]),
+  resource_changes: z.array(ScanResourceChangeSchema).max(40).optional().default([]),
   proposed_sources: z
     .array(
       z.object({
@@ -95,6 +167,8 @@ export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & {
 export type ParsedScanResult = {
   editor_summary: string;
   leads: ParsedScanLead[];
+  /** Registry change proposals (spec 14); empty unless a batch had a registry source. */
+  resource_changes: ParsedResourceChange[];
   proposed_sources: { url: string; title: string; why: string; section: string }[];
   parseError: string | null;
 };
@@ -115,12 +189,17 @@ export function parseScanResult(
   const empty: ParsedScanResult = {
     editor_summary: "",
     leads: [],
+    resource_changes: [],
     proposed_sources: [],
     parseError: "Writing pass returned no usable JSON.",
   };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return empty;
   const obj = raw as Record<string, unknown>;
-  const hasShape = "leads" in obj || "editor_summary" in obj || "proposed_sources" in obj;
+  const hasShape =
+    "leads" in obj ||
+    "editor_summary" in obj ||
+    "proposed_sources" in obj ||
+    "resource_changes" in obj;
   if (!hasShape) return empty;
 
   let editor_summary =
@@ -159,6 +238,19 @@ export function parseScanResult(
     editor_summary = [rankingNote, editor_summary].filter(Boolean).join(" ").slice(0, 2000);
   }
 
+  /*
+    Registry proposals, one bad row at a time: an entry the schema cannot read
+    is dropped, exactly like an unreadable lead. A batch is only asked for
+    these when it read a registry source, so their absence is normal.
+  */
+  const changesIn = Array.isArray(obj.resource_changes) ? obj.resource_changes : [];
+  const resource_changes: ParsedResourceChange[] = [];
+  for (const item of changesIn) {
+    const parsed = ScanResourceChangeSchema.safeParse(item);
+    if (parsed.success) resource_changes.push(parsed.data);
+    if (resource_changes.length >= 40) break;
+  }
+
   const proposedIn = Array.isArray(obj.proposed_sources) ? obj.proposed_sources : [];
   const proposed_sources: { url: string; title: string; why: string; section: string }[] = [];
   for (const item of proposedIn) {
@@ -187,7 +279,7 @@ export function parseScanResult(
     if (proposed_sources.length >= 12) break;
   }
 
-  return { editor_summary, leads, proposed_sources, parseError: null };
+  return { editor_summary, leads, resource_changes, proposed_sources, parseError: null };
 }
 
 export function previousScanNeedsReread(

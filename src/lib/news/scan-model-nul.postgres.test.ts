@@ -84,10 +84,12 @@ if (probe.ok) {
       .sort()) {
       await sql.query(readFileSync(resolve(migrationDir, name), "utf8"));
     }
+    // Lyons, not Longmont: a Longmont paper also gets the five registry
+    // backbone sources (spec 22), and this test counts the scan's own sources.
     await sql.query(
       `insert into paper_settings
         (newsroom_id,name,city,state,timezone,onboarded,youtube_channels,meeting_keywords,seed_sources)
-       values (1,'Test Paper','Longmont','CO','America/Denver',true,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb)`,
+       values (1,'Test Paper','Lyons','CO','America/Denver',true,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb)`,
     );
   });
 

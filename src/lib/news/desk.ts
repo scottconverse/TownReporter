@@ -30,6 +30,12 @@ import {
   scanHeadlineKey,
 } from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
+import { registryRolesBySource } from "./registry/registry-sources.server.ts";
+import {
+  commitScanResourceChanges,
+  normalizeSourceUrl,
+  registryChangeSentence,
+} from "./registry/scan-changes.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -1998,6 +2004,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const scanPlace = await getPaperPlace(owned(context));
     await ensureSeeds(context.userId, owned(context));
     const sql = await getSql();
+    /*
+      NAV-P1 (spec 14): which of this newsroom's sources are registry sources,
+      read once per run. A source may be a news source and a registry source at
+      the same time; this map only decides whether a batch prompt asks for
+      registry changes too -- it never removes the news question.
+    */
+    const registryRoles = await registryRolesBySource(sql, owned(context));
     const meetingChannels = paperConfig.youtubeChannels ?? [];
     /*
     FB1: the scan's first arrival, and the honest sentence even when the paper
@@ -2662,6 +2675,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await throwIfJobCancelled(job.id);
       const { memory, publishedContext, scanOverrides, scanLocalModel, batchTimeoutMs } =
         await ensureScanModelContext();
+      /*
+        NAV-P1 (spec 14 step 4): only a batch that read a SELECTED, CHANGED
+        registry source is asked for resource_changes[]. A registry source that
+        did not change this run has no retained capture, so a proposal from it
+        could not be stored anyway (see commitScanResourceChanges).
+      */
+      const changedIds = new Set(
+        pendingHashes.filter((entry) => entry.changed).map((entry) => entry.id),
+      );
+      const registryBatch = batch.sources.some(
+        (source) => registryRoles.has(source.id) && changedIds.has(source.id),
+      );
       const userMsg = buildScanUserMessage({
       topics: topicChoices,
       section: sectionSnapshot,
@@ -2671,6 +2696,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       memory,
       published: publishedContext,
       payload: batch.payload,
+      registry: registryBatch,
     });
       /*
       The same one-shot technical failover Draft uses (see `failOverAndRetry`),
@@ -3356,6 +3382,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     // D162: a manual scan already filed its leads batch by batch; only the ones
     // whose early filing failed are left for this commit.
     leads: fileAsRead ? leadsLeftForCommit : merged.leads,
+    resource_changes: merged.resource_changes,
     proposed_sources: merged.proposed_sources,
     parseError: null,
   };
@@ -3399,6 +3426,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await writeSql`update sources set newsletter_signup_url=${signup.url}
         where id=${signup.id} and newsroom_id=${owned(context)} and newsletter_signup_url is null`;
     }
+    /*
+      NAV-P1: the snapshot ids this transaction just wrote, so a registry
+      change can carry `evidence_capture_id` = the capture of the page it was
+      read from. A source that did not change has no entry, and a proposal that
+      cites it is rejected below rather than stored unverified.
+    */
+    const snapshotIdBySourceId = new Map<number, number>();
     for (const p of pendingHashes) {
       await writeSql`
         update sources
@@ -3406,12 +3440,33 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         where id = ${p.id} and newsroom_id = ${owned(context)}
       `;
       if (p.changed) {
-        await writeSql`
+        const [capture] = await writeSql<{ id: number }>`
           insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
           values (${context.userId}, ${owned(context)}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
+          returning id
         `;
+        if (capture) snapshotIdBySourceId.set(p.id, Number(capture.id));
       }
     }
+
+    /*
+      Spec 14 steps 4-6: registry changes land as pending proposals only.
+      Nothing here writes a registry field, publishes anything, or creates an
+      entity; a crisis-flagged service's change goes straight to the editor.
+      `lead_id` stays null (filing leads from changes is Phase 2).
+    */
+    const sourceIdByUrl = new Map<string, number>();
+    const tierBySourceId = new Map<number, string>();
+    for (const source of sources) tierBySourceId.set(source.id, source.tier);
+    for (const source of fetched) sourceIdByUrl.set(normalizeSourceUrl(source.url), source.id);
+    const registryCounts = await commitScanResourceChanges(writeSql, {
+      newsroomId: owned(context),
+      scanRunId: runId,
+      changes: data.resource_changes,
+      sourceIdByUrl,
+      snapshotIdBySourceId,
+      tierBySourceId,
+    });
 
     /*
       `existingLeads` was read above, outside this transaction, because the
@@ -3546,6 +3601,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       decisionsSentence,
       resurfacedSentence,
       meetingCoverageLine: meetingAwareness?.coverageLine ?? "",
+      registrySentence: registryChangeSentence(registryCounts),
       summaryLimit: SUMMARY_LIMIT,
     });
     // Sanitize the ASSEMBLED sentence rather than only the model's clause at
