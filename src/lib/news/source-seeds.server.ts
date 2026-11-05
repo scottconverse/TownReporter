@@ -96,8 +96,10 @@ export function registryBackboneSources() {
 /**
  * Seed the spec 22 registry backbone for an onboarded newsroom.
  *
- * Idempotent twice over: the source insert is guarded by the
- * (user_id, newsroom_id, url) key, and the role insert by
+ * Idempotent newsroom-wide: before inserting, each backbone URL is looked up
+ * by (newsroom_id, url) -- the same check `ensureNewsroomSources` uses -- so a
+ * second editor in the same newsroom reuses the first editor's row instead of
+ * creating a second accepted copy. The role insert is guarded by
  * (newsroom_id, source_id, registry_role), so a second run adds nothing.
  * Returns how many role rows this call created.
  *
@@ -118,20 +120,31 @@ export async function ensureRegistryBackboneSources(
     `;
     let added = 0;
     for (const source of registryBackboneSources()) {
-      const inserted = await sql<{ id: number }>`
-        insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
-        values(${userId},${newsroomId},${source.url},${source.title},${source.kind},${source.tier},'accepted')
-        on conflict(user_id,newsroom_id,url) do nothing
-        returning id
+      /*
+        Look the URL up across the whole newsroom first, whatever user or
+        status it carries. The (user_id, newsroom_id, url) key is per editor,
+        so on its own it would let a second editor create a second accepted
+        copy -- and would resurrect a source the first editor rejected. The
+        paper_settings lock taken above serializes this read-then-write.
+      */
+      const [existing] = await sql<{ id: number }>`
+        select id from sources
+        where newsroom_id=${newsroomId} and url=${source.url}
+        order by id
+        limit 1
       `;
-      const row =
-        inserted[0] ??
-        (
-          await sql<{ id: number }>`
-            select id from sources where newsroom_id=${newsroomId} and url=${source.url}
-          `
-        )[0];
-      if (!row) continue;
+      let rowId: number | null = existing ? Number(existing.id) : null;
+      if (rowId === null) {
+        const inserted = await sql<{ id: number }>`
+          insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+          values(${userId},${newsroomId},${source.url},${source.title},${source.kind},${source.tier},'accepted')
+          on conflict(user_id,newsroom_id,url) do nothing
+          returning id
+        `;
+        if (inserted[0]) rowId = Number(inserted[0].id);
+      }
+      if (rowId === null) continue;
+      const row = { id: rowId };
       const created = await markRegistrySource(sql, {
         newsroomId,
         sourceId: row.id,

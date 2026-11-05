@@ -126,3 +126,35 @@ test("the backbone is not seeded into a newsroom that was never onboarded", asyn
   assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 0);
   assert.deepEqual(await listRegistrySources(sql, newsroomId), []);
 });
+
+test("a second editor's seed reuses the newsroom's rows, and a rejected one stays rejected", async () => {
+  const sql = await getSql();
+  const newsroomId = 9207;
+  await sql.query("insert into paper_settings (newsroom_id, onboarded) values ($1, true)", [
+    newsroomId,
+  ]);
+
+  assert.equal(await ensureRegistryBackboneSources("first-editor", newsroomId), 5);
+  assert.equal(await ensureRegistryBackboneSources("second-editor", newsroomId), 0);
+
+  const [sourceCount] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from sources where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(Number(sourceCount!.count), 5, "one row per backbone URL, not one per editor");
+
+  const rejectedUrl = registryBackboneSources()[0]!.url;
+  await sql.query(
+    "update sources set status = 'rejected' where newsroom_id = $1 and url = $2",
+    [newsroomId, rejectedUrl],
+  );
+
+  assert.equal(await ensureRegistryBackboneSources("third-editor", newsroomId), 0);
+  const rows = await sql.query<{ status: string; user_id: string }>(
+    "select status, user_id from sources where newsroom_id = $1 and url = $2",
+    [newsroomId, rejectedUrl],
+  );
+  assert.equal(rows.length, 1, "the rejected URL is not duplicated");
+  assert.equal(rows[0]!.status, "rejected", "its status is not flipped back");
+  assert.equal(rows[0]!.user_id, "first-editor");
+});
