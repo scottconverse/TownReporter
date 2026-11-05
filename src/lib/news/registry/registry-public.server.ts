@@ -170,8 +170,9 @@ export async function listPublicRegistry(
          from service_at_locations sal
          join locations l on l.id = sal.location_id and l.newsroom_id = sal.newsroom_id
         where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
-          and sal.published = true and l.published = true
-        order by sal.id`,
+          and sal.published = true
+          and l.published = true and l.status = 'active'
+        order by sal.service_id, sal.id`,
       [newsroomId, serviceIds],
     ),
     sql.query<{ service_id: number; phone: string }>(
@@ -195,23 +196,26 @@ export async function listPublicRegistry(
     ),
     sql.query<{
       service_id: number;
+      schedule_id: number;
       by_appointment: boolean;
       days: string | null;
       opens_at: string | null;
       closes_at: string | null;
       notes: string | null;
     }>(
-      `select sc.service_id, sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
+      `select sc.service_id, sc.id as schedule_id,
+              sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from schedules sc
         where sc.newsroom_id = $1 and sc.service_id = any($2::int[])
           and sc.published = true
         union
-       select sal.service_id, sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
+       select sal.service_id, sc.id as schedule_id,
+              sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from service_at_locations sal
          join schedules sc on sc.id = sal.schedule_id and sc.newsroom_id = sal.newsroom_id
         where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
           and sal.published = true and sc.published = true
-        order by service_id`,
+        order by service_id, days nulls last, opens_at nulls last, schedule_id`,
       [newsroomId, serviceIds],
     ),
     sql.query<{ service_id: number; language: string }>(
@@ -235,7 +239,14 @@ export async function listPublicRegistry(
   const locationByService = firstBy(locations, (row) => Number(row.service_id));
   const servicePhoneByService = firstBy(servicePhones, (row) => Number(row.service_id));
   const phoneByOrganization = firstBy(organizationPhones, (row) => Number(row.organization_id));
-  const scheduleByService = firstBy(schedules, (row) => Number(row.service_id));
+  // Every published schedule row belongs on the page, not just the first: a
+  // service open Monday and Wednesday must show both. The query orders them
+  // by weekday / opening time / id, so the joined line is stable.
+  const schedulesByService = new Map<number, (typeof schedules)[number][]>();
+  for (const row of schedules) {
+    const id = Number(row.service_id);
+    schedulesByService.set(id, [...(schedulesByService.get(id) ?? []), row]);
+  }
   const languagesByService = new Map<number, string[]>();
   for (const row of languages) {
     const id = Number(row.service_id);
@@ -250,7 +261,7 @@ export async function listPublicRegistry(
       servicePhoneByService.get(serviceId)?.phone ??
       phoneByOrganization.get(organizationId)?.phone ??
       null;
-    const schedule = scheduleByService.get(serviceId);
+    const serviceSchedules = schedulesByService.get(serviceId) ?? [];
     return {
       serviceId,
       organizationName: row.organization_name,
@@ -266,7 +277,9 @@ export async function listPublicRegistry(
           ])
         : null,
       phone: phone ?? null,
-      hours: schedule ? formatHours(schedule) : null,
+      hours: serviceSchedules.length
+        ? serviceSchedules.map((schedule) => formatHours(schedule)).join("; ")
+        : null,
       languages: languagesByService.get(serviceId) ?? [],
       lastVerifiedAt: row.last_verified_at,
       sourceUrl: row.source_url,
