@@ -119,20 +119,26 @@ export function isBackboneRegion(place: BackbonePlace | null | undefined): boole
 /**
  * The paper's own place for the backbone check.
  *
- * City and state come straight from the newsroom's `paper_settings` row, NOT
- * from `getPaperPlace`: that read merges a blank row with the shipped
- * Longmont identity (`mergeRow` in paper-settings.ts), so a paper that never
- * named a place would look like Longmont's. A blank place is no place. The
- * county has no such fallback -- `getPaperPlace` reads it from
- * `dark_settings` -- so it is taken from there.
+ * The default newsroom is the shipped Longmont paper. Its live
+ * `paper_settings` row has an empty city and state, and the app reads those
+ * blanks as the shipped Longmont identity (`mergeRow`, and the note above
+ * PAPER_NOT_SET_UP_SENTENCE in paper-settings.ts). So for that newsroom the
+ * place is `getPaperPlace`, the same read its masthead uses.
+ *
+ * Any other newsroom gets the city and state straight from its own row. A
+ * blank there is no place: `getPaperPlace` would fold it into Longmont and a
+ * paper for another town would get Longmont's directories. The county has no
+ * Longmont fallback (`getPaperPlace` reads it from `dark_settings`), so it
+ * comes from there for every newsroom.
  */
 async function backboneRegionPlace(newsroomId: number): Promise<BackbonePlace> {
+  const place = await getPaperPlace(newsroomId);
+  if (newsroomId === DEFAULT_NEWSROOM_ID) return place;
   const sql = await getSql();
   const [row] = await sql<{ city: string | null; state: string | null }>`
     select city, state from paper_settings where newsroom_id = ${newsroomId} limit 1
   `;
-  const { county } = await getPaperPlace(newsroomId);
-  return { city: row?.city ?? null, state: row?.state ?? null, county };
+  return { city: row?.city ?? null, state: row?.state ?? null, county: place.county };
 }
 
 /**

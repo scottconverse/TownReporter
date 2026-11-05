@@ -193,3 +193,24 @@ test("the backbone seeds only into a Longmont / Boulder County paper", async () 
   );
   assert.equal(Number(longmont!.count), 5);
 });
+
+test("the default Longmont paper gets the backbone with the live row's empty city and state", async () => {
+  const sql = await getSql();
+  // The live paper's row: onboarded, with name, city and state left empty.
+  await sql.query(
+    `insert into paper_settings (newsroom_id, onboarded) values (1, true)
+     on conflict (newsroom_id) do update set onboarded = true, city = null, state = null`,
+  );
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", 1), 5);
+  const [row] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from sources where newsroom_id = 1 and status = 'accepted'",
+  );
+  assert.equal(Number(row!.count), 5);
+});
+
+test("another newsroom with an empty city and state gets no backbone", async () => {
+  const sql = await getSql();
+  await sql.query("insert into paper_settings (newsroom_id, onboarded) values (9211, true)");
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", 9211), 0);
+  assert.deepEqual(await listRegistrySources(sql, 9211), []);
+});
