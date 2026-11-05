@@ -69,9 +69,11 @@ it("a changed registry source proposes changes without writing the registry, and
   const [org] = await sql<{ id: number }>`
     insert into organizations(newsroom_id,hsds_id,name) values(${ROOM},'org-scan','Example Org')
     returning id`;
+  // The service came from the directory this source covers, and the lookup
+  // now resolves an HSDS id within that directory.
   const [service] = await sql<{ id: number }>`
-    insert into services(newsroom_id,hsds_id,organization_id,name)
-    values(${ROOM},'svc-scan',${org!.id},'Weekly grocery pickup') returning id`;
+    insert into services(newsroom_id,hsds_id,directory_name,organization_id,name)
+    values(${ROOM},'svc-scan','Resource navigation',${org!.id},'Weekly grocery pickup') returning id`;
 
   const [run] = await sql<{ id: number }>`
     insert into scan_runs(user_id,newsroom_id) values(${USER},${ROOM}) returning id`;

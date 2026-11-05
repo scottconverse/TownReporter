@@ -90,8 +90,8 @@ async function seedNewsroom(
     [newsroomId, key("lang"), service!.id, childPublished],
   );
   const [location] = await sql.query<{ id: number }>(
-    `insert into locations (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, published)
-     values ($1, $2, $3, '100 Main St', 'Longmont', 'CO', '80501', $4) returning id`,
+    `insert into locations (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, status, published)
+     values ($1, $2, $3, '100 Main St', 'Longmont', 'CO', '80501', 'active', $4) returning id`,
     [newsroomId, key("loc"), org!.id, childPublished],
   );
   await sql.query(
@@ -357,4 +357,84 @@ test("the desk's imports and registry sources are this newsroom's only", async (
   assert.equal(sources[0]!.registryRole, "directory");
   assert.ok(sources[0]!.lastFetchedAt, "last fetched date is returned from the source");
   assert.equal((await sql.query("select id from resource_sources where newsroom_id = 9409")).length, 0);
+});
+
+test("an unresolved proposal shows the model's entity name on the desk list", async () => {
+  const sql = await getSql();
+  const newsroomId = 9412;
+  const seeded = await seedNewsroom(newsroomId);
+
+  await sql.query(
+    `insert into resource_changes
+       (newsroom_id, scan_run_id, source_id, source_capture_id, evidence_capture_id,
+        evidence_tier, entity_type, entity_id, entity_name, entity_hsds_id,
+        field_name, before_value, after_value, change_kind, summary, review_state)
+     values ($1, $2, $3, $4, $4, 'B', 'organization', null, 'Brand New Pantry', 'new-1',
+             'name', null, 'Brand New Pantry', 'field_change', 'A new entry.', 'pending')`,
+    [newsroomId, seeded.runId, seeded.sourceId, seeded.snapshotId],
+  );
+
+  const changes = await listDeskChanges(sql, newsroomId);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0]!.entityId, null);
+  assert.equal(changes[0]!.entityName, "Brand New Pantry");
+});
+
+test("a published but inactive location's address never shows, and an active one does", async () => {
+  const sql = await getSql();
+  const newsroomId = 9413;
+  const seeded = await seedNewsroom(newsroomId, { published: true });
+
+  // Replace the seeded link so an inactive location can sort first: without
+  // the status filter it would win the one-location slot.
+  await sql.query("delete from service_at_locations where service_id = $1", [seeded.serviceId]);
+  const [inactive] = await sql.query<{ id: number }>(
+    `insert into locations
+       (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, status, published)
+     values ($1, 'loc-inactive', $2, '1 Closed St', 'Boulder', 'CO', '80301', 'inactive', true)
+     returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, published)
+     values ($1, 'sal-inactive', $2, $3, true)`,
+    [newsroomId, seeded.serviceId, inactive!.id],
+  );
+  const [active] = await sql.query<{ id: number }>(
+    `insert into locations
+       (newsroom_id, hsds_id, organization_id, address_1, city, state_province, postal_code, status, published)
+     values ($1, 'loc-active', $2, '2 Open St', 'Longmont', 'CO', '80501', 'active', true)
+     returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, published)
+     values ($1, 'sal-active', $2, $3, true)`,
+    [newsroomId, seeded.serviceId, active!.id],
+  );
+
+  const page = await listPublicRegistry(sql, newsroomId);
+  assert.equal(page.entries[0]!.address, "2 Open St, Longmont, CO, 80501");
+
+  await sql.query("update locations set status = 'inactive' where id = $1", [active!.id]);
+  const withoutActive = await listPublicRegistry(sql, newsroomId);
+  assert.equal(withoutActive.entries[0]!.address, null, "only an inactive location is left");
+});
+
+test("all published schedules for a service are shown, in a stable order", async () => {
+  const sql = await getSql();
+  const newsroomId = 9414;
+  const seeded = await seedNewsroom(newsroomId, { published: true });
+
+  await sql.query(
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-wed', $2, 'Wednesday', '13:00', '15:00', true)`,
+    [newsroomId, seeded.serviceId],
+  );
+
+  const page = await listPublicRegistry(sql, newsroomId);
+  assert.equal(
+    page.entries[0]!.hours,
+    "Monday, 09:00–11:00; Wednesday, 13:00–15:00",
+  );
 });

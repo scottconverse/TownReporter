@@ -27,7 +27,12 @@ create table if not exists resource_imports (
   imported_at timestamptz not null default now(),
   record_counts jsonb not null default '{}'::jsonb,
   conflicts jsonb not null default '[]'::jsonb,
-  report text
+  report text,
+  -- The complete imported bundle as it arrived. `snapshots.excerpt` is the
+  -- evidence column and is kept in full below too, but a directory bundle can
+  -- be far larger than the app's usual page-excerpt cap, so the canonical copy
+  -- lives here rather than in an excerpt column.
+  payload text
 );
 
 create index if not exists resource_imports_newsroom_idx
@@ -436,6 +441,10 @@ create table if not exists resource_changes (
       'accessibility', 'taxonomy'
     )),
   entity_id integer,
+  -- The model's own words for the entity, kept even when `entity_id` is null
+  -- (a new-entry proposal) so the desk can show what the change was about.
+  entity_name text,
+  entity_hsds_id text,
   field_name text not null,
   before_value text,
   after_value text,

@@ -71,25 +71,65 @@ export function evidenceTierForSource(tier: string | null | undefined): "A" | "B
   return tier === "A" || tier === "B" ? tier : "C";
 }
 
+/**
+ * The directory an evidence source belongs to, when the registry knows one.
+ *
+ * A source can carry several registry roles, each with its own directory name;
+ * only a single distinct name is usable as a filter. No name, or two names,
+ * means the directory is unknown and the lookup stays newsroom-wide.
+ */
+async function directoryNameForSource(
+  sql: Sql,
+  newsroomId: number,
+  sourceId: number,
+): Promise<string | null> {
+  const rows = await sql.query<{ directory_name: string }>(
+    `select distinct directory_name
+       from resource_sources
+      where newsroom_id = $1 and source_id = $2 and directory_name is not null`,
+    [newsroomId, sourceId],
+  );
+  return rows.length === 1 ? rows[0]!.directory_name : null;
+}
+
+/**
+ * The registry row a change names, or null when there is no single answer.
+ *
+ * The HSDS id is unique only per (newsroom, directory_name, hsds_id): two
+ * directories in one newsroom may both number a record the same way. So the
+ * lookup is narrowed to the directory of the change's own source when that is
+ * known. Where more than one row still matches -- by HSDS id or by the name
+ * fallback -- the change is left unresolved rather than bound to whichever row
+ * happened to come back first.
+ */
 async function resolveEntityId(
   sql: Sql,
   newsroomId: number,
   change: ParsedResourceChange,
+  sourceId: number,
 ): Promise<number | null> {
   const table = ENTITY_TABLE[change.entity_type];
+  const directoryName = await directoryNameForSource(sql, newsroomId, sourceId);
+
+  const find = async (column: string, value: string, caseInsensitive = false) => {
+    const params: unknown[] = [newsroomId, value];
+    let text = `select id from ${table} where newsroom_id = $1 and `;
+    text += caseInsensitive ? `lower(${column}) = lower($2)` : `${column} = $2`;
+    if (directoryName !== null) {
+      params.push(directoryName);
+      text += ` and directory_name = $3`;
+    }
+    return sql.query<{ id: number }>(text, params);
+  };
+
   if (change.entity_hsds_id) {
-    const rows = await sql.query<{ id: number }>(
-      `select id from ${table} where newsroom_id = $1 and hsds_id = $2 limit 1`,
-      [newsroomId, change.entity_hsds_id],
-    );
-    if (rows[0]) return Number(rows[0].id);
+    const rows = await find("hsds_id", change.entity_hsds_id);
+    if (rows.length === 1) return Number(rows[0]!.id);
+    if (rows.length > 1) return null;
   }
   if (change.entity_name && TABLES_WITH_NAME.has(table)) {
-    const rows = await sql.query<{ id: number }>(
-      `select id from ${table} where newsroom_id = $1 and lower(name) = lower($2) limit 1`,
-      [newsroomId, change.entity_name],
-    );
-    if (rows[0]) return Number(rows[0].id);
+    const rows = await find("name", change.entity_name, true);
+    if (rows.length === 1) return Number(rows[0]!.id);
   }
   return null;
 }
@@ -264,7 +304,7 @@ export async function commitScanResourceChanges(
       continue;
     }
 
-    const entityId = await resolveEntityId(sql, input.newsroomId, change);
+    const entityId = await resolveEntityId(sql, input.newsroomId, change, sourceId);
     const crisis = await entityIsCrisis(sql, input.newsroomId, change, entityId);
     const reviewState = crisis ? "needs-editor" : "pending";
     if (crisis) needsEditor += 1;
@@ -272,9 +312,10 @@ export async function commitScanResourceChanges(
     await sql.query(
       `insert into resource_changes
          (newsroom_id, scan_run_id, source_id, source_capture_id, evidence_capture_id,
-          evidence_tier, entity_type, entity_id, field_name, before_value, after_value,
+          evidence_tier, entity_type, entity_id, entity_name, entity_hsds_id,
+          field_name, before_value, after_value,
           change_kind, summary, model_confidence, review_state, lead_id)
-       values ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, null)`,
+       values ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, null)`,
       [
         input.newsroomId,
         input.scanRunId,
@@ -283,6 +324,8 @@ export async function commitScanResourceChanges(
         evidenceTierForSource(input.tierBySourceId.get(sourceId)),
         change.entity_type,
         entityId,
+        change.entity_name?.trim() || null,
+        change.entity_hsds_id?.trim() || null,
         change.field_name,
         change.before_value,
         change.after_value,

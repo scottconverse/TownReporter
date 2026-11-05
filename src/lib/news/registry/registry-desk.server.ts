@@ -85,6 +85,7 @@ export async function listDeskChanges(
     entity_type: string;
     entity_id: number | null;
     entity_name: string | null;
+    stored_entity_name: string | null;
     field_name: string;
     before_value: string | null;
     after_value: string | null;
@@ -130,6 +131,7 @@ export async function listDeskChanges(
                    join services sv on sv.id = lg.service_id and sv.newsroom_id = lg.newsroom_id
                   where lg.id = rc.entity_id and lg.newsroom_id = rc.newsroom_id)
             end as entity_name,
+            rc.entity_name as stored_entity_name,
             rc.field_name, rc.before_value, rc.after_value, rc.change_kind, rc.summary,
             rc.evidence_tier, rc.created_at, rc.scan_run_id,
             src.title as source_title, src.url as source_url,
@@ -149,7 +151,9 @@ export async function listDeskChanges(
     reviewState: row.review_state,
     entityType: row.entity_type,
     entityId: row.entity_id == null ? null : Number(row.entity_id),
-    entityName: row.entity_name ?? null,
+    // An unresolved proposal has no entity row to read a name from, so the
+    // model's own name for the entity is the fallback the desk shows.
+    entityName: row.entity_name ?? row.stored_entity_name ?? null,
     fieldName: row.field_name,
     beforeValue: row.before_value,
     afterValue: row.after_value,

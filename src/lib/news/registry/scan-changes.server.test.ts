@@ -303,3 +303,69 @@ test("a crisis-flagged service's change always goes to the editor (guardrail 4)"
   assert.equal(row!.review_state, "needs-editor");
   assert.equal(row!.evidence_tier, "A");
 });
+
+test("an HSDS id repeated across directories binds within the change's own directory", async () => {
+  const sql = await getSql();
+  const newsroomId = 9308;
+  const seeded = await seedNewsroom(newsroomId);
+  await sql.query(
+    `insert into resource_sources (newsroom_id, source_id, registry_role, directory_name)
+     values ($1, $2, 'directory', 'Directory A')`,
+    [newsroomId, seeded.sourceId],
+  );
+  const [serviceA] = await sql.query<{ id: number }>(
+    `insert into services (newsroom_id, hsds_id, directory_name, organization_id, name)
+     values ($1, 'shared-1', 'Directory A', $2, 'Pantry A') returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  await sql.query(
+    `insert into services (newsroom_id, hsds_id, directory_name, organization_id, name)
+     values ($1, 'shared-1', 'Directory B', $2, 'Pantry B')`,
+    [newsroomId, seeded.organizationId],
+  );
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    changes: [change({ entity_hsds_id: "shared-1", entity_name: "" })],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+  assert.equal(counts.stored, 1);
+
+  const [row] = await sql.query<{ entity_id: number | null }>(
+    "select entity_id from resource_changes where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(Number(row!.entity_id), Number(serviceA!.id));
+});
+
+test("an ambiguous name match is left unresolved instead of picking a row", async () => {
+  const sql = await getSql();
+  const newsroomId = 9309;
+  const seeded = await seedNewsroom(newsroomId);
+  await sql.query(
+    `insert into resource_sources (newsroom_id, source_id, registry_role, directory_name)
+     values ($1, $2, 'directory', 'Directory A')`,
+    [newsroomId, seeded.sourceId],
+  );
+  for (const hsdsId of ["amb-1", "amb-2"]) {
+    await sql.query(
+      `insert into services (newsroom_id, hsds_id, directory_name, organization_id, name)
+       values ($1, $2, 'Directory A', $3, 'Ambiguous Pantry')`,
+      [newsroomId, hsdsId, seeded.organizationId],
+    );
+  }
+
+  await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    changes: [change({ entity_hsds_id: "", entity_name: "Ambiguous Pantry" })],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+
+  const [row] = await sql.query<{ entity_id: number | null }>(
+    "select entity_id from resource_changes where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(row!.entity_id, null);
+});
