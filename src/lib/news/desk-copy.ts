@@ -2117,11 +2117,23 @@ export function composeScanRunSummary(input: {
   resurfacedSentence?: string;
   /** The meetings coverage line, or "". Must survive into the result. */
   meetingCoverageLine?: string;
+  /**
+   * NAV-P1: the registry-change count for this run, or "". Present only when
+   * the pass proposed registry changes or rejected one for want of a capture;
+   * absent everywhere else, so existing callers and their summaries are
+   * unchanged.
+   */
+  registrySentence?: string;
   /** The column's own cap. Defaults to the 1200 the summary column has had. */
   summaryLimit?: number;
 }): string {
   const limit = input.summaryLimit ?? 1200;
-  const tail = [input.decisionsSentence ?? "", input.resurfacedSentence ?? "", input.meetingCoverageLine ?? ""]
+  const tail = [
+    input.decisionsSentence ?? "",
+    input.resurfacedSentence ?? "",
+    input.meetingCoverageLine ?? "",
+    input.registrySentence ?? "",
+  ]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" ");
@@ -3161,6 +3173,13 @@ export function buildScanUserMessage(opts: {
   payload: string;
   topics?: readonly ScanTopicOption[];
   section?: {name:string;brief:string;instructions:string}|null;
+  /**
+   * NAV-P1: this batch read at least one changed registry source, so the
+   * reply may also carry `resource_changes[]` (spec 14 steps 4-6). Absent
+   * everywhere else, so a scan with no registry sources asks for exactly
+   * what it asked for before.
+   */
+  registry?: boolean;
 }): string {
   const { city, state, reread, memory, payload } = opts;
   const published = opts.published ?? [];
@@ -3210,11 +3229,25 @@ Return JSON:
       "why": "one sentence: what this page offers the paper",
       "section": "council"
     }
-  ]
+  ]${opts.registry ? `,
+  "resource_changes": [
+    {
+      "entity_type": "service",
+      "entity_hsds_id": "the directory id if the text states one, else \\"\\"",
+      "entity_name": "the organization or service name exactly as the text names it",
+      "field_name": "the HSDS field this is about, e.g. phone, hours, address_1, eligibility",
+      "before_value": "what the registry says now, if the text says, else null",
+      "after_value": "what the text now says, or null when the change removes it",
+      "change_kind": "field_change",
+      "summary": "one sentence: what changed for a resident",
+      "model_confidence": 0.8,
+      "source_url": "the exact SOURCE URL above that states this"
+    }
+  ]` : ""}
 }
 ${scanTopicBlock(opts.topics ?? DEFAULT_TOPIC_OPTIONS)}
 A lead must be a news EVENT, not a page that exists. Every lead needs something that happened, will happen on a date, was decided, changed, was announced or was disputed, or a number that moved. News values require an event (Galtung & Ruge 1965; Harcup & O'Neill 2017); a directory, a list of funds, a set of opening hours, a "lists" page, an obituaries index or an about page describes what exists and has NO event -- do not file it. Set "is_event" to true or false for each lead, "event" to one sentence naming the event, and "event_date" to its date when the text gives one (else ""). If you cannot write a one-sentence event, set "is_event" to false; the desk drops those. A meeting is an event only when something was decided, proposed, voted on, disputed, or a notable item is on the agenda or in the packet -- and then "event" must NAME that decision or item ("council voted 4-3 to revisit the cannabis rules"; "the board will consider the X rezoning on Oct. 14"). A meeting that was merely posted, set, scheduled or recorded -- an agenda posted, minutes posted, a session or hearing announced, a packet uploaded, "Commission meets Oct. 1" -- is not an event: set "is_event" to false and do not file it; the meeting-capture path files those, not this scan. If the candidate comes from an index, listing, feed or category page, the lead must be the SPECIFIC NEW item on it -- a new obituary name, a new grant, a new meeting, a new closed road -- never the page itself; if the text does not say what is new on that page, do not file a lead from it (a page watcher's news is the change to a page, not the page).
-${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler, a standing page, or manufacture a lead to earn a score. proposed_sources may be any public http(s) page URL cited in the text above -- a document, agenda, roster, feed or site the text actually points at. Give each one a "why": ONE sentence, in plain words, saying what that page offers this paper and why it is worth putting on the watch list. Set "section" to the exact key of the section it would be filed under, from the section list above. Never return a search-results page, a redirector, or a URL you did not see in the text. Max 12 leads, max 12 proposed_sources.`;
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler, a standing page, or manufacture a lead to earn a score. proposed_sources may be any public http(s) page URL cited in the text above -- a document, agenda, roster, feed or site the text actually points at. Give each one a "why": ONE sentence, in plain words, saying what that page offers this paper and why it is worth putting on the watch list. Set "section" to the exact key of the section it would be filed under, from the section list above. Never return a search-results page, a redirector, or a URL you did not see in the text. Max 12 leads, max 12 proposed_sources.${opts.registry ? ` This batch also read a page that is a community-resource directory source. Fill "resource_changes" ONLY with facts the text states about an organization, service, location, schedule, contact, eligibility, document, language or accessibility that a resource directory would list: a phone number, address, hours, eligibility rule, fee, closure, move or contact that the text says is now different. Use the exact entity name from the text and the SOURCE URL that states it; that URL is how the desk attaches the capture the proposal rests on, so never invent one. It is a PROPOSAL for an editor, never an instruction to publish, and an empty array is the right answer when the text only describes news.` : ""}`;
 }
 
 /**
