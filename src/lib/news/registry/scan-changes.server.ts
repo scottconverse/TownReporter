@@ -95,8 +95,115 @@ async function resolveEntityId(
 }
 
 /**
+ * The service ids a changed child row belongs to.
+ *
+ * A schedule, contact, eligibility, required document, language, accessibility
+ * or service-at-location row carries no crisis flag of its own -- the flag is
+ * on the service, and spec 14's rule ("crisis-flagged services are never
+ * auto-modified") applies to every row beneath it. So the row's own link is
+ * followed to its service: directly where the table has a `service_id`, and
+ * through `service_at_locations` when the row hangs off a location or a
+ * schedule instead.
+ *
+ * A row that names no service -- an organization-level contact, say -- is
+ * followed through its organization to that organization's services, because
+ * the phone on the organization is often the crisis line itself.
+ */
+async function linkedServiceIds(
+  sql: Sql,
+  newsroomId: number,
+  change: ParsedResourceChange,
+  entityId: number,
+): Promise<number[]> {
+  const query = async (text: string) => {
+    const rows = await sql.query<{ service_id: number | null }>(text, [entityId, newsroomId]);
+    return rows
+      .map((row) => (row.service_id == null ? null : Number(row.service_id)))
+      .filter((id): id is number => id !== null);
+  };
+
+  switch (change.entity_type) {
+    case "service":
+      return [entityId];
+    case "eligibility":
+      return query(
+        "select service_id from eligibilities where id = $1 and newsroom_id = $2",
+      );
+    case "required_document":
+      return query(
+        "select service_id from required_documents where id = $1 and newsroom_id = $2",
+      );
+    case "language":
+      return query("select service_id from languages where id = $1 and newsroom_id = $2");
+    case "service_at_location":
+      return query(
+        "select service_id from service_at_locations where id = $1 and newsroom_id = $2",
+      );
+    case "schedule":
+      /*
+        A schedule names its service directly, or belongs to a location (or to
+        a service-at-location row) and reaches its service that way. The
+        location path is used only when the schedule names no service of its
+        own, so one schedule shared by a location's services is not confused
+        with a schedule the service owns.
+      */
+      return query(
+        `select sc.service_id
+           from schedules sc
+          where sc.id = $1 and sc.newsroom_id = $2 and sc.service_id is not null
+         union
+         select sal.service_id
+           from schedules sc
+           join service_at_locations sal
+             on sal.newsroom_id = sc.newsroom_id
+            and (sal.schedule_id = sc.id
+                 or (sc.service_id is null and sc.location_id is not null
+                     and sal.location_id = sc.location_id))
+          where sc.id = $1 and sc.newsroom_id = $2`,
+      );
+    case "accessibility":
+      return query(
+        `select a.service_id
+           from accessibilities a
+          where a.id = $1 and a.newsroom_id = $2 and a.service_id is not null
+         union
+         select sal.service_id
+           from accessibilities a
+           join service_at_locations sal
+             on sal.newsroom_id = a.newsroom_id and sal.location_id = a.location_id
+          where a.id = $1 and a.newsroom_id = $2
+            and a.service_id is null and a.location_id is not null`,
+      );
+    case "contact":
+      return query(
+        `select c.service_id
+           from contacts c
+          where c.id = $1 and c.newsroom_id = $2 and c.service_id is not null
+         union
+         select s.id
+           from contacts c
+           join services s
+             on s.organization_id = c.organization_id and s.newsroom_id = c.newsroom_id
+          where c.id = $1 and c.newsroom_id = $2
+            and c.service_id is null and c.organization_id is not null
+         union
+         select sal.service_id
+           from contacts c
+           join service_at_locations sal
+             on sal.newsroom_id = c.newsroom_id and sal.location_id = c.location_id
+          where c.id = $1 and c.newsroom_id = $2
+            and c.service_id is null and c.location_id is not null`,
+      );
+    default:
+      return [];
+  }
+}
+
+/**
  * A crisis-flagged service is never auto-modified (spec 14): any change to it
- * lands in the editor's queue whatever the model's confidence.
+ * lands in the editor's queue whatever the model's confidence. That includes a
+ * change to a schedule, contact, eligibility rule, required document, language,
+ * accessibility note or service-at-location row that belongs to the service.
  */
 async function entityIsCrisis(
   sql: Sql,
@@ -104,12 +211,16 @@ async function entityIsCrisis(
   change: ParsedResourceChange,
   entityId: number | null,
 ): Promise<boolean> {
-  if (change.entity_type !== "service" || entityId === null) return false;
+  if (entityId === null) return false;
+  const serviceIds = await linkedServiceIds(sql, newsroomId, change, entityId);
+  if (serviceIds.length === 0) return false;
+  const placeholders = serviceIds.map((_, index) => `$${index + 2}`).join(", ");
   const rows = await sql.query<{ crisis: boolean }>(
-    "select crisis from services where id = $1 and newsroom_id = $2 limit 1",
-    [entityId, newsroomId],
+    `select crisis from services
+      where newsroom_id = $1 and id in (${placeholders}) and crisis = true limit 1`,
+    [newsroomId, ...serviceIds],
   );
-  return rows[0]?.crisis === true;
+  return rows.length > 0;
 }
 
 export interface ScanResourceChangeCommitInput {

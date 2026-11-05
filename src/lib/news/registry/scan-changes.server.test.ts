@@ -177,6 +177,109 @@ test("a change matching no entity is a new-entity proposal and creates nothing (
   assert.equal(Number(named!.count), 0);
 });
 
+async function addSchedule(newsroomId: number, serviceId: number, hsdsId: string) {
+  const sql = await getSql();
+  await sql.query(
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at)
+     values ($1, $2, $3, 'Monday', '09:00', '11:00')`,
+    [newsroomId, hsdsId, serviceId],
+  );
+}
+
+test("a schedule change on a crisis service goes to the editor, and the same change on a normal service does not", async () => {
+  const sql = await getSql();
+
+  const crisisRoom = 9305;
+  const crisis = await seedNewsroom(crisisRoom);
+  await sql.query("update services set crisis = true where id = $1", [crisis.serviceId]);
+  await addSchedule(crisisRoom, crisis.serviceId, "sch-crisis");
+  const crisisCounts = await commitScanResourceChanges(sql, {
+    newsroomId: crisisRoom,
+    scanRunId: crisis.runId,
+    changes: [
+      change({
+        entity_type: "schedule",
+        entity_hsds_id: "sch-crisis",
+        field_name: "opens_at",
+        before_value: "09:00",
+        after_value: "10:00",
+        change_kind: "hours_change",
+      }),
+    ],
+    ...maps(crisis.sourceId, crisis.snapshotId, "B"),
+  });
+  assert.deepEqual(crisisCounts, { stored: 1, rejected: 0, needsEditor: 1 });
+  const [crisisRow] = await sql.query<{ review_state: string }>(
+    "select review_state from resource_changes where newsroom_id = $1",
+    [crisisRoom],
+  );
+  assert.equal(crisisRow!.review_state, "needs-editor");
+
+  const normalRoom = 9306;
+  const normal = await seedNewsroom(normalRoom);
+  await addSchedule(normalRoom, normal.serviceId, "sch-normal");
+  const normalCounts = await commitScanResourceChanges(sql, {
+    newsroomId: normalRoom,
+    scanRunId: normal.runId,
+    changes: [
+      change({
+        entity_type: "schedule",
+        entity_hsds_id: "sch-normal",
+        field_name: "opens_at",
+        before_value: "09:00",
+        after_value: "10:00",
+        change_kind: "hours_change",
+      }),
+    ],
+    ...maps(normal.sourceId, normal.snapshotId, "B"),
+  });
+  assert.deepEqual(normalCounts, { stored: 1, rejected: 0, needsEditor: 0 });
+  const [normalRow] = await sql.query<{ review_state: string }>(
+    "select review_state from resource_changes where newsroom_id = $1",
+    [normalRoom],
+  );
+  assert.equal(normalRow!.review_state, "pending");
+});
+
+test("a schedule reached only through service_at_locations still finds its crisis service", async () => {
+  const sql = await getSql();
+  const newsroomId = 9307;
+  const seeded = await seedNewsroom(newsroomId);
+  await sql.query("update services set crisis = true where id = $1", [seeded.serviceId]);
+  const [location] = await sql.query<{ id: number }>(
+    `insert into locations (newsroom_id, hsds_id, organization_id, city)
+     values ($1, 'loc-scan', $2, 'Longmont') returning id`,
+    [newsroomId, seeded.organizationId],
+  );
+  const [schedule] = await sql.query<{ id: number }>(
+    `insert into schedules (newsroom_id, hsds_id, location_id, days)
+     values ($1, 'sch-loc', $2, 'Tuesday') returning id`,
+    [newsroomId, location!.id],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, schedule_id)
+     values ($1, 'sal-scan', $2, $3, $4)`,
+    [newsroomId, seeded.serviceId, location!.id, schedule!.id],
+  );
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    changes: [
+      change({
+        entity_type: "schedule",
+        entity_hsds_id: "sch-loc",
+        field_name: "days",
+        before_value: "Tuesday",
+        after_value: "Wednesday",
+        change_kind: "hours_change",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "A"),
+  });
+  assert.deepEqual(counts, { stored: 1, rejected: 0, needsEditor: 1 });
+});
+
 test("a crisis-flagged service's change always goes to the editor (guardrail 4)", async () => {
   const sql = await getSql();
   const newsroomId = 9304;
