@@ -278,3 +278,46 @@ test("deleting a schedule clears the service_at_location link and keeps its news
   assert.equal(saved!.schedule_id, null);
   assert.equal(Number(saved!.newsroom_id), newsroomId);
 });
+
+test("a bundle longer than an excerpt cap keeps all of it, and a conflict on its last record stays checkable", async () => {
+  const sql = await getSql();
+  const newsroomId = 9109;
+  const directory = "large-hsds-directory";
+  const bundle = sampleCopy();
+  // Push the bundle well past the old 2000-character truncation point.
+  bundle.organizations[0]!.description = "x".repeat(5000);
+
+  const payloadLength = JSON.stringify(bundle).length;
+  assert.ok(payloadLength > 2000, "the fixture is longer than the old cap");
+
+  const first = await importHsdsBundle(bundle, { newsroomId, directoryName: directory });
+
+  // Change the last organization, whose record sits well past 2000 characters.
+  const changed = structuredClone(bundle);
+  const lastOrg = changed.organizations[changed.organizations.length - 1]!;
+  lastOrg.name = "Changed Last Organization";
+  const second = await importHsdsBundle(changed, { newsroomId, directoryName: directory });
+
+  const conflict = second.conflicts.find((row) => row.after_value === "Changed Last Organization");
+  assert.ok(conflict, "the last record's change is a conflict");
+
+  const [importRow] = await sql.query<{ payload: string }>(
+    "select payload from resource_imports where id = $1",
+    [second.importId],
+  );
+  assert.equal(importRow!.payload, JSON.stringify(changed), "the full bundle is stored");
+  assert.notEqual(first.importId, second.importId);
+
+  const [evidence] = await sql.query<{ excerpt: string }>(
+    `select s.excerpt
+       from resource_changes rc
+       join snapshots s on s.id = rc.evidence_capture_id
+      where rc.newsroom_id = $1 and rc.after_value = 'Changed Last Organization'`,
+    [newsroomId],
+  );
+  assert.ok(evidence, "the conflict points at a retained capture");
+  assert.ok(
+    evidence!.excerpt.includes(JSON.stringify(lastOrg)),
+    "the evidence holds the conflicted record",
+  );
+});

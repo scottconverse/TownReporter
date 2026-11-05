@@ -501,6 +501,13 @@ async function importHsdsBundleIn(
   ) as Record<RegistryTableName, number>;
 
   const sourceId = await ensureSource(sql, options);
+  /*
+    Keep the whole bundle, not a prefix. Every conflict is stored as evidence
+    pointing at this snapshot, and a conflict can sit on the last record of a
+    bundle longer than any excerpt cap -- 2000 characters truncated both the
+    record and the proof. `snapshots.excerpt` is unbounded `text`, so the
+    evidence copy is complete.
+  */
   const snapshot = await sql.query<{ id: number }>(
     `insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
      values ($1, $2, $3, $4, $5) returning id`,
@@ -509,15 +516,18 @@ async function importHsdsBundleIn(
       options.newsroomId,
       sourceId,
       createHash("sha256").update(payload).digest("hex"),
-      payload.slice(0, 2000),
+      payload,
     ],
   );
   const snapshotId = snapshot[0]!.id;
 
+  // The canonical copy of the bundle. A directory bundle is routinely larger
+  // than the page-text sizes the app stores elsewhere, so it has its own
+  // column rather than relying on the evidence excerpt alone.
   const importRow = await sql.query<{ id: number }>(
-    `insert into resource_imports (newsroom_id, directory_name, format, source_url)
-     values ($1, $2, 'json', $3) returning id`,
-    [options.newsroomId, options.directoryName, options.sourceUrl ?? null],
+    `insert into resource_imports (newsroom_id, directory_name, format, source_url, payload)
+     values ($1, $2, 'json', $3, $4) returning id`,
+    [options.newsroomId, options.directoryName, options.sourceUrl ?? null, payload],
   );
   const importId = Number(importRow[0]!.id);
 
