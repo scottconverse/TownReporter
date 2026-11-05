@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
-import { listPublicRegistryPage } from "@/lib/news/registry/registry-public.server";
+import { listPublicRegistryPage } from "@/lib/news/registry/registry-public";
 
 /**
  * The public Registry (spec 15.1, 18.2 and 24, Phase 1).

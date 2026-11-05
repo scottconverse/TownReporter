@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { DeskShell, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
-import { listRegistryDesk } from "@/lib/news/registry/registry-desk.server";
+import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import { evidenceTierLabel } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 

@@ -16,9 +16,7 @@
  * the organization's otherwise. It is never inferred from an import date.
  */
 
-import { createServerFn } from "@tanstack/react-start";
-import { getSql, type Sql } from "../../db.ts";
-import { DEFAULT_NEWSROOM_ID } from "../membership.ts";
+import type { Sql } from "../../db.ts";
 import type { WhenValue } from "./registry-desk.server.ts";
 
 export interface PublicRegistryEntry {
@@ -292,23 +290,3 @@ export async function listPublicRegistry(
 
   return { entries, categories };
 }
-
-/** The page's one read. Public: no middleware, and no desk data in it. */
-export const listPublicRegistryPage = createServerFn({ method: "GET" })
-  .validator((input: unknown) => {
-    const category = Number((input as { category?: unknown } | null)?.category);
-    return {
-      category: Number.isInteger(category) && category > 0 ? category : null,
-    };
-  })
-  .handler(async ({ data }): Promise<PublicRegistryPage> => {
-    try {
-      const sql = await getSql();
-      return await listPublicRegistry(sql, DEFAULT_NEWSROOM_ID, data.category);
-    } catch (err) {
-      // A registry that cannot be read is an empty registry, not a broken
-      // page: the reader gets the honest empty state rather than a 500.
-      console.error("[registry] listPublicRegistry failed", err);
-      return { entries: [], categories: [] };
-    }
-  });

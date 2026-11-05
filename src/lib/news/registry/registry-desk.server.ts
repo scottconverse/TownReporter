@@ -16,9 +16,7 @@
  * Nothing is written anywhere in this module.
  */
 
-import { createServerFn } from "@tanstack/react-start";
-import { getSql, type Sql } from "../../db.ts";
-import { deskMiddleware } from "../desk-auth.ts";
+import type { Sql } from "../../db.ts";
 
 /** A timestamp as the driver hands it back: pg gives a Date, PGlite a Date. */
 export type WhenValue = string | Date | null;
@@ -281,16 +279,3 @@ export interface RegistryDeskView {
   imports: DeskRegistryImport[];
   sources: DeskRegistrySource[];
 }
-
-/** The desk page's one read. Read-only: this module writes nothing. */
-export const listRegistryDesk = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }): Promise<RegistryDeskView> => {
-    const sql = await getSql();
-    const [changes, imports, sources] = await Promise.all([
-      listDeskChanges(sql, context.newsroomId),
-      listRegistryImports(sql, context.newsroomId),
-      listRegistrySourcesWithHealth(sql, context.newsroomId),
-    ]);
-    return { changes, imports, sources };
-  });
