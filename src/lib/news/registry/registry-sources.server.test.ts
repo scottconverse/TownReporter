@@ -1,0 +1,128 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { getSql } from "../../db.ts";
+import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
+import {
+  isRegistrySource,
+  listRegistrySources,
+  markRegistrySource,
+  registryRolesBySource,
+} from "./registry-sources.server.ts";
+import {
+  ensureRegistryBackboneSources,
+  registryBackboneSources,
+} from "../source-seeds.server.ts";
+
+await applyMigrationsToTestPglite();
+
+async function seedSource(userId: string, newsroomId: number, url: string, title = "Source") {
+  const sql = await getSql();
+  const [row] = await sql.query<{ id: number }>(
+    `insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
+     values ($1, $2, $3, $4, 'news', 'A', 'accepted') returning id`,
+    [userId, newsroomId, url, title],
+  );
+  return row!.id;
+}
+
+test("a source can be a news source and a registry source at the same time", async () => {
+  const sql = await getSql();
+  const newsroomId = 9201;
+  const sourceId = await seedSource("registry-owner", newsroomId, "https://both.test/news");
+
+  assert.equal(await isRegistrySource(sql, newsroomId, sourceId), false);
+  assert.equal(
+    await markRegistrySource(sql, { newsroomId, sourceId, registryRole: "directory" }),
+    true,
+  );
+  assert.equal(await isRegistrySource(sql, newsroomId, sourceId), true);
+
+  const [source] = await sql.query<{ kind: string; status: string }>(
+    "select kind, status from sources where id = $1",
+    [sourceId],
+  );
+  assert.deepEqual(source, { kind: "news", status: "accepted" }, "the news role is untouched");
+
+  // The same call again is a no-op, not a duplicate.
+  assert.equal(
+    await markRegistrySource(sql, { newsroomId, sourceId, registryRole: "directory" }),
+    false,
+  );
+});
+
+test("a source can hold more than one registry role, and the scan reads them as a set", async () => {
+  const sql = await getSql();
+  const newsroomId = 9202;
+  const sourceId = await seedSource("registry-owner", newsroomId, "https://roles.test/feed");
+
+  await markRegistrySource(sql, { newsroomId, sourceId, registryRole: "organization" });
+  await markRegistrySource(sql, { newsroomId, sourceId, registryRole: "service" });
+
+  const roles = await registryRolesBySource(sql, newsroomId);
+  assert.deepEqual([...(roles.get(sourceId) ?? [])].sort(), ["organization", "service"]);
+
+  const listed = await listRegistrySources(sql, newsroomId);
+  assert.equal(listed.length, 2);
+  assert.ok(listed.every((row) => row.sourceId === sourceId && row.url === "https://roles.test/feed"));
+});
+
+test("registry roles are scoped to one newsroom", async () => {
+  const sql = await getSql();
+  const sourceId = await seedSource("registry-owner", 9203, "https://scoped.test/feed");
+  await markRegistrySource(sql, { newsroomId: 9203, sourceId, registryRole: "directory" });
+
+  assert.equal(await isRegistrySource(sql, 9204, sourceId), false);
+  assert.deepEqual(await listRegistrySources(sql, 9204), []);
+});
+
+test("the spec 22 backbone is five directories with the intended tiers", () => {
+  const sources = registryBackboneSources();
+  assert.equal(sources.length, 5);
+  const byHost = new Map(sources.map((s) => [new URL(s.url).hostname, s.tier]));
+  assert.equal(byHost.get("bouldercounty.gov"), "A");
+  assert.equal(byHost.get("longmontcolorado.gov"), "A");
+  assert.equal(byHost.get("www.211colorado.org"), "B");
+  assert.equal(byHost.get("www.bouldercountyhelp.org"), "B");
+  assert.equal(byHost.get("www.ourcenter.org"), "B");
+});
+
+test("seeding the backbone twice adds nothing the second time", async () => {
+  const sql = await getSql();
+  const newsroomId = 9205;
+  await sql.query("insert into paper_settings (newsroom_id, onboarded) values ($1, true)", [
+    newsroomId,
+  ]);
+
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 5);
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 0);
+
+  const [sourceCount] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from sources where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(Number(sourceCount!.count), 5);
+
+  const [roleCount] = await sql.query<{ count: string }>(
+    `select count(*)::text as count from resource_sources
+      where newsroom_id = $1 and registry_role = 'directory'`,
+    [newsroomId],
+  );
+  assert.equal(Number(roleCount!.count), 5);
+
+  const [accepted] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from sources where newsroom_id = $1 and status = 'accepted'",
+    [newsroomId],
+  );
+  assert.equal(Number(accepted!.count), 5);
+});
+
+test("the backbone is not seeded into a newsroom that was never onboarded", async () => {
+  const sql = await getSql();
+  const newsroomId = 9206;
+  await sql.query("insert into paper_settings (newsroom_id, onboarded) values ($1, false)", [
+    newsroomId,
+  ]);
+
+  assert.equal(await ensureRegistryBackboneSources("seed-owner", newsroomId), 0);
+  assert.deepEqual(await listRegistrySources(sql, newsroomId), []);
+});

@@ -3,7 +3,8 @@ import { withTransaction, type Sql } from "../db.ts";
 import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
-import { parseHttpUrl } from "./source-lines.ts";
+import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { markRegistrySource } from "./registry/registry-sources.server.ts";
 import { storableText } from "./storable-text.ts";
 import { assertHttpUrl, isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
 
@@ -33,6 +34,113 @@ export async function ensureNewsroomSources(userId: string, newsroomId = DEFAULT
         )
         on conflict(user_id,newsroom_id,url) do nothing
       `;
+  });
+  // Spec 22: the registry backbone rides the same seeding path, so an
+  // onboarded newsroom gets it whenever its sources are seeded.
+  await ensureRegistryBackboneSources(userId, newsroomId);
+}
+
+/**
+ * The registry backbone (spec 22), in the same line format the "add sources"
+ * box parses. Seeded as accepted sources and marked with the `directory`
+ * registry role.
+ *
+ * Tier here is editorial, not incidental. The two government navigation pages
+ * are official records (tier A under the existing kind rule); 211, Boulder
+ * County Help and the OUR Center referral page are established secondary
+ * directories (tier B). None of the five is a Reddit/forum/social page, so
+ * none is seeded tier C.
+ *
+ * The sixth item in spec 22 -- the Longmont Community Foundation nonprofit
+ * directory and its parser-compatible seed file -- is not in this repository,
+ * so it is deliberately not invented here.
+ *
+ * The standards links and findhelp.org in spec 22 are references, not registry
+ * sources, and are not seeded.
+ */
+const REGISTRY_BACKBONE_SOURCE_LINES = `
+211 Colorado - https://www.211colorado.org/
+Boulder County Family Resource Network - https://bouldercounty.gov/departments/human-services/navigation-resources/
+BoulderCountyHelp.org - https://www.bouldercountyhelp.org/
+City of Longmont Resource Navigation - https://longmontcolorado.gov/community-and-neighborhood-resources/community-relations/resource-navigation/
+OUR Center Referral Program - https://www.ourcenter.org/referral-program/
+`;
+
+/**
+ * Tier per host. `parseSourceLines` would file the three .org directories as
+ * tier C (its kind rule only promotes official and news hosts), but a
+ * maintained directory is established secondary evidence, not a tip.
+ */
+const REGISTRY_BACKBONE_TIER_BY_HOST: Record<string, "A" | "B"> = {
+  "bouldercounty.gov": "A",
+  "longmontcolorado.gov": "A",
+  "www.211colorado.org": "B",
+  "www.bouldercountyhelp.org": "B",
+  "www.ourcenter.org": "B",
+};
+
+/** The five backbone directories, parsed through the watch-list line format. */
+export function registryBackboneSources() {
+  return parseSourceLines(REGISTRY_BACKBONE_SOURCE_LINES).map((source) => {
+    let host = "";
+    try {
+      host = new URL(source.url).hostname;
+    } catch {
+      /* parseSourceLines already guarantees a valid URL */
+    }
+    const tier = REGISTRY_BACKBONE_TIER_BY_HOST[host];
+    return tier ? { ...source, tier } : source;
+  });
+}
+
+/**
+ * Seed the spec 22 registry backbone for an onboarded newsroom.
+ *
+ * Idempotent twice over: the source insert is guarded by the
+ * (user_id, newsroom_id, url) key, and the role insert by
+ * (newsroom_id, source_id, registry_role), so a second run adds nothing.
+ * Returns how many role rows this call created.
+ *
+ * It does not flip an existing source's status: if the editor already dropped
+ * or re-titled one of these pages, that decision stands (rule 25).
+ */
+export async function ensureRegistryBackboneSources(
+  userId: string,
+  newsroomId = DEFAULT_NEWSROOM_ID,
+): Promise<number> {
+  if (!(await isOnboarded(newsroomId))) return 0;
+  return withTransaction(async (sql) => {
+    await sql`
+      select newsroom_id
+      from paper_settings
+      where newsroom_id=${newsroomId}
+      for update
+    `;
+    let added = 0;
+    for (const source of registryBackboneSources()) {
+      const inserted = await sql<{ id: number }>`
+        insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+        values(${userId},${newsroomId},${source.url},${source.title},${source.kind},${source.tier},'accepted')
+        on conflict(user_id,newsroom_id,url) do nothing
+        returning id
+      `;
+      const row =
+        inserted[0] ??
+        (
+          await sql<{ id: number }>`
+            select id from sources where newsroom_id=${newsroomId} and url=${source.url}
+          `
+        )[0];
+      if (!row) continue;
+      const created = await markRegistrySource(sql, {
+        newsroomId,
+        sourceId: row.id,
+        registryRole: "directory",
+        directoryName: source.title,
+      });
+      if (created) added += 1;
+    }
+    return added;
   });
 }
 
