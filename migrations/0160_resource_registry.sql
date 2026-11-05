@@ -71,8 +71,12 @@ create table if not exists taxonomies (
   updated_at timestamptz not null default now(),
   unique (newsroom_id, directory_name, hsds_id),
   unique (id, newsroom_id),
+  -- Column-list SET NULL (Postgres 15+): a bare `on delete set null` would
+  -- null BOTH columns, and newsroom_id is NOT NULL, so deleting a parent
+  -- taxonomy would fail instead of clearing the child's link. Only the
+  -- referencing column is cleared; the row keeps its newsroom.
   foreign key (parent_id, newsroom_id) references taxonomies (id, newsroom_id)
-    on delete set null
+    on delete set null (parent_id)
 );
 
 create index if not exists taxonomies_newsroom_idx on taxonomies (newsroom_id);
@@ -141,7 +145,7 @@ create table if not exists services (
   foreign key (organization_id, newsroom_id) references organizations (id, newsroom_id)
     on delete cascade,
   foreign key (taxonomy_id, newsroom_id) references taxonomies (id, newsroom_id)
-    on delete set null
+    on delete set null (taxonomy_id)
 );
 
 create index if not exists services_newsroom_idx on services (newsroom_id);
@@ -246,7 +250,7 @@ create table if not exists service_at_locations (
   foreign key (location_id, newsroom_id) references locations (id, newsroom_id)
     on delete cascade,
   foreign key (schedule_id, newsroom_id) references schedules (id, newsroom_id)
-    on delete set null
+    on delete set null (schedule_id)
 );
 
 create index if not exists service_at_locations_newsroom_idx

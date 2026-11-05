@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { Sql } from "../../db.ts";
+import { withTransaction, type Sql } from "../../db.ts";
 import type { HsdsBundle } from "./hsds-types.ts";
 import {
   bundleToRows,
@@ -39,6 +39,15 @@ export interface ImportOptions {
   sourceId?: number | null;
   /** `sources.user_id` for the source row this importer creates. */
   userId?: string;
+  /**
+   * An already-open transaction. Pass this when the caller is inside one so
+   * the import joins it instead of opening a second connection. When absent,
+   * the importer opens its own transaction through `withTransaction` -- the
+   * only way the whole import is atomic on a real Postgres pool, where a bare
+   * `begin`/`commit` pair sent through `sql.query` need not land on the same
+   * connection.
+   */
+  tx?: Sql;
 }
 
 export interface ImportConflict {
@@ -229,15 +238,17 @@ async function ensureSource(
   if (options.sourceId) return options.sourceId;
   const userId = options.userId ?? "";
   const url = options.sourceUrl?.trim() || `hsds://${options.directoryName}`;
+  // The source belongs to the importing newsroom, not to column default 1:
+  // two newsrooms importing the same directory are two source rows.
   const existing = await sql.query<{ id: number }>(
-    "select id from sources where user_id = $1 and url = $2",
-    [userId, url],
+    "select id from sources where user_id = $1 and newsroom_id = $2 and url = $3",
+    [userId, options.newsroomId, url],
   );
   if (existing[0]) return existing[0].id;
   const inserted = await sql.query<{ id: number }>(
-    `insert into sources (user_id, url, title, kind, tier)
-     values ($1, $2, $3, 'official', 'B') returning id`,
-    [userId, url, options.directoryName],
+    `insert into sources (user_id, newsroom_id, url, title, kind, tier)
+     values ($1, $2, $3, $4, 'official', 'B') returning id`,
+    [userId, options.newsroomId, url, options.directoryName],
   );
   return inserted[0]!.id;
 }
@@ -462,8 +473,24 @@ async function writeTable(
 /**
  * Import a bundle. One transaction: a throw anywhere rolls the whole import
  * back and nothing is written.
+ *
+ * The transaction comes from `withTransaction` (src/lib/db.ts), which pins
+ * every statement to one connection on both backends. Sending `begin` /
+ * `commit` / `rollback` through `sql.query` looked transactional on PGlite's
+ * single connection but was not on the production `pg` Pool, where each
+ * query may borrow a different client: a failure would roll back nothing and
+ * a partial import could commit. A caller that already holds a transaction
+ * passes it as `options.tx` and the import joins it.
  */
 export async function importHsdsBundle(
+  bundle: HsdsBundle,
+  options: ImportOptions,
+): Promise<ImportResult> {
+  if (options.tx) return importHsdsBundleIn(options.tx, bundle, options);
+  return withTransaction((tx) => importHsdsBundleIn(tx, bundle, options));
+}
+
+async function importHsdsBundleIn(
   sql: Sql,
   bundle: HsdsBundle,
   options: ImportOptions,
@@ -473,146 +500,140 @@ export async function importHsdsBundle(
     REGISTRY_TABLE_NAMES.map((name) => [name, 0]),
   ) as Record<RegistryTableName, number>;
 
-  await sql.query("begin");
-  try {
-    const sourceId = await ensureSource(sql, options);
-    const snapshot = await sql.query<{ id: number }>(
-      `insert into snapshots (user_id, source_id, content_hash, excerpt)
-       values ($1, $2, $3, $4) returning id`,
-      [
-        options.userId ?? "",
-        sourceId,
-        createHash("sha256").update(payload).digest("hex"),
-        payload.slice(0, 2000),
-      ],
-    );
-    const snapshotId = snapshot[0]!.id;
-
-    const importRow = await sql.query<{ id: number }>(
-      `insert into resource_imports (newsroom_id, directory_name, format, source_url)
-       values ($1, $2, 'json', $3) returning id`,
-      [options.newsroomId, options.directoryName, options.sourceUrl ?? null],
-    );
-    const importId = Number(importRow[0]!.id);
-
-    const context = {
-      newsroomId: options.newsroomId,
-      directoryName: options.directoryName,
-      importId,
+  const sourceId = await ensureSource(sql, options);
+  const snapshot = await sql.query<{ id: number }>(
+    `insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
+     values ($1, $2, $3, $4, $5) returning id`,
+    [
+      options.userId ?? "",
+      options.newsroomId,
       sourceId,
-      snapshotId,
-    };
+      createHash("sha256").update(payload).digest("hex"),
+      payload.slice(0, 2000),
+    ],
+  );
+  const snapshotId = snapshot[0]!.id;
 
-    const mapped = bundleToRows(bundle);
-    const maps: IdMaps = {};
-    const conflicts: ImportConflict[] = [];
+  const importRow = await sql.query<{ id: number }>(
+    `insert into resource_imports (newsroom_id, directory_name, format, source_url)
+     values ($1, $2, 'json', $3) returning id`,
+    [options.newsroomId, options.directoryName, options.sourceUrl ?? null],
+  );
+  const importId = Number(importRow[0]!.id);
 
-    // Taxonomies first so a service can point at one; parents are wired in a
-    // second pass because a child may name a parent that comes later.
-    const taxonomyRows = mapped.taxonomies.map((row) => ({
-      hsds_id: row.hsds_id,
-      name: row.name,
-      parent_id: null as number | null,
-    }));
-    const taxonomyWrite = await writeTable(sql, "taxonomies", taxonomyRows, context);
-    maps.taxonomies = taxonomyWrite.ids;
-    recordCounts.taxonomies = taxonomyWrite.inserted;
-    conflicts.push(...taxonomyWrite.conflicts);
-    for (const row of mapped.taxonomies) {
-      if (!row.parent_hsds_id) continue;
-      const parentId = taxonomyWrite.ids.get(row.parent_hsds_id);
-      const selfId = taxonomyWrite.ids.get(row.hsds_id);
-      if (parentId === undefined || selfId === undefined) continue;
-      const current = await sql.query<{ parent_id: number | null }>(
-        "select parent_id from taxonomies where id = $1",
-        [selfId],
-      );
-      const priorParent = current[0]?.parent_id ?? null;
-      if (priorParent === parentId) continue;
-      if (priorParent !== null) {
-        // A changed parent is a conflict, not an overwrite.
-        await sql.query(
-          `insert into resource_changes
-             (newsroom_id, source_id, source_capture_id, evidence_capture_id, evidence_tier,
-              entity_type, entity_id, field_name, before_value, after_value, change_kind,
-              summary, review_state)
-           values ($1, $2, $3, $3, $4, 'taxonomy', $5, 'parent_id', $6, $7, 'field_change', $8, 'pending')`,
-          [
-            context.newsroomId,
-            context.sourceId,
-            context.snapshotId,
-            IMPORT_EVIDENCE_TIER,
-            selfId,
-            String(priorParent),
-            String(parentId),
-            `Re-import of ${context.directoryName} changes the taxonomy parent.`,
-          ],
-        );
-        conflicts.push({
-          entity_type: "taxonomy",
-          entity_id: selfId,
-          hsds_id: row.hsds_id,
-          field_name: "parent_id",
-          before_value: String(priorParent),
-          after_value: String(parentId),
-        });
-        continue;
-      }
-      await sql.query("update taxonomies set parent_id = $1, updated_at = now() where id = $2", [
-        parentId,
-        selfId,
-      ]);
-    }
+  const context = {
+    newsroomId: options.newsroomId,
+    directoryName: options.directoryName,
+    importId,
+    sourceId,
+    snapshotId,
+  };
 
-    // Parent tables, each resolved before the tables that reference it.
-    for (const table of ["organizations", "services", "locations"] as const) {
-      const resolved = resolveRows(mapped, maps);
-      const write = await writeTable(sql, table, resolved[table], context);
-      maps[table] = write.ids;
-      recordCounts[table] = write.inserted;
-      conflicts.push(...write.conflicts);
-    }
+  const mapped = bundleToRows(bundle);
+  const maps: IdMaps = {};
+  const conflicts: ImportConflict[] = [];
 
-    const afterParents = resolveRows(mapped, maps);
-    const scheduleWrite = await writeTable(sql, "schedules", afterParents.schedules, context);
-    maps.schedules = scheduleWrite.ids;
-    recordCounts.schedules = scheduleWrite.inserted;
-    conflicts.push(...scheduleWrite.conflicts);
-
-    const final = resolveRows(mapped, maps);
-    for (const table of TABLE_ORDER) {
-      if (
-        table === "taxonomies" ||
-        table === "organizations" ||
-        table === "services" ||
-        table === "locations" ||
-        table === "schedules"
-      ) {
-        continue;
-      }
-      const write = await writeTable(sql, table, final[table], context);
-      recordCounts[table] = write.inserted;
-      conflicts.push(...write.conflicts);
-    }
-
-    await sql.query(
-      `update resource_imports
-          set record_counts = $1::jsonb, conflicts = $2::jsonb, report = $3
-        where id = $4`,
-      [
-        JSON.stringify(recordCounts),
-        JSON.stringify(conflicts),
-        `${Object.values(recordCounts).reduce((sum, count) => sum + count, 0)} rows from ${options.directoryName}, ${conflicts.length} conflicts.`,
-        importId,
-      ],
+  // Taxonomies first so a service can point at one; parents are wired in a
+  // second pass because a child may name a parent that comes later.
+  const taxonomyRows = mapped.taxonomies.map((row) => ({
+    hsds_id: row.hsds_id,
+    name: row.name,
+    parent_id: null as number | null,
+  }));
+  const taxonomyWrite = await writeTable(sql, "taxonomies", taxonomyRows, context);
+  maps.taxonomies = taxonomyWrite.ids;
+  recordCounts.taxonomies = taxonomyWrite.inserted;
+  conflicts.push(...taxonomyWrite.conflicts);
+  for (const row of mapped.taxonomies) {
+    if (!row.parent_hsds_id) continue;
+    const parentId = taxonomyWrite.ids.get(row.parent_hsds_id);
+    const selfId = taxonomyWrite.ids.get(row.hsds_id);
+    if (parentId === undefined || selfId === undefined) continue;
+    const current = await sql.query<{ parent_id: number | null }>(
+      "select parent_id from taxonomies where id = $1",
+      [selfId],
     );
-
-    await sql.query("commit");
-    return { importId, snapshotId, sourceId, recordCounts, conflicts };
-  } catch (error) {
-    await sql.query("rollback").catch(() => undefined);
-    throw error;
+    const priorParent = current[0]?.parent_id ?? null;
+    if (priorParent === parentId) continue;
+    if (priorParent !== null) {
+      // A changed parent is a conflict, not an overwrite.
+      await sql.query(
+        `insert into resource_changes
+           (newsroom_id, source_id, source_capture_id, evidence_capture_id, evidence_tier,
+            entity_type, entity_id, field_name, before_value, after_value, change_kind,
+            summary, review_state)
+         values ($1, $2, $3, $3, $4, 'taxonomy', $5, 'parent_id', $6, $7, 'field_change', $8, 'pending')`,
+        [
+          context.newsroomId,
+          context.sourceId,
+          context.snapshotId,
+          IMPORT_EVIDENCE_TIER,
+          selfId,
+          String(priorParent),
+          String(parentId),
+          `Re-import of ${context.directoryName} changes the taxonomy parent.`,
+        ],
+      );
+      conflicts.push({
+        entity_type: "taxonomy",
+        entity_id: selfId,
+        hsds_id: row.hsds_id,
+        field_name: "parent_id",
+        before_value: String(priorParent),
+        after_value: String(parentId),
+      });
+      continue;
+    }
+    await sql.query("update taxonomies set parent_id = $1, updated_at = now() where id = $2", [
+      parentId,
+      selfId,
+    ]);
   }
+
+  // Parent tables, each resolved before the tables that reference it.
+  for (const table of ["organizations", "services", "locations"] as const) {
+    const resolved = resolveRows(mapped, maps);
+    const write = await writeTable(sql, table, resolved[table], context);
+    maps[table] = write.ids;
+    recordCounts[table] = write.inserted;
+    conflicts.push(...write.conflicts);
+  }
+
+  const afterParents = resolveRows(mapped, maps);
+  const scheduleWrite = await writeTable(sql, "schedules", afterParents.schedules, context);
+  maps.schedules = scheduleWrite.ids;
+  recordCounts.schedules = scheduleWrite.inserted;
+  conflicts.push(...scheduleWrite.conflicts);
+
+  const final = resolveRows(mapped, maps);
+  for (const table of TABLE_ORDER) {
+    if (
+      table === "taxonomies" ||
+      table === "organizations" ||
+      table === "services" ||
+      table === "locations" ||
+      table === "schedules"
+    ) {
+      continue;
+    }
+    const write = await writeTable(sql, table, final[table], context);
+    recordCounts[table] = write.inserted;
+    conflicts.push(...write.conflicts);
+  }
+
+  await sql.query(
+    `update resource_imports
+        set record_counts = $1::jsonb, conflicts = $2::jsonb, report = $3
+      where id = $4`,
+    [
+      JSON.stringify(recordCounts),
+      JSON.stringify(conflicts),
+      `${Object.values(recordCounts).reduce((sum, count) => sum + count, 0)} rows from ${options.directoryName}, ${conflicts.length} conflicts.`,
+      importId,
+    ],
+  );
+
+  return { importId, snapshotId, sourceId, recordCounts, conflicts };
 }
 
 interface StoredRow {
