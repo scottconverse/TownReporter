@@ -359,7 +359,7 @@ function DraftsPage() {
 
   They are drafts with no lead, so `DESK_DRAFT_ROWS_SQL` -- which joins
   `leads` -- cannot see them, and an editor who pasted a column found it on
-  neither screen she looked at. They print only from the Opinion page, so the
+  neither screen they looked at. They print only from the Opinion page, so the
   row does not offer Publish here: it offers the way there.
 
   Same query key as `desk.opinion.tsx` ("editorials"), so filing or
