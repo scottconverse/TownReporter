@@ -34,7 +34,13 @@ export async function screenModule(path, overrides = {}, real = []) {
  * filled with "the check already completed", so a test that is not about this gate
  * keeps the readiness it had before; a test that is about it sets the facts.
  */
-const ALWAYS_REAL = ["@/lib/news/unchecked-story-gate", "@/lib/news/writer-bar"];
+// opinion-drafts-waiting is a pure filter the Drafts screen draws from; a
+// null-returning stub of it would crash the screen rather than test it.
+const ALWAYS_REAL = [
+  "@/lib/news/unchecked-story-gate",
+  "@/lib/news/writer-bar",
+  "@/lib/news/opinion-drafts-waiting",
+];
 
 export async function screenModuleUrl(path, overrides = {}, real = [], fixture = {}) {
   let source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
