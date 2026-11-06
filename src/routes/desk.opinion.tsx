@@ -141,6 +141,16 @@ function OpinionPage() {
     which is indistinguishable from broken and considerably more annoying.
   */
   const pieceRef = useRef<HTMLElement | null>(null);
+  /*
+    The filed confirmation, shown AT the paste box.
+
+    Filing closed the box and put "Filed as a draft" in the page notices at
+    the top -- hundreds of pixels above the panel the editor was looking at,
+    in small grey text. On the live paper the piece simply appeared to vanish.
+    This copy sits under the box's own button row, and is cleared when the
+    editor opens the box again.
+  */
+  const [filedNote, setFiledNote] = useState<string | null>(null);
   const [notice, setNotice] = useState<{
     text: string;
     kind: "info" | "success" | "error";
@@ -258,6 +268,9 @@ function OpinionPage() {
       setWritten("");
       setShowWritten(false);
       setSuccess("Filed as a draft. Read it below, then publish when you are ready.");
+      setFiledNote(
+        "Filed as a draft. It is in the list below and on the Drafts page. Nothing is published until you press Publish.",
+      );
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
     onError: () => setError("That would not file. Nothing was changed."),
@@ -732,11 +745,22 @@ function OpinionPage() {
           </div>
         ) : (
           <div className="astra-panel-acts">
-            <InkButton tone="ghost" onClick={() => setShowWritten(true)}>
+            <InkButton
+              tone="ghost"
+              onClick={() => {
+                setFiledNote(null);
+                setShowWritten(true);
+              }}
+            >
               Paste a piece I wrote
             </InkButton>
           </div>
         )}
+        {filedNote ? (
+          <p role="status" className="published-line">
+            {filedNote}
+          </p>
+        ) : null}
         </div>
       </div>
 

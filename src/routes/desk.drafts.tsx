@@ -12,6 +12,8 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
+import { listEditorials } from "@/lib/news/opinion";
+import { opinionDraftsWaiting } from "@/lib/news/opinion-drafts-waiting";
 import { listWaitingRoundups, publishWaitingRoundup, type WaitingRoundup } from "@/lib/news/routine-waiting";
 import { editorTitle } from "@/lib/news/desk-copy";
 import {
@@ -195,6 +197,7 @@ function DraftsPage() {
       }
     >
       <WaitingRoundups />
+      <OpinionDraftsWaiting />
       <div className="seg-strip" role="group" aria-label="Filter drafts">
         {FILTERS.map((f) => (
           <button
@@ -348,6 +351,59 @@ function DraftsPage() {
         </div>
       )}
     </DeskShell>
+  );
+}
+
+/*
+  Pieces filed through the Opinion desk's paste box.
+
+  They are drafts with no lead, so `DESK_DRAFT_ROWS_SQL` -- which joins
+  `leads` -- cannot see them, and an editor who pasted a column found it on
+  neither screen she looked at. They print only from the Opinion page, so the
+  row does not offer Publish here: it offers the way there.
+
+  Same query key as `desk.opinion.tsx` ("editorials"), so filing or
+  publishing there refreshes this list without a poll of its own.
+*/
+function OpinionDraftsWaiting() {
+  const waiting = useQuery({
+    queryKey: ["editorials"],
+    queryFn: () => listEditorials(),
+  });
+
+  const rows = opinionDraftsWaiting(waiting.data ?? []);
+  if (waiting.isPending || rows.length === 0) return null;
+
+  return (
+    <section aria-label="Opinion pieces waiting">
+      <h2 className="hl-head">Opinion pieces waiting</h2>
+      <p className="wire-sum">
+        These opinion pieces print only when you press Publish on the Opinion page.
+      </p>
+      {rows.map((row) => {
+        const headline = row.headline || row.subject;
+        return (
+          <div className="drafts-row" key={row.id}>
+            <div className="drafts-main">
+              <p className="drafts-overline">
+                Opinion
+                {row.words != null ? ` · ${row.words} words` : ""}
+              </p>
+              <h3 className="hl-head">{headline}</h3>
+            </div>
+            <div className="drafts-side">
+              <Link
+                to="/desk/opinion"
+                className="btn solid"
+                aria-label={`Open in Opinion: ${headline}`}
+              >
+                Open in Opinion
+              </Link>
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
