@@ -11,9 +11,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../../db.ts";
 import { deskMiddleware } from "../desk-auth.ts";
 import {
+  countPublishedRegistryServices,
   listDeskChanges,
   listRegistryImports,
   listRegistrySourcesWithHealth,
+  listUnpublishedRegistryEntries,
+  starterListIsLoaded,
   type RegistryDeskView,
 } from "./registry-desk.server.ts";
 
@@ -22,10 +25,13 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<RegistryDeskView> => {
     const sql = await getSql();
-    const [changes, imports, sources] = await Promise.all([
+    const [changes, imports, sources, waiting, publishedCount, starterLoaded] = await Promise.all([
       listDeskChanges(sql, context.newsroomId),
       listRegistryImports(sql, context.newsroomId),
       listRegistrySourcesWithHealth(sql, context.newsroomId),
+      listUnpublishedRegistryEntries(sql, context.newsroomId),
+      countPublishedRegistryServices(sql, context.newsroomId),
+      starterListIsLoaded(sql, context.newsroomId),
     ]);
-    return { changes, imports, sources };
+    return { changes, imports, sources, waiting, publishedCount, starterLoaded };
   });

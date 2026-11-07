@@ -113,6 +113,7 @@ export function SectionNav({
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const aboutRef = useRef<HTMLAnchorElement | null>(null);
+  const communityRef = useRef<HTMLAnchorElement | null>(null);
   /*
     The links' own widths, in px, and the gap between them. Both are properties
     of the text, not of the row: the row only decides how many of them fit. So
@@ -163,9 +164,11 @@ export function SectionNav({
     // About is outside items, so its width changes with the route even when
     // the section set does not. Read it on every fit rather than trusting the
     // last link measurement.
-    const about = includeAbout
-      ? (aboutRef.current?.getBoundingClientRect().width ?? 0)
-      : 0;
+    const about =
+      (includeAbout ? (aboutRef.current?.getBoundingClientRect().width ?? 0) : 0) +
+      // Community resources is a non-section link too, and it is always in the
+      // row, so the fit has to leave room for it or it overflows.
+      (communityRef.current?.getBoundingClientRect().width ?? 0);
     metrics.current.about = about;
     return fitSectionCount({
       room: nav.getBoundingClientRect().width,
@@ -284,6 +287,9 @@ export function SectionNav({
             More sections <span aria-hidden>▾</span>
           </button>
         )}
+        <Link ref={communityRef} to="/registry" className="about-nav">
+          Community resources
+        </Link>
         <Link
           ref={includeAbout ? aboutRef : undefined}
           to="/about"

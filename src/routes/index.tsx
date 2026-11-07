@@ -386,6 +386,16 @@ function Home() {
                 </div>
                 <MoreTopStories items={moreItems} />
               </section>
+              {/*
+                A reader who needs help should not have to reach the footer to
+                find the community resources page. One plain line, in the same
+                size as the rest of the page's reading text.
+              */}
+              <aside className="front-resources" aria-label="Community resources">
+                <Link to="/registry">
+                  Community resources: food, housing, health and crisis help in our area.
+                </Link>
+              </aside>
               {initial.events ? (
                 <EventsWeekBox data={initial.events} roundups={roundupItems} />
               ) : null}
