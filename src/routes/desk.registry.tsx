@@ -1,23 +1,32 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { DeskShell, SecHead } from "@/components/desk-chrome";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
+import { loadStarterList, publishRegistryEntry } from "@/lib/news/registry/registry-desk-write";
+import {
+  STARTER_CHECKED_ON_BY_SERVICE_ID,
+  STARTER_ENTRIES,
+  checkedOnLabel,
+} from "@/lib/news/registry/starter-list";
 import { evidenceTierLabel } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /**
- * The desk's read-only view of what the community resource scan found
- * (spec 24, Phase 1).
+ * The desk's view of the community resource registry (spec 24, Phase 1).
  *
- * Spec 24 puts accept / reject / needs-editor / redraft in Phase 2, so this
- * page has no controls that write. It prints one line saying so, rather than
- * leaving an editor to wonder where the buttons went.
+ * Spec 24 puts accept / reject / needs-editor / redraft for the scan's
+ * *changes* in Phase 2, so the change list still has no buttons. What the page
+ * does have is the two writes Phase 1 approved: load the approved starter list,
+ * and publish one loaded entry at a time.
  *
- * Three blocks, each with its own honest empty state:
- *   1. the changes the scan detected, filterable by review state;
- *   2. the HSDS imports;
- *   3. the sources carrying a registry role, and whether the desk could read
+ * Four blocks, each with its own honest empty state:
+ *   1. entries waiting to be published, with the starter list's load button
+ *      when it has not been loaded, and a Publish button per row;
+ *   2. how many entries are published, and a link to the public page;
+ *   3. the changes the scan detected, filterable by review state;
+ *   4. the HSDS imports;
+ *   5. the sources carrying a registry role, and whether the desk could read
  *      them last time.
  */
 
@@ -85,9 +94,29 @@ function RegistryDeskPage() {
   const search = Route.useSearch();
   const state: ReviewStateFilter = search.state ?? "all";
   const { formatShortDate, formatListDateTime } = usePaperDateFormatters();
+  const qc = useQueryClient();
   const query = useQuery({ queryKey: ["registry-desk"], queryFn: () => listRegistryDesk() });
   const changes = query.data?.changes ?? [];
   const visible = state === "all" ? changes : changes.filter((c) => c.reviewState === state);
+  const waiting = query.data?.waiting ?? [];
+
+  const load = useMutation({
+    mutationFn: () => loadStarterList(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["registry-desk"] }),
+  });
+
+  const publish = useMutation({
+    mutationFn: (serviceId: number) => publishRegistryEntry({ data: { serviceId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["registry-desk"] }),
+  });
+
+  const loadMessage = load.data
+    ? `Loaded ${load.data.entries} entries. ${load.data.waiting} are waiting to be published.`
+    : load.error
+      ? load.error instanceof Error
+        ? load.error.message
+        : "The starter list could not be loaded."
+      : "Loading puts the entries here. Nothing shows to readers until you press Publish on each one.";
 
   return (
     <DeskShell
@@ -96,7 +125,8 @@ function RegistryDeskPage() {
       lede="Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches."
     >
       <p className="note">
-        Review buttons come in a later phase. This page only shows what the scan found.
+        The scan&rsquo;s change list below has no buttons yet: accepting or rejecting a change comes
+        in a later phase. Above, you can load the starter list and publish each entry one at a time.
       </p>
 
       {query.isError ? (
@@ -111,6 +141,100 @@ function RegistryDeskPage() {
         <ListSkeleton rows={4} />
       ) : (
         <>
+          <section className="src-sec">
+            <SecHead
+              title="Entries waiting to be published"
+              count={waiting.length}
+              sub="Loaded from the starter list or an import. Nothing here shows to readers until you publish it."
+            />
+            {!query.data?.starterLoaded || load.data ? (
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                {!query.data?.starterLoaded ? (
+                  <InkButton
+                    tone="solid"
+                    onClick={() => load.mutate()}
+                    pending={load.isPending}
+                    pendingLabel="Loading…"
+                  >
+                    Load the starter list ({STARTER_ENTRIES.length} entries)
+                  </InkButton>
+                ) : null}
+                <span role="status" aria-live="polite" className="text-sm text-ink-2">
+                  {loadMessage}
+                </span>
+              </div>
+            ) : null}
+            {publish.isError ? (
+              <p className="mb-3 text-sm text-rust" role="alert">
+                {publish.error instanceof Error
+                  ? publish.error.message
+                  : "That entry was not published. Nothing was changed."}
+              </p>
+            ) : null}
+            {waiting.length === 0 ? (
+              <p className="wire-sum">No entries are waiting.</p>
+            ) : (
+              <ul className="astra-plain">
+                {waiting.map((row) => {
+                  const checkedOn = STARTER_CHECKED_ON_BY_SERVICE_ID[row.serviceHsdsId];
+                  return (
+                    <li key={row.serviceId}>
+                      <div className="astra-row-t">
+                        {row.organizationName} — {row.serviceName}
+                      </div>
+                      <p className="astra-row-meta">{row.categoryName ?? "No category"}</p>
+                      {row.phone ? <p className="astra-row-meta">Phone: {row.phone}</p> : null}
+                      {row.description ? <p className="astra-row-meta">{row.description}</p> : null}
+                      <p className="astra-row-meta">
+                        Source:{" "}
+                        {row.sourceUrl ? (
+                          <a
+                            className="inline-link"
+                            href={row.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {row.sourceTitle || row.sourceUrl} ↗
+                          </a>
+                        ) : (
+                          (row.sourceTitle ?? "not recorded")
+                        )}
+                      </p>
+                      {checkedOn ? (
+                        <p className="astra-row-meta">{checkedOnLabel(checkedOn)}</p>
+                      ) : null}
+                      <div className="mt-2">
+                        <InkButton
+                          tone="solid"
+                          ariaLabel={`Publish: ${row.serviceName}`}
+                          disabled={publish.isPending}
+                          pending={publish.isPending && publish.variables === row.serviceId}
+                          pendingLabel="Publishing…"
+                          onClick={() => publish.mutate(row.serviceId)}
+                        >
+                          Publish
+                        </InkButton>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="src-sec">
+            <SecHead
+              title="Published entries"
+              count={query.data?.publishedCount ?? 0}
+              sub="Every published entry appears on the public page."
+              aside={
+                <Link to="/registry" className="btn quiet small">
+                  See the public page
+                </Link>
+              }
+            />
+          </section>
+
           <section className="src-sec">
             <SecHead
               title="Detected changes"

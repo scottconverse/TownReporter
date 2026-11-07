@@ -17,6 +17,7 @@
  */
 
 import type { Sql } from "../../db.ts";
+import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
 
 /** A timestamp as the driver hands it back: pg gives a Date, PGlite a Date. */
 export type WhenValue = string | Date | null;
@@ -274,8 +275,106 @@ export async function listRegistrySourcesWithHealth(
   }));
 }
 
+/** One service an editor has loaded but not yet published. */
+export interface DeskRegistryWaitingEntry {
+  serviceId: number;
+  /** The HSDS id the entry was imported under; matches the starter list. */
+  serviceHsdsId: string;
+  organizationName: string;
+  serviceName: string;
+  categoryName: string | null;
+  phone: string | null;
+  description: string | null;
+  sourceTitle: string | null;
+  sourceUrl: string | null;
+}
+
+/**
+ * Every unpublished service in this newsroom, any directory, newest import
+ * first. This is the desk's "waiting to be published" list; publishing one
+ * takes it off this list and onto the public page.
+ */
+export async function listUnpublishedRegistryEntries(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistryWaitingEntry[]> {
+  const rows = await sql.query<{
+    service_id: number;
+    service_hsds_id: string;
+    service_name: string;
+    service_description: string | null;
+    organization_name: string;
+    category_name: string | null;
+    phone: string | null;
+    source_title: string | null;
+    source_url: string | null;
+  }>(
+    `select s.id as service_id, s.hsds_id as service_hsds_id, s.name as service_name,
+            s.description as service_description,
+            o.name as organization_name,
+            t.name as category_name,
+            (select c.phone from contacts c
+              where c.newsroom_id = s.newsroom_id and c.service_id = s.id
+                and c.phone is not null and c.phone <> ''
+              order by c.id limit 1) as phone,
+            src.title as source_title, src.url as source_url
+       from services s
+       join organizations o
+         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+       left join taxonomies t
+         on t.id = s.taxonomy_id and t.newsroom_id = s.newsroom_id
+       left join sources src
+         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.published = false
+      order by s.created_at desc, s.id desc
+      limit 200`,
+    [newsroomId],
+  );
+
+  return rows.map((row) => ({
+    serviceId: Number(row.service_id),
+    serviceHsdsId: row.service_hsds_id,
+    organizationName: row.organization_name,
+    serviceName: row.service_name,
+    categoryName: row.category_name,
+    phone: row.phone,
+    description: row.service_description,
+    sourceTitle: row.source_title,
+    sourceUrl: row.source_url,
+  }));
+}
+
+/** How many registry services in this newsroom are published. */
+export async function countPublishedRegistryServices(
+  sql: Sql,
+  newsroomId: number,
+): Promise<number> {
+  const rows = await sql.query<{ count: string }>(
+    "select count(*)::text as count from services where newsroom_id = $1 and published = true",
+    [newsroomId],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * Whether the starter list has been loaded into this newsroom. Any row from
+ * its directory is proof; the load is all-or-nothing inside one transaction.
+ */
+export async function starterListIsLoaded(sql: Sql, newsroomId: number): Promise<boolean> {
+  const rows = await sql.query<{ count: string }>(
+    `select count(*)::text as count
+       from services
+      where newsroom_id = $1 and directory_name = $2`,
+    [newsroomId, STARTER_LIST_DIRECTORY],
+  );
+  return Number(rows[0]?.count ?? 0) > 0;
+}
+
 export interface RegistryDeskView {
   changes: DeskRegistryChange[];
   imports: DeskRegistryImport[];
   sources: DeskRegistrySource[];
+  waiting: DeskRegistryWaitingEntry[];
+  publishedCount: number;
+  starterLoaded: boolean;
 }

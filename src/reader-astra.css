@@ -4841,6 +4841,27 @@
   line-height: 1.45;
 }
 
+/* One plain line to the community resources page, under the top stories. */
+.reader .front-resources {
+  margin: 0 0 32px;
+  padding: 16px 18px;
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--acc);
+  background: var(--card);
+  font-family: var(--fd);
+  font-size: 17px;
+  line-height: 1.45;
+}
+.reader .front-resources a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .front-resources a:hover {
+  color: var(--acctx);
+}
+
 /* Latest stories and the solid-opinion card. */
 .reader .frontlatestband {
   display: flex;
