@@ -121,8 +121,8 @@ function RegistryDeskPage() {
   return (
     <DeskShell
       title="Registry"
-      kicker="Community resources and what the scan found"
-      lede="Load the starter list, publish each entry one at a time, and see every change the scan detected in a registry source."
+      kicker="What the scan found in the community resource directory"
+      lede="Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches."
     >
       <p className="note">
         The scan&rsquo;s change list below has no buttons yet: accepting or rejecting a change comes
