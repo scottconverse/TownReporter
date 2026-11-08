@@ -199,3 +199,46 @@ test("A roundup row keeps its opened text and kill question as blocks of the row
 
   assert.deepEqual(pageErrors, []);
 });
+
+/**
+ * A roundup body prints its feed lines as long unbroken addresses
+ * ("Source: https://..."). The Test walk of Nov. 8 opened one on a 390px phone
+ * and the page went 960px wide. This draws the real desk stylesheet at phone
+ * width and opens a roundup whose body carries such an address: the page must
+ * not scroll sideways.
+ */
+test("An opened roundup with a long source address fits a phone screen", async (t) => {
+  const data = {
+    "drafts-desk": {
+      rows: [],
+      total: 0,
+      counts: { all: 0, running: 0, "needs-you": 0, yours: 0, failed: 0 },
+    },
+    desk: [{ id: 12, channel: "weekend", issueDate: "Nov 8, 2026", headline: "This weekend" }],
+  };
+  const longUrl =
+    "https://calendar.google.com/calendar/ical/r5a1ofr4s6d7mvuicgvq36l6tc%40group.calendar.google.com/public/basic.ics";
+  const { page, pageErrors } = await mountDrafts(
+    t,
+    {
+      DeskShell: `({children,title,lede})=>h("div",{className:"desk-ltr astra"},h("main",{},h("h1",{},title),lede,children))`,
+      // The story body draws each plain block as a pre-wrap paragraph; this
+      // stand-in draws the feed line the same way.
+      StoryBody: `({body})=>h("div",{},body.split("\\n\\n").map((b,i)=>h("p",{key:i,className:"whitespace-pre-wrap",style:{whiteSpace:"pre-wrap"}},b)))`,
+      getWaitingRoundup: `async () => ({dek:"A short dek.",body:${JSON.stringify(`Events this weekend.\n\nSource: ${longUrl}`)},sourceUrls:[${JSON.stringify(longUrl)}]})`,
+    },
+    data,
+  );
+  await page.addStyleTag({ path: fileURLToPath(new URL("../src/desk-astra.css", import.meta.url)) });
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.getByRole("button", { name: "Open: This weekend" }).click();
+  await page.getByRole("button", { name: "Close: This weekend" }).waitFor();
+  await page.locator(".roundup-preview").getByText(/Source: https:/).waitFor();
+  const [scrollWidth, clientWidth] = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    document.documentElement.clientWidth,
+  ]);
+  assert.ok(scrollWidth <= clientWidth, `page is ${scrollWidth}px wide on a ${clientWidth}px screen`);
+  assert.deepEqual(pageErrors, []);
+});

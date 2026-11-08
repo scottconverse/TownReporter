@@ -4382,6 +4382,12 @@
   grid-column: 1 / -1;
   min-width: 0;
 }
+/* The roundup body prints its feed lines ("Source: https://...") as long
+   unbroken addresses. On a phone one of them pushed the page 960px wide, so
+   the opened text may break an address anywhere to stay inside the row. */
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-preview {
+  overflow-wrap: anywhere;
+}
 /* The kill question reads as one line -- the sentence, then the two presses
    beside it -- and only stacks when there is genuinely no room for that. */
 .desk-ltr.astra .drafts-row.roundup-row > .roundup-kill {
