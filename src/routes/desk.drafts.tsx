@@ -527,7 +527,7 @@ function WaitingRoundups() {
         const result = results[roundup.id];
         const isPublishing = publishing === roundup.id;
         return (
-          <div className="drafts-row" key={roundup.id}>
+          <div className="drafts-row roundup-row" key={roundup.id}>
             <div className="drafts-main">
               <p className="drafts-overline">
                 {channels[roundup.channel]} · {roundup.issueDate}
@@ -551,32 +551,16 @@ function WaitingRoundups() {
                   </Link>
                 </p>
               )}
-              {openId === roundup.id && detail ? (
-                <div className="roundup-preview">
-                  {detail.dek ? <p className="dek">{detail.dek}</p> : null}
-                  <StoryBody body={detail.body} />
-                  {detail.sourceUrls.length ? (
-                    <section aria-label="Sources and public records">
-                      <h4 className="hl-head">Sources &amp; public records</h4>
-                      <ul>
-                        {detail.sourceUrls.map((url) => (
-                          <li key={url}>
-                            <a href={url} className="inline-link" target="_blank" rel="noreferrer">
-                              {url}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
             <div className="drafts-side">
               <button
                 type="button"
                 className="btn"
-                aria-label={`Open: ${roundup.headline}`}
+                aria-label={
+                  openId === roundup.id
+                    ? `Close: ${roundup.headline}`
+                    : `Open: ${roundup.headline}`
+                }
                 aria-expanded={openId === roundup.id}
                 disabled={opening === roundup.id}
                 onClick={() => void handleOpen(roundup.id)}
@@ -603,7 +587,11 @@ function WaitingRoundups() {
               </button>
             </div>
             {killTarget === roundup.id ? (
-              <div className="drafts-main" role="group" aria-label={`Kill ${roundup.headline}`}>
+              <div
+                className="drafts-main roundup-kill"
+                role="group"
+                aria-label={`Kill ${roundup.headline}`}
+              >
                 <p>Kill this roundup? It will not print.</p>
                 <div className="drafts-side">
                   <button
@@ -622,6 +610,30 @@ function WaitingRoundups() {
                     Cancel
                   </button>
                 </div>
+              </div>
+            ) : null}
+            {openId === roundup.id && detail ? (
+              /* The opened roundup is a full-width block under the row's own
+                 line (headline at the left, Open / Kill / Publish at the
+                 right), not a continuation of the headline cell. See
+                 `.roundup-preview` in desk-astra.css. */
+              <div className="roundup-preview">
+                {detail.dek ? <p className="dek">{detail.dek}</p> : null}
+                <StoryBody body={detail.body} />
+                {detail.sourceUrls.length ? (
+                  <section aria-label="Sources and public records">
+                    <h4 className="hl-head">Sources &amp; public records</h4>
+                    <ul>
+                      {detail.sourceUrls.map((url) => (
+                        <li key={url}>
+                          <a href={url} className="inline-link" target="_blank" rel="noreferrer">
+                            {url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
               </div>
             ) : null}
           </div>
