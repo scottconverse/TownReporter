@@ -14,7 +14,15 @@ import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import { opinionDraftsWaiting } from "@/lib/news/opinion-drafts-waiting";
-import { listWaitingRoundups, publishWaitingRoundup, type WaitingRoundup } from "@/lib/news/routine-waiting";
+import {
+  getWaitingRoundup,
+  killWaitingRoundup,
+  listWaitingRoundups,
+  publishWaitingRoundup,
+  type WaitingRoundup,
+  type WaitingRoundupDetail,
+} from "@/lib/news/routine-waiting";
+import { StoryBody } from "@/components/story-body";
 import { editorTitle } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
@@ -411,16 +419,22 @@ function WaitingRoundups() {
   const queryClient = useQueryClient();
   const [publishing, setPublishing] = useState<number | null>(null);
   const [results, setResults] = useState<
-    Record<number, { ok: true; slug: string } | { ok: false; error: string }>
+    Record<number, { ok: true; slug: string } | { ok: true } | { ok: false; error: string }>
   >({});
   const [published, setPublished] = useState<{ id: number; headline: string; slug: string }[]>([]);
+  const [killed, setKilled] = useState<{ id: number; headline: string }[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<WaitingRoundupDetail | null>(null);
+  const [opening, setOpening] = useState<number | null>(null);
+  const [killTarget, setKillTarget] = useState<number | null>(null);
+  const [killing, setKilling] = useState<number | null>(null);
   const waiting = useQuery({
     queryKey: ["desk", "waiting-roundups"],
     queryFn: () => listWaitingRoundups(),
   });
 
   const rows = waiting.data ?? [];
-  if (waiting.isLoading || (rows.length === 0 && published.length === 0)) {
+  if (waiting.isLoading || (rows.length === 0 && published.length === 0 && killed.length === 0)) {
     return null;
   }
 
@@ -450,6 +464,61 @@ function WaitingRoundups() {
     }
   }
 
+  async function handleOpen(id: number) {
+    if (openId === id) {
+      setOpenId(null);
+      setDetail(null);
+      return;
+    }
+    setOpening(id);
+    setResults((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      const loaded = await getWaitingRoundup({ data: id });
+      if (!loaded) {
+        setOpenId(null);
+        setDetail(null);
+        setResults((prev) => ({
+          ...prev,
+          [id]: { ok: false, error: "This roundup is not waiting any more. Reload the page." },
+        }));
+        return;
+      }
+      setDetail(loaded);
+      setOpenId(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not open the roundup.";
+      setResults((prev) => ({ ...prev, [id]: { ok: false, error: message } }));
+    } finally {
+      setOpening(null);
+    }
+  }
+
+  async function handleKill(id: number, headline: string) {
+    setKilling(id);
+    try {
+      const result = await killWaitingRoundup({ data: id });
+      setResults((prev) => ({ ...prev, [id]: result }));
+      if (result.ok) {
+        setKilled((prev) => [...prev.filter((k) => k.id !== id), { id, headline }]);
+        if (openId === id) {
+          setOpenId(null);
+          setDetail(null);
+        }
+        await queryClient.invalidateQueries({ queryKey: ["desk", "waiting-roundups"] });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not kill the roundup.";
+      setResults((prev) => ({ ...prev, [id]: { ok: false, error: message } }));
+    } finally {
+      setKilling(null);
+      setKillTarget(null);
+    }
+  }
+
   return (
     <section aria-label="Roundups waiting">
       <h2 className="hl-head">Roundups waiting</h2>
@@ -465,7 +534,7 @@ function WaitingRoundups() {
               </p>
               <h3 className="hl-head">{roundup.headline}</h3>
               {result && !result.ok && <p role="alert">{result.error}</p>}
-              {result && result.ok && (
+              {result && result.ok && "slug" in result && (
                 /*
                   Faint toast (walk note, Oct 31 2026): this confirmation was an
                   unstyled <p> -- it inherited whatever colour the row was
@@ -482,8 +551,47 @@ function WaitingRoundups() {
                   </Link>
                 </p>
               )}
+              {openId === roundup.id && detail ? (
+                <div className="roundup-preview">
+                  {detail.dek ? <p className="dek">{detail.dek}</p> : null}
+                  <StoryBody body={detail.body} />
+                  {detail.sourceUrls.length ? (
+                    <section aria-label="Sources and public records">
+                      <h4 className="hl-head">Sources &amp; public records</h4>
+                      <ul>
+                        {detail.sourceUrls.map((url) => (
+                          <li key={url}>
+                            <a href={url} className="inline-link" target="_blank" rel="noreferrer">
+                              {url}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="drafts-side">
+              <button
+                type="button"
+                className="btn"
+                aria-label={`Open: ${roundup.headline}`}
+                aria-expanded={openId === roundup.id}
+                disabled={opening === roundup.id}
+                onClick={() => void handleOpen(roundup.id)}
+              >
+                {openId === roundup.id ? "Close" : "Open"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                aria-label={`Kill: ${roundup.headline}`}
+                disabled={killing === roundup.id}
+                onClick={() => setKillTarget(killTarget === roundup.id ? null : roundup.id)}
+              >
+                Kill
+              </button>
               <button
                 type="button"
                 className="btn solid"
@@ -494,6 +602,28 @@ function WaitingRoundups() {
                 {isPublishing ? "Publishing…" : "Publish"}
               </button>
             </div>
+            {killTarget === roundup.id ? (
+              <div className="drafts-main" role="group" aria-label={`Kill ${roundup.headline}`}>
+                <p>Kill this roundup? It will not print.</p>
+                <div className="drafts-side">
+                  <button
+                    type="button"
+                    className="btn solid"
+                    disabled={killing === roundup.id}
+                    onClick={() => void handleKill(roundup.id, roundup.headline)}
+                  >
+                    {killing === roundup.id ? "Killing…" : "Yes, kill it"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setKillTarget(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -501,6 +631,11 @@ function WaitingRoundups() {
         .filter((p) => !rows.some((r) => r.id === p.id))
         .map((p) => (
           <div className="drafts-row" key={`published-${p.id}`}><div className="drafts-main"><h3 className="hl-head">{p.headline}</h3><p className="published-line" role="status">Published.{" "}<Link to="/articles/$slug" params={{ slug: p.slug }} className="inline-link">Open the story</Link></p></div></div>
+        ))}
+      {killed
+        .filter((k) => !rows.some((r) => r.id === k.id))
+        .map((k) => (
+          <div className="drafts-row" key={`killed-${k.id}`}><div className="drafts-main"><p className="published-line" role="status">Killed: {k.headline}</p></div></div>
         ))}
     </section>
   );
