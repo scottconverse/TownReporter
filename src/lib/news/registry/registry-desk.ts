@@ -13,6 +13,8 @@ import { deskMiddleware } from "../desk-auth.ts";
 import {
   countPublishedRegistryServices,
   listDeskChanges,
+  listPublishedRegistryEntries,
+  listRegistryCategoryNames,
   listRegistryImports,
   listRegistrySourcesWithHealth,
   listUnpublishedRegistryEntries,
@@ -25,13 +27,33 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<RegistryDeskView> => {
     const sql = await getSql();
-    const [changes, imports, sources, waiting, publishedCount, starterLoaded] = await Promise.all([
+    const [
+      changes,
+      imports,
+      sources,
+      waiting,
+      published,
+      categories,
+      publishedCount,
+      starterLoaded,
+    ] = await Promise.all([
       listDeskChanges(sql, context.newsroomId),
       listRegistryImports(sql, context.newsroomId),
       listRegistrySourcesWithHealth(sql, context.newsroomId),
       listUnpublishedRegistryEntries(sql, context.newsroomId),
+      listPublishedRegistryEntries(sql, context.newsroomId),
+      listRegistryCategoryNames(sql, context.newsroomId),
       countPublishedRegistryServices(sql, context.newsroomId),
       starterListIsLoaded(sql, context.newsroomId),
     ]);
-    return { changes, imports, sources, waiting, publishedCount, starterLoaded };
+    return {
+      changes,
+      imports,
+      sources,
+      waiting,
+      published,
+      categories,
+      publishedCount,
+      starterLoaded,
+    };
   });
