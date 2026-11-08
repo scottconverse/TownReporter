@@ -1,9 +1,19 @@
+import { useState, type ChangeEvent } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
-import { loadStarterList, publishRegistryEntry } from "@/lib/news/registry/registry-desk-write";
+import {
+  addRegistryEntry,
+  loadStarterList,
+  publishRegistryEntry,
+  takeDownRegistryEntry,
+  updateRegistryEntry,
+} from "@/lib/news/registry/registry-desk-write";
+import {
+  type RegistryEntryFields,
+} from "@/lib/news/registry/registry-entry-fields";
 import {
   STARTER_CHECKED_ON_BY_SERVICE_ID,
   STARTER_ENTRIES,
@@ -90,6 +100,154 @@ export const Route = createFileRoute("/desk/registry")({
   component: RegistryDeskPage,
 });
 
+const field = "w-full border border-rule bg-paper p-2 text-sm";
+
+/** The id of the one datalist every entry form draws its categories from. */
+const CATEGORY_LIST_ID = "registry-category-options";
+
+const EMPTY_ENTRY_FIELDS: RegistryEntryFields = {
+  organizationName: "",
+  serviceName: "",
+  categoryName: "",
+  phone: "",
+  description: "",
+  sourceTitle: "",
+  sourceUrl: "",
+};
+
+/**
+ * The seven fields of one entry, in place: used to edit a row and to add a new
+ * one. The values start from the row the editor pressed Edit on, or from
+ * nothing for a new entry. The category box offers the newsroom's existing
+ * names but accepts a new one.
+ */
+function RegistryEntryForm({
+  initial,
+  submitLabel,
+  pending,
+  pendingLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initial: RegistryEntryFields;
+  submitLabel: string;
+  pending: boolean;
+  pendingLabel: string;
+  onSubmit: (fields: RegistryEntryFields) => void;
+  onCancel: () => void;
+}) {
+  const [fields, setFields] = useState<RegistryEntryFields>(initial);
+  const change =
+    (key: keyof RegistryEntryFields) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setFields((current) => ({ ...current, [key]: event.target.value }));
+
+  return (
+    <form
+      className="mt-3 grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(fields);
+      }}
+    >
+      <label className="block text-sm">
+        Organization name
+        <input
+          className={field}
+          value={fields.organizationName}
+          maxLength={200}
+          onChange={change("organizationName")}
+        />
+      </label>
+      <label className="block text-sm">
+        Service name
+        <input
+          className={field}
+          value={fields.serviceName}
+          maxLength={200}
+          onChange={change("serviceName")}
+        />
+      </label>
+      <label className="block text-sm">
+        Category
+        <input
+          className={field}
+          value={fields.categoryName}
+          maxLength={200}
+          list={CATEGORY_LIST_ID}
+          onChange={change("categoryName")}
+        />
+      </label>
+      <label className="block text-sm">
+        Phone
+        <input
+          className={field}
+          value={fields.phone}
+          maxLength={60}
+          onChange={change("phone")}
+        />
+      </label>
+      <label className="block text-sm">
+        Description
+        <textarea
+          className={field}
+          value={fields.description}
+          rows={3}
+          maxLength={2000}
+          onChange={change("description")}
+        />
+      </label>
+      <label className="block text-sm">
+        Source title
+        <input
+          className={field}
+          value={fields.sourceTitle}
+          maxLength={300}
+          onChange={change("sourceTitle")}
+        />
+      </label>
+      <label className="block text-sm">
+        Source URL
+        <input
+          className={field}
+          value={fields.sourceUrl}
+          maxLength={2000}
+          onChange={change("sourceUrl")}
+        />
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <InkButton type="submit" tone="solid" pending={pending} pendingLabel={pendingLabel}>
+          {submitLabel}
+        </InkButton>
+        <InkButton tone="ghost" onClick={onCancel}>
+          Cancel
+        </InkButton>
+      </div>
+    </form>
+  );
+}
+
+/** The form values an existing row starts from. */
+function entryFieldsOf(row: {
+  organizationName: string;
+  serviceName: string;
+  categoryName: string | null;
+  phone: string | null;
+  description: string | null;
+  sourceTitle: string | null;
+  sourceUrl: string | null;
+}): RegistryEntryFields {
+  return {
+    organizationName: row.organizationName,
+    serviceName: row.serviceName,
+    categoryName: row.categoryName ?? "",
+    phone: row.phone ?? "",
+    description: row.description ?? "",
+    sourceTitle: row.sourceTitle ?? "",
+    sourceUrl: row.sourceUrl ?? "",
+  };
+}
+
 function RegistryDeskPage() {
   const search = Route.useSearch();
   const state: ReviewStateFilter = search.state ?? "all";
@@ -99,6 +257,25 @@ function RegistryDeskPage() {
   const changes = query.data?.changes ?? [];
   const visible = state === "all" ? changes : changes.filter((c) => c.reviewState === state);
   const waiting = query.data?.waiting ?? [];
+  const published = query.data?.published ?? [];
+  const categories = query.data?.categories ?? [];
+
+  // Which row's form is open. One at a time, so the desk never shows two
+  // half-edited entries and an editor cannot lose track of which Save is which.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  // Bumped after an add so the add form remounts empty.
+  const [addVersion, setAddVersion] = useState(0);
+  // The last write's word to the editor. Held here rather than read off a
+  // mutation so a later action replaces it instead of leaving the older
+  // mutation's "Saved." sitting under the newer one.
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const writeFailed = (error: unknown) => {
+    setActionMessage(null);
+    setActionError(
+      error instanceof Error ? error.message : "That change was not saved. Nothing was changed.",
+    );
+  };
 
   const load = useMutation({
     mutationFn: () => loadStarterList(),
@@ -108,6 +285,39 @@ function RegistryDeskPage() {
   const publish = useMutation({
     mutationFn: (serviceId: number) => publishRegistryEntry({ data: { serviceId } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["registry-desk"] }),
+  });
+
+  const edit = useMutation({
+    mutationFn: ({ serviceId, fields }: { serviceId: number; fields: RegistryEntryFields }) =>
+      updateRegistryEntry({ data: { serviceId, fields } }),
+    onSuccess: () => {
+      setEditingId(null);
+      setActionError(null);
+      setActionMessage("Saved.");
+      return qc.invalidateQueries({ queryKey: ["registry-desk"] });
+    },
+    onError: writeFailed,
+  });
+
+  const add = useMutation({
+    mutationFn: (fields: RegistryEntryFields) => addRegistryEntry({ data: { fields } }),
+    onSuccess: () => {
+      setAddVersion((version) => version + 1);
+      setActionError(null);
+      setActionMessage("Added. It is in the waiting list.");
+      return qc.invalidateQueries({ queryKey: ["registry-desk"] });
+    },
+    onError: writeFailed,
+  });
+
+  const takeDown = useMutation({
+    mutationFn: (serviceId: number) => takeDownRegistryEntry({ data: { serviceId } }),
+    onSuccess: () => {
+      setActionError(null);
+      setActionMessage("Taken down. It is back in the waiting list.");
+      return qc.invalidateQueries({ queryKey: ["registry-desk"] });
+    },
+    onError: writeFailed,
   });
 
   const loadMessage = load.data
@@ -171,6 +381,21 @@ function RegistryDeskPage() {
                   : "That entry was not published. Nothing was changed."}
               </p>
             ) : null}
+            {actionError ? (
+              <p className="mb-3 text-sm text-rust" role="alert">
+                {actionError}
+              </p>
+            ) : null}
+            {actionMessage ? (
+              <p className="mb-3 text-sm text-ink-2" role="status" aria-live="polite">
+                {actionMessage}
+              </p>
+            ) : null}
+            <datalist id={CATEGORY_LIST_ID}>
+              {categories.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
             {waiting.length === 0 ? (
               <p className="wire-sum">No entries are waiting.</p>
             ) : (
@@ -203,7 +428,7 @@ function RegistryDeskPage() {
                       {checkedOn ? (
                         <p className="astra-row-meta">{checkedOnLabel(checkedOn)}</p>
                       ) : null}
-                      <div className="mt-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <InkButton
                           tone="solid"
                           ariaLabel={`Publish: ${row.serviceName}`}
@@ -214,12 +439,46 @@ function RegistryDeskPage() {
                         >
                           Publish
                         </InkButton>
+                        <InkButton
+                          tone="ghost"
+                          ariaLabel={`Edit: ${row.serviceName}`}
+                          onClick={() =>
+                            setEditingId(editingId === row.serviceId ? null : row.serviceId)
+                          }
+                        >
+                          Edit
+                        </InkButton>
                       </div>
+                      {editingId === row.serviceId ? (
+                        <RegistryEntryForm
+                          initial={entryFieldsOf(row)}
+                          submitLabel="Save"
+                          pending={edit.isPending}
+                          pendingLabel="Saving…"
+                          onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
+                          onCancel={() => setEditingId(null)}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}
               </ul>
             )}
+            <div className="mt-6">
+              <h3 className="font-display text-xl">Add an entry</h3>
+              <p className="wire-sum">
+                It goes into the waiting list. Readers see it only after you press Publish.
+              </p>
+              <RegistryEntryForm
+                key={addVersion}
+                initial={EMPTY_ENTRY_FIELDS}
+                submitLabel="Add entry"
+                pending={add.isPending}
+                pendingLabel="Adding…"
+                onSubmit={(fields) => add.mutate(fields)}
+                onCancel={() => setAddVersion((version) => version + 1)}
+              />
+            </div>
           </section>
 
           <section className="src-sec">
@@ -233,6 +492,68 @@ function RegistryDeskPage() {
                 </Link>
               }
             />
+            {published.length === 0 ? (
+              <p className="wire-sum">No entries are published yet.</p>
+            ) : (
+              <ul className="astra-plain">
+                {published.map((row) => (
+                  <li key={row.serviceId}>
+                    <div className="astra-row-t">
+                      {row.organizationName} — {row.serviceName}
+                    </div>
+                    <p className="astra-row-meta">{row.categoryName ?? "No category"}</p>
+                    {row.phone ? <p className="astra-row-meta">Phone: {row.phone}</p> : null}
+                    {row.description ? <p className="astra-row-meta">{row.description}</p> : null}
+                    <p className="astra-row-meta">
+                      Source:{" "}
+                      {row.sourceUrl ? (
+                        <a
+                          className="inline-link"
+                          href={row.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {row.sourceTitle || row.sourceUrl} ↗
+                        </a>
+                      ) : (
+                        (row.sourceTitle ?? "not recorded")
+                      )}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <InkButton
+                        tone="ghost"
+                        ariaLabel={`Edit: ${row.serviceName}`}
+                        onClick={() =>
+                          setEditingId(editingId === row.serviceId ? null : row.serviceId)
+                        }
+                      >
+                        Edit
+                      </InkButton>
+                      <InkButton
+                        tone="ghost"
+                        ariaLabel={`Take down: ${row.serviceName}`}
+                        disabled={takeDown.isPending}
+                        pending={takeDown.isPending && takeDown.variables === row.serviceId}
+                        pendingLabel="Taking down…"
+                        onClick={() => takeDown.mutate(row.serviceId)}
+                      >
+                        Take down
+                      </InkButton>
+                    </div>
+                    {editingId === row.serviceId ? (
+                      <RegistryEntryForm
+                        initial={entryFieldsOf(row)}
+                        submitLabel="Save"
+                        pending={edit.isPending}
+                        pendingLabel="Saving…"
+                        onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
+                        onCancel={() => setEditingId(null)}
+                      />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="src-sec">

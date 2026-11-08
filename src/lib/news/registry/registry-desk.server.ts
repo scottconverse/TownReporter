@@ -290,6 +290,52 @@ export interface DeskRegistryWaitingEntry {
 }
 
 /**
+ * One published service on the desk. The same shape as a waiting entry, so the
+ * editor's form can be filled from either list without a second reader.
+ */
+export type DeskRegistryPublishedEntry = DeskRegistryWaitingEntry;
+
+/**
+ * The columns both desk entry lists read. `published` decides which list a row
+ * lands in; everything else is what the editor's form is filled from.
+ */
+const ENTRY_COLUMNS = `s.id as service_id, s.hsds_id as service_hsds_id, s.name as service_name,
+            s.description as service_description,
+            o.name as organization_name,
+            t.name as category_name,
+            (select c.phone from contacts c
+              where c.newsroom_id = s.newsroom_id and c.service_id = s.id
+                and c.phone is not null and c.phone <> ''
+              order by c.id limit 1) as phone,
+            src.title as source_title, src.url as source_url`;
+
+interface EntryRow {
+  service_id: number;
+  service_hsds_id: string;
+  service_name: string;
+  service_description: string | null;
+  organization_name: string;
+  category_name: string | null;
+  phone: string | null;
+  source_title: string | null;
+  source_url: string | null;
+}
+
+function toEntry(row: EntryRow): DeskRegistryWaitingEntry {
+  return {
+    serviceId: Number(row.service_id),
+    serviceHsdsId: row.service_hsds_id,
+    organizationName: row.organization_name,
+    serviceName: row.service_name,
+    categoryName: row.category_name,
+    phone: row.phone,
+    description: row.service_description,
+    sourceTitle: row.source_title,
+    sourceUrl: row.source_url,
+  };
+}
+
+/**
  * Every unpublished service in this newsroom, any directory, newest import
  * first. This is the desk's "waiting to be published" list; publishing one
  * takes it off this list and onto the public page.
@@ -298,26 +344,8 @@ export async function listUnpublishedRegistryEntries(
   sql: Sql,
   newsroomId: number,
 ): Promise<DeskRegistryWaitingEntry[]> {
-  const rows = await sql.query<{
-    service_id: number;
-    service_hsds_id: string;
-    service_name: string;
-    service_description: string | null;
-    organization_name: string;
-    category_name: string | null;
-    phone: string | null;
-    source_title: string | null;
-    source_url: string | null;
-  }>(
-    `select s.id as service_id, s.hsds_id as service_hsds_id, s.name as service_name,
-            s.description as service_description,
-            o.name as organization_name,
-            t.name as category_name,
-            (select c.phone from contacts c
-              where c.newsroom_id = s.newsroom_id and c.service_id = s.id
-                and c.phone is not null and c.phone <> ''
-              order by c.id limit 1) as phone,
-            src.title as source_title, src.url as source_url
+  const rows = await sql.query<EntryRow>(
+    `select ${ENTRY_COLUMNS}
        from services s
        join organizations o
          on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
@@ -331,17 +359,53 @@ export async function listUnpublishedRegistryEntries(
     [newsroomId],
   );
 
-  return rows.map((row) => ({
-    serviceId: Number(row.service_id),
-    serviceHsdsId: row.service_hsds_id,
-    organizationName: row.organization_name,
-    serviceName: row.service_name,
-    categoryName: row.category_name,
-    phone: row.phone,
-    description: row.service_description,
-    sourceTitle: row.source_title,
-    sourceUrl: row.source_url,
-  }));
+  return rows.map(toEntry);
+}
+
+/**
+ * Every published service in this newsroom, newest first, with the values the
+ * editor's Edit form starts from. Listing them rather than only counting them
+ * is what lets the editor fix one without taking it down first.
+ */
+export async function listPublishedRegistryEntries(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistryPublishedEntry[]> {
+  const rows = await sql.query<EntryRow>(
+    `select ${ENTRY_COLUMNS}
+       from services s
+       join organizations o
+         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+       left join taxonomies t
+         on t.id = s.taxonomy_id and t.newsroom_id = s.newsroom_id
+       left join sources src
+         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.published = true
+      order by s.updated_at desc, s.id desc
+      limit 200`,
+    [newsroomId],
+  );
+
+  return rows.map(toEntry);
+}
+
+/**
+ * Every category name this newsroom already uses, for the form's datalist.
+ *
+ * The editor types a category; the list is an offer, not a rule. A name on it
+ * is reused, and a name that is not on it creates a category.
+ */
+export async function listRegistryCategoryNames(
+  sql: Sql,
+  newsroomId: number,
+): Promise<string[]> {
+  const rows = await sql.query<{ name: string }>(
+    `select distinct name from taxonomies
+      where newsroom_id = $1
+      order by name`,
+    [newsroomId],
+  );
+  return rows.map((row) => row.name);
 }
 
 /** How many registry services in this newsroom are published. */
@@ -375,6 +439,9 @@ export interface RegistryDeskView {
   imports: DeskRegistryImport[];
   sources: DeskRegistrySource[];
   waiting: DeskRegistryWaitingEntry[];
+  published: DeskRegistryPublishedEntry[];
+  /** The newsroom's category names, for the edit and add forms' datalist. */
+  categories: string[];
   publishedCount: number;
   starterLoaded: boolean;
 }
