@@ -4287,6 +4287,17 @@
 }
 .desk-ltr.astra .published-line .inline-link {
   color: var(--fg);
+  /* The comment above says the underline is what keeps this a link, but the
+     underline was never declared here: it was riding on the generic
+     `.desk-ltr .inline-link` rule in `styles.css`, which sets
+     `text-underline-offset: 4px` and is then overridden to 4px again by the
+     `.desk-ltr.astra a` rule in this file. Declared here instead, at the same
+     1px / 3px pair `.drafts-hl` uses (README section 6), so the line does not
+     depend on two other sheets agreeing. `currentColor` keeps it the same ink
+     as the sentence in both palettes. */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 .desk-ltr.astra .drafts-overline {
   display: block;
@@ -4321,6 +4332,70 @@
 }
 .desk-ltr.astra .drafts-job {
   grid-column: 1 / -1;
+}
+
+/*
+  THE ROUNDUP ROW IS NOT A DRAFT ROW.
+
+  `div.drafts-row` above is a four-track grid sized for a draft: state chip,
+  headline, meta, actions. A roundup row has neither the chip nor the meta --
+  it is a headline, three buttons (Open / Kill / Publish), and, when it is
+  open or being killed, one full-width block underneath. Drawn on the draft
+  grid it put the roundup text in the 200px first track and the kill question
+  in the 170px third one, so a 3,000-character roundup became a tall narrow
+  strip with its buttons stranded halfway down it.
+
+  So the row gets its own shape, on its own class (`roundup-row`, added next
+  to `drafts-row` in desk.drafts.tsx), and `.drafts-row` itself is untouched:
+  the draft rows above and below it keep the four-column grid exactly as it
+  was.
+
+  Two tracks, not four: the headline cell takes the free space, the actions
+  take what they need and sit at the TOP of the row (`align-items: start`),
+  not centred against the height of the opened text. Everything else in the
+  row -- the opened roundup, the kill question -- spans both tracks on a row
+  of its own.
+
+  The selector is `.drafts-row.roundup-row` (0,4,0) on purpose. The responsive
+  blocks further down retune `.drafts-row` (a 160px first track at 1280px and
+  below, one track at every width at 882px and below) at (0,3,0); without the
+  extra class in the selector those blocks would reach in here and put the
+  roundup text back in a 160px column.
+*/
+.desk-ltr.astra .drafts-row.roundup-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+.desk-ltr.astra .drafts-row.roundup-row > .drafts-side {
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* A button is a press, not a paragraph: no control label in these rows breaks
+   across two lines ("Yes, kill it" and "Publish" both did on the draft grid). */
+.desk-ltr.astra .drafts-row.roundup-row .btn {
+  white-space: nowrap;
+}
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-kill,
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+/* The kill question reads as one line -- the sentence, then the two presses
+   beside it -- and only stacks when there is genuinely no room for that. */
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-kill {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-kill > p {
+  margin: 0;
+  white-space: nowrap;
+}
+.desk-ltr.astra .drafts-row.roundup-row > .roundup-kill > .drafts-side {
+  flex: 0 0 auto;
 }
 
 /* ---------------------------------------------------------------------------
@@ -5306,6 +5381,19 @@
     position: static;
     min-width: 0;
     max-width: 100%;
+  }
+  /* The roundup row keeps its two tracks through `.roundup-row`'s own (0,4,0)
+     rule, so it needs its own stack here: one column, actions under the
+     headline at the left, and the kill question's sentence allowed to wrap
+     again -- `nowrap` on a phone is a row wider than the screen. */
+  .desk-ltr.astra .drafts-row.roundup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .drafts-row.roundup-row > .drafts-side {
+    justify-content: flex-start;
+  }
+  .desk-ltr.astra .drafts-row.roundup-row > .roundup-kill > p {
+    white-space: normal;
   }
 }
 
