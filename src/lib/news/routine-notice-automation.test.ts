@@ -21,7 +21,11 @@ import {
   tickRoutineNoticeEditions,
 } from "./routine-notice-worker.server.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
-import { listWaitingRoundupsFor, publishWaitingRoundupFor } from "./routine-waiting.ts";
+import {
+  killWaitingRoundupFor,
+  listWaitingRoundupsFor,
+  publishWaitingRoundupFor,
+} from "./routine-waiting.ts";
 
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
 // applies migrations/*.sql before the file loads; the postgres-integration
@@ -327,6 +331,94 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     needs_review: 1,
     body: "Editor changed this edition.",
   });
+});
+
+test("a killed roundup is not recreated or updated by the next routine run", async () => {
+  const source = await activateFixture();
+  assert.deepEqual(await tickRoutineNoticeEditions(new Date("2026-09-08T13:00:00Z")), {
+    queued: 1,
+  });
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='kill-claim' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  let eventTitle = "Concert";
+  const fakeCheck = async () => ({
+    ok: true as const,
+    check: {
+      checkId: 44,
+      source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: new Date().toISOString(),
+      capture: {
+        captureEventId: 8,
+        artifactVersionId: 9,
+        observedAt: new Date().toISOString(),
+        evidenceHref: null,
+        textAvailable: true,
+      },
+      state: "parsed" as const,
+      counts: { parsed: 1, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates: [
+        {
+          id: 1,
+          externalIdHash: "event-1",
+          formatKey: "community-arts-event-logistics" as const,
+          variant: "event",
+          fields: {
+            issuer: { value: "Arts Council", locator: "issuer" },
+            title: { value: eventTitle, locator: "title" },
+            start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+            venue: { value: "Park", locator: "venue" },
+          },
+          conflict: false,
+        },
+      ],
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  });
+  await performRoutineNoticeWorkWith(job as DeskJob, {
+    now: runNow,
+    check: fakeCheck as any,
+    verifyCheck: async () => {},
+  });
+
+  const [waiting] = await sql.query<{ id: number; body: string }>(
+    "select id, body from articles where newsroom_id=$1",
+    [room],
+  );
+  const killed = await killWaitingRoundupFor(sql, room, waiting!.id, owner);
+  assert.deepEqual(killed, { ok: true });
+
+  // A real change would normally update the printed edition; the killed
+  // article must be left alone instead.
+  eventTitle = "Concert — new time";
+  const [nextJob] = await sql.query<any>(
+    "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working','kill-next') returning *",
+    [room, owner, job.subject_id],
+  );
+  await performRoutineNoticeWorkWith(nextJob as DeskJob, {
+    now: runNow,
+    check: fakeCheck as any,
+    verifyCheck: async () => {},
+  });
+
+  const [after] = await sql.query<{ status: string; body: string; needs_review: number }>(
+    "select (select status from articles where id=$2) status,(select body from articles where id=$2) body,(summary_json::jsonb->>'needsReview')::int needs_review from routine_notice_runs where id=$1",
+    [job.subject_id, waiting!.id],
+  );
+  assert.equal(after.status, "killed");
+  assert.equal(after.body, waiting!.body);
+  assert.equal(after.needs_review, 1);
+  assert.equal(
+    (await sql.query("select 1 from articles where newsroom_id=$1", [room])).length,
+    1,
+    "the worker must not print a second article",
+  );
 });
 
 test("revocation at the final boundary leaves no article, correction, audit, or completed run", async () => {
