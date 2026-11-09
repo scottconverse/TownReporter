@@ -46,6 +46,38 @@ if (typeof window !== "undefined") {
   });
 }
 
+/*
+  Register the service worker that makes the paper installable.
+
+  A browser will not offer "Install app" for a manifest-only site; Chrome also
+  wants a service worker with a fetch handler. `public/sw.js` is served at
+  `/sw.js`, so its scope is `/`. It caches nothing -- it exists to satisfy the
+  install check and to show a plain "You are offline." page when a reader opens
+  the installed app with no signal. Registering after `load` keeps it off the
+  critical path: nothing about the page waits on it.
+
+  Skipped inside a frame: an embedded page has no home screen to install to,
+  and registering from one would give the worker a scope the embedder never
+  asked for. A failed register is not an error a reader can act on, so it is a
+  warning and nothing else.
+*/
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  let embedded = false;
+  try {
+    embedded = window.self !== window.top;
+  } catch {
+    // A cross-origin parent makes the comparison throw; treat it as embedded.
+    embedded = true;
+  }
+  if (!embedded) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch((error) => {
+        console.warn("[app] service worker registration failed", error);
+      });
+    });
+  }
+}
+
 export const Route = createRootRoute({
   /*
     Fetched ONCE per page load, on the server: this `beforeLoad` runs a
