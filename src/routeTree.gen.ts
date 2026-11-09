@@ -15,6 +15,7 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as CorrectionsRouteImport } from './routes/corrections'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as FeedRouteImport } from './routes/feed'
+import { Route as GetTheAppRouteImport } from './routes/get-the-app'
 import { Route as GetTheCodeRouteImport } from './routes/get-the-code'
 import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
@@ -82,6 +83,11 @@ const DeskRoute = DeskRouteImport.update({
 const FeedRoute = FeedRouteImport.update({
   id: '/feed',
   path: '/feed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GetTheAppRoute = GetTheAppRouteImport.update({
+  id: '/get-the-app',
+  path: '/get-the-app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GetTheCodeRoute = GetTheCodeRouteImport.update({
@@ -283,6 +289,7 @@ export interface FileRoutesByFullPath {
   '/corrections': typeof CorrectionsRoute
   '/desk': typeof DeskRouteWithChildren
   '/feed': typeof FeedRoute
+  '/get-the-app': typeof GetTheAppRoute
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
@@ -328,6 +335,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/corrections': typeof CorrectionsRoute
   '/feed': typeof FeedRoute
+  '/get-the-app': typeof GetTheAppRoute
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
@@ -375,6 +383,7 @@ export interface FileRoutesById {
   '/corrections': typeof CorrectionsRoute
   '/desk': typeof DeskRouteWithChildren
   '/feed': typeof FeedRoute
+  '/get-the-app': typeof GetTheAppRoute
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
@@ -423,6 +432,7 @@ export interface FileRouteTypes {
     | '/corrections'
     | '/desk'
     | '/feed'
+    | '/get-the-app'
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
@@ -468,6 +478,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/corrections'
     | '/feed'
+    | '/get-the-app'
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
@@ -514,6 +525,7 @@ export interface FileRouteTypes {
     | '/corrections'
     | '/desk'
     | '/feed'
+    | '/get-the-app'
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
@@ -561,6 +573,7 @@ export interface RootRouteChildren {
   CorrectionsRoute: typeof CorrectionsRoute
   DeskRoute: typeof DeskRouteWithChildren
   FeedRoute: typeof FeedRoute
+  GetTheAppRoute: typeof GetTheAppRoute
   GetTheCodeRoute: typeof GetTheCodeRoute
   HowWeReportRoute: typeof HowWeReportRoute
   LoginRoute: typeof LoginRoute
@@ -619,6 +632,13 @@ declare module '@tanstack/react-router' {
       path: '/feed'
       fullPath: '/feed'
       preLoaderRoute: typeof FeedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/get-the-app': {
+      id: '/get-the-app'
+      path: '/get-the-app'
+      fullPath: '/get-the-app'
+      preLoaderRoute: typeof GetTheAppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/get-the-code': {
@@ -953,6 +973,7 @@ const rootRouteChildren: RootRouteChildren = {
   CorrectionsRoute: CorrectionsRoute,
   DeskRoute: DeskRouteWithChildren,
   FeedRoute: FeedRoute,
+  GetTheAppRoute: GetTheAppRoute,
   GetTheCodeRoute: GetTheCodeRoute,
   HowWeReportRoute: HowWeReportRoute,
   LoginRoute: LoginRoute,

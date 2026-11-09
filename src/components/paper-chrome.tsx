@@ -211,6 +211,7 @@ export function PaperShell({
                 <Link to="/how-we-report">How we report</Link>
                 <Link to="/registry">Community resources</Link>
                 <Link to="/corrections">Corrections</Link>
+                <Link to="/get-the-app">Get the app</Link>
                 {/*
                   Boundary entry: leave the reader app with a document
                   navigation. An in-app route transition can leave a public

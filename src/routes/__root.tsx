@@ -10,6 +10,11 @@ import { AppearanceProvider } from "@/lib/appearance-provider";
 import { appearanceHeadScript } from "@/lib/appearance";
 import { assetReloadHeadScript } from "@/lib/asset-reload";
 import { readerStorageKey } from "@/lib/reader";
+import {
+  clearInstallPrompt,
+  rememberInstallPrompt,
+  type InstallPromptEvent,
+} from "@/lib/app-install";
 import appCss from "../styles.css?url";
 import deskCss from "../desk-astra.css?url";
 import readerCss from "../reader-astra.css?url";
@@ -76,6 +81,23 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       });
     });
   }
+}
+
+/*
+  Save the Android install prompt, once, where a component can still reach it.
+
+  Chrome fires `beforeinstallprompt` early -- before a story mounts -- and the
+  event is only replayable if it was cancelled when it fired. Cancelling it by
+  default also stops Chrome's own mini-infobar, so the paper decides where the
+  offer appears (the story-page bar and /get-the-app). `appinstalled` clears it:
+  an accepted prompt cannot be shown twice. See src/lib/app-install.ts.
+*/
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    rememberInstallPrompt(event as InstallPromptEvent);
+  });
+  window.addEventListener("appinstalled", () => clearInstallPrompt());
 }
 
 export const Route = createRootRoute({
