@@ -7121,6 +7121,10 @@
   .desk-ltr.astra .astra-row.pubhead > :last-child {
     display: none;
   }
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pub,
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pubhead {
+    grid-template-columns: 96px minmax(0, 1fr) 4em 8em;
+  }
 }
 .desk-ltr.astra .astra-cell { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .desk-ltr.astra .astra-row-t {
