@@ -9075,6 +9075,21 @@
   border: 0;
   background: transparent;
 }
+@container dark-desk (min-width: 1040px) {
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: start;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked > .model-picker {
+    grid-column: 2 !important;
+    grid-row: 1 / span 3;
+    align-self: start;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked > .model-picker-setup {
+    grid-column: 1 / -1;
+  }
+}
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker-setup > summary {
   display: inline-flex;
   align-items: center;
