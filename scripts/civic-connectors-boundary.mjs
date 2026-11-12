@@ -63,10 +63,19 @@ try {
     }
   }
   assert.ok(info, `Connector service did not start: ${logs}`);
-  assert.equal(info.data.version, "0.1.0.dev6");
+  assert.equal(info.data.version, "0.1.0.dev8");
   assert.equal(info.schema_version, "2.0.0");
   const providers = await client.execute("providers");
   assert.equal(providers.data.providers.length, 31);
+  for (const provider of ["legistar", "swagit"]) {
+    const row = providers.data.providers.find((item) => item.provider === provider);
+    assert.ok(row, `Provider catalog is missing ${provider}`);
+    assert.equal(
+      row.capabilities?.operations?.native_search?.implementation_status,
+      "implemented",
+      `${provider} native-search implementation label must reflect the packaged adapter`,
+    );
+  }
   const bytes = Buffer.from(
     JSON.stringify([
       {
