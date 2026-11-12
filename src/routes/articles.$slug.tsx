@@ -31,6 +31,7 @@ import {
 } from "@/lib/news/legal-gone";
 import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
+import { InstallBar } from "@/components/install-bar";
 
 /**
  * How much of a story a heading has to have gone past before the jump list
@@ -364,6 +365,14 @@ function ArticlePage() {
     <PaperShell compact>
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
       <ReadBeacon />
+      {/*
+        A reader on a phone can put the paper on their home screen; this is
+        where they are most likely to want to (they are already reading it).
+        Renders nothing on a desk screen, in the installed app, or after the
+        reader closes it, and nothing at all before mount. The not-found and
+        410 views return above this, so neither carries the bar.
+      */}
+      <InstallBar />
 
       {/* The story proper. "Keep reading" below it is about other stories, so it sits outside. */}
       <article className="storycontent">

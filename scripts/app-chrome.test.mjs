@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import sharp from "sharp";
 import {
   appNameFromHost,
   createHeadInjector,
@@ -450,6 +451,9 @@ test("filters non-document paths", () => {
   assert.equal(isDocumentPath("/api/thing"), false);
   assert.equal(isDocumentPath("/__app/manifest.webmanifest"), false);
   assert.equal(isDocumentPath("/logo.png"), false);
+  // The service worker must be handed to the browser as JavaScript. If this
+  // ever returns true the head injector would rewrite /sw.js as a page.
+  assert.equal(isDocumentPath("/sw.js"), false);
 });
 
 // The display name must come from the product, never from the deployment host.
@@ -475,6 +479,75 @@ test("renders the manifest with the product name", () => {
   assert.equal(manifest.name, "TownReporter");
   assert.equal(manifest.short_name, "TownReporter");
   assert.equal(manifest.icons[0].src, "/__app/icon-180.png");
+});
+
+/*
+  The icons a phone needs before it will offer "Install app".
+
+  Chrome on Android refuses to install from a manifest whose only icon is
+  180x180, and it wants a maskable icon so its round/squircle mask crops a
+  background instead of the mark. This checks the manifest's declarations
+  against the bytes on disk: every `sizes` is a promise about the file, so the
+  PNG's own width and height are read back and compared.
+*/
+test("the manifest declares the 180, 192, 512 and maskable icons it promises", async () => {
+  const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
+  const icons = manifest.icons;
+  assert.ok(Array.isArray(icons) && icons.length >= 4, "the manifest lists its icons");
+
+  const sizes = icons.map((icon) => icon.sizes);
+  for (const wanted of ["180x180", "192x192", "512x512"]) {
+    assert.ok(sizes.includes(wanted), `a ${wanted} icon is declared`);
+  }
+  assert.ok(
+    icons.some((icon) => icon.purpose === "maskable" && icon.sizes === "512x512"),
+    "a 512x512 maskable icon is declared",
+  );
+
+  for (const icon of icons) {
+    assert.equal(icon.type, "image/png", `${icon.src} is declared as a PNG`);
+    const file = join(TEMPLATE_ROOT, "public", icon.src.replace(/^\//, ""));
+    assert.ok(existsSync(file), `${icon.src} exists under public/`);
+    const [width, height] = icon.sizes.split("x").map(Number);
+    const meta = await sharp(file).metadata();
+    assert.equal(meta.format, "png", `${icon.src} is a PNG`);
+    assert.equal(meta.width, width, `${icon.src} width matches sizes "${icon.sizes}"`);
+    assert.equal(meta.height, height, `${icon.src} height matches sizes "${icon.sizes}"`);
+  }
+});
+
+test("the maskable icon leaves the artwork room inside Android's mask", async () => {
+  const file = join(TEMPLATE_ROOT, "public/__app/icon-maskable-512.png");
+  const { data, info } = await sharp(file)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  // Android may crop to a circle inscribed in the 512 square. The mark must
+  // sit inside the inner 80% diameter, so the corners of the artwork cannot
+  // be the only place its colour appears.
+  const radius = info.width / 2;
+  const safe = radius * 0.8;
+  const centre = info.width / 2;
+  let inside = 0;
+  let outside = 0;
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const at = (y * info.width + x) * 4;
+      // Red is the brand square and cream is the favicon's own field; the
+      // near-black glyph is the mark, and it is what the mask must not crop.
+      const r = data[at];
+      const g = data[at + 1];
+      const b = data[at + 2];
+      const isMark = !(r === 155 && g === 41 && b === 21) && !(r === 246 && g === 241 && b === 231);
+      if (!isMark) continue;
+      const dx = x + 0.5 - centre;
+      const dy = y + 0.5 - centre;
+      if (Math.hypot(dx, dy) <= safe) inside += 1;
+      else outside += 1;
+    }
+  }
+  assert.ok(inside > 0, "the mark is drawn");
+  assert.equal(outside, 0, `${outside} mark pixels fall outside Android's safe circle`);
 });
 
 // Tripwires: the deployed-app path only works if Nitro scans server/ — an

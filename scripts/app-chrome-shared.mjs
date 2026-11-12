@@ -139,6 +139,31 @@ export function renderWebManifest(hostHeader) {
           sizes: "180x180",
           type: "image/png",
         },
+        /*
+          Chrome on Android will not offer "Install app" from a manifest whose
+          only icon is 180x180; it wants a 192 and a 512. The maskable one is
+          the same mark at 80% on a full brand square, so Android's round and
+          squircle masks crop the background instead of the design. All three
+          are rendered from public/favicon.svg by scripts/make-app-icons.mjs.
+        */
+        {
+          src: "/__app/icon-192.png",
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "/__app/icon-512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "/__app/icon-maskable-512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "maskable",
+        },
       ],
     },
     null,

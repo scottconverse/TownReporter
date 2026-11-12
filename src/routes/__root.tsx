@@ -10,6 +10,11 @@ import { AppearanceProvider } from "@/lib/appearance-provider";
 import { appearanceHeadScript } from "@/lib/appearance";
 import { assetReloadHeadScript } from "@/lib/asset-reload";
 import { readerStorageKey } from "@/lib/reader";
+import {
+  clearInstallPrompt,
+  rememberInstallPrompt,
+  type InstallPromptEvent,
+} from "@/lib/app-install";
 import appCss from "../styles.css?url";
 import deskCss from "../desk-astra.css?url";
 import readerCss from "../reader-astra.css?url";
@@ -44,6 +49,55 @@ if (typeof window !== "undefined") {
     event.preventDefault();
     window.location.reload();
   });
+}
+
+/*
+  Register the service worker that makes the paper installable.
+
+  A browser will not offer "Install app" for a manifest-only site; Chrome also
+  wants a service worker with a fetch handler. `public/sw.js` is served at
+  `/sw.js`, so its scope is `/`. It caches nothing -- it exists to satisfy the
+  install check and to show a plain "You are offline." page when a reader opens
+  the installed app with no signal. Registering after `load` keeps it off the
+  critical path: nothing about the page waits on it.
+
+  Skipped inside a frame: an embedded page has no home screen to install to,
+  and registering from one would give the worker a scope the embedder never
+  asked for. A failed register is not an error a reader can act on, so it is a
+  warning and nothing else.
+*/
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  let embedded = false;
+  try {
+    embedded = window.self !== window.top;
+  } catch {
+    // A cross-origin parent makes the comparison throw; treat it as embedded.
+    embedded = true;
+  }
+  if (!embedded) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch((error) => {
+        console.warn("[app] service worker registration failed", error);
+      });
+    });
+  }
+}
+
+/*
+  Save the Android install prompt, once, where a component can still reach it.
+
+  Chrome fires `beforeinstallprompt` early -- before a story mounts -- and the
+  event is only replayable if it was cancelled when it fired. Cancelling it by
+  default also stops Chrome's own mini-infobar, so the paper decides where the
+  offer appears (the story-page bar and /get-the-app). `appinstalled` clears it:
+  an accepted prompt cannot be shown twice. See src/lib/app-install.ts.
+*/
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    rememberInstallPrompt(event as InstallPromptEvent);
+  });
+  window.addEventListener("appinstalled", () => clearInstallPrompt());
 }
 
 export const Route = createRootRoute({

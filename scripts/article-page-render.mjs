@@ -179,6 +179,9 @@ const provenanceStub = inlineModule(`
 `);
 const beaconStub = inlineModule(`export function ViewBeacon() { return null; }`);
 const readBeaconStub = inlineModule(`export function ReadBeacon() { return null; }`);
+/* The install bar decides after mount, so on the server it is always null --
+   the stub renders exactly what the real one does in a server render. */
+const installBarStub = inlineModule(`export function InstallBar() { return null; }`);
 const deskChromeUtilsStub = inlineModule(`export const inkGhost = "";`);
 const publicStub = inlineModule(`
   export async function getPublishedArticle() { return null; }
@@ -251,6 +254,7 @@ const routeImports = {
   "@/components/provenance": provenanceStub,
   "@/components/view-beacon": beaconStub,
   "@/components/read-beacon": readBeaconStub,
+  "@/components/install-bar": installBarStub,
   "@/components/desk-chrome-utils": deskChromeUtilsStub,
   "@/components/paper/dates-panel": datesPanelStub,
   "@/components/paper/section-tag": sectionTagStub,
