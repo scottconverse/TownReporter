@@ -1,5 +1,7 @@
 # Install TownReporter on Windows
 
+The QuorumRelay integration is a development candidate. Its [connector setup guide](civic-connectors.md) documents the separately configured HTTP service and newsroom credentials; installing TownReporter alone does not provision that service. Existing published Windows downloads remain the versions described below.
+
 Use Setup.exe for the self-contained local newsroom. The older online source-ZIP path remains documented separately below. Source setup for macOS and Linux remains in [setup.md](setup.md).
 
 ## Self-contained Setup.exe

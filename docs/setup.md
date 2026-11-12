@@ -1,5 +1,7 @@
 # TownReporter — operator setup
 
+**QuorumRelay development candidate:** Follow the [connector setup guide](civic-connectors.md) for the separately operated service, per-newsroom credentials, database migrations and source controls. TownReporter does not install or start that service. The published release described below remains separate from this candidate.
+
 **Current software version: [0.6.87](releases/README.md)** (released 2026-10-29, tag `v0.6.87`; the release assets are `TownReporter-0.6.87-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
