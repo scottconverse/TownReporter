@@ -7907,6 +7907,13 @@
   }
 }
 
+/* The Sources sidebar cannot fit the shared picker's label plus 260px field
+   at Large text until the wider desktop layout. Keep both above their help. */
+@media (max-width: 1279px) {
+  :root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="sources"] aside.astra-col .model-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,
