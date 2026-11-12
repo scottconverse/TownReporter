@@ -63,7 +63,7 @@ try {
     }
   }
   assert.ok(info, `Connector service did not start: ${logs}`);
-  assert.equal(info.data.version, "0.1.0.dev5");
+  assert.equal(info.data.version, "0.1.0.dev6");
   assert.equal(info.schema_version, "2.0.0");
   const providers = await client.execute("providers");
   assert.equal(providers.data.providers.length, 31);
@@ -94,7 +94,8 @@ try {
   assert.equal(discovered.data.records.length, 1);
   assert.match(discovered.coverage.scope, /saved capture.*not a complete/i);
   const retrieved = await client.execute("fetch", request);
-  assert.equal(retrieved.status, "completed");
+  assert.equal(retrieved.status, "partial");
+  assert.match(retrieved.coverage.scope, /one saved capture.*not a complete upstream catalog/i);
   assert.equal(retrieved.data.capture.sha256, createHash("sha256").update(bytes).digest("hex"));
   assert.deepEqual(retrieved.data.records[0].original.unknown, [
     null, false, 0, "", { non_ascii: "café" },

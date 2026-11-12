@@ -1,6 +1,6 @@
 # QuorumRelay in TownReporter
 
-This integration is a development candidate pinned to QuorumRelay service `0.1.0.dev5`, schema `2.0.0`, and the `quorumrelay-client` tarball recorded in `package-lock.json`. Install the application dependencies and apply migrations through `0162_civic_connector_documents.sql` using the normal TownReporter deployment procedure. Run a separately configured QuorumRelay HTTP service; TownReporter does not start it.
+This integration is a development candidate pinned to QuorumRelay service `0.1.0.dev6`, schema `2.0.0`, and the `quorumrelay-client` tarball recorded in `package-lock.json`. Install the application dependencies and apply migrations through `0162_civic_connector_documents.sql` using the normal TownReporter deployment procedure. Run a separately configured QuorumRelay HTTP service; TownReporter does not start it.
 
 Set `CIVIC_CONNECTORS_URL` to the service HTTP(S) root without embedded credentials, query, or fragment. Set `CIVIC_CONNECTORS_NEWSROOM_TOKENS` to a JSON object mapping each newsroom ID to its own service token. Store these values as server secrets, not browser configuration or source control. The service must enforce the matching newsroom scope and provider permissions for each token. TownReporter rejects a missing credential or incompatible service version.
 
