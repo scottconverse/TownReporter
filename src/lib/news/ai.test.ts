@@ -249,7 +249,7 @@ describe("resolveProvider", () => {
         ["codex-frontier", "gpt-6.1-sol"],
         ["codex-balanced", "gpt-6.1-sol"],
         ["codex-luna", "gpt-6-luna"],
-        ["claude-fable", "claude-fable-5-1"],
+        ["claude-fable", "claude-fable-5-2"],
         ["claude-frontier", "claude-opus-5-5"],
         ["claude-sonnet", "claude-sonnet-5-5"],
         ["claude-haiku", "claude-haiku-5-5"],

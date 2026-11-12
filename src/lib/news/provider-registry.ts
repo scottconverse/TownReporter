@@ -573,11 +573,11 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "claude-fable",
-    label: "Claude Fable 5.1",
+    label: "Claude Fable 5.2",
     familyLabel: "Claude Fable",
     detail: "Fast",
     kind: "claude-code",
-    model: "claude-fable-5-1",
+    model: "claude-fable-5-2",
     envOverrides: {},
     budget: KIND_BUDGETS["claude-code"],
     plannerModel: CLAUDE_PLANNER_MODEL,
