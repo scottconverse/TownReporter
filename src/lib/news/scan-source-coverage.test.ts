@@ -11,6 +11,20 @@ import {
   updateScanCoverageEntry,
 } from "./scan-source-coverage.ts";
 import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
+import { scanSourceCoverageLine, scanSourceCoverageStatus } from "./desk-copy.ts";
+
+it("preserves incomplete connector coverage in persisted scan results", () => {
+  const entries = manualScanCoverage([{ id: 1, title: "Council", url: "https://example.test" }], 1);
+  const partial = updateScanCoverageEntry(entries, 1, {
+    status: "partial", reason: "An attachment was unavailable.", readAt: "2026-11-11T00:00:00Z",
+  });
+  const reopened = parseScanSourceCoverage(JSON.stringify(partial));
+  assert.equal(reopened[0]?.status, "partial");
+  assert.equal(reopened[0]?.reason, "An attachment was unavailable.");
+  assert.equal(scanCoverageCounts(reopened).partial, 1);
+  assert.match(scanSourceCoverageLine(reopened), /1 partial/);
+  assert.equal(scanSourceCoverageStatus(reopened[0]!), "Partially read");
+});
 
 it("records one skipped source when a three-source scan has a cap of two", async () => {
   await applyMigrationsToTestPglite();
@@ -69,6 +83,7 @@ it("records one skipped source when a three-source scan has a cap of two", async
     assert.deepEqual(scanCoverageCounts(persisted), {
       total: 3,
       read: 2,
+      partial: 0,
       skipped: 1,
       blocked: 0,
       pending: 0,

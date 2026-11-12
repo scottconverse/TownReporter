@@ -5,6 +5,7 @@ import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
+import { CivicConnectorsPanel } from "@/components/civic-connectors-panel";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { SourceNewsletter } from "@/components/source-newsletter";
 import { MoveButtons } from "@/components/source-moves";
@@ -546,6 +547,7 @@ function SourcesPage() {
       <p className="lede">
         Manage the pages the scanner reads on every pass.
       </p>
+      <CivicConnectorsPanel />
       {/*
         The add dialog, behind the header's "+ Add a source" (BJ3 item 3).
 

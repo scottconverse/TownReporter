@@ -2,6 +2,8 @@
 
 **Version 0.6.87 · publication and deployment are recorded separately**
 
+**Development candidate:** The [QuorumRelay source and evidence guide](civic-connectors.md) covers the new connector controls, saved captures, provider limits and separately authorized writes. This integration is not part of the published 0.6.87 download. Provider selection does not guarantee live access or complete documents/media for every source.
+
 [Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.87 release guide and evidence boundaries](releases/0.6.87.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.

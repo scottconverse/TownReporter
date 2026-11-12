@@ -4615,6 +4615,21 @@
     gap: 8px;
   }
 }
+/* At the compact Large breakpoint, size Section to its selected value so All
+   does not reserve the width of Infrastructure. Longer selections can move
+   the filters below the tabs rather than overlap or lose their text. */
+@media (min-width: 1280px) and (max-width: 1340px) {
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-search {
+    flex-basis: 100px;
+    width: 100px;
+  }
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-sel select[aria-label="Section"] {
+    field-sizing: content;
+  }
+}
 /* At Large text, the native Section select's widest option can be much longer
    than its selected value. Let the bordered select groups give up width before
    the 100px Search floor pushes its hitbox back under the Queue tabs. */
@@ -7106,6 +7121,10 @@
   .desk-ltr.astra .astra-row.pubhead > :last-child {
     display: none;
   }
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pub,
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pubhead {
+    grid-template-columns: 96px minmax(0, 1fr) 4em 8em;
+  }
 }
 .desk-ltr.astra .astra-cell { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .desk-ltr.astra .astra-row-t {
@@ -7892,6 +7911,13 @@
   }
 }
 
+/* The Sources sidebar cannot fit the shared picker's label plus 260px field
+   at Large text until the wider desktop layout. Keep both above their help. */
+@media (max-width: 1279px) {
+  :root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="sources"] aside.astra-col .model-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,
@@ -9074,6 +9100,21 @@
   padding: 0;
   border: 0;
   background: transparent;
+}
+@container dark-desk (min-width: 1040px) {
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: start;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked > .model-picker {
+    grid-column: 2 !important;
+    grid-row: 1 / span 3;
+    align-self: start;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file > .model-picker.stacked > .model-picker-setup {
+    grid-column: 1 / -1;
+  }
 }
 :is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker-setup > summary {
   display: inline-flex;

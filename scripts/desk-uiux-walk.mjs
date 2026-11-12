@@ -339,11 +339,41 @@ function normalizedSnapshotText(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 
-function summarySnapshotContainsLabel(label, liveLabel, snapshot) {
+function summaryHasComputedName(label, liveLabel, accessibility) {
   const expected = normalizedSnapshotText(label);
   return Boolean(expected) &&
     normalizedSnapshotText(liveLabel) === expected &&
-    normalizedSnapshotText(snapshot).includes(expected);
+    accessibility?.ignored === false &&
+    accessibility.role === "DisclosureTriangle" &&
+    normalizedSnapshotText(accessibility.name) === expected;
+}
+
+async function computedSummaryAccessibility(page, node) {
+  // ariaSnapshot serializes inline strong/text nodes separately. Query Chromium's
+  // actual disclosure node so full names are checked without depending on that
+  // serialization, and ignored/missing/broken roles still fail closed.
+  const session = await page.context().newCDPSession(page);
+  try {
+    const { root } = await session.send("DOM.getDocument");
+    const { nodeIds } = await session.send("DOM.querySelectorAll", {
+      nodeId: root.nodeId,
+      selector: node.identitySelector,
+    });
+    const nodeId = nodeIds[node.identityIndex];
+    if (!nodeId) return { ignored: true, role: "", name: "" };
+    const { nodes } = await session.send("Accessibility.getPartialAXTree", {
+      nodeId,
+      fetchRelatives: false,
+    });
+    const accessible = nodes[0];
+    return {
+      ignored: accessible?.ignored !== false,
+      role: accessible?.role?.value || "",
+      name: accessible?.name?.value || "",
+    };
+  } finally {
+    await session.detach();
+  }
 }
 
 function missingInteractiveRoleFailure(measured) {
@@ -690,7 +720,8 @@ async function establishIdentity(page, surface, scenario) {
     surface.kind === "desk"
       ? scenario.theme === "dark" ? "desk-dark" : "light"
       : scenario.theme === "dark" ? "reader-dark" : "reader-light";
-  const deskFont = scenario.size === "large" ? 16.8 : 14;
+  // Astra's shell uses 16px with the existing 1.2 Large text scale.
+  const deskFont = scenario.size === "large" ? 19.2 : 16;
   const readerScale = scenario.size === "large" ? "1.2" : "1";
   const readerFont =
     19 * (scenario.size === "large" ? 1.2 : 1);
@@ -1207,13 +1238,15 @@ async function captureSurface(page, scenario, surface) {
       await locator.scrollIntoViewIfNeeded({ timeout: 10_000 });
       const liveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
       const snapshot = await locator.ariaSnapshot();
+      const accessibility = await computedSummaryAccessibility(page, node);
       measuredSummarySnapshots.push({
         ...node,
         liveLabel,
         identityMatchesLabel:
           normalizedSnapshotText(liveLabel) === normalizedSnapshotText(node.label),
         snapshot,
-        snapshotContainsLabel: summarySnapshotContainsLabel(node.label, liveLabel, snapshot),
+        accessibility,
+        computedNameMatchesLabel: summaryHasComputedName(node.label, liveLabel, accessibility),
       });
     }
     if (!report.summaryMutationProbe && surface.name === "Published") {
@@ -1226,31 +1259,37 @@ async function captureSurface(page, scenario, surface) {
       let mutatedSnapshot = "";
       let mutationRejected = false;
       let restoredSnapshot = "";
+      let mutatedAccessibility = null;
+      let restoredAccessibility = null;
       try {
         await locator.evaluate((element) => { element.textContent = ""; });
         const mutatedLiveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
         mutatedSnapshot = await locator.ariaSnapshot();
-        mutationRejected = !summarySnapshotContainsLabel(
+        mutatedAccessibility = await computedSummaryAccessibility(page, beatMemoryNode);
+        mutationRejected = !summaryHasComputedName(
           beatMemoryNode.label,
           mutatedLiveLabel,
-          mutatedSnapshot,
+          mutatedAccessibility,
         );
       } finally {
         await locator.evaluate((element, text) => { element.textContent = text; }, originalText);
         restoredSnapshot = await locator.ariaSnapshot();
+        restoredAccessibility = await computedSummaryAccessibility(page, beatMemoryNode);
       }
       const restoredLiveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
-      const restorationPassed = summarySnapshotContainsLabel(
+      const restorationPassed = summaryHasComputedName(
         beatMemoryNode.label,
         restoredLiveLabel,
-        restoredSnapshot,
+        restoredAccessibility,
       );
       report.summaryMutationProbe = {
         target: "details.beat-memory > summary",
         expectedLabel: beatMemoryNode.label,
         mutatedSnapshot,
+        mutatedAccessibility,
         rejectedWhenTextRemoved: mutationRejected,
         restoredSnapshot,
+        restoredAccessibility,
         restorationPassed,
       };
       if (!mutationRejected || !restorationPassed) {
@@ -1632,7 +1671,7 @@ async function captureSurface(page, scenario, surface) {
   const missingViewportRoleControls = missingRoleControls.filter((control) => control.initialViewport);
   const belowFoldMissingRoleControls = missingRoleControls.filter((control) => !control.initialViewport);
   const unnamedAccessibleControls = measuredControlNames.filter((control) => control.role && !control.name);
-  const summariesMissingComputedText = measuredSummarySnapshots.filter((summary) => !summary.snapshotContainsLabel);
+  const summariesMissingComputedText = measuredSummarySnapshots.filter((summary) => !summary.computedNameMatchesLabel);
   const expandedMissingRoleControls = measuredExpandedDisclosureNames.filter((control) => !control.role);
   const expandedUnnamedControls = measuredExpandedDisclosureNames.filter((control) => control.role && !control.name);
   const expandedNavigationMissingRoleControls = measuredExpandedNavigationNames.filter((control) => !control.role);
@@ -1676,7 +1715,7 @@ async function captureSurface(page, scenario, surface) {
     .map((summary) =>
       summary.identitySelector + "[" + summary.identityIndex + "] label=" +
       JSON.stringify(summary.label) + " live=" + JSON.stringify(summary.liveLabel) +
-      " snapshot=" + summary.snapshot,
+      " accessibility=" + JSON.stringify(summary.accessibility) + " snapshot=" + summary.snapshot,
     );
   measured.expandedDisclosureMetrics = expandedDisclosureMetrics;
   measured.responsiveLayoutMetrics = responsiveLayoutMetrics;
@@ -1809,7 +1848,7 @@ async function captureSurface(page, scenario, surface) {
   }
 
   if (surface.kind === "desk") {
-    const expectedFont = scenario.size === "large" ? 16.8 : 14;
+    const expectedFont = scenario.size === "large" ? 19.2 : 16;
     if (measured.deskSize !== scenario.size) {
       violations.push("data-desk-size was " + measured.deskSize + ", expected " + scenario.size);
     }

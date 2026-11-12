@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
+    "quorumrelay-client": "file:vendor/quorumrelay-client-0.1.0-dev.8.tgz",
     "@earendil-works/pi-ai": "0.82.1",
     "@electric-sql/pglite": "^0.5.8",
     "@hookform/resolvers": "^5.7.0",

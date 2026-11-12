@@ -81,9 +81,10 @@ export const SOURCE_SCAN_PREFERENCE_COPY = {
 
 export function scanSourceCoverageLine(entries: readonly ScanSourceCoverageEntry[]): string {
   const read = entries.filter((entry) => entry.status === "read").length;
+  const partial = entries.filter((entry) => entry.status === "partial").length;
   const skipped = entries.filter((entry) => entry.status === "skipped").length;
   const blocked = entries.filter((entry) => entry.status === "blocked").length;
-  return `Read ${read} of ${entries.length} · ${skipped} wait their turn · ${blocked} blocked`;
+  return `Read ${read} of ${entries.length}${partial ? ` · ${partial} partial` : ""} · ${skipped} wait their turn · ${blocked} blocked`;
 }
 
 export function scanSourceCoverageAge(
@@ -102,6 +103,8 @@ export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string
   switch (entry.status) {
     case "read":
       return "Read";
+    case "partial":
+      return "Partially read";
     case "blocked":
       return "Blocked";
     case "pending":
