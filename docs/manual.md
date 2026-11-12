@@ -783,7 +783,7 @@ Behind every AI button on the desk is the same **model picker**. It is labelled 
 | **Automatic — Recommended ladder** | The desk tries models in a fixed order (below) |
 | **Codex Astra 6**, **Codex Sol 6.1**, **Codex Luna 6** | OpenAI models, through the Codex program signed in on this machine |
 | **Gemini 3.8 Flash (Pro plan)**, **Gemini 3.1 Pro (Pro plan)** | Google models, through the Gemini program signed in to your Google Pro plan. A named pick only; never part of Automatic |
-| **Claude Fable 5.1**, **Claude Opus 5.5**, **Claude Sonnet 5.5**, **Claude Haiku 5.5** | Anthropic models, through the Claude Code program signed in on this machine |
+| **Claude Fable 5.2**, **Claude Opus 5.5**, **Claude Sonnet 5.5**, **Claude Haiku 5.5** | Anthropic models, through the Claude Code program signed in on this machine |
 | **Local model** | A model already loaded in LM Studio, Ollama or llama.cpp on this computer |
 | **DeepSeek v4.1 Flash 1017** | The paper’s default writer, run through Ollama and the Claude Code program, with thinking off |
 | **<name> (key)** | A saved API connection you added yourself |
@@ -1155,7 +1155,7 @@ The named picks, from `PROVIDER_REGISTRY` (labels are what editors read):
 | Codex Luna 6                       | `codex-luna`      | Codex            | `gpt-6-luna`           |
 | Codex Sol 6.1 (balanced)           | `codex-balanced`  | Codex            | `gpt-6.1-sol`          |
 | Codex Sol 6.1                      | `codex-frontier`  | Codex            | `gpt-6.1-sol`          |
-| Claude Fable 5.1                   | `claude-fable`    | Claude Code      | `claude-fable-5-1`     |
+| Claude Fable 5.2                   | `claude-fable`    | Claude Code      | `claude-fable-5-2`     |
 | Claude Opus 5.5                    | `claude-frontier` | Claude Code      | `claude-opus-5-5`      |
 | Claude Sonnet 5.5                  | `claude-sonnet`   | Claude Code      | `claude-sonnet-5-5`    |
 | Claude Haiku 5.5                   | `claude-haiku`    | Claude Code      | `claude-haiku-5-5`     |

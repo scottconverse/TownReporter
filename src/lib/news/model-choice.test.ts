@@ -67,7 +67,7 @@ describe("model choice contract", () => {
         "Codex Luna 6",
         "Gemini 3.8 Flash (Pro plan)",
         "Gemini 3.1 Pro (Pro plan)",
-        "Claude Fable 5.1",
+        "Claude Fable 5.2",
         "Claude Opus 5.5",
         "Claude Sonnet 5.5",
         "Claude Haiku 5.5",

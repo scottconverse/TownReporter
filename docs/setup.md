@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers the same list: Automatic; DeepSeek v4.1 Flash 1017; Codex Astra 6, Luna 6, Sol 6.1 (balanced) and Sol 6.1; Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5; Gemini 3.8 Flash and 3.1 Pro; Local model; and saved custom connections. The paper's default is DeepSeek v4.1 Flash 1017. |
+| **A model**                 | Every writing picker offers the same list: Automatic; DeepSeek v4.1 Flash 1017; Codex Astra 6, Luna 6, Sol 6.1 (balanced) and Sol 6.1; Claude Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5; Gemini 3.8 Flash and 3.1 Pro; Local model; and saved custom connections. The paper's default is DeepSeek v4.1 Flash 1017. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 | **Optional tools**          | LibreOffice (reads Excel, PowerPoint and LibreOffice files), `yt-dlp` and `ffmpeg` (meeting capture), `textflowkit` (speech-to-text for captionless meetings), an IMAP mailbox (newsletters). Each is detected; none is required. The model section below and [Part 3 of the manual](manual.md#part-3--running-it) say how each is found. |
@@ -260,7 +260,7 @@ running on their default ports. See
 | ------ | ---------------- | ----------------------- |
 | DeepSeek v4.1 Flash 1017 | `deepseek-v4.1-flash:1017-cloud`, effort None by default | Ollama at `http://127.0.0.1:11434/v1` with the model available, and the Claude Code program (the desk runs DeepSeek inside it; without the program it falls back to plain HTTP with no tools). |
 | Codex Astra 6 / Luna 6 / Sol 6.1 (balanced) / Sol 6.1 | `gpt-6-astra` / `gpt-6-luna` / `gpt-6.1-sol` / `gpt-6.1-sol` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
-| Claude Fable 5.1 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5 | `claude-fable-5-1` / `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+| Claude Fable 5.2 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5 | `claude-fable-5-2` / `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
 | Gemini 3.8 Flash / 3.1 Pro (Pro plan) | `gemini-3.8-flash-<effort>` / `gemini-3.1-pro-<effort>` | The signed-in Gemini program `agy`. Never chosen by Automatic. |
 | Local model | whatever `LLM_MODEL` names | Discovered LM Studio/Ollama/llama.cpp model, or `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
@@ -386,7 +386,7 @@ Without the variable, the Opinion desk says so and spends nothing. Everything
 else on the desk works.
 
 The Opinion picker controls the writing model exactly. Named Claude choices use
-Fable 5.1, Opus 5.5, Sonnet 5.5, or Haiku 5.5 as labelled; named Codex choices use
+Fable 5.2, Opus 5.5, Sonnet 5.5, or Haiku 5.5 as labelled; named Codex choices use
 Astra 6, Luna 6, Sol 6.1 (balanced), or Sol 6.1 as labelled.
 
 Note the length, and the cost. A piece takes ten to forty minutes, because the

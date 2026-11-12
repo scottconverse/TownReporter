@@ -154,7 +154,7 @@ describe("forced runtime snapshots", () => {
     ["codex-frontier", "codex", "gpt-6.1-sol"],
     ["codex-balanced", "codex", "gpt-6.1-sol"],
     ["codex-luna", "codex", "gpt-6-luna"],
-    ["claude-fable", "claude-code", "claude-fable-5-1"],
+    ["claude-fable", "claude-code", "claude-fable-5-2"],
     ["claude-frontier", "claude-code", "claude-opus-5-5"],
     ["claude-sonnet", "claude-code", "claude-sonnet-5-5"],
     ["claude-haiku", "claude-code", "claude-haiku-5-5"],
