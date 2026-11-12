@@ -4615,6 +4615,21 @@
     gap: 8px;
   }
 }
+/* At the compact Large breakpoint, size Section to its selected value so All
+   does not reserve the width of Infrastructure. Longer selections can move
+   the filters below the tabs rather than overlap or lose their text. */
+@media (min-width: 1280px) and (max-width: 1340px) {
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-search {
+    flex-basis: 100px;
+    width: 100px;
+  }
+  :root[data-desk-size="large"] .desk-ltr.astra .queue-sel select[aria-label="Section"] {
+    field-sizing: content;
+  }
+}
 /* At Large text, the native Section select's widest option can be much longer
    than its selected value. Let the bordered select groups give up width before
    the 100px Search floor pushes its hitbox back under the Queue tabs. */
