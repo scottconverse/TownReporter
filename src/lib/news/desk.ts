@@ -1693,9 +1693,14 @@ export const performCheckOneSource = createServerOnlyFn(async function performCh
     rather than reporting a failure the scanner would not have reported.
   */
   try {
-    const bundle = await withRetry(() => ingestUrl(src.url));
+    const { connectorIngestForSource } = await import("./civic-connectors.ts");
+    const bundle = await withRetry(async () =>
+      await connectorIngestForSource(sql, { ...context, newsroomId: owned(context) }, src.id)
+        ?? ingestUrl(src.url));
     const text = postgresText(bundle.text);
     if (!text.trim()) throw new Error("Page had almost no readable text");
+    const connectorPartial = "connectorResult" in bundle &&
+      (bundle.connectorResult as { status?: string } | null)?.status === "partial";
     /*
       SH0-1: the manual check is an ATTEMPT like any other, so it moves the
       streak the same way the scan does -- one code path per outcome, and this
@@ -1722,7 +1727,7 @@ export const performCheckOneSource = createServerOnlyFn(async function performCh
       url: src.url,
       title: bundle.titleHint?.trim() || src.title,
       characters: text.length,
-      line: bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : "Read OK now.",
+      line: connectorPartial ? "Partially read; inspect captured evidence and unavailable documents." : bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : "Read OK now.",
     };
   } catch (err) {
     const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
@@ -2999,6 +3004,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const bundle = await withRetry(async () => {
         await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
+        if (!deps.ingestUrl) {
+          const { connectorIngestForSource } = await import("./civic-connectors.ts");
+          const connector = await connectorIngestForSource(sql, { ...context, newsroomId: owned(context) }, src.id);
+          if (connector) return connector;
+        }
         return fetchUrl(src.url);
       });
       const sourceText = postgresText(bundle.text);
@@ -3025,6 +3035,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const text = extraBits.length ? `${sourceText}\n\n${extraBits.join("\n\n")}` : sourceText;
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
+      const connectorPartial = "connectorResult" in bundle &&
+        (bundle.connectorResult as { status?: string } | null)?.status === "partial";
       /*
         SH0-1: the streak is written in the SAME statement that clears
         `last_error`, on both commit paths, because a success is the only thing
@@ -3051,7 +3063,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           outcome: "read",
           changedByHash: changed,
         });
-        await recordScanObservation(src.id, verdict.kind, [verdict.note, bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null].filter(Boolean).join(" "));
+        await recordScanObservation(src.id, verdict.kind, [verdict.note, connectorPartial ? "Connector coverage is partial." : null, bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null].filter(Boolean).join(" "));
       }
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
@@ -3067,9 +3079,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       fetched.push(fetchedSource);
       queueFetchedForStreaming(fetchedSource);
       sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
-        status: "read",
+        status: connectorPartial ? "partial" : "read",
         readAt: new Date().toISOString(),
-        reason: bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null,
+        reason: connectorPartial ? "Connector capture or document coverage is incomplete; inspect saved evidence." : bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null,
       });
       await noteSourceProgress();
     } catch (err) {

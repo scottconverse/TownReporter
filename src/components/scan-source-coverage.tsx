@@ -15,7 +15,7 @@ export function ScanSourceCoverageList(props: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const detailEntries = props.entries.filter(
-    (entry) => entry.status === "skipped" || entry.status === "blocked" || (entry.status === "read" && entry.reason != null),
+    (entry) => entry.status === "skipped" || entry.status === "blocked" || entry.status === "partial" || (entry.status === "read" && entry.reason != null),
   );
   if (!props.entries.length || props.entries.some((entry) => entry.status === "pending")) return null;
   const asOfMs = Date.parse(props.asOf);

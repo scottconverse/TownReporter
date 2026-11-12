@@ -95,6 +95,7 @@ Every item here is in the code of this release. The full manual covers each one 
 **Watch and scan**
 
 - A watch list of civic sources with kind and tier, saved source packs, and per-source purpose, cadence and deadline.
+- For the development candidate, see the [QuorumRelay connector setup guide](docs/civic-connectors.md).
 - A daily scan that reads the whole accepted pool, never-read sources first, inside a 90-minute budget; each run reports sources read, waiting and blocked, by name. Manual scans take three scopes: General, Section, or Custom.
 - Pages that refuse automated reads are retried once through a guarded Chromium read, then through the page's RSS or Atom feed. RSS, Atom and JSON feeds are read directly. Calendar and index pages keep their lists.
 - Subscribed newsletters are read from a read-only mailbox the owner sets up, and enter the archive and scan.

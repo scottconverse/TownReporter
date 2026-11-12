@@ -1,0 +1,11 @@
+# QuorumRelay in TownReporter
+
+This integration is a development candidate pinned to QuorumRelay service `0.1.0.dev4`, schema `2.0.0`, and the `quorumrelay-client` tarball recorded in `package-lock.json`. Install the application dependencies and apply migrations through `0162_civic_connector_documents.sql` using the normal TownReporter deployment procedure. Run a separately configured QuorumRelay HTTP service; TownReporter does not start it.
+
+Set `CIVIC_CONNECTORS_URL` to the service HTTP(S) root without embedded credentials, query, or fragment. Set `CIVIC_CONNECTORS_NEWSROOM_TOKENS` to a JSON object mapping each newsroom ID to its own service token. Store these values as server secrets, not browser configuration or source control. The service must enforce the matching newsroom scope and provider permissions for each token. TownReporter rejects a missing credential or incompatible service version.
+
+In Desk Sources, an owner chooses an accepted source, provider and mode, then saves the configuration. Saved mode requires an explicitly supplied capture; live mode uses the configured provider and bounds. Preview does not save newsroom evidence. A read saves evidence revisions; reopening shows citation and available document text. Searches and exports operate on saved evidence. Filing a lead is an explicit editorial action. Scans retrieve listed documents where possible; the panel reports unavailable text and the 100-document limit as partial coverage. No read publishes a story.
+
+Authorized account fetches require the service operator to bind credentials to the exact provider origin, newsroom tenant, and explicit source namespace. Enter only documented provider fetch fields in the request, never credentials. Date and body discovery filters do not apply to these fetches. Unmapped provider responses remain raw captures with partial coverage rather than inferred complete records.
+
+Provider writes are disabled until the source owner enables them and the service separately grants the exact target and operation. Review the returned plan and explicitly approve its hash before commit. A plan or mock receipt is not evidence of a live provider change. Follow the service operator's credential and receipt guidance for any authorized live environment.

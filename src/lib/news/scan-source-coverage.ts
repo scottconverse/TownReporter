@@ -1,4 +1,4 @@
-export type ScanCoverageStatus = "pending" | "read" | "skipped" | "blocked";
+export type ScanCoverageStatus = "pending" | "read" | "partial" | "skipped" | "blocked";
 export type ScanCoverageReason =
   "time-budget" | "over-cap" | "waiting" | "host-cap" | "not-reached" | "fetch-failed" | "blocked-after-render" | "not-due";
 
@@ -85,7 +85,7 @@ export function updateScanCoverageEntry(
           reasonCode: outcome.reasonCode ?? null,
           reason: outcome.reason ?? null,
           lastReadAt:
-            outcome.status === "read"
+            outcome.status === "read" || outcome.status === "partial"
               ? (outcome.readAt ?? new Date().toISOString())
               : entry.lastReadAt,
         }
@@ -121,7 +121,7 @@ export function parseScanSourceCoverage(raw: unknown): ScanSourceCoverageEntry[]
       typeof row.title !== "string" ||
       typeof row.url !== "string" ||
       typeof row.status !== "string" ||
-      !["pending", "read", "skipped", "blocked"].includes(row.status)
+      !["pending", "read", "partial", "skipped", "blocked"].includes(row.status)
     )
       return [];
     return [
@@ -144,6 +144,7 @@ export function scanCoverageCounts(entries: readonly ScanSourceCoverageEntry[]) 
   return {
     total: entries.length,
     read: entries.filter((entry) => entry.status === "read").length,
+    partial: entries.filter((entry) => entry.status === "partial").length,
     skipped: entries.filter((entry) => entry.status === "skipped").length,
     blocked: entries.filter((entry) => entry.status === "blocked").length,
     pending: entries.filter((entry) => entry.status === "pending").length,
