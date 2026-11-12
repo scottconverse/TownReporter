@@ -63,7 +63,7 @@ try {
     }
   }
   assert.ok(info, `Connector service did not start: ${logs}`);
-  assert.equal(info.data.version, "0.1.0.dev4");
+  assert.equal(info.data.version, "0.1.0.dev5");
   assert.equal(info.schema_version, "2.0.0");
   const providers = await client.execute("providers");
   assert.equal(providers.data.providers.length, 31);

@@ -7,7 +7,7 @@ import { rememberCapture } from "./investigate.ts";
 import { storableText } from "./storable-text.ts";
 import type { IngestResult } from "./ingest.ts";
 
-export const CONNECTOR_SERVICE_VERSION = "0.1.0.dev4";
+export const CONNECTOR_SERVICE_VERSION = "0.1.0.dev5";
 export const CONNECTOR_SCHEMA_VERSION = "2.0.0";
 export type ConnectorActor = { userId: string; newsroomId: number; role?: string };
 type Json = { [key: string]: unknown };
@@ -60,7 +60,7 @@ export async function newsroomConnectorClient(actor: Pick<ConnectorActor, "newsr
   const client = new QuorumRelayClient(connectorConfigurationForNewsroom(actor.newsroomId));
   const info = await client.info();
   if (object(info.data).version !== CONNECTOR_SERVICE_VERSION || info.schema_version !== CONNECTOR_SCHEMA_VERSION)
-    throw new Error("Connector service version does not match the pinned 0.1.0.dev4 / schema 2.0.0 candidate.");
+    throw new Error("Connector service version does not match the pinned 0.1.0.dev5 / schema 2.0.0 candidate.");
   return client;
 }
 

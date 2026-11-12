@@ -72,7 +72,7 @@ export function CivicConnectorsPanel() {
   return (
     <details className="paper-panel" data-testid="civic-connectors-panel">
       <summary><strong>Civic data connectors</strong>, shared source discovery, cited evidence and export</summary>
-      <p>Read-only ingestion never publishes a story or edits a provider. Source scans retrieve listed documents where available; unavailable text and the 100-document scan limit are reported as partial coverage. Saved captures and partial catalogs remain limited. Service 0.1.0.dev4, schema 2.0.0.</p>
+      <p>Read-only ingestion never publishes a story or edits a provider. Source scans retrieve listed documents where available; unavailable text and the 100-document scan limit are reported as partial coverage. Saved captures and partial catalogs remain limited. Service 0.1.0.dev5, schema 2.0.0.</p>
       {desk.isPending ? <p>Checking connector configuration…</p> : null}
       {desk.error ? <p role="alert">Could not load connector evidence.</p> : null}
       {value?.serviceError ? <p role="status">{value.serviceError} Operator guide: <code>docs/civic-connectors.md</code>.</p> : null}
