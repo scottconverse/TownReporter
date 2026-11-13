@@ -9225,3 +9225,28 @@
 .desk-ltr.astra.large[data-desk-page="dark"] .astra-deep-file .astra-panel-acts {
   padding-top: 4px;
 }
+
+/*
+  Dark Desk, wide screens: the file's model and its thinking effort sit side
+  by side. Stacked, the two pickers and their help lines pushed the Decide
+  buttons below the first screen once the desk text went to 16px (#373) with
+  Large text on. Same words, same controls, same order for screen readers;
+  only the columns change. The effort box carries an inline full-width
+  grid-column, so this rule needs !important to move it.
+*/
+@media (min-width: 1200px) {
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: row dense;
+    column-gap: 20px;
+  }
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked > .model-picker {
+    grid-column: 2 !important;
+    grid-row: 1 / span 4;
+    align-self: start;
+  }
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked > .model-picker-setup {
+    grid-column: 1 !important;
+    justify-self: start;
+  }
+}
