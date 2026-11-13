@@ -13,7 +13,7 @@ export function TownrecordImport() {
       event.preventDefault(); if (!file || busy) return;
       setBusy(true); setResult("Importing…");
       try {
-        if (file.size > 2_000_000) throw new Error("Choose a TownRecord export smaller than 2 MB.");
+        if (file.size > 8 * 1024 * 1024) throw new Error("Choose a TownRecord export smaller than 8 MiB.");
         const saved = await importTownrecordEvidence({ data: { json: await file.text() } });
         setResult(`Lead ${saved.leadId}: ${saved.unchanged ? "already imported; editorial work preserved" : "received in New, awaiting editorial review"}.`);
       } catch (error) { setResult(`Import failed. ${error instanceof Error ? error.message : "Check the export and retry."}`); }

@@ -31,7 +31,7 @@ export async function receiveTownrecordEvidence(
   sql: Sql, actor: { userId: string; newsroomId: number; role: string }, input: unknown,
 ) {
   if (!["owner", "editor"].includes(actor.role)) throw new Error("Newsroom editor access is required.");
-  if (JSON.stringify(input).length > 2_000_000) throw new Error("TownRecord package exceeds 2 MB.");
+  if (Buffer.byteLength(JSON.stringify(input), "utf8") > 8 * 1024 * 1024) throw new Error("TownRecord package exceeds 8 MiB.");
   const data = townrecordPackage.parse(input);
   const encoded = JSON.stringify(canonical(data));
   const hash = createHash("sha256").update(encoded).digest("hex");
@@ -39,7 +39,7 @@ export async function receiveTownrecordEvidence(
   // The caller supplies one transaction; this insert serializes concurrent retries.
   await sql.query(`insert into townrecord_handoffs
     (newsroom_id,instance_id,meeting_id,revision,package_hash,package_json)
-    values($1,$2,$3,$4,$5,$6::jsonb) on conflict do nothing`, [...key, hash, encoded]);
+    values($1,$2,$3,$4,$5,$6) on conflict do nothing`, [...key, hash, encoded]);
   const [saved] = await sql.query<{ package_hash: string; lead_id: number | null }>(
     `select package_hash,lead_id from townrecord_handoffs
      where newsroom_id=$1 and instance_id=$2 and meeting_id=$3 and revision=$4 for update`, key,
@@ -79,3 +79,4 @@ export async function receiveTownrecordEvidence(
     [...key, lead!.id, capture.versionId, capture.captureEventId]);
   return { leadId: lead!.id, unchanged: false };
 }
+

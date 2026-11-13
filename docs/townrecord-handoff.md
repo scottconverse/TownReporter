@@ -17,8 +17,7 @@ A retry of the same instance/meeting/revision returns the same lead without
 changing editorial work. A new reviewed revision creates separate evidence and
 a new unpublished lead. Different bytes under the same revision are refused.
 A failed import stays on the form with an explanation; correct the problem and
-retry the same export. Uploads are bounded to 2 MB. Larger packages need a smaller
-reviewed export; there is no automatic truncation. No source URL is fetched during
+retry the same export. Uploads are bounded to 8 MiB. Oversize packages are refused visibly; there is no automatic truncation. No source URL is fetched during
 import and no TownRecord token is shared with TownReporter.
 
 Only existing newsroom owners/editors can import, using their existing signed-in
@@ -35,3 +34,7 @@ The Sources panel exposed the TownRecord meeting link, original PrimeGov agenda
 and original YouTube recording. No article was drafted or published. Test tab and
 preview were stopped afterward; production was not used. Local screenshot and
 export are preserved under outputs/townrecord-community-acceptance.
+
+The complete JSON snapshot is stored as text, retaining escaped control characters
+in extracted PDF text that PostgreSQL JSONB cannot represent.
+

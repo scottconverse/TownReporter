@@ -37,3 +37,19 @@ it("receives a lead, preserves editorial changes on retry, and keeps revised evi
   await assert.rejects(receive({ ...packet, public_url: "javascript:alert(1)" }));
   assert.deepEqual(await receive(packet), { leadId: first.leadId, unchanged: true });
 });
+
+it("accepts a full council packet over the old limit and refuses oversized bytes", async () => {
+  const receive = (value: unknown) => withTransaction(tx => receiveTownrecordEvidence(tx, actor, value));
+  const complete = { ...packet, meeting_id: 43, evidence: {
+    ...packet.evidence, document_text: [{ text: "a".repeat(2_000_000) + " retained final page\u0000" }],
+  } };
+  const saved = await receive(complete);
+  const [lead] = await (await getSql()).query<{ evidence: string }>("select evidence from leads where id=$1", [saved.leadId]);
+  assert.ok(lead!.evidence.includes("retained final page"));
+  const [snapshot] = await (await getSql()).query<{ package_json: string }>("select package_json from townrecord_handoffs where lead_id=$1", [saved.leadId]);
+  assert.deepEqual(JSON.parse(snapshot!.package_json).evidence.document_text, complete.evidence.document_text);
+  await assert.rejects(receive({ ...complete, meeting_id: 44, evidence: {
+    ...complete.evidence, document_text: [{ text: "é".repeat(4 * 1024 * 1024) }],
+  } }), /exceeds 8 MiB/);
+});
+
