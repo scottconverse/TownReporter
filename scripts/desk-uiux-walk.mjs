@@ -659,6 +659,12 @@ function screenshotPathFor(scenario, surfaceName) {
   return join(screenshotDir, name + ".png");
 }
 
+// The desk shell is `calc(1rem * var(--ts))` in src/styles.css: 16px, and
+// 19.2px when Large text sets --ts to 1.2 (raised from 14px in #373).
+function deskShellFontPx(scenario) {
+  return scenario.size === "large" ? 19.2 : 16;
+}
+
 async function establishIdentity(page, surface, scenario) {
   const expected = {
     pathname: surface.path,
@@ -690,7 +696,7 @@ async function establishIdentity(page, surface, scenario) {
     surface.kind === "desk"
       ? scenario.theme === "dark" ? "desk-dark" : "light"
       : scenario.theme === "dark" ? "reader-dark" : "reader-light";
-  const deskFont = scenario.size === "large" ? 16.8 : 14;
+  const deskFont = deskShellFontPx(scenario);
   const readerScale = scenario.size === "large" ? "1.2" : "1";
   const readerFont =
     19 * (scenario.size === "large" ? 1.2 : 1);
@@ -1809,7 +1815,7 @@ async function captureSurface(page, scenario, surface) {
   }
 
   if (surface.kind === "desk") {
-    const expectedFont = scenario.size === "large" ? 16.8 : 14;
+    const expectedFont = deskShellFontPx(scenario);
     if (measured.deskSize !== scenario.size) {
       violations.push("data-desk-size was " + measured.deskSize + ", expected " + scenario.size);
     }

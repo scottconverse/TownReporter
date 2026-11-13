@@ -115,7 +115,9 @@ async function main() {
     ].join("\n"),
   );
   await page.getByRole("button", { name: "File it as a draft" }).click();
-  await page.getByText(/Filed as a draft/).waitFor({ timeout: 30_000 });
+  // The note under the paste box (desk.opinion.tsx filedNote); the page
+  // notice above says "Filed as a draft" too, so match the paste-box words.
+  await page.getByText(/Filed as a draft\. It is in the list below/).waitFor({ timeout: 30_000 });
   step("one real editorial is on the desk");
 
   /*

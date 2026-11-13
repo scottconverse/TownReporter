@@ -66,6 +66,32 @@ function step(name) {
   reaches both by opening it -- which is what this does. Every assertion the
   callers make is unchanged: the desk is in dark, large-text mode afterwards.
 */
+
+// On overflow, name the widest elements that pass the right edge, so the
+// failure says what to fix instead of only that something is too wide.
+async function assertNoHorizontalOverflow(page, message) {
+  const result = await page.evaluate(() => {
+    const limit = window.innerWidth;
+    if (document.documentElement.scrollWidth <= limit) return null;
+    const wide = [];
+    for (const el of document.body.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (r.right > limit + 1 && r.width > 0) {
+        wide.push({
+          tag: el.tagName.toLowerCase(),
+          cls: String(el.className || "").slice(0, 80),
+          right: Math.round(r.right),
+          width: Math.round(r.width),
+          text: (el.textContent || "").trim().slice(0, 60),
+        });
+      }
+    }
+    wide.sort((a, b) => a.width - b.width);
+    return { scrollWidth: document.documentElement.scrollWidth, limit, wide: wide.slice(0, 8) };
+  });
+  if (result) throw new Error(message + " " + JSON.stringify(result));
+}
+
 async function chooseDeskAppearance(who) {
   /*
     UI1b-5: this used to look for `{ name: "Open navigation" }`. The designer
@@ -752,13 +778,12 @@ async function routineNoticePermissionsJourney(context, observePage) {
   step("owner saves explicit attribution and branch settings without activating editions");
 
   await page.setViewportSize({ width: 390, height: 844 });
-  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
-    throw new Error("manual notice checks have horizontal overflow at 390px");
-  }
+  await assertNoHorizontalOverflow(page, "manual notice checks have horizontal overflow at 390px");
   await chooseDeskAppearance(page);
-  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
-    throw new Error("manual notice checks have horizontal overflow at 390px in dark large-text mode");
-  }
+  await assertNoHorizontalOverflow(
+    page,
+    "manual notice checks have horizontal overflow at 390px in dark large-text mode",
+  );
   step("manual notice checks remain readable at a narrow width in dark large-text mode");
 
   const other = await context.newPage();
