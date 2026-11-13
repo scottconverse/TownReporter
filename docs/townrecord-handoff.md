@@ -24,3 +24,14 @@ import and no TownRecord token is shared with TownReporter.
 Only existing newsroom owners/editors can import, using their existing signed-in
 session. Each newsroom has its own handoff identities. This is a file handoff,
 not a background synchronization subscription or a new connector service.
+
+## Installed browser acceptance (isolated Windows preview)
+
+November 13, 2026: imported the actual TownRecord Longmont Council export through
+Sources & scan using a disposable authenticated owner in a loopback-only preview.
+The UI created Lead 1 in New. Repeating the same upload returned Lead 1 with
+"already imported; editorial work preserved". The queue held one lead, no draft.
+The Sources panel exposed the TownRecord meeting link, original PrimeGov agenda
+and original YouTube recording. No article was drafted or published. Test tab and
+preview were stopped afterward; production was not used. Local screenshot and
+export are preserved under outputs/townrecord-community-acceptance.
