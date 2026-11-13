@@ -4617,11 +4617,29 @@
 }
 /* At Large text, the native Section select's widest option can be much longer
    than its selected value. Let the bordered select groups give up width before
-   the 100px Search floor pushes its hitbox back under the Queue tabs. */
-@media (min-width: 1341px) and (max-width: 1535px) {
+   the 100px Search floor pushes its hitbox back under the Queue tabs.
+   From 1280, not 1341: after the 16px desk text (#371-#373) the 1280 row in
+   Large text had no room, and Search slid 80px under the tabs. */
+@media (min-width: 1280px) and (max-width: 1535px) {
   .desk-ltr.astra.large .queue-sel {
     flex: 0 1 auto;
     min-width: 0;
+  }
+  /* Sort's chosen value ("Best first") is as long as its widest option, so
+     it has nothing to give; only Section and Search shrink. */
+  .desk-ltr.astra.large .queue-sel:has(select[aria-label="Sort"]) {
+    flex: 0 0 auto;
+  }
+  /* CI at 1280 in Large text: the row was still 2px over and Section's
+     select 7px short. Tighter gaps and 1px less tab padding give ~18px. */
+  .desk-ltr.astra.large .queue-controls {
+    gap: 6px;
+  }
+  .desk-ltr.astra.large .queue-filters {
+    gap: 6px;
+  }
+  .desk-ltr.astra.large .queue-controls .queue-tabs > button {
+    padding-inline: 5px;
   }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
@@ -9224,4 +9242,64 @@
 :root[data-desk-size="large"] .desk-ltr.astra[data-desk-page="dark"] .astra-deep-file .astra-panel-acts,
 .desk-ltr.astra.large[data-desk-page="dark"] .astra-deep-file .astra-panel-acts {
   padding-top: 4px;
+}
+
+/*
+  Dark Desk, wide screens: the file's model and its thinking effort sit side
+  by side. Stacked, the two pickers and their help lines pushed the Decide
+  buttons below the first screen once the desk text went to 16px (#373) with
+  Large text on. Same words, same controls, same order for screen readers;
+  only the columns change. The effort box carries an inline full-width
+  grid-column, so this rule needs !important to move it.
+*/
+@media (min-width: 1200px) {
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: row dense;
+    column-gap: 20px;
+  }
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked > .model-picker {
+    grid-column: 2 !important;
+    grid-row: 1 / span 4;
+    align-self: start;
+  }
+  .desk-ltr.astra .astra-deep-file > .model-picker.stacked > .model-picker-setup {
+    grid-column: 1 !important;
+    justify-self: start;
+  }
+}
+
+/*
+  SOURCES: THE DAILY SCAN RAIL IS 340PX, SO ITS MODEL PICKER STACKS.
+
+  The shared picker is `auto minmax(260px, 420px)`: a label column beside a
+  select that never drops under 260px. The rail's panel has about 296px inside
+  its padding, so the label was squeezed to one word a line, and with Text:
+  Large at 1024px the row ran 4px past the viewport and the whole desk
+  scrolled sideways (scripts/desk-uiux-walk.mjs, case-10, Sources). One
+  column puts the label over the select; no words change.
+*/
+.desk-ltr.astra .astra-split > .astra-col .model-picker {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+}
+.desk-ltr.astra .astra-split > .astra-col .model-picker > * { grid-column: 1; min-width: 0; }
+
+/*
+  PUBLISHED, 981-1280PX, TEXT: LARGE: THE VIEWS AND CORRECTIONS TRACKS GROW.
+
+  The four-track grid above gives Views 56px and Corrections 110px. At Large
+  (19.2px, 800 weight, caps, 0.05em spacing) the headers measure about 62px and
+  145px, and neither word can wrap, so "CORRECTIONS" ran 12px past the viewport
+  at 1024px (scripts/desk-uiux-walk.mjs, case-10, Published). The two tracks
+  scale with the text instead; the header and the rows keep the same tracks,
+  and the story column gives up the difference. Normal text is unchanged.
+*/
+@media (min-width: 981px) and (max-width: 1280px) {
+  .desk-ltr.astra.large .astra-row.pub,
+  .desk-ltr.astra.large .astra-row.pubhead,
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pub,
+  :root[data-desk-size="large"] .desk-ltr.astra .astra-row.pubhead {
+    grid-template-columns: 96px minmax(0, 1fr) calc(60px * var(--ts)) calc(132px * var(--ts));
+  }
 }

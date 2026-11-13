@@ -1429,7 +1429,14 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
   }
   must(job, `the live draft filed a draft job row newer than #${jobIdBefore}`);
   await owner.goto(`${base}/desk/story/${Number(job.subject_id)}`, { waitUntil: "domcontentloaded" });
-  await owner.waitForTimeout(2_000);
+  // The story page loads its job state after hydration, which can take more
+  // than 2s on a CI runner. Wait up to 30s for the sentence; it is not a
+  // pass by itself -- the checks below still read the body.
+  await owner
+    .getByText(/usage limit was reached|usage limit reached|Rate limit reached|No other model is available to try/)
+    .first()
+    .waitFor({ timeout: 30_000 })
+    .catch(() => {});
   const body = await owner.locator("body").innerText();
 
   /*
