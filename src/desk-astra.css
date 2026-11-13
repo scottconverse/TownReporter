@@ -9268,3 +9268,19 @@
     justify-self: start;
   }
 }
+
+/*
+  SOURCES: THE DAILY SCAN RAIL IS 340PX, SO ITS MODEL PICKER STACKS.
+
+  The shared picker is `auto minmax(260px, 420px)`: a label column beside a
+  select that never drops under 260px. The rail's panel has about 296px inside
+  its padding, so the label was squeezed to one word a line, and with Text:
+  Large at 1024px the row ran 4px past the viewport and the whole desk
+  scrolled sideways (scripts/desk-uiux-walk.mjs, case-10, Sources). One
+  column puts the label over the select; no words change.
+*/
+.desk-ltr.astra .astra-split > .astra-col .model-picker {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+}
+.desk-ltr.astra .astra-split > .astra-col .model-picker > * { grid-column: 1; min-width: 0; }
