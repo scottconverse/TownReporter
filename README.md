@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.87](docs/releases/0.6.87.md)** (2026-10-29). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.87) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.6.88](docs/releases/0.6.88.md)** (2026-11-12). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.88) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,19 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.6.87
+## What is new in 0.6.88
+
+37 pull requests since 0.6.87. The short list; the long list is in the [changelog](CHANGELOG.md#0688--2026-11-12) and the [release guide](docs/releases/0.6.88.md).
+
+- **Reader pages and events.** New ICS and site event readers, the `routine_events` table, a front-page events week box and 37 event feeds. The Bulletin redesign changes every reader page, and the events box meets 14px text and 44px tap targets on a phone.
+- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries.
+- **Phone app install.** Readers can add TownReporter to the Android or iPhone home screen. New icons, manifest and a service worker show **You are offline.** when the phone is offline.
+- **Desk and Drafts.** Same-day routine updates post one short note. The scan model picker moves below the header. Waiting roundups have **Open / Close** and **Kill**. Opinion drafts show on Drafts. Desk text and buttons reach 16px.
+- **Scan, models and Ollama.** The scan reads news first and files leads during a hand-started scan. Repeats and distinct finder refs are fixed. The scan warns when speech-to-text is missing. TownReporter looks after Ollama. Claude Fable uses **Claude Fable 5.2** and `claude-fable-5-2`.
+- **Operations and tests.** The production deploy wrapper no longer hangs. Fast release checks add a scripted Publish walk, a changed-files runner and a scan replay. CI test fixes are in.
+- The #383 and #385 Test server walks passed with a real Publish. #383 went live on 2026-11-12 at 9:10 AM Mountain. #385 went live on 2026-11-12 at 11:19 AM Mountain.
+
+## What was new in 0.6.87
 
 Five pull requests since 0.6.86. The short list; the long list is in the [changelog](CHANGELOG.md#0687--2026-10-29) and the [release guide](docs/releases/0.6.87.md).
 
@@ -231,7 +243,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.87](docs/releases/0.6.87.md)           |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.88](docs/releases/0.6.88.md)           |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -245,7 +257,7 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.87](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.87) carries three files: `TownReporter-0.6.87-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.88](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.88) carries three files: `TownReporter-0.6.88-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
 CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.87, and no fresh-machine human acceptance of it is claimed here.
 
@@ -522,7 +534,8 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-- **[0.6.87](docs/releases/0.6.87.md)** (2026-10-29), the current version. Dark Desk job cards stay current, model switches and retries name the model that runs, **Send to Dark Desk** opens the new file, closed files explain the controls, and phone controls meet the 44 px target.
+- **[0.6.88](docs/releases/0.6.88.md)** (2026-11-12), the current version. Event feeds and a front-page events week box, the Bulletin reader design, **Community resources** with desk publish, edit and take-down, phone install with **Get the app**, Ollama care on port 11435, roundup **Open** and **Kill** on Drafts, **Opinion pieces waiting**, 16px desk text, Claude Fable 5.2 and a deploy wrapper that no longer hangs.
+- **[0.6.87](docs/releases/0.6.87.md)** (2026-10-29). Dark Desk job cards stay current, model switches and retries name the model that runs, **Send to Dark Desk** opens the new file, closed files explain the controls, and phone controls meet the 44 px target.
 - **[0.6.86](docs/releases/0.6.86.md)** (2026-10-28). A killed lead stays in its row with **Killed.** and **Undo** for about 10 seconds, while the bottom strip remains. Dark Desk **Keep investigating** and **Retry** use the model and thinking effort in the file's picker after a stop or model change.
 - **[0.6.85](docs/releases/0.6.85.md)** (2026-10-28). Duplicate detection and a fast-Kill Undo strip; `ops/promote.ps1` no longer crashes while writing its verify log.
 - **[0.6.84](docs/releases/0.6.84.md)** (2026-10-27). One shared model picker and the Automatic ladder (DeepSeek v4.1 Flash 1017, Local model, Codex Sol 6.1 (balanced), Claude Sonnet 5.5); Find evidence and search by meaning on the editor desk; the Today in town list; warn-never-block with audited "anyway" buttons; a rebuilt Dark Desk; newsletters; Excel, PowerPoint and LibreOffice reading; three-day backups on D: from the ops script.
