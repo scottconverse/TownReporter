@@ -4625,6 +4625,11 @@
     flex: 0 1 auto;
     min-width: 0;
   }
+  /* Sort's chosen value ("Best first") is as long as its widest option, so
+     it has nothing to give; only Section and Search shrink. */
+  .desk-ltr.astra.large .queue-sel:has(select[aria-label="Sort"]) {
+    flex: 0 0 auto;
+  }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
