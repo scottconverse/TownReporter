@@ -1,3 +1,4 @@
+import { TownrecordImport } from "../components/townrecord-import";
 import { dailyScanCounts } from "@/lib/desk/daily-scan-counts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -546,6 +547,7 @@ function SourcesPage() {
       <p className="lede">
         Manage the pages the scanner reads on every pass.
       </p>
+      <TownrecordImport />
       {/*
         The add dialog, behind the header's "+ Add a source" (BJ3 item 3).
 
