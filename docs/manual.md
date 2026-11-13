@@ -2877,3 +2877,10 @@ Each release has its own guide in [releases/](releases/README.md), listing the t
 ---
 
 MIT licensed. Copyright (c) 2026 Scott Converse.
+
+
+## Reviewed community meeting evidence
+
+TownRecord reviewed meeting exports can be imported from Sources & scan as
+unpublished leads. See [TownRecord handoff](townrecord-handoff.md) for the steps,
+retry behavior, revision identity and editorial verification limits.
