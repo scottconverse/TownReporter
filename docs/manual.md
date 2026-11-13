@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.87 · publication and deployment are recorded separately**
+**Version 0.6.88 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.87 release guide and evidence boundaries](releases/0.6.87.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.88 release guide and evidence boundaries](releases/0.6.88.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.87 does.**
+**What TownReporter 0.6.88 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads, spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.87](releases/0.6.87.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.88](releases/0.6.88.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -116,6 +116,9 @@ You are responsible for everything that appears on the paper.
 - An RSS feed at `/feed` (the newest 40 stories), a `sitemap.xml`, and a `robots.txt` that points at it.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
+- A public **Community resources** page at `/registry`. It shows only published entries, with a source link and a **Last verified:** date. **Something wrong here?** opens Corrections with the entry name filled in.
+- A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
+- The reader pages use the Bulletin design with self-hosted fonts.
 - No account, no cookie banner, and a visit count that is never tied to a person.
 - No mention of AI on a story. The About page says in one sentence that AI helps with research and that a human editor reviews every story.
 
@@ -123,7 +126,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.87, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.88, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -447,6 +450,8 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 ![The Drafts list with filter pills and rows showing a status chip, headline and one button](images/17-drafts.png)
 
+- **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
+- **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
 - **Filter pills:** **All**, **Running**, **Needs you**, **Yours** and **Failed**, each with a count that stays blank until it has loaded. **Needs you** means the checks are waiting on you. **Yours** means you wrote or changed the headline.
 - **A row** shows a chip (for a finished draft, the readiness chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**; for a running one, **Queued · 0:12** or **Writing · 2:18** with a live clock; for a first draft that failed, **Draft failed**), a line such as “Council · AI”, “Council · Written by you” or “Council · Reprint”, the headline, and the model’s name or the time it was saved. A running row carries the full job card with **Cancel**.
 - **The button** names the next step: **Watch** (running), **Retry** (failed), **Check** (evidence to check), **Start story** (no draft yet) or **Review** (ready). Every button opens the story page.
@@ -825,6 +830,9 @@ The second tab, **Connections**, has three groups.
 - **Frontier · API key.** Your saved API connections. Each card has **Test**, **Settings** and **Remove**. **+ Add a connection** (owner) opens **Add a connection**: a name, a **Base URL**, an optional **API key** (stored encrypted on the server, never shown again) and a model id. A **Set up Gemini** button fills in the Gemini preset. Each saved connection can be edited, have models discovered, tested (**Test connection**; this may cost a small charge), disabled and deleted (permanent).
 - **Subscription sign-ins (OAuth).** Cards for **Claude Code** and **Codex** show whether the program is installed and signed in, with **Sign in to Claude Code** / **Sign in to Codex** and **Test**. A sign-in shows a link to open and, for Codex, a one-time code; the card turns to **Signed in** by itself. **Test** asks the model for one word and says how long it took: the only button that proves it can write. There is no Sign out, on purpose. Being signed in to claude.ai in a browser is a different login and does not count. A **Gemini (Pro plan)** card shows **Ready** or **Not ready** only; install the Gemini program and sign in with Google on that machine.
 - **Local & self-hosted.** One card per local server (LM Studio, Ollama, llama.cpp), showing its models, which is in memory and which the desk uses, and **Use this one** for the owner. **Test all connections** (top of the page) re-reads every sign-in and looks for servers; it asks no model a question.
+- **Ollama.** TownReporter finds a running Ollama on 11434 and uses it. It changes nothing. If nothing answers, a warning box shows on Today and on Models with **Check again**. TownReporter never downloads or installs Ollama. If Ollama is installed but stopped, TownReporter starts its own copy on port 11435 before a scan or AI job and waits up to 60 s. It never blocks a job. The DeepSeek rung and local-model lookup use 11435 while our copy is the one running. They go back to 11434 when it answers again. TownReporter stops only the copy it started, by saved PID. The owner can press **Sign in to Ollama**. It runs `ollama signin` and shows the link. The sign-in is optional.
+
+The Claude Fable choice is **Claude Fable 5.2**.
 
 When a draft fails because a login lapsed, the error carries a **Sign in to Claude Code** or **Sign in to Codex** button that takes you to the sign-in with the link ready.
 
@@ -973,10 +981,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.87 that is
-`TownReporter-0.6.87-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.88 that is
+`TownReporter-0.6.88-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.87
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.88
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
@@ -1197,6 +1205,17 @@ DeepSeek endpoint and model can be re-pointed with
 `TOWNREPORTER_DEEPSEEK_BASE_URL`, `TOWNREPORTER_DEEPSEEK_MODEL` and
 `TOWNREPORTER_DEEPSEEK_API_KEY`; `TOWNREPORTER_DEEPSEEK=0` removes the rung. A
 **Local model** setting never moves a DeepSeek pick to another server (D240).
+
+### Ollama on this computer
+
+TownReporter looks after Ollama for the newsroom.
+
+- It finds a running Ollama on 11434 and uses it. It changes nothing.
+- If nothing answers, a warning box shows on Today and on Models. The box has **Check again**. It does not block a scan or a draft. TownReporter never downloads or installs Ollama.
+- Before each scan and AI job, TownReporter checks once (cached 30 s, one shared in-flight check). If Ollama is installed but stopped, it starts its own copy on port 11435 and waits up to 60 s. It writes one desk line. It never blocks a job.
+- The DeepSeek rung and local-model lookup use 11435 while our copy is the one running. They go back to 11434 when it answers again.
+- TownReporter stops only the copy it started, by saved PID.
+- The owner can press **Sign in to Ollama** in Connections. It runs `ollama signin` and shows the link. The sign-in is optional. You can skip this step. There is no password box and no stored credential.
 
 ### When a model fails
 
@@ -2550,8 +2569,11 @@ older `prerollout` copies after a good promote. Details are in
 | `/`                                          | The paper                                                                                  |
 | `/?topic=opinion`                            | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
 | `/articles/:slug`                            | A story                                                                                    |
+| `/registry`                                  | The public **Community resources** page; only published entries                            |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
 | `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
+| `/get-the-app`                               | Install steps for **iPhone or iPad** and **Android**                                       |
+| `/sw.js`                                     | Service worker for the offline page; caches nothing                                        |
 | `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited — or the notice, if the owner took that excerpt down at a publisher's request |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
@@ -2568,6 +2590,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/desk/filed-draft/:draftId`                 | The version of a draft that a reporting run filed, kept as filed                           |
 | `/desk/import`                               | Import finished stories                                                                    |
 | `/desk/published`                            | Live stories and corrections; beat memory (`/desk/memory` redirects here)                  |
+| `/desk/registry`                             | Community resources desk: starter list, publish, edit, add and take down                   |
 | `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
 | `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
 | `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
@@ -2757,6 +2780,8 @@ For the shape of the whole database see the
 | 0153-0154 | Dynamic sources: `source_yield`, `leads.source_id`, trial and cadence columns on `sources`, `proposed_count`               |
 | 0155      | `drafts.editor_checks`                                                                                                     |
 | 0156-0158 | `evidence_vectors`; trigram indexes on `artifact_chunks` (`pg_trgm`); `story_meaning_vectors`                              |
+| 0159      | `routine_events` (one row per source, event and day; additive)                                                             |
+| 0160      | Resource registry tables: HSDS 3.0 core tables plus `resource_sources`, `resource_changes`, `resource_queries`, `resource_imports`; every registry row starts `published = false` |
 
 ## Manual investigative page watches
 

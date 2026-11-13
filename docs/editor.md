@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current software version: [0.6.87](releases/0.6.87.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
+**Current software version: [0.6.88](releases/0.6.88.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
 The screenshots in this guide were taken from the running 0.6.84 desk and public paper. If a label ever differs from a picture, the words in the text and on screen are right.
 
@@ -402,6 +402,8 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 ![The Drafts list with filter pills and rows showing a status chip, headline and one button](images/17-drafts.png)
 
+- **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
+- **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
 - **Filter pills:** **All**, **Running**, **Needs you**, **Yours** and **Failed**, each with a count that stays blank until it has loaded. **Needs you** means the checks are waiting on you. **Yours** means you wrote or changed the headline.
 - **A row** shows a chip (for a finished draft, the readiness chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**; for a running one, **Queued · 0:12** or **Writing · 2:18** with a live clock; for a first draft that failed, **Draft failed**), a line such as “Council · AI”, “Council · Written by you” or “Council · Reprint”, the headline, and the model’s name or the time it was saved. A running row carries the full job card with **Cancel**.
 - **The button** names the next step: **Watch** (running), **Retry** (failed), **Check** (evidence to check), **Start story** (no draft yet) or **Review** (ready). Every button opens the story page.
@@ -826,6 +828,9 @@ The second tab, **Connections**, has three groups.
 - **Frontier · API key.** Your saved API connections. Each card has **Test**, **Settings** and **Remove**. **+ Add a connection** (owner) opens **Add a connection**: a name, a **Base URL**, an optional **API key** (stored encrypted on the server, never shown again) and a model id. A **Set up Gemini** button fills in the Gemini preset. Each saved connection can be edited, have models discovered, tested (**Test connection**; this may cost a small charge), disabled and deleted (permanent).
 - **Subscription sign-ins (OAuth).** Cards for **Claude Code** and **Codex** show whether the program is installed and signed in, with **Sign in to Claude Code** / **Sign in to Codex** and **Test**. A sign-in shows a link to open and, for Codex, a one-time code; the card turns to **Signed in** by itself. **Test** asks the model for one word and says how long it took: the only button that proves it can write. There is no Sign out, on purpose. Being signed in to claude.ai in a browser is a different login and does not count. A **Gemini (Pro plan)** card shows **Ready** or **Not ready** only; install the Gemini program and sign in with Google on that machine.
 - **Local & self-hosted.** One card per local server (LM Studio, Ollama, llama.cpp), showing its models, which is in memory and which the desk uses, and **Use this one** for the owner. **Test all connections** (top of the page) re-reads every sign-in and looks for servers; it asks no model a question.
+- **Ollama.** TownReporter finds a running Ollama on 11434 and uses it. It changes nothing. If nothing answers, a warning box shows on Today and on Models with **Check again**. TownReporter never downloads or installs Ollama. If Ollama is installed but stopped, TownReporter starts its own copy on port 11435 before a scan or AI job and waits up to 60 s. It never blocks a job. The DeepSeek rung and local-model lookup use 11435 while our copy is the one running. They go back to 11434 when it answers again. TownReporter stops only the copy it started, by saved PID. The owner can press **Sign in to Ollama**. It runs `ollama signin` and shows the link. The sign-in is optional.
+
+The Claude Fable choice is **Claude Fable 5.2**.
 
 When a draft fails because a login lapsed, the error carries a **Sign in to Claude Code** or **Sign in to Codex** button that takes you to the sign-in with the link ready.
 
@@ -935,6 +940,19 @@ Owner only. **Time per call** is how long the desk waits for one answer from a m
 ### Legal removals
 
 `/desk/legal-removals` — owner only; reached from **Published** and from search. A separate process for removing a story and its connected application copies, with no Undo. See [Legal removal: owner workflow](#legal-removal-owner-workflow).
+
+---
+
+## Community resources (`/desk/registry`)
+
+`/desk/registry` — the desk’s view of the community resource registry. Load the starter list, publish entries, and keep the public list current.
+
+- **Entries waiting to be published:** each row shows the organization, service, category, phone, description and source. **Load the starter list** loads 11 entries. Loading publishes nothing. A second load adds no rows.
+- **Publish** sets the service and its organization, contacts, languages, schedules and locations to published, and marks the editor’s verification. **Published entries** lists every published entry and has **See the public page**.
+- **Edit** opens the same seven fields: organization name, service name, category, phone, description, source title and source URL. **Save** keeps a published entry published and stamps it as checked by the editor. **Cancel** closes the form.
+- **Add an entry** uses the same form. The new entry goes to the waiting list. Readers see it only after you press **Publish**.
+- **Take down** removes a published entry from `/registry` and puts it back in the waiting list. Nothing is deleted. **Publish** brings it back.
+- The page also shows **Detected changes**, **Imports** and **Registry sources**. The change list has no review buttons in this phase; it applies no change to the directory. Every imported row starts unpublished.
 
 ---
 
