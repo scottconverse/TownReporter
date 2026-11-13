@@ -4630,6 +4630,17 @@
   .desk-ltr.astra.large .queue-sel:has(select[aria-label="Sort"]) {
     flex: 0 0 auto;
   }
+  /* CI at 1280 in Large text: the row was still 2px over and Section's
+     select 7px short. Tighter gaps and 1px less tab padding give ~18px. */
+  .desk-ltr.astra.large .queue-controls {
+    gap: 6px;
+  }
+  .desk-ltr.astra.large .queue-filters {
+    gap: 6px;
+  }
+  .desk-ltr.astra.large .queue-controls .queue-tabs > button {
+    padding-inline: 5px;
+  }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
