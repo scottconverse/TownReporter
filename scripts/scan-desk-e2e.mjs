@@ -283,7 +283,7 @@ async function dailySettingsJourney(context, observePage) {
     .locator('option[value="custom-connections-loading"]')
     .waitFor({ state: "detached", timeout: 45_000 });
   const labels = (await runtime.locator("option").allTextContents()).map((label) =>
-    label.split("—")[0].trim(),
+    label.split("—")[0].split(" · ")[0].trim(),
   );
   // 0.6.64 (Unit AA) item 2: the daily-scan picker offers Automatic now -- a
   // scheduled run walks the writing ladder and the run record names the rung it
