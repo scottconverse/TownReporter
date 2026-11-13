@@ -1,8 +1,24 @@
 # Changelog
 
-Current software version: **0.6.88** (released 2026-11-12). Publication state is recorded by GitHub: [release v0.6.88](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.88).
+Current software version: **0.6.89** (released 2026-11-13). Publication state is recorded by GitHub: [release v0.6.89](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.89).
 
 ## Unreleased
+
+## 0.6.89 — 2026-11-13
+
+This release covers the 2 changes after 0.6.88 (#387 and #388; #384 is not in it). The release guide is [docs/releases/0.6.89.md](docs/releases/0.6.89.md). The number after a change is the pull request that made it.
+
+### Sources & scan
+
+- **TownRecord evidence comes in as leads.** In **Sources & scan**, **Import reviewed TownRecord evidence** takes a TownRecord meeting export (a JSON file under 8 MiB). Each import becomes an unpublished lead in **New leads**, with its citations and capture records. Only an owner or editor can import. A retry of the same export changes nothing and keeps the editor's edits. Changed bytes under the same revision are refused. A new revision makes a separate lead. Nothing is published by itself, and the import makes no model calls. Migration `0163_townrecord_handoffs.sql` is additive (#388).
+
+### Desk layout at large text
+
+- **Large desk text fits at 1280 px.** Dark Desk keeps **Decide** in the first screen. The Queue keeps **Search** clear of the tabs and **Sort** at its width. The Sources rail stacks its model picker. Published Views and Corrections columns no longer overflow (#387).
+
+### Tests
+
+- **Nightly CI walks are green again.** The browser walks match the 16px desk text and the paste-box note, and wait for the quota sentence (#387).
 
 ## 0.6.88 — 2026-11-12
 
