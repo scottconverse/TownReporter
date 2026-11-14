@@ -4642,6 +4642,28 @@
     padding-inline: 5px;
   }
 }
+/* Large text, 1280-1439: the filters go on their own line under the tabs,
+   the same shape as 701-1279. On production data (long Section names) the
+   one-line row needed ~971px and had ~920; Section ran 8px past the screen
+   edge at 1280x900 (walk r389-1113 L1, Nov 13 2026). The small CI fixture
+   never showed it, so this does not depend on how long the names are.
+   Not from 1440: there the same production row fits on one line (Section
+   ends at 1395 of 1400), and release-h-blockers-e2e needs one row at 1440. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .desk-ltr.astra.large .queue-controls {
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra.large .queue-tabs {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .desk-ltr.astra.large .queue-filters {
+    flex-wrap: wrap;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
    sets its own 5px/12px padding and falls to a 40px floor at <=700
