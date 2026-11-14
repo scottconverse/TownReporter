@@ -302,12 +302,15 @@ const preflightUrl = await load("src/lib/news/preflight.ts", {
 const leadMatchUrl = await load("src/lib/news/lead-match.ts", {
   "./preflight.ts": preflightUrl,
 });
+const leadScoreUrl = await load("src/lib/news/lead-score.ts");
 const deskCopyUrl = await load("src/lib/news/desk-copy.ts", {
   "./preflight.ts": preflightUrl,
   "./lead-match.ts": leadMatchUrl,
   "../paper.ts": paperUrl,
   // FC18 (Oct 13 2026): desk-copy.ts now imports the real sentence-stop helper.
   "./sentence-stop.ts": await load("src/lib/news/sentence-stop.ts"),
+  // lead-score.ts (method B, Nov 13 2026): desk-copy.ts and desk-chrome.tsx import it; it has no imports, so the REAL file is loaded.
+  "./lead-score.ts": leadScoreUrl,
 });
 const sourceLinesUrl = await load("src/lib/news/source-lines.ts", {
   "./url-guard.ts": urlGuardUrl,
@@ -317,6 +320,7 @@ const logicUrl = await load("src/lib/news/editor-dialog-logic.ts", {
   "./source-lines.ts": sourceLinesUrl,
   "./url-guard.ts": urlGuardUrl,
   "./kill-reasons.ts": killReasonsUrl,
+  "./lead-score.ts": leadScoreUrl,
   "zod": import.meta.resolve("zod"),
 });
 const importStoriesUrl = await load("src/lib/news/import-stories.ts", {
@@ -324,6 +328,7 @@ const importStoriesUrl = await load("src/lib/news/import-stories.ts", {
 });
 const schemaUrl = await load("src/lib/news/schema.ts", {
   "zod": import.meta.resolve("zod"),
+  "./lead-score.ts": leadScoreUrl,
   "../paper.ts": paperUrl,
   "./url-guard.ts": urlGuardUrl,
 });

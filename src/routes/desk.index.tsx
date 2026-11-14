@@ -2205,7 +2205,7 @@ function DeskHome() {
                               onUndo={() => void undoKill.mutate(killUndoPress(l.id, recentlyKilled.recent.get(l.id)?.restore))}
                             />
                           ) : null}
-                          <Score v={l.newsworthiness ?? 0} />
+                          <Score v={l.newsworthiness ?? 0} parts={l.score_parts} />
                           <div className="today-lead-main">
                             {/*
                               CY item 4. The drawn row opens with its chip line

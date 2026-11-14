@@ -281,6 +281,8 @@ const deskCopy = moduleUrl(
     "./lead-match.ts": leadMatchStubForCopy,
     "../paper.ts": paperModuleStub,
     "./sentence-stop.ts": moduleUrl(sentenceStopStub, "sentence-stop.ts", {}),
+    // lead-score.ts (method B, Nov 13 2026): desk-copy.ts and desk-chrome.tsx import it; it has no imports, so the REAL file is loaded.
+    "./lead-score.ts": await sharedModuleUrl("src/lib/news/lead-score.ts"),
     react: import.meta.resolve("react"),
   },
 );
@@ -891,6 +893,7 @@ const { Chip } = await import(
         module to load.
       */
       "@/lib/news/running-head-label": await sharedModuleUrl("src/lib/news/running-head-label.ts"),
+      "@/lib/news/lead-score": await sharedModuleUrl("src/lib/news/lead-score.ts"),
       /*
         A11 (Oct 20 2026) made desk-chrome.tsx read the nav Queue poll interval
         from @/lib/desk/queue-count-refresh. It has no imports, so the real

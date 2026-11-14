@@ -53,6 +53,7 @@ const stub = (names) =>
 const copy = await loadModule("../src/lib/news/desk-copy.ts", {
   "./preflight.ts": stub(["looksLikeProviderAuthFailure", "providerAuthTarget"]),
   "./sentence-stop.ts": stub(["cutAtSentenceEnd"]),
+  "./lead-score.ts": stub(["scorePartsInstruction", "SCORE_PARTS_EXAMPLE"]),
   "./lead-match.ts": stub(["distinguishingOverlap", "explainPairMatch", "sharesTightName"]),
   /*
     `TOPICS` is read at module load, not just imported, so the stub has to be

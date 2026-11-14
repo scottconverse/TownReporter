@@ -325,7 +325,8 @@ export async function performAddLead(
       reason at all still stores NULL rather than an empty string.
     */
     await sql`
-      update leads set newsworthiness = ${scored.score}, evidence = ${storableText(scored.reason) || null}
+      update leads set newsworthiness = ${scored.score}, score_parts = ${scored.parts ? JSON.stringify(scored.parts) : null},
+        evidence = ${storableText(scored.reason) || null}
       where id = ${leadId} and newsroom_id = ${context.newsroomId}
     `;
     return { ok: true as const, leadId, then: "score" as const, score: scored.score, reason: scored.reason, notice ,

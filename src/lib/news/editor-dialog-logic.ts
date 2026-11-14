@@ -11,6 +11,7 @@
  * is a dialog whose logic is only reachable through a browser.
  */
 import { parseSourceLines, type ParsedSourceLine } from "./source-lines.ts";
+import { readScoreParts, SCORE_PARTS_EXAMPLE, scorePartsInstruction, scoreTotal, type ScoreParts } from "./lead-score.ts";
 import { sourceIdentity } from "./url-guard.ts";
 import { isBadSourceReason } from "./kill-reasons.ts";
 
@@ -326,13 +327,13 @@ export function weavePrompt(input: { headline: string; body: string; material: s
 /**
  * "Research and score it" for a lead.
  *
- * The score is the lead's newsworthiness, 0 to 20 -- the same scale and the
- * same anchors the scanner uses (desk-copy.ts, "newsworthiness is an integer
- * from 0 to 20"), because the Queue shows both in one column with one color
- * rule (warm at 10, hot at 14) and the tooltip "Newsworthiness N/20". Until
- * Nov 13 2026 this asked for 0-100, so a hand-filed lead could show "56" in
- * red with the tooltip "56/20". The reason is what the Queue prints under the
- * lead. Asking for one line of JSON keeps the parse
+ * The score is the lead's newsworthiness on the scanner's own scale: four
+ * parts, 1 to 5 each, that the desk adds (./lead-score.ts), because the Queue
+ * shows both in one column with one color rule (warm at 10, hot at 14) and one
+ * tooltip. Until Nov 13 2026 this asked for 0-100, so a hand-filed lead could
+ * show "56" in red with the tooltip "56/20". A reply with one 0-20 "score" and
+ * no valid parts is still read, clamped to 0-20. The reason is what the Queue
+ * prints under the lead. Asking for one line of JSON keeps the parse
  * honest: `parseScore` refuses anything else, and the caller leaves the lead as
  * it was rather than writing half a score.
  */
@@ -340,20 +341,22 @@ export function scorePrompt(input: { headline: string; text: string }): { system
   return {
     system:
       "You score news leads for a small local newspaper. Answer with one JSON object and " +
-      "nothing else: {\"score\": <integer 0-20>, \"reason\": \"<one sentence>\"}. Score for " +
-      "public interest, whether it is new, and whether the paper can verify it from records. " +
-      "0 means valid but lowest priority, 10 means a useful dated local development, and 20 " +
-      "means an urgent major decision or immediate resident impact. " +
+      `nothing else: ${JSON.stringify({ ...SCORE_PARTS_EXAMPLE, reason: "<one sentence>" })}. ` +
+      scorePartsInstruction("The object") +
+      " reason is one sentence on the lead as a whole. " +
       "A routine notice scores low even when it is genuine news to someone.",
     user: [`Lead: ${input.headline.slice(0, 300)}`, `What we have:\n${input.text.trim().slice(0, 4000)}`].join("\n\n"),
   };
 }
 
-export function parseScore(text: string): { score: number; reason: string } | null {
+export function parseScore(text: string): { score: number; reason: string; parts: ScoreParts | null } | null {
   const match = String(text ?? "").match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {
     const row = JSON.parse(match[0]) as { score?: unknown; reason?: unknown };
+    const reason = String(row.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+    const parts = readScoreParts(row);
+    if (parts) return { score: scoreTotal(parts), reason, parts };
     /*
       A number, or a string that IS a number -- and nothing else.
 
@@ -369,7 +372,8 @@ export function parseScore(text: string): { score: number; reason: string } | nu
     if (!Number.isFinite(score)) return null;
     return {
       score: Math.max(0, Math.min(20, score)),
-      reason: String(row.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 400),
+      reason,
+      parts: null,
     };
   } catch {
     return null;

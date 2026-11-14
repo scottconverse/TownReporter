@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TOPICS } from "../paper.ts";
 import { assertHttpUrl } from "./url-guard.ts";
+import { readScoreParts, scoreTotal, type ScoreParts } from "./lead-score.ts";
 
 export const TopicSchema = z.enum(TOPICS);
 
@@ -162,6 +163,8 @@ export const ScanResultSchema = z.object({
 export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & {
   topic: string;
   topicUnchosen: boolean;
+  /** The four-part score (./lead-score.ts) when the model sent valid parts; null when it sent only a number or nothing. */
+  scoreParts: ScoreParts | null;
 };
 
 export type ParsedScanResult = {
@@ -222,9 +225,16 @@ export function parseScanResult(
         topicNames.find((s) => s.name.trim().toLowerCase() === rawTopic && allowedTopics.includes(s.key))?.key;
       const topic = chosen ?? (allowedTopics.includes(parsed.data.topic) ? parsed.data.topic : allowedTopics[0]);
       if (topic) {
-        const score = item && typeof item === "object" ? (item as Record<string, unknown>).newsworthiness : undefined;
+        /*
+          The four parts first (./lead-score.ts): the desk adds them, so the
+          total is the newsworthiness. A reply with no valid parts falls back
+          to a plain 0-20 newsworthiness number, as every reply did before.
+        */
+        const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        const scoreParts = readScoreParts(rec.score);
+        const score = scoreParts ? scoreTotal(scoreParts) : rec.newsworthiness;
         const ranked = typeof score === "number" && Number.isInteger(score) && score >= 0 && score <= 20;
-        leads.push({...parsed.data, topic, topicUnchosen: chosen === undefined, newsworthiness: ranked ? score : 0});
+        leads.push({...parsed.data, topic, topicUnchosen: chosen === undefined, newsworthiness: ranked ? score : 0, scoreParts});
         if (!ranked) unrankedLeads += 1;
       }
     }

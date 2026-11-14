@@ -1668,9 +1668,12 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.match(prompt, /schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government/i);
     assert.match(prompt, /source-quoted facts/i);
     assert.match(prompt, /Do not refile facts in Already covered, invent new sections, or file filler/i);
-    assert.match(prompt, /newsworthiness is an integer from 0 to 20/i);
-    assert.match(prompt, /0 means valid but lowest priority/i);
-    assert.doesNotMatch(prompt, /"newsworthiness": 0/);
+    assert.match(prompt, /score rates the lead on four parts, each an integer from 1 to 5/i);
+    assert.match(prompt, /immediacy \(Why now\? What changed\?\)/);
+    assert.match(prompt, /novelty \(Is this new, or routine recurrence\?\)/);
+    assert.match(prompt, /"score": \{"immediacy":3,/);
+    assert.match(prompt, /adds the four parts into the lead's newsworthiness \(4 to 20\)/);
+    assert.doesNotMatch(prompt, /"newsworthiness": \d/);
   });
 
   it("keeps a selected section's brief while requiring quoted local evidence", () => {
