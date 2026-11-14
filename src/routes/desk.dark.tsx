@@ -2202,6 +2202,49 @@ function InvestigationWorkspace({
         ) : null}
       </div>
 
+      {/*
+        Decide sits right under the file's model and its notices, ABOVE the
+        Scope/Depth/Limit row and the Activity / Case file pair. With Text:
+        Large at 1280x900 and a production file (long help text, "Could not
+        finish this round"), Decide started at 821px and its last buttons
+        ended at 1053px, below the first screen (walk r389-1113 L1, Nov 13
+        2026). Moving the box in the page (not only in CSS) keeps the reading
+        and Tab order the same as what is drawn.
+      */}
+      {/* The five editor decisions stay on the file. */}
+      <div className="astra-panel decide">
+        <div className="astra-case-h">
+          <p className="astra-label">Decide</p>
+        </div>
+        {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
+        <div className="astra-panel-acts" aria-label="File decisions">
+          <div className="astra-decision-keep">
+            <InkButton tone="ghost" disabled={keepDisabled || decide.keepDisabled} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
+              Keep investigating
+            </InkButton>
+            {decide.keepNote ? <p className="astra-decision-why">{decide.keepNote}</p> : null}
+          </div>
+          {digging && inv ? <InkButton tone="ghost" onClick={onUseSelectedModel}>Use selected model</InkButton> : null}
+          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
+            Start an AI follow-up
+          </InkButton>
+          <InkButton tone="ghost" disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
+            Wait and watch
+          </InkButton>
+          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
+            {queuePending ? "Sending…" : "Send to the queue"}
+          </InkButton>
+          <InkButton tone="quiet" disabled={keepDisabled || decide.closeDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
+            {decide.closeLabel}
+          </InkButton>
+        </div>
+        {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}
+        {watchNotice ? <p className="note" role="status">{watchNotice}</p> : null}
+        <p className="astra-note">
+          Nothing here prints. "Send to the queue" files a lead for you to review.
+        </p>
+      </div>
+
       {/* Each boundary is the value saved on this file when it was opened. */}
       <div className="astra-bounds">
         <div className="astra-bound">
@@ -2298,40 +2341,6 @@ function InvestigationWorkspace({
             <InkButton tone="ghost" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
           </div>
         </div>
-      </div>
-
-      {/* The five editor decisions stay on the file. */}
-      <div className="astra-panel decide">
-        <div className="astra-case-h">
-          <p className="astra-label">Decide</p>
-        </div>
-        {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
-        <div className="astra-panel-acts" aria-label="File decisions">
-          <div className="astra-decision-keep">
-            <InkButton tone="ghost" disabled={keepDisabled || decide.keepDisabled} pending={keepPendingLabel != null} pendingLabel={keepPendingLabel ?? "Reading…"} onClick={onKeepDigging}>
-              Keep investigating
-            </InkButton>
-            {decide.keepNote ? <p className="astra-decision-why">{decide.keepNote}</p> : null}
-          </div>
-          {digging && inv ? <InkButton tone="ghost" onClick={onUseSelectedModel}>Use selected model</InkButton> : null}
-          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
-            Start an AI follow-up
-          </InkButton>
-          <InkButton tone="ghost" disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
-            Wait and watch
-          </InkButton>
-          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
-            {queuePending ? "Sending…" : "Send to the queue"}
-          </InkButton>
-          <InkButton tone="quiet" disabled={keepDisabled || decide.closeDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
-            {decide.closeLabel}
-          </InkButton>
-        </div>
-        {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}
-        {watchNotice ? <p className="note" role="status">{watchNotice}</p> : null}
-        <p className="astra-note">
-          Nothing here prints. "Send to the queue" files a lead for you to review.
-        </p>
       </div>
 
       {followUpOpen && detailReady ? (

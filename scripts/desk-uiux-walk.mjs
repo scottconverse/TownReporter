@@ -622,7 +622,8 @@ async function checkResponsiveBoundaries(page, scenario, surface) {
         size: scenario.size,
       }, metrics);
       if (surface.name === "Queue") {
-        const shouldBeOneLine = width >= 1280;
+        // Large text wraps the filters through 1535 (production Section names did not fit, Nov 13 2026).
+        const shouldBeOneLine = width >= 1280 && scenario.size !== "large";
         const isOneLine = metrics.queueRowTopDelta <= 1;
         if (isOneLine !== shouldBeOneLine) {
           failures.push(
@@ -988,6 +989,30 @@ async function captureSurface(page, scenario, surface) {
       if (bottom >= 1100 || (scenario.size === "large" && top >= 1000)) throw new Error(`Large file hides Decide: top ${top.toFixed(2)}, action bottom ${bottom.toFixed(2)} px`);
       report.darkDecideMeasurements ??= [];
       report.darkDecideMeasurements.push({ theme: scenario.theme, size: scenario.size, top, bottom, findings: 262, captureRecords: 363, activityLines: await page.locator(".astra-log").count() });
+    }
+    // 1280 in Large text (walk r389-1113 L1, Nov 13 2026): on production data
+    // Decide sat under Scope/Depth/Limit and the Activity pair, and its last
+    // buttons ended at 1053px. The small fixture never showed that, so check
+    // the page order (data-independent) and the last button's bottom.
+    if (scenario.viewport.width === 1280 && scenario.size === "large" && process.argv.includes("--local")) {
+      const drawn = await page.evaluate(() => {
+        const decide = document.querySelector(".astra-panel.decide");
+        const bounds = document.querySelector(".astra-bounds");
+        const pair = document.querySelector(".astra-pair");
+        const buttons = [...(decide?.querySelectorAll('[aria-label="File decisions"] button') ?? [])];
+        const before = (a, b) => !b || Boolean(a && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        return {
+          found: Boolean(decide) && buttons.length > 0,
+          aboveBounds: before(decide, bounds),
+          abovePair: before(decide, pair),
+          lastBottom: Math.max(...buttons.map((b) => b.getBoundingClientRect().bottom + scrollY)),
+          height: innerHeight,
+        };
+      });
+      console.log(`1280 Large Decide: above bounds ${drawn.aboveBounds}, above pair ${drawn.abovePair}, last button bottom ${drawn.lastBottom.toFixed(2)} of ${drawn.height} px`);
+      if (!drawn.found || !drawn.aboveBounds || !drawn.abovePair || drawn.lastBottom >= drawn.height) {
+        throw new Error("1280 Large text pushes Decide out of the first screen: " + JSON.stringify(drawn));
+      }
     }
   }
   if (surface.name === "Queue") {
