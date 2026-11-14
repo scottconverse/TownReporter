@@ -622,7 +622,7 @@ async function checkResponsiveBoundaries(page, scenario, surface) {
         size: scenario.size,
       }, metrics);
       if (surface.name === "Queue") {
-        // Large text wraps the filters through 1535 (production Section names did not fit, Nov 13 2026).
+        // Large text wraps the filters through 1439 (production Section names did not fit, Nov 13 2026).
         const shouldBeOneLine = width >= 1280 && scenario.size !== "large";
         const isOneLine = metrics.queueRowTopDelta <= 1;
         if (isOneLine !== shouldBeOneLine) {
