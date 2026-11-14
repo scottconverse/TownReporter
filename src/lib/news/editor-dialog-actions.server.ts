@@ -167,7 +167,7 @@ export type AddLeadResult =
       ok: true;
       leadId: number;
       then: "score" | "draft" | "as-is";
-      /** The usefulness number, when "Research and score it" worked. */
+      /** The newsworthiness, 0 to 20, when "Research and score it" worked. */
       score?: number;
       reason?: string;
       /** A sentence the dialog shows in the warning style. Never a silent no-op. */
@@ -325,7 +325,8 @@ export async function performAddLead(
       reason at all still stores NULL rather than an empty string.
     */
     await sql`
-      update leads set newsworthiness = ${scored.score}, evidence = ${storableText(scored.reason) || null}
+      update leads set newsworthiness = ${scored.score}, score_parts = ${scored.parts ? JSON.stringify(scored.parts) : null},
+        evidence = ${storableText(scored.reason) || null}
       where id = ${leadId} and newsroom_id = ${context.newsroomId}
     `;
     return { ok: true as const, leadId, then: "score" as const, score: scored.score, reason: scored.reason, notice ,

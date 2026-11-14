@@ -646,7 +646,7 @@ export function LeadRowView({
       ) : (
         <span className="queue-pick" aria-hidden="true" />
       )}
-      <Score v={score} />
+      <Score v={score} parts={lead.score_parts} />
       <div className="lead-cell">
         <div className="lead-chips">
           {/* Unit BF3: the chip line is DRAWN status-first (NEW / HELD /

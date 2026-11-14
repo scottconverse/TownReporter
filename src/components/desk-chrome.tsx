@@ -33,6 +33,7 @@ import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
 import { runningHeadLabel } from "@/lib/news/running-head-label";
+import { parseStoredScoreParts, scoreTooltip } from "@/lib/news/lead-score";
 
 const users = new WeakMap<Document, { count: number; dispose: () => void }>();
 
@@ -1322,11 +1323,11 @@ export function Field({
   );
 }
 
-export function Score({ v }: { v: number }) {
+export function Score({ v, parts }: { v: number; parts?: unknown }) {
   return (
     <span
       className={"score" + (v >= 14 ? " hot" : v >= 10 ? " warm" : "")}
-      title={"Newsworthiness " + v + "/20"}
+      title={scoreTooltip(v, parseStoredScoreParts(parts))}
     >
       {v}
     </span>

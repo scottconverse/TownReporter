@@ -898,7 +898,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
     }
   >`
     select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
-           l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+           l.newsworthiness, l.score_parts, l.created_at, l.investigation_id, a.slug as article_slug,
            -- "import" = read out of a report the editor pasted; null = not
            -- recorded. The Queue shows the Imported badge off this.
            l.origin,
@@ -1163,7 +1163,7 @@ export const getLead = createServerFn({ method: "GET" })
     const sql = await getSql();
     await ensureDeskDraftMemoSchema();
     const leads = await sql<LeadRow>`
-      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.score_parts, l.created_at, l.investigation_id, l.notes_json,
              l.meeting_video_id,l.meeting_artifact_id,l.meeting_lead_purpose,
              l.origin,
              l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,

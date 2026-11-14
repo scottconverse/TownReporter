@@ -2,6 +2,7 @@ import { sanitizePublicUrls } from "./schema.ts";
 import { storableText } from "./storable-text.ts";
 import { sourceIdentity } from "./url-guard.ts";
 import { noEventVerdict, standingPageStamp, type LeadEventFields } from "./lead-newsworthiness.ts";
+import type { ScoreParts } from "./lead-score.ts";
 import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
@@ -116,6 +117,8 @@ export type ScanAiLead = {
    * section, which is what every caller written before this flag meant.
    */
   topicUnchosen?: boolean;
+  /** The four-part score (./lead-score.ts); null or absent for a lead scored as one number. */
+  scoreParts?: ScoreParts | null;
 } & LeadEventFields;
 
 /**
@@ -706,7 +709,7 @@ export async function fileScanLeads(
 
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
-        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen, dup_kind,
+        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, score_parts, status, possible_duplicate_of, topic_unchosen, dup_kind,
           dup_ai_same, dup_ai_why, dup_ai_target,
           dup_ai_printed_same, dup_ai_printed_why, dup_ai_printed_slug,
           dup_ai_model, dup_ai_checked_at)
@@ -717,6 +720,7 @@ export async function fileScanLeads(
           ${urls},
           ${evidence.slice(0, 2000)},
           ${Number(lead.newsworthiness) || 0},
+          ${lead.scoreParts ? JSON.stringify(lead.scoreParts) : null},
           ${initialStatus},
           ${possibleDuplicateOf},
           ${lead.topicUnchosen === true},

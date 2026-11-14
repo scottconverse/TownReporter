@@ -157,6 +157,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
             itself, so the real file is loaded like its three siblings above.
           */
           "./sentence-stop.ts": import.meta.resolve("../src/lib/news/sentence-stop.ts"),
+          "./lead-score.ts": import.meta.resolve("../src/lib/news/lead-score.ts"),
         },
       ),
       "@/lib/timezone": timezoneStub,

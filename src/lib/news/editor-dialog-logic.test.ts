@@ -12,6 +12,7 @@ import {
   insertUpdateAtTop,
   parseProposedSources,
   parseScore,
+  scorePrompt,
   previewSources,
   previewSplit,
   scopeFromKey,
@@ -153,14 +154,40 @@ describe("the rows out of a model answer", () => {
 });
 
 describe("the score out of a model answer", () => {
-  it("reads one JSON object, clamped to the desk's 0-100", () => {
-    assert.deepEqual(parseScore('{"score": 72, "reason": "It is new and checkable."}'), {
-      score: 72,
+  it("reads one JSON object, clamped to the Queue's 0-20 newsworthiness", () => {
+    assert.deepEqual(parseScore('{"score": 12, "reason": "It is new and checkable."}'), {
+      score: 12,
       reason: "It is new and checkable.",
+      parts: null,
     });
-    assert.deepEqual(parseScore('Sure:\n{"score": 140, "reason":"x"}\n')?.score, 100);
+    assert.deepEqual(parseScore('Sure:\n{"score": 56, "reason":"x"}\n')?.score, 20);
     assert.deepEqual(parseScore('{"score": -4, "reason":"x"}')?.score, 0);
-    assert.deepEqual(parseScore('{"score": 71.6, "reason":"x"}')?.score, 72);
+    assert.deepEqual(parseScore('{"score": 11.6, "reason":"x"}')?.score, 12);
+  });
+
+  it("asks the model for the same four parts the scanner uses", () => {
+    const p = scorePrompt({ headline: "h", text: "t" });
+    assert.match(p.system, /four parts, each an integer from 1 to 5/);
+    assert.match(p.system, /"immediacy":3/);
+    assert.match(p.system, /"reason":"<one sentence>"/);
+    assert.doesNotMatch(p.system, /0-100/);
+  });
+
+  it("adds the four parts into the score and keeps them", () => {
+    const got = parseScore(
+      '{"immediacy": 4, "immediacy_why": "Vote is Tuesday.", "impact": 3, "impact_why": "Every renter.",' +
+        ' "conflict": "1", "conflict_why": "", "novelty": 2, "novelty_why": "Annual.", "reason": "A dated vote."}',
+    );
+    assert.equal(got?.score, 10);
+    assert.equal(got?.reason, "A dated vote.");
+    assert.deepEqual(got?.parts, {
+      immediacy: 4, impact: 3, conflict: 1, novelty: 2,
+      reasons: { immediacy: "Vote is Tuesday.", impact: "Every renter.", conflict: "", novelty: "Annual." },
+    });
+    // A part out of range is not half a score: the plain "score" is used instead, or nothing.
+    assert.equal(parseScore('{"immediacy": 9, "impact": 3, "conflict": 1, "novelty": 2, "score": 7}')?.parts, null);
+    assert.equal(parseScore('{"immediacy": 9, "impact": 3, "conflict": 1, "novelty": 2, "score": 7}')?.score, 7);
+    assert.equal(parseScore('{"immediacy": 9, "impact": 3, "conflict": 1, "novelty": 2}'), null);
   });
 
   it("answers null rather than half a score when the model refused or rambled", () => {

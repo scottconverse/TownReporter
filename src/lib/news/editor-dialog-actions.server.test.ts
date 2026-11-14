@@ -242,14 +242,14 @@ describe("add to this story", () => {
 describe("add a lead", () => {
   it("sends the exact saved local endpoint and model to lead scoring", async () => {
     const { deps, chatOptions } = makeDeps({
-      chat: { ok: true as const, text: '{"score": 72, "reason": "New and checkable."}' },
+      chat: { ok: true as const, text: '{"score": 12, "reason": "New and checkable."}' },
     });
     const result = await performAddLead(
       context,
       { paste: "A neighbor says the vote was 4-3", then: "score", modelChoice: "local-model" },
       deps,
     );
-    assert.equal(result.ok && result.score, 72);
+    assert.equal(result.ok && result.score, 12);
     assert.deepEqual(chatOptions[0]?.localModel, {
       baseUrl: "http://127.0.0.1:1234/v1",
       id: "loaded-exact-model",
@@ -259,7 +259,7 @@ describe("add a lead", () => {
   it("files it and reports the score on the happy path", async () => {
     const filed: { headline: string; why: string; topic: string; urls: string[] }[] = [];
     const { deps, writes, chatCalls } = makeDeps({
-      chat: { ok: true as const, text: '{"score": 72, "reason": "New and checkable."}' },
+      chat: { ok: true as const, text: '{"score": 12, "reason": "New and checkable."}' },
       insertLead: async (_ctx, input) => {
         filed.push(input);
         return { ok: true as const, id: 42 };
@@ -268,7 +268,7 @@ describe("add a lead", () => {
     const result = await performAddLead(context, { paste: "https://records.example/minutes", then: "score" }, deps);
     assert.equal(result.ok && result.leadId, 42);
     assert.equal(result.ok && result.then, "score");
-    assert.equal(result.ok && result.score, 72);
+    assert.equal(result.ok && result.score, 12);
     assert.equal(result.ok && result.reason, "New and checkable.");
     assert.equal(chatCalls.n, 1);
     // The readable name of that URL is "Minutes" -- seven characters -- so the
@@ -279,7 +279,7 @@ describe("add a lead", () => {
     ]);
     const score = writes()[0]!;
     assert.match(score.text, /^update leads set newsworthiness/);
-    assert.deepEqual(score.values, [72, "New and checkable.", 42, 81]);
+    assert.deepEqual(score.values, [12, null, "New and checkable.", 42, 81]);
   });
 
   it("answers ok with a notice when the model fails after the lead is filed", async () => {

@@ -167,6 +167,11 @@ const sentenceStopUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/sentence-stop.ts", import.meta.url), "utf8"),
   "sentence-stop.ts",
 );
+// lead-score.ts (method B, Nov 13 2026): desk-copy.ts and desk-chrome.tsx import it; it has no imports, so the REAL file is loaded.
+const leadScoreUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/lead-score.ts", import.meta.url), "utf8"),
+  "lead-score.ts",
+);
 const deskCopyUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
   "desk-copy.ts",
@@ -175,6 +180,7 @@ const deskCopyUrl = moduleUrl(
     "./lead-match.ts": leadMatchStubForCopy,
     "../paper.ts": paperModuleStub,
     "./sentence-stop.ts": sentenceStopUrl,
+    "./lead-score.ts": leadScoreUrl,
   },
 );
 
@@ -324,6 +330,7 @@ const { DeskShell } = await import(
         so the REAL file is loaded -- the same reasoning as desk-nav.ts above
         -- and the specifier has to resolve for the shell to load at all.
       */
+      "@/lib/news/lead-score": leadScoreUrl,
       "@/lib/news/running-head-label": moduleUrl(
         await readFile(new URL("../src/lib/news/running-head-label.ts", import.meta.url), "utf8"),
         "running-head-label.ts",

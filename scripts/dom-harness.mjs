@@ -409,6 +409,10 @@ export const sharesTightName = () => false;
 */
 sharedHelperUrls["@/lib/desk/queue-count-refresh"] = await moduleUrl("src/lib/desk/queue-count-refresh.ts");
 
+// lead-score.ts (method B, Nov 13 2026): desk-copy.ts and desk-chrome.tsx import it; it has no imports, so the REAL file is loaded.
+sharedHelperUrls["./lead-score.ts"] = await moduleUrl("src/lib/news/lead-score.ts");
+sharedHelperUrls["@/lib/news/lead-score"] = sharedHelperUrls["./lead-score.ts"];
+
 /**
  * Point every specifier at a URL Node can import.
  *

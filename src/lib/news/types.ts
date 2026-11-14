@@ -1,3 +1,5 @@
+import type { ScoreParts } from "./lead-score.ts";
+
 export type SourceRow = {
   id: number;
   url: string;
@@ -88,6 +90,9 @@ export type LeadRow = {
   source_urls: string;
   evidence: string | null;
   newsworthiness: number | null;
+  /** The four-part score (migration 0164, lib/news/lead-score.ts); null for a
+   * lead scored as one number or not at all. */
+  score_parts?: ScoreParts | null;
   created_at: string;
   /** How this lead entered the desk (migration 0091). "import" = read out of
    * a report the editor pasted; null = not recorded, which includes every lead
