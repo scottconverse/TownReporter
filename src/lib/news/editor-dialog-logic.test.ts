@@ -12,6 +12,7 @@ import {
   insertUpdateAtTop,
   parseProposedSources,
   parseScore,
+  scorePrompt,
   previewSources,
   previewSplit,
   scopeFromKey,
@@ -153,14 +154,21 @@ describe("the rows out of a model answer", () => {
 });
 
 describe("the score out of a model answer", () => {
-  it("reads one JSON object, clamped to the desk's 0-100", () => {
-    assert.deepEqual(parseScore('{"score": 72, "reason": "It is new and checkable."}'), {
-      score: 72,
+  it("reads one JSON object, clamped to the Queue's 0-20 newsworthiness", () => {
+    assert.deepEqual(parseScore('{"score": 12, "reason": "It is new and checkable."}'), {
+      score: 12,
       reason: "It is new and checkable.",
     });
-    assert.deepEqual(parseScore('Sure:\n{"score": 140, "reason":"x"}\n')?.score, 100);
+    assert.deepEqual(parseScore('Sure:\n{"score": 56, "reason":"x"}\n')?.score, 20);
     assert.deepEqual(parseScore('{"score": -4, "reason":"x"}')?.score, 0);
-    assert.deepEqual(parseScore('{"score": 71.6, "reason":"x"}')?.score, 72);
+    assert.deepEqual(parseScore('{"score": 11.6, "reason":"x"}')?.score, 12);
+  });
+
+  it("asks the model for the same 0-20 scale the scanner and the Queue use", () => {
+    const p = scorePrompt({ headline: "h", text: "t" });
+    assert.match(p.system, /<integer 0-20>/);
+    assert.match(p.system, /10 means a useful dated local development/);
+    assert.doesNotMatch(p.system, /0-100/);
   });
 
   it("answers null rather than half a score when the model refused or rambled", () => {

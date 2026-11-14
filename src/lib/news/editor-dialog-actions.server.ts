@@ -167,7 +167,7 @@ export type AddLeadResult =
       ok: true;
       leadId: number;
       then: "score" | "draft" | "as-is";
-      /** The usefulness number, when "Research and score it" worked. */
+      /** The newsworthiness, 0 to 20, when "Research and score it" worked. */
       score?: number;
       reason?: string;
       /** A sentence the dialog shows in the warning style. Never a silent no-op. */

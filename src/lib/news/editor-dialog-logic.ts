@@ -326,8 +326,13 @@ export function weavePrompt(input: { headline: string; body: string; material: s
 /**
  * "Research and score it" for a lead.
  *
- * The score is the desk's own 0-100 usefulness number and the reason is what the
- * Queue prints under the lead. Asking for one line of JSON keeps the parse
+ * The score is the lead's newsworthiness, 0 to 20 -- the same scale and the
+ * same anchors the scanner uses (desk-copy.ts, "newsworthiness is an integer
+ * from 0 to 20"), because the Queue shows both in one column with one color
+ * rule (warm at 10, hot at 14) and the tooltip "Newsworthiness N/20". Until
+ * Nov 13 2026 this asked for 0-100, so a hand-filed lead could show "56" in
+ * red with the tooltip "56/20". The reason is what the Queue prints under the
+ * lead. Asking for one line of JSON keeps the parse
  * honest: `parseScore` refuses anything else, and the caller leaves the lead as
  * it was rather than writing half a score.
  */
@@ -335,8 +340,10 @@ export function scorePrompt(input: { headline: string; text: string }): { system
   return {
     system:
       "You score news leads for a small local newspaper. Answer with one JSON object and " +
-      'nothing else: {"score": <0-100>, "reason": "<one sentence>"}. Score for public ' +
-      "interest, whether it is new, and whether the paper can verify it from records. " +
+      "nothing else: {\"score\": <integer 0-20>, \"reason\": \"<one sentence>\"}. Score for " +
+      "public interest, whether it is new, and whether the paper can verify it from records. " +
+      "0 means valid but lowest priority, 10 means a useful dated local development, and 20 " +
+      "means an urgent major decision or immediate resident impact. " +
       "A routine notice scores low even when it is genuine news to someone.",
     user: [`Lead: ${input.headline.slice(0, 300)}`, `What we have:\n${input.text.trim().slice(0, 4000)}`].join("\n\n"),
   };
@@ -361,7 +368,7 @@ export function parseScore(text: string): { score: number; reason: string } | nu
     );
     if (!Number.isFinite(score)) return null;
     return {
-      score: Math.max(0, Math.min(100, score)),
+      score: Math.max(0, Math.min(20, score)),
       reason: String(row.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 400),
     };
   } catch {
