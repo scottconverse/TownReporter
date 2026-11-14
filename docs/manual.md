@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.89 · publication and deployment are recorded separately**
+**Version 0.6.90 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.89 release guide and evidence boundaries](releases/0.6.89.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.90 release guide and evidence boundaries](releases/0.6.90.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.89 does.**
+**What TownReporter 0.6.90 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads, spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.89](releases/0.6.89.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.90](releases/0.6.90.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -126,7 +126,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.89, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.90, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -981,10 +981,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.89 that is
-`TownReporter-0.6.89-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.90 that is
+`TownReporter-0.6.90-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.89
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.90
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
