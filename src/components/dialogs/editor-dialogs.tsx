@@ -618,7 +618,7 @@ export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
           : answer.then === "draft"
             ? `Filed as lead ${answer.leadId}, and it is drafting now -- watch it under Running now.`
             : answer.score !== undefined && answer.score !== null
-              ? `Filed as lead ${answer.leadId} with a newsworthiness score of ${answer.score} out of 20.`
+              ? `Filed as lead ${answer.leadId} with a usefulness score of ${answer.score}.`
               : `Filed as lead ${answer.leadId}. The AI is reading it now.`;
       announceToDesk(filed);
       onDone?.(filed);
