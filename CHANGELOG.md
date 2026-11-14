@@ -1,8 +1,20 @@
 # Changelog
 
-Current software version: **0.6.89** (released 2026-11-13). Publication state is recorded by GitHub: [release v0.6.89](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.89).
+Current software version: **0.6.90** (released 2026-11-13). Publication state is recorded by GitHub: [release v0.6.90](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.90).
 
 ## Unreleased
+
+## 0.6.90 — 2026-11-13
+
+This release covers 1 change after 0.6.89 (#391). The release guide is [docs/releases/0.6.90.md](docs/releases/0.6.90.md). The number after a change is the pull request that made it.
+
+### Desk layout at large text
+
+- **Large desk text at 1280 px, second pass.** On Dark Desk the file's model picker now sits below **Decide**, so all five Decide buttons are in the first screen (the last one ended at 1130 of 1000 px on the CI file, and now ends at 823). On the Queue, from 1280 to 1439 px, the filters go on their own line under the tabs, so long Section names no longer push **Sort** off the row (#391).
+
+### Tests
+
+- **The desk walk checks Decide at 1280 px Large.** CI now fails if Decide drops below the first screen or below the bounds and pair boxes (#391).
 
 ## 0.6.89 — 2026-11-13
 
