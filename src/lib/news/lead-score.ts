@@ -126,11 +126,27 @@ export function parseStoredScoreParts(raw: unknown): ScoreParts | null {
   });
 }
 
+/**
+ * The four parts as one line of VISIBLE text, in `SCORE_PARTS` order:
+ * `Immediacy 3 · Impact 4 · Conflict 1 · Novelty 3`. The Today row, the Queue
+ * row and the story page all print this, so the wording is written once.
+ */
+export function scorePartsLine(parts: ScoreParts): string {
+  return SCORE_PARTS.map((p) => `${LABEL[p]} ${parts[p]}`).join(" · ");
+}
+
+/**
+ * One line per part that has a reason, `Immediacy: <reason>`, in `SCORE_PARTS`
+ * order. A part whose reason is "" is skipped rather than printed as a label
+ * with nothing after it.
+ */
+export function scorePartReasonLines(parts: ScoreParts): string[] {
+  return SCORE_PARTS.filter((p) => parts.reasons[p]).map((p) => `${LABEL[p]}: ${parts.reasons[p]}`);
+}
+
 /** The tooltip on the Queue's score: the total, the four parts, then each reason on its own line. */
 export function scoreTooltip(total: number, parts: ScoreParts | null): string {
   const head = `Newsworthiness ${total}/20`;
   if (!parts) return head;
-  const line = SCORE_PARTS.map((p) => `${LABEL[p]} ${parts[p]}`).join(" · ");
-  const why = SCORE_PARTS.filter((p) => parts.reasons[p]).map((p) => `${LABEL[p]}: ${parts.reasons[p]}`);
-  return [head, line, ...why].join("\n");
+  return [head, scorePartsLine(parts), ...scorePartReasonLines(parts)].join("\n");
 }
