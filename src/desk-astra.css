@@ -4172,6 +4172,14 @@
   font: 700 calc(16px * var(--ts)) var(--fd);
   text-decoration: none;
 }
+/* The four score parts, visible under the headline on the Today and Queue rows
+   (Scott, Nov 15 2026: "Show me the overall score, and each individual score,
+   per story"). `.meta` is the desk's existing 16px meta text; the margin is
+   the only thing new here, so the line sits close under its headline. */
+.desk-ltr.astra .lead-score-parts,
+.desk-ltr.astra .today-lead-score-parts {
+  margin: 4px 0 0;
+}
 .desk-ltr.astra .today-lead-why {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -8043,6 +8051,20 @@
   border-bottom: 1px solid var(--line);
   font: 700 calc(16px * var(--ts))/1.5 var(--fd);
   color: var(--fg2);
+}
+
+/* The lead's score on the story page: the total, the four parts, then one
+   line per reason. Rule 30: `.meta` and `.note` are the desk's own 16px text
+   and colours, so nothing small, faint or new is added here -- only the
+   layout that puts the lines under the status row, full width. */
+.desk-ltr.astra .astra-wb-context .astra-wb-score {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.desk-ltr.astra .astra-wb-score > p {
+  margin: 0;
 }
 
 /* The writer row: who is being asked, and how this draft stands. */

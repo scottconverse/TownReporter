@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseScanResult } from "./schema.ts";
-import { parseStoredScoreParts, readScoreParts, scoreTooltip, scoreTotal } from "./lead-score.ts";
+import { parseStoredScoreParts, readScoreParts, scoreTooltip, scoreTotal, scorePartReasonLines, scorePartsLine } from "./lead-score.ts";
 
 const parts = { immediacy: 4, immediacy_why: " Vote is\nTuesday. ", impact: 3, conflict: 1, novelty: 2, novelty_why: "Annual." };
 
@@ -26,6 +26,27 @@ describe("the four-part lead score", () => {
     assert.deepEqual(parseStoredScoreParts(p), p);
     assert.equal(parseStoredScoreParts(null), null);
     assert.equal(parseStoredScoreParts("not json"), null);
+  });
+
+  it("writes the four parts as one visible line, in the desk's order", () => {
+    const p = readScoreParts({ immediacy: 3, impact: 4, conflict: 1, novelty: 3 })!;
+    assert.equal(scorePartsLine(p), "Immediacy 3 · Impact 4 · Conflict 1 · Novelty 3");
+  });
+
+  it("writes one reason line per part that has a reason, skipping an empty one", () => {
+    const p = readScoreParts({
+      immediacy: 3,
+      impact: 4,
+      conflict: 1,
+      novelty: 3,
+      immediacy_why: "The vote is Tuesday.",
+      conflict_why: "",
+      novelty_why: "Not routine.",
+    })!;
+    assert.deepEqual(scorePartReasonLines(p), [
+      "Immediacy: The vote is Tuesday.",
+      "Novelty: Not routine.",
+    ]);
   });
 
   it("says the parts and the reasons in the Queue tooltip", () => {

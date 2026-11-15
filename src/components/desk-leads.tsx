@@ -11,6 +11,9 @@ import {
   HOME_OR_LIST_SOURCE_WARNING,
   homeOrListSourceUrls,
 } from "../lib/news/lead-source-page.ts";
+/* A relative import for the same reason as `lead-source-page.ts` above: the
+   render harness resolves only the relative specifiers it maps. */
+import { parseStoredScoreParts, scorePartsLine } from "../lib/news/lead-score.ts";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   editorTitle,
@@ -315,6 +318,13 @@ export function LeadRowView({
    */
   const [dupKill, setDupKill] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const score = lead.newsworthiness ?? 0;
+  /*
+    The four parts, visible under the headline (Scott, Nov 15 2026: "Show me the
+    overall score, and each individual score, per story"). The hover tooltip
+    stays as well; a phone has no hover. A lead scored the old way has no parts
+    and keeps the total alone.
+  */
+  const scoreParts = parseStoredScoreParts(lead.score_parts);
   const held = lead.status === "held";
   const closed = lead.status === "killed" || lead.status === "published";
   /*
@@ -668,6 +678,7 @@ export function LeadRowView({
             {editorTitle(lead.headline)}
           </Link>
         </h3>
+        {scoreParts ? <p className="meta lead-score-parts">{scorePartsLine(scoreParts)}</p> : null}
         {/*
           BF4, defect 1: the Queue row is chips + headline, as drawn. The "why"
           summary line the desk printed under the headline is not in the
