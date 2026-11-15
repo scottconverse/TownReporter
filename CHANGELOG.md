@@ -1,8 +1,18 @@
 # Changelog
 
-Current software version: **0.6.90** (released 2026-11-13). Publication state is recorded by GitHub: [release v0.6.90](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.90).
+Current software version: **0.6.91** (released 2026-11-14). Publication state is recorded by GitHub: [release v0.6.91](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91).
 
 ## Unreleased
+
+## 0.6.91 — 2026-11-14
+
+This release covers 1 change after 0.6.90 (#393). The release guide is [docs/releases/0.6.91.md](docs/releases/0.6.91.md). The number after a change is the pull request that made it.
+
+### Lead scores
+
+- **Lead scores come in four parts (method B).** The scan and **Research and score it** ask the model for four integer parts, 1 to 5 each, with one short reason each: immediacy (why now?), impact (who gets hit, how many, how much money?), conflict (is there a fight?) and novelty (new, or routine?). The desk adds them into the lead's newsworthiness (4 to 20), so the Queue sort, the warm (10) and hot (14) colors and every priority floor work as before. The parts are kept in `leads.score_parts`; migration `0164_lead_score_parts.sql` adds one nullable column and fills nothing, so older leads keep their single score. A reply without valid parts falls back to a plain 0-20 number. On a 20-lead test (3 runs per lead), one number moved 1.6 points between runs on average; the four parts moved 0.75 points (#393).
+- **The Queue score tooltip shows the parts.** Hover a score: **Newsworthiness N/20**, then the four parts and their reasons when the lead has them (#393).
+- **Research and score it uses the 0-20 scale.** It asked the model for 0-100 and could show a hand-filed lead as **56** (tooltip 56/20). It now asks for the Queue's scale and clamps to 0-20. The dialog's wording is unchanged: **Filed as lead N with a usefulness score of S.** (#393).
 
 ## 0.6.90 — 2026-11-13
 
