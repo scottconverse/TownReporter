@@ -928,9 +928,13 @@ function PublishAllDrafts({
               <div className="drafts-main">
                 <h3 className="hl-head">{editorTitle(item.headline)}</h3>
                 {item.error ? <p role="alert">{item.error}</p> : null}
-                {(item.warnings ?? []).map((warning) => (
-                  <p key={warning.key}>{warning.sentence}</p>
-                ))}
+                {/* A refusal with one warning carries that warning's sentence
+                    as its error too; say it once. */}
+                {(item.warnings ?? [])
+                  .filter((warning) => warning.sentence.trim() !== (item.error ?? "").trim())
+                  .map((warning) => (
+                    <p key={warning.key}>{warning.sentence}</p>
+                  ))}
               </div>
               <div className="drafts-side">
                 <Link
