@@ -2249,7 +2249,9 @@ function StoryPage() {
     alone and no reason lines.
   */
   const leadScoreParts = parseStoredScoreParts(data.lead.score_parts);
-  const leadScoreTotal = data.lead.newsworthiness ?? (leadScoreParts ? scoreTotal(leadScoreParts) : 0);
+  // A lead that was never scored has no total: show nothing, never "0/20".
+  const leadScoreTotal: number | null =
+    data.lead.newsworthiness ?? (leadScoreParts ? scoreTotal(leadScoreParts) : null);
   const leadScoreReasons = leadScoreParts ? scorePartReasonLines(leadScoreParts) : [];
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -3111,15 +3113,17 @@ function StoryPage() {
           edit. A lead scored before the four parts existed shows the total
           alone, the same as the Queue's score badge.
         */}
-        <div className="astra-wb-score">
-          <p className="meta">Score {leadScoreTotal}/20</p>
-          {leadScoreParts ? <p className="meta">{scorePartsLine(leadScoreParts)}</p> : null}
-          {leadScoreReasons.map((line) => (
-            <p className="note" key={line}>
-              {line}
-            </p>
-          ))}
-        </div>
+        {leadScoreTotal === null ? null : (
+          <div className="astra-wb-score">
+            <p className="meta">Score {leadScoreTotal}/20</p>
+            {leadScoreParts ? <p className="meta">{scorePartsLine(leadScoreParts)}</p> : null}
+            {leadScoreReasons.map((line) => (
+              <p className="note" key={line}>
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
       {/*
           The fold used to print a count of failures -- "13 provider or page
