@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current software version: [0.6.90](releases/0.6.90.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
+**Current software version: [0.6.91](releases/0.6.91.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
 The screenshots in this guide were taken from the running 0.6.84 desk and public paper. If a label ever differs from a picture, the words in the text and on screen are right.
 
@@ -197,7 +197,7 @@ The **+ New story** buttons on Drafts and Queue open an older form called **Writ
 
 ### Add a lead
 
-**+ Add a lead** (Today and Queue) is for a link or a tip, not a full story. Paste a URL or describe what you heard in **Link or tip**, optionally add **Why it might matter**, and choose **Then**: **Research and score it**, **Research and draft a story now**, or **Just file it as-is** (no AI). Press **Add lead**. The dialog stays open and tells you the lead’s number and what happened, for example “Filed as lead 41 with a newsworthiness score of 12 out of 20.”
+**+ Add a lead** (Today and Queue) is for a link or a tip, not a full story. Paste a URL or describe what you heard in **Link or tip**, optionally add **Why it might matter**, and choose **Then**: **Research and score it**, **Research and draft a story now**, or **Just file it as-is** (no AI). Press **Add lead**. The dialog stays open and tells you the lead’s number and what happened, for example “Filed as lead 41 with a usefulness score of 12.” The score is out of 20, like the Queue’s score.
 
 ### Start reporting
 
@@ -345,7 +345,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 | Part | Meaning |
 |---|---|
 | Tick box | Select the row for the bulk bar |
-| Score | Newsworthiness out of 20 (warm at 10, hot at 14) |
+| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. Hover the score to see the parts and their reasons. Leads filed before 0.6.91 show only the total |
 | Chips | The section; the status (**New**, **Drafted**, **Held**, **Killed**, **Published**); **Section not chosen — pick one** when the scan guessed the section; **Imported**; **Looks already printed: <headline>**; **Came back N times** |
 | Headline | A link to the story page |
 | Evidence | One small square per source link and a count such as “3 opened · 1 attached” |

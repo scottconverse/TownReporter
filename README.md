@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.90](docs/releases/0.6.90.md)** (2026-11-13). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.90) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.6.91](docs/releases/0.6.91.md)** (2026-11-14). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,14 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.6.90
+## What is new in 0.6.91
+
+1 pull request since 0.6.90. The long list is in the [changelog](CHANGELOG.md#0691--2026-11-14) and the [release guide](docs/releases/0.6.91.md).
+
+- **Lead scores come in four parts (method B).** The scan and **Research and score it** now rate each lead 1 to 5 on immediacy, impact, conflict and novelty, each with one short reason. The desk adds them into the newsworthiness (4 to 20), so the Queue sort and colors are unchanged. Hover a score on the Queue to see the parts and reasons (#393).
+- **Research and score it uses the Queue's 0-20 scale**, so a hand-filed lead no longer shows a score like 56 (#393).
+
+## What was new in 0.6.90
 
 1 pull request since 0.6.89. The long list is in the [changelog](CHANGELOG.md#0690--2026-11-13) and the [release guide](docs/releases/0.6.90.md).
 
@@ -224,7 +231,19 @@ TownReporter is one Node 22 web application (TanStack Start on Vite) with a Post
 
 - **Front end.** The public paper and the desk are React routes in `src/routes`. The paper is self-contained: fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to an outside host.
 - **Server functions.** Every desk and Dark Desk mutation runs through `deskMiddleware`, which resolves the signed-in user and requires owner or editor membership.
-- **Database.** Migrations in `migrations/` (0001 to 0158); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
+- **Database.** Migrations in `migrations/` (0001 to 0164); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
+- **Lead scores.** The model rates each lead 1 to 5 on four parts. The desk adds them (`src/lib/news/lead-score.ts`). `leads.newsworthiness` keeps the 4-20 total and `leads.score_parts` keeps the parts and reasons:
+
+```mermaid
+flowchart LR
+  M["Scan or Research and score it<br/>(model reply)"] --> V{"Four valid parts?<br/>each an integer 1-5"}
+  V -- yes --> S["Desk adds them<br/>immediacy + impact + conflict + novelty"]
+  S --> N["leads.newsworthiness 4-20<br/>leads.score_parts: parts + reasons"]
+  V -- no --> F["Plain 0-20 number<br/>score_parts stays empty"]
+  F --> N
+  N --> Q["Queue: sort, warm 10, hot 14<br/>tooltip Newsworthiness N/20 + parts"]
+```
+
 - **Job queue.** Scans, drafts, Dark Desk rounds, meeting capture and evidence checks run as leased jobs with a heartbeat, on separate lanes so a draft does not wait behind a scan.
 - **Models.** A provider registry (`src/lib/news/provider-registry.ts`) is the one list every picker, ladder and failover reads. Codex and Claude run as restricted CLIs; DeepSeek runs inside the Claude Code CLI through a local relay that sets its thinking budget (off by default); local models and saved connections speak `/v1/chat/completions`.
 - **Evidence.** Captured records are content-hashed; transcripts are immutable revisions; the meaning index is a table of vectors with no text.
@@ -257,7 +276,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.90](docs/releases/0.6.90.md)           |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.91](docs/releases/0.6.91.md)           |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -271,7 +290,7 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.90](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.90) carries three files: `TownReporter-0.6.90-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.91](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91) carries three files: `TownReporter-0.6.91-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
 CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.87, and no fresh-machine human acceptance of it is claimed here.
 
@@ -548,7 +567,8 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-- **[0.6.90](docs/releases/0.6.90.md)** (2026-11-13), the current version. With Large desk text at 1280 px, Dark Desk keeps all of Decide in the first screen and the Queue filters wrap under the tabs.
+- **[0.6.91](docs/releases/0.6.91.md)** (2026-11-14), the current version. Lead scores come in four parts (immediacy, impact, conflict, novelty) that add up to the 4-20 newsworthiness, and the Queue tooltip shows them.
+- **[0.6.90](docs/releases/0.6.90.md)** (2026-11-13). With Large desk text at 1280 px, Dark Desk keeps all of Decide in the first screen and the Queue filters wrap under the tabs.
 - **[0.6.89](docs/releases/0.6.89.md)** (2026-11-13). TownRecord meeting exports import as unpublished leads in Sources & scan, and large desk text fits at 1280 px.
 - **[0.6.88](docs/releases/0.6.88.md)** (2026-11-12). Event feeds and a front-page events week box, the Bulletin reader design, **Community resources** with desk publish, edit and take-down, phone install with **Get the app**, Ollama care on port 11435, roundup **Open** and **Kill** on Drafts, **Opinion pieces waiting**, 16px desk text, Claude Fable 5.2 and a deploy wrapper that no longer hangs.
 - **[0.6.87](docs/releases/0.6.87.md)** (2026-10-29). Dark Desk job cards stay current, model switches and retries name the model that runs, **Send to Dark Desk** opens the new file, closed files explain the controls, and phone controls meet the 44 px target.

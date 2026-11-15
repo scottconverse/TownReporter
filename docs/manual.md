@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.90 · publication and deployment are recorded separately**
+**Version 0.6.91 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.90 release guide and evidence boundaries](releases/0.6.90.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.91 release guide and evidence boundaries](releases/0.6.91.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,10 +41,10 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.90 does.**
+**What TownReporter 0.6.91 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
-- **Files and sorts leads.** The Queue scores leads, spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
+- **Files and sorts leads.** The Queue scores leads out of 20 (four parts, 1 to 5 each: immediacy, impact, conflict and novelty, each with a reason), spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
 - **Writes drafts.** One shared model picker offers the same list of AI models on every screen that uses one, with Automatic as the default. The paper’s default writer is **DeepSeek v4.1 Flash 1017** with thinking off. Automatic tries DeepSeek v4.1 Flash 1017, then a model already loaded on the computer, then Codex Sol 6.1 (balanced), then Claude Sonnet 5.5. Gemini stays a named pick and is not part of Automatic. After each draft the story page names the model that wrote it (“Last draft: <model>, <time>”) and says why if it moved to another one. A drafting scope of **Use only supplied material** tells the writer to search nothing and open no other pages.
 - **Checks its own work.** Evidence checks compare a draft with the saved web pages and uploaded documents. Names are checked against written sources. A Style check flags weak writing. **Find evidence** searches saved evidence by exact words and by meaning, and finds past stories close in meaning. Meaning search is on the editor desk only.
 - **Never prints for you, except routine notices.** An editor reads each ordinary story and presses **Publish**. The app warns about risks but never blocks you: every warning has an “anyway” button, such as **Publish anyway in <Section>**, and the choice is recorded. Approved routine sources can print fixed-format roundups such as “Today in town” by themselves, if the owner switches that on.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.90](releases/0.6.90.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.91](releases/0.6.91.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -126,7 +126,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.90, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.91, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -279,7 +279,7 @@ The **+ New story** buttons on Drafts and Queue open an older form called **Writ
 
 ### Add a lead
 
-**+ Add a lead** (Today and Queue) is for a link or a tip, not a full story. Paste a URL or describe what you heard in **Link or tip**, optionally add **Why it might matter**, and choose **Then**: **Research and score it**, **Research and draft a story now**, or **Just file it as-is** (no AI). Press **Add lead**. The dialog stays open and tells you the lead’s number and what happened, for example “Filed as lead 41 with a newsworthiness score of 12 out of 20.”
+**+ Add a lead** (Today and Queue) is for a link or a tip, not a full story. Paste a URL or describe what you heard in **Link or tip**, optionally add **Why it might matter**, and choose **Then**: **Research and score it**, **Research and draft a story now**, or **Just file it as-is** (no AI). Press **Add lead**. The dialog stays open and tells you the lead’s number and what happened, for example “Filed as lead 41 with a usefulness score of 12.” The score is out of 20, like the Queue’s score.
 
 ### Start reporting
 
@@ -395,7 +395,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 | Part | Meaning |
 |---|---|
 | Tick box | Select the row for the bulk bar |
-| Score | Newsworthiness out of 20 (warm at 10, hot at 14) |
+| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. Hover the score to see the parts and their reasons. Leads filed before 0.6.91 show only the total |
 | Chips | The section; the status (**New**, **Drafted**, **Held**, **Killed**, **Published**); **Section not chosen — pick one** when the scan guessed the section; **Imported**; **Looks already printed: <headline>**; **Came back N times** |
 | Headline | A link to the story page |
 | Evidence | One small square per source link and a count such as “3 opened · 1 attached” |
@@ -981,10 +981,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.90 that is
-`TownReporter-0.6.90-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.91 that is
+`TownReporter-0.6.91-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.90
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.91
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
@@ -2133,6 +2133,37 @@ upstream of it is assistance; everything downstream of it is a correction, never
 a silent edit. The one path that does not pass through it is a routine
 notice roundup, drawn separately in
 [Routine editions, drawn](#routine-editions-drawn) below.
+
+## How a lead gets its score
+
+Since 0.6.91 the model does not give one number. It rates each lead 1 to 5 on
+four parts and gives one short reason for each part. The desk adds the parts
+(`src/lib/news/lead-score.ts`). The questions are:
+
+| Part | The question |
+| --- | --- |
+| Immediacy | Why now? What changed? |
+| Impact | Who gets hit? How many people? How much money? |
+| Conflict | Is there a fight? Opposing sides? |
+| Novelty | Is this new, or routine recurrence? |
+
+```mermaid
+flowchart LR
+    M["Scan, or Research and score it<br/>(model reply)"] --> V{"Four valid parts?<br/>each an integer 1-5"}
+    V -->|yes| S["Desk adds them<br/>immediacy + impact + conflict + novelty"]
+    S --> N["leads.newsworthiness 4-20<br/>leads.score_parts: parts + reasons"]
+    V -->|no| F["Plain 0-20 number<br/>score_parts stays empty"]
+    F --> N
+    N --> Q["Queue: sort, warm at 10, hot at 14<br/>tooltip: Newsworthiness N/20 + parts"]
+```
+
+The total stays in `leads.newsworthiness`, so the Queue sort, the warm and hot
+colors and the priority floors did not change. Migration
+`0164_lead_score_parts.sql` adds the nullable `leads.score_parts` column and
+fills nothing. Leads filed before 0.6.91 show only the total. Why four parts: on
+a 20-lead test (3 runs per lead), one number moved 1.6 points between runs on
+average; the four parts moved 0.75 points and kept the same band on 19 of 20
+leads, against 14 of 20.
 
 ## A job, end to end
 
