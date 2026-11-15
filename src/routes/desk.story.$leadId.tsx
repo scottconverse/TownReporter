@@ -54,6 +54,12 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draftNotSavedWords, draftWaitingWords, editorTitle, sharedModelWaitWords } from "@/lib/news/desk-copy";
+import {
+  parseStoredScoreParts,
+  scorePartReasonLines,
+  scorePartsLine,
+  scoreTotal,
+} from "@/lib/news/lead-score";
 import { showDraftRunning } from "@/lib/desk/draft-running";
 import { useDeskJobs } from "@/components/job-card-state";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
@@ -2236,6 +2242,17 @@ function StoryPage() {
   // separately-latched pieces of local state.
   const jobState = resolveDraftJobState(data.job);
   const sources = parseUrlList(data.lead.source_urls);
+  /*
+    The lead's score, in full (Scott, Nov 15 2026: "Show me the overall score,
+    and each individual score, per story"). `newsworthiness` is the sum of the
+    four parts; a lead scored the old way has no parts, so it shows the total
+    alone and no reason lines.
+  */
+  const leadScoreParts = parseStoredScoreParts(data.lead.score_parts);
+  // A lead that was never scored has no total: show nothing, never "0/20".
+  const leadScoreTotal: number | null =
+    data.lead.newsworthiness ?? (leadScoreParts ? scoreTotal(leadScoreParts) : null);
+  const leadScoreReasons = leadScoreParts ? scorePartReasonLines(leadScoreParts) : [];
   const fromDark =
     Boolean(data.lead.investigation_id) ||
     /DARK DESK/i.test(data.lead.why) ||
@@ -3089,6 +3106,24 @@ function StoryPage() {
             Kill this lead
           </ActionButton>
         ) : null}
+        {/*
+          The lead's score, whole: the total as `Score 11/20`, the four parts
+          on one line, and one reason line per part that has a reason. Plain
+          text, not a control -- there is nothing here to sort, filter or
+          edit. A lead scored before the four parts existed shows the total
+          alone, the same as the Queue's score badge.
+        */}
+        {leadScoreTotal === null ? null : (
+          <div className="astra-wb-score">
+            <p className="meta">Score {leadScoreTotal}/20</p>
+            {leadScoreParts ? <p className="meta">{scorePartsLine(leadScoreParts)}</p> : null}
+            {leadScoreReasons.map((line) => (
+              <p className="note" key={line}>
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
       {/*
           The fold used to print a count of failures -- "13 provider or page

@@ -312,6 +312,9 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
       "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       // G26-HP-1: the real home/list-page check the row now renders.
       "../lib/news/lead-source-page.ts": await sharedModuleUrl("src/lib/news/lead-source-page.ts"),
+      // The row's visible four-part score line (Nov 15 2026) comes from the
+      // real module, so the wording asserted below is the desk's own.
+      "../lib/news/lead-score.ts": await sharedModuleUrl("src/lib/news/lead-score.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
@@ -396,6 +399,24 @@ test("Today and Queue label unread source links as attached", () => {
     "Could not save the Pull result because access to this story changed. Reload the story to check.");
   assert.equal(deskCopyModule.pullFailureCopy("The desk could not confirm the saved request", "https://longmontcolorado.gov/story"),
     "The desk could not confirm that the Pull result was saved. Reload the story to check before trying again.");
+});
+
+test("a lead with four score parts prints them under its headline; one without parts prints no line", () => {
+  const parts = {
+    immediacy: 3,
+    impact: 4,
+    conflict: 1,
+    novelty: 3,
+    reasons: { immediacy: "The vote is Tuesday.", impact: "", conflict: "", novelty: "" },
+  };
+  const withParts = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ status: "new", score_parts: parts }) }),
+  );
+  assert.match(withParts, /Immediacy 3 · Impact 4 · Conflict 1 · Novelty 3/);
+  const withoutParts = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ status: "new", score_parts: null }) }),
+  );
+  assert.doesNotMatch(withoutParts, /Immediacy \d/);
 });
 
 test("a lead with resurfaced_count of 0 shows no came-back badge", () => {

@@ -1,6 +1,7 @@
 import { writeStoryFromInput } from "@/components/scoped-actions";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
+import { parseStoredScoreParts, scorePartsLine } from "@/lib/news/lead-score";
 import { TodayInProgress } from "@/components/today-in-progress";
 import { OllamaWarning } from "@/components/ollama-warning";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
@@ -2169,6 +2170,9 @@ function DeskHome() {
                         dropped rather than invented, exactly as on the Queue.
                       */
                       const sources = parseUrlList(l.source_urls).length;
+                      // The four parts as visible text (Scott, Nov 15 2026); a
+                      // lead scored the old way has none and keeps the total.
+                      const scoreParts = parseStoredScoreParts(l.score_parts);
                       /*
                         FB6, item 1: the pending state is THIS lead's, not the
                         screen's. Eight rows share one mutation, and a pending
@@ -2241,6 +2245,7 @@ function DeskHome() {
                                 {l.headline}
                               </Link>
                             </h3>
+                            {scoreParts ? <p className="meta today-lead-score-parts">{scorePartsLine(scoreParts)}</p> : null}
                             <p className="today-lead-why">{l.why}</p>
                             <div className="today-lead-row2">
                               {/*

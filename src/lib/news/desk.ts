@@ -106,9 +106,11 @@ import {
 } from "./source-sitemap.ts";
 import {
   DESK_DRAFT_FILTERS,
+  cleanPublishAllInput,
   deskDraftFilterCounts,
   deskDraftMatchesFilter,
   deskDraftState,
+  type PublishAllItem,
 } from "./desk-drafts.ts";
 import {
   PUBLISHED_FILTERS,
@@ -7858,6 +7860,114 @@ export const publishLead = createServerFn({ method: "POST" })
           data.draftFields,
         ),
   );
+
+/**
+ * Publish several finished stories, one at a time, in the order given
+ * (feat-publish-all, Nov 15 2026).
+ *
+ * The owner's ask: after a batch of drafts, "I should be able to push one
+ * button for 'publish all drafts'" instead of going back and forth between
+ * story screens. This is the server half of that button.
+ *
+ * WHAT IT IS NOT. It is not a second publish path. Each story goes through the
+ * very same `performPublish` the story page's own Publish button calls, with
+ * the same defaults, so every gate -- the section confirmation, the named
+ * outlet credit, the citation lock, the evidence check -- decides exactly what
+ * it decides there. The caller's confirm list drew each story with its
+ * section, and `topic` is that section: pressing "Publish N stories" IS the
+ * section confirmation for each of them (0.6.67's rule), the same way the
+ * story page's button carries the section it printed on its face.
+ *
+ * IT NEVER ACKNOWLEDGES A WARNING. `acknowledgedWarningKeys` is empty here, so
+ * any warning refuses that one story and comes back in the result; the Drafts
+ * screen then offers "Publish anyway" for that story alone, with the keys the
+ * server named. That is Scott's rule 22 -- every gate warns and has an anyway
+ * button -- and it is also what keeps a batch from becoming blanket consent.
+ *
+ * ONE FAILURE DOES NOT STOP THE REST. A refusal, or an error thrown while
+ * printing one story, is recorded against that story and the loop moves on:
+ * the editor pressed one button for a batch, and a single unprintable draft
+ * must not strand the other twenty-four. Each print is its own transaction
+ * inside `performPublish`, so a refusal leaves nothing half-printed.
+ */
+export const performPublishAllDrafts = createServerOnlyFn(async function performPublishAllDrafts(
+  context: { userId: string; newsroomId?: number },
+  items: readonly PublishAllItem[],
+): Promise<PublishAllResult[]> {
+  const sql = await getSql();
+  /*
+    The headlines are read once, up front, for the result lists: the editor
+    reads "Published (3)" as three headlines, not three ids, and
+    `performPublish` only answers with the slug. A story that is not this
+    newsroom's has no row here and comes back with an empty headline; it is
+    refused by `performPublish` itself ("Lead not found") rather than by a
+    check invented here.
+  */
+  const ids = items.map((item) => item.leadId);
+  const headlineRows = ids.length
+    ? await sql.query<{ id: number; headline: string | null }>(
+        "select id, headline from leads where id = any($1::int[]) and newsroom_id = $2",
+        [ids, owned(context)],
+      )
+    : [];
+  const headlines = new Map(headlineRows.map((row) => [row.id, row.headline ?? ""]));
+  const results: PublishAllResult[] = [];
+  for (const item of items) {
+    const headline = headlines.get(item.leadId) ?? "";
+    try {
+      const outcome = await performPublish(
+        context,
+        item.leadId,
+        item.topic,
+        undefined,
+        {},
+        [],
+        undefined,
+      );
+      results.push(
+        outcome.ok
+          ? { leadId: item.leadId, headline, ok: true, slug: outcome.slug }
+          : {
+              leadId: item.leadId,
+              headline,
+              ok: false,
+              error: outcome.error,
+              ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
+              ...(outcome.hard ? { hard: outcome.hard } : {}),
+            },
+      );
+    } catch (error) {
+      results.push({
+        leadId: item.leadId,
+        headline,
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not publish.",
+      });
+    }
+  }
+  return results;
+});
+
+export const publishAllDrafts = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => cleanPublishAllInput(raw))
+  .handler(async ({ context, data }) =>
+    data.ok
+      ? { results: await performPublishAllDrafts(context, data.items) }
+      : { results: [] as PublishAllResult[], error: data.error },
+  );
+
+/** One story's answer from `publishAllDrafts`, in the order it was printed. */
+export type PublishAllResult =
+  | { leadId: number; headline: string; ok: true; slug: string }
+  | {
+      leadId: number;
+      headline: string;
+      ok: false;
+      error: string;
+      warnings?: { key: string; sentence: string }[];
+      hard?: string;
+    };
 
 /**
  * Change the headline of a story that has already printed.
