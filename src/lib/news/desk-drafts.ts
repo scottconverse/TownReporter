@@ -257,6 +257,101 @@ export function deskDraftAction(state: DeskDraftState): string {
   }
 }
 
+/*
+  ── PUBLISHING EVERY DRAFT AT ONCE (feat-publish-all) ────────────────────────
+
+  The owner's ask (Nov 15 2026): "I should be able to push one button for
+  'publish all drafts'" -- a batch of finished stories used to mean opening
+  each story page in turn. The two rules that decide that button live here, in
+  the pure module, rather than in the route or beside the server function, so
+  both are tested without a database:
+
+    1. WHICH ROWS QUALIFY. Only a draft whose state is "Your draft" or "Ready
+       to check" is part of the batch. A running draft is not finished, a failed
+       one has nothing to print, an empty one has no prose, and the three
+       "Needs you" states (names, evidence, imported) are exactly the rows with
+       an outstanding decision -- publishing them would be the desk deciding on
+       the editor's behalf. `performPublish` still has the final say per story;
+       this only decides what the button offers.
+    2. WHAT A REQUEST MAY CARRY. Positive integers, at most 25, no duplicates.
+       A duplicate would print one story twice in the same batch, so it is
+       dropped (the first copy is kept), not refused; anything that is not a
+       positive integer, or an empty list, refuses the whole request, because a
+       request built wrong is a client bug and not a list of stories to guess.
+*/
+
+/** The most stories one publish-all request may carry (the client batches). */
+export const PUBLISH_ALL_MAX = 25;
+
+export type PublishAllItem = { leadId: number; topic?: string };
+
+export type PublishAllInput =
+  | { ok: true; items: PublishAllItem[] }
+  | { ok: false; error: string };
+
+function positiveInt(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2_147_483_647
+    ? value
+    : null;
+}
+
+/** The input a publish-all request may carry, cleaned. See the note above. */
+export function cleanPublishAllInput(raw: unknown): PublishAllInput {
+  const list = (typeof raw === "object" && raw !== null && !Array.isArray(raw)
+    ? (raw as { items?: unknown }).items
+    : undefined);
+  if (!Array.isArray(list) || list.length === 0) {
+    return { ok: false, error: "Choose at least one story to publish." };
+  }
+  if (list.length > PUBLISH_ALL_MAX) {
+    return {
+      ok: false,
+      error: `Publish at most ${PUBLISH_ALL_MAX} stories at a time.`,
+    };
+  }
+  const seen = new Set<number>();
+  const items: PublishAllItem[] = [];
+  for (const entry of list) {
+    const o = (typeof entry === "object" && entry !== null ? entry : {}) as {
+      leadId?: unknown;
+      topic?: unknown;
+    };
+    const leadId = positiveInt(o.leadId);
+    if (leadId === null) {
+      return { ok: false, error: "There is no such story." };
+    }
+    // A duplicate prints one story twice; the first copy is the one kept.
+    if (seen.has(leadId)) continue;
+    seen.add(leadId);
+    // 40 is `LIMITS.topic` in request-input.ts, the same ceiling the single
+    // publish request uses for the section key.
+    const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, 40) : "";
+    items.push({ leadId, ...(topic ? { topic } : {}) });
+  }
+  return { ok: true, items };
+}
+
+/** Is this row part of "Publish all drafts"? */
+export function publishAllQualifies(state: Pick<DeskDraftState, "key">): boolean {
+  return state.key === "yours" || state.key === "ready";
+}
+
+/**
+ * The stories the button would print, in the order the list holds them.
+ *
+ * `stateOf` is passed in rather than computed here for the same reason the
+ * elapsed clock is: the caller already builds each row's state to draw it, and
+ * a second reading of the same facts could disagree with the row on screen.
+ */
+export function publishAllCandidates<R extends { lead_id: number; headline: string; topic: string | null }>(
+  rows: readonly R[],
+  stateOf: (row: R) => Pick<DeskDraftState, "key">,
+): { leadId: number; headline: string; topic: string | null }[] {
+  return rows
+    .filter((row) => publishAllQualifies(stateOf(row)))
+    .map((row) => ({ leadId: row.lead_id, headline: row.headline, topic: row.topic }));
+}
+
 /** The edition and its step counts are derived before any display window. */
 export function tonightDrafts<T>(rows: readonly T[], states: readonly DeskDraftState[]) {
   const edition = rows

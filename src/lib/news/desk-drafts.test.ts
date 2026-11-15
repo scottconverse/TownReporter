@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PUBLISH_ALL_MAX,
+  cleanPublishAllInput,
   deskDraftAction,
   deskDraftElapsed,
   deskDraftFilterCounts,
   deskDraftMatchesFilter,
   deskDraftState,
+  publishAllCandidates,
+  publishAllQualifies,
   type DeskDraftFacts,
 } from "./desk-drafts.ts";
 
@@ -242,4 +246,81 @@ test("FC24: unreviewed claims and Not checked yet both wait on the editor", () =
   assert.equal(accepted.needsYou, false);
   const notChecked = deskDraftState({ ...quiet, has_body: true, story_readiness: { ...memo, state: "not-checked", reason: "Not checked." } } as never);
   assert.equal(notChecked.needsYou, true);
+});
+
+/*
+  feat-publish-all (Nov 15 2026): the two rules behind the Drafts screen's
+  "Publish all drafts" button. Both are decisions, not lookups -- a state key
+  wrongly included prints a story the editor had not finished, and a request
+  cleaned wrongly prints the same story twice -- so both are pinned here,
+  behaviour only, with no database and no source file read.
+*/
+test("publish all: only an editor's own or a ready draft is in the batch", () => {
+  const included = ["yours", "ready"] as const;
+  const excluded = [
+    "running",
+    "failed",
+    "names",
+    "evidence",
+    "imported",
+    "empty",
+    "not-ready",
+  ] as const;
+  for (const key of included) assert.equal(publishAllQualifies({ key }), true, key);
+  for (const key of excluded) assert.equal(publishAllQualifies({ key }), false, key);
+});
+
+test("publish all: the candidate list keeps order and drops every other row", () => {
+  const rows = [
+    { lead_id: 1, headline: "Council vote", topic: "council" },
+    { lead_id: 2, headline: "Still writing", topic: "schools" },
+    { lead_id: 3, headline: "Empty row", topic: null },
+    { lead_id: 4, headline: "Your draft", topic: "police" },
+    { lead_id: 5, headline: "Name to review", topic: "council" },
+  ];
+  const keys: Record<number, string> = {
+    1: "ready",
+    2: "running",
+    3: "empty",
+    4: "yours",
+    5: "names",
+  };
+  const candidates = publishAllCandidates(rows, (row) => ({ key: keys[row.lead_id] as never }));
+  assert.deepEqual(
+    candidates.map((c) => c.leadId),
+    [1, 4],
+  );
+  assert.deepEqual(candidates[1], { leadId: 4, headline: "Your draft", topic: "police" });
+});
+
+test("publish all: a request carries positive integers, at most 25, no duplicates", () => {
+  assert.deepEqual(cleanPublishAllInput({ items: [{ leadId: 3 }, { leadId: 3 }, { leadId: 9, topic: " council " }] }), {
+    ok: true,
+    items: [{ leadId: 3 }, { leadId: 9, topic: "council" }],
+  });
+
+  // Exactly the ceiling is accepted; one more refuses.
+  const atLimit = Array.from({ length: PUBLISH_ALL_MAX }, (_, i) => ({ leadId: i + 1 }));
+  const accepted = cleanPublishAllInput({ items: atLimit });
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.items.length, PUBLISH_ALL_MAX);
+  assert.equal(
+    cleanPublishAllInput({ items: [...atLimit, { leadId: PUBLISH_ALL_MAX + 1 }] }).ok,
+    false,
+  );
+
+  // Everything that is not a positive integer refuses the whole request.
+  for (const bad of [
+    null,
+    {},
+    { items: [] },
+    { items: "3" },
+    { items: [{ leadId: 0 }] },
+    { items: [{ leadId: -4 }] },
+    { items: [{ leadId: 2.5 }] },
+    { items: [{ leadId: "7" }] },
+    { items: [{ leadId: 1 }, { leadId: null }] },
+  ]) {
+    assert.equal(cleanPublishAllInput(bad).ok, false, JSON.stringify(bad));
+  }
 });

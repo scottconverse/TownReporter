@@ -11,7 +11,8 @@ import { draftPillText } from "@/lib/desk/draft-pills";
 import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
-import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
+import { Dialog } from "@/components/dialog";
+import { listDraftsDesk, listDraftsDeskPage, publishAllDrafts, publishLead } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import { opinionDraftsWaiting } from "@/lib/news/opinion-drafts-waiting";
 import {
@@ -25,9 +26,11 @@ import {
 import { StoryBody } from "@/components/story-body";
 import { editorTitle } from "@/lib/news/desk-copy";
 import {
+  PUBLISH_ALL_MAX,
   deskDraftAction,
   deskDraftElapsed,
   deskDraftState,
+  publishAllCandidates,
   type DeskDraftFilter,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
@@ -206,6 +209,7 @@ function DraftsPage() {
     >
       <WaitingRoundups />
       <OpinionDraftsWaiting />
+      <PublishAllDrafts sectionName={sectionName} />
       <div className="seg-strip" role="group" aria-label="Filter drafts">
         {FILTERS.map((f) => (
           <button
@@ -649,6 +653,326 @@ function WaitingRoundups() {
         .map((k) => (
           <div className="drafts-row" key={`killed-${k.id}`}><div className="drafts-main"><p className="published-line" role="status">Killed: {k.headline}</p></div></div>
         ))}
+    </section>
+  );
+}
+
+/*
+  ── "PUBLISH ALL DRAFTS" (feat-publish-all, Nov 15 2026) ─────────────────────
+
+  The owner's ask: "can you give the ability to publish all stories that I've
+  done drafts of at once? … I should be able to push one button for 'publish
+  all drafts'." Until now each finished story was published from its own story
+  page, one screen at a time.
+
+  WHAT IS IN THE BATCH. The stories whose row's own state is "Your draft" or
+  "Ready to check" -- `publishAllCandidates`, from the WHOLE list
+  (`listDraftsDesk`), not only the 25 rows the window is showing. A running
+  draft is not finished, a failed or empty one has nothing to print, and the
+  "Needs you" rows (a name to review, evidence to check) are exactly the ones
+  with a decision still outstanding, so they are not offered here. The button
+  hides itself when nothing qualifies.
+
+  THE CONFIRM STEP IS THE SECTION CONFIRMATION. The dialog lists every story
+  with its section, and pressing "Publish N stories" sends each story's shown
+  section as its `topic` -- the same thing the story page's own Publish button
+  does by carrying the section it printed on its face.
+
+  A REFUSAL IS ONE STORY'S, NOT THE BATCH'S. `publishAllDrafts` never
+  acknowledges a warning, so any gate that fires refuses that story and names
+  what it said; the row then offers "Publish anyway" for that story alone,
+  carrying exactly the keys the server returned (Scott's rule 22: every gate
+  warns and has an anyway button). A `hard` refusal is a wall and gets no
+  button.
+*/
+type PublishAllOutcome = {
+  leadId: number;
+  headline: string;
+  ok: boolean;
+  slug?: string;
+  error?: string;
+  warnings?: { key: string; sentence: string }[];
+  hard?: string;
+};
+
+function PublishAllDrafts({
+  sectionName,
+}: {
+  sectionName: (topic: string | null) => string;
+}) {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [batchError, setBatchError] = useState("");
+  const [published, setPublished] = useState<
+    { leadId: number; headline: string; slug: string }[]
+  >([]);
+  const [refused, setRefused] = useState<PublishAllOutcome[]>([]);
+  const [anywayId, setAnywayId] = useState<number | null>(null);
+
+  /*
+    The whole list, not the window: the button counts the stories the desk can
+    print, and a page of 25 would make it describe the page. The key starts
+    with `["drafts-desk"]` so every existing invalidation of that prefix (the
+    story page after a publish, Today after a redraft) reaches this read too.
+  */
+  const all = useQuery({
+    queryKey: ["drafts-desk", "publish-all"],
+    queryFn: () => listDraftsDesk(),
+    refetchInterval: 5000,
+  });
+
+  const candidates = publishAllCandidates(all.data ?? [], (row) =>
+    deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }),
+  );
+  const sectionFor = new Map(candidates.map((c) => [c.leadId, c.topic]));
+
+  const refresh = (queryKey: readonly unknown[]) => {
+    void qc.invalidateQueries({ queryKey }).catch(() => {});
+  };
+  // The same list the story page's own publish refreshes, so the nav count,
+  // the Drafts list and the published screen agree after the batch.
+  const refreshAfterPublish = (leadIds: number[]) => {
+    refresh(["drafts-desk"]);
+    refresh(["leads"]);
+    refresh(["paper"]);
+    refresh(["published-desk"]);
+    for (const leadId of leadIds) refresh(["lead", leadId]);
+  };
+
+  async function run() {
+    setConfirming(false);
+    setRunning(true);
+    setBatchError("");
+    setPublished([]);
+    setRefused([]);
+    setProgress({ done: 0, total: candidates.length });
+    const publishedNow: { leadId: number; headline: string; slug: string }[] = [];
+    const refusedNow: PublishAllOutcome[] = [];
+    let done = 0;
+    try {
+      /*
+        Batches of `PUBLISH_ALL_MAX`, one after the other, so a desk with more
+        than 25 finished drafts still gets them all. Each batch's answers are
+        drawn as they land: a long list is never a silent spinner.
+      */
+      for (let start = 0; start < candidates.length; start += PUBLISH_ALL_MAX) {
+        const batch = candidates.slice(start, start + PUBLISH_ALL_MAX);
+        const answer = await publishAllDrafts({
+          data: {
+            items: batch.map((c) => ({
+              leadId: c.leadId,
+              ...(c.topic ? { topic: c.topic } : {}),
+            })),
+          },
+        });
+        if ("error" in answer && answer.error) setBatchError(answer.error);
+        for (const result of answer.results) {
+          done += 1;
+          setProgress({ done, total: candidates.length });
+          if (result.ok) {
+            publishedNow.push({
+              leadId: result.leadId,
+              headline: result.headline,
+              slug: result.slug,
+            });
+          } else {
+            refusedNow.push(result);
+          }
+        }
+        setPublished([...publishedNow]);
+        setRefused([...refusedNow]);
+      }
+      refreshAfterPublish([
+        ...publishedNow.map((p) => p.leadId),
+        ...refusedNow.map((r) => r.leadId),
+      ]);
+      void all.refetch();
+    } catch (error) {
+      setBatchError(
+        error instanceof Error ? error.message : "Could not publish the drafts.",
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  /*
+    "Publish anyway" for one refused story: the existing single-story publish,
+    with exactly the warning keys the server returned for THIS story and the
+    section it was confirmed in. Nothing else is acknowledged.
+  */
+  async function publishAnyway(item: PublishAllOutcome) {
+    setAnywayId(item.leadId);
+    try {
+      const topic = sectionFor.get(item.leadId) ?? null;
+      const answer = await publishLead({
+        data: {
+          leadId: item.leadId,
+          ...(topic ? { topic } : {}),
+          acknowledgedWarningKeys: (item.warnings ?? []).map((w) => w.key),
+        },
+      });
+      if (answer.ok) {
+        setPublished((prev) => [
+          ...prev.filter((p) => p.leadId !== item.leadId),
+          { leadId: item.leadId, headline: item.headline, slug: answer.slug },
+        ]);
+        setRefused((prev) => prev.filter((r) => r.leadId !== item.leadId));
+        refreshAfterPublish([item.leadId]);
+        void all.refetch();
+      } else {
+        setRefused((prev) =>
+          prev.map((r) =>
+            r.leadId === item.leadId
+              ? {
+                  leadId: r.leadId,
+                  headline: r.headline,
+                  ok: false,
+                  error: answer.error,
+                  ...("warnings" in answer && answer.warnings
+                    ? { warnings: answer.warnings }
+                    : {}),
+                  ...("hard" in answer && answer.hard ? { hard: answer.hard } : {}),
+                }
+              : r,
+          ),
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not publish.";
+      setRefused((prev) =>
+        prev.map((r) => (r.leadId === item.leadId ? { ...r, error: message } : r)),
+      );
+    } finally {
+      setAnywayId(null);
+    }
+  }
+
+  if (
+    candidates.length === 0 &&
+    published.length === 0 &&
+    refused.length === 0 &&
+    !running
+  ) {
+    return null;
+  }
+
+  return (
+    <section aria-label="Publish all drafts">
+      {candidates.length > 0 || running ? (
+        <div className="drafts-row">
+          <div className="drafts-main">
+            <h2 className="hl-head">Publish all drafts</h2>
+            <p className="wire-sum">
+              {candidates.length === 1
+                ? "One finished story is ready to print."
+                : `${candidates.length} finished stories are ready to print.`}
+            </p>
+            {running ? (
+              /* The live region: the batch's own progress, in words. */
+              <p className="published-line" role="status">
+                Publishing {progress.done} of {progress.total}…
+              </p>
+            ) : null}
+            {batchError ? <p role="alert">{batchError}</p> : null}
+          </div>
+          {candidates.length > 0 ? (
+            <div className="drafts-side">
+              <button
+                type="button"
+                className="btn solid"
+                disabled={running}
+                onClick={() => setConfirming(true)}
+              >
+                Publish all drafts ({candidates.length})
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {published.length > 0 ? (
+        <div>
+          <h2 className="hl-head">Published ({published.length})</h2>
+          {published.map((item) => (
+            <div className="drafts-row" key={`publish-all-ok-${item.leadId}`}>
+              <div className="drafts-main">
+                <h3 className="hl-head">{editorTitle(item.headline)}</h3>
+                <p className="published-line" role="status">
+                  Published.{" "}
+                  <Link
+                    to="/articles/$slug"
+                    params={{ slug: item.slug }}
+                    className="inline-link"
+                  >
+                    Open the story
+                  </Link>
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {refused.length > 0 ? (
+        <div>
+          <h2 className="hl-head">Not published ({refused.length})</h2>
+          {refused.map((item) => (
+            <div className="drafts-row" key={`publish-all-no-${item.leadId}`}>
+              <div className="drafts-main">
+                <h3 className="hl-head">{editorTitle(item.headline)}</h3>
+                {item.error ? <p role="alert">{item.error}</p> : null}
+                {(item.warnings ?? []).map((warning) => (
+                  <p key={warning.key}>{warning.sentence}</p>
+                ))}
+              </div>
+              <div className="drafts-side">
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(item.leadId) }}
+                  className="btn"
+                  aria-label={`Open: ${item.headline}`}
+                >
+                  Open
+                </Link>
+                {/* Rule 22: a warning has an "anyway" press. A hard refusal is
+                    a wall, so it gets none. */}
+                {item.warnings && item.warnings.length > 0 && !item.hard ? (
+                  <button
+                    type="button"
+                    className="btn solid"
+                    disabled={anywayId === item.leadId}
+                    aria-label={`Publish anyway: ${item.headline}`}
+                    onClick={() => void publishAnyway(item)}
+                  >
+                    {anywayId === item.leadId ? "Publishing…" : "Publish anyway"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <Dialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title="Publish these stories?"
+        subtitle="Each story prints in the section shown beside it."
+        primaryLabel={`Publish ${candidates.length} ${candidates.length === 1 ? "story" : "stories"}`}
+        onPrimary={() => void run()}
+        cancelLabel="Cancel"
+      >
+        <ul>
+          {candidates.map((c) => (
+            <li key={c.leadId}>
+              {editorTitle(c.headline)} — {sectionName(c.topic)}
+            </li>
+          ))}
+        </ul>
+      </Dialog>
     </section>
   );
 }
