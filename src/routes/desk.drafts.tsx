@@ -723,7 +723,11 @@ function PublishAllDrafts({
     refetchInterval: 5000,
   });
 
-  const candidates = publishAllCandidates(all.data ?? [], (row) =>
+  // Only a real list counts. The key shares the `["drafts-desk"]` prefix, so a
+  // cache or fixture holding the paged shape ({ rows, total }) must not crash
+  // the screen; it simply offers nothing until the whole list arrives.
+  const allRows = Array.isArray(all.data) ? all.data : [];
+  const candidates = publishAllCandidates(allRows, (row) =>
     deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }),
   );
   const sectionFor = new Map(candidates.map((c) => [c.leadId, c.topic]));
