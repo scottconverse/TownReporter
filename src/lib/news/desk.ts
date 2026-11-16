@@ -7878,11 +7878,15 @@ export const publishLead = createServerFn({ method: "POST" })
  * section confirmation for each of them (0.6.67's rule), the same way the
  * story page's button carries the section it printed on its face.
  *
- * IT NEVER ACKNOWLEDGES A WARNING. `acknowledgedWarningKeys` is empty here, so
- * any warning refuses that one story and comes back in the result; the Drafts
- * screen then offers "Publish anyway" for that story alone, with the keys the
- * server named. That is Scott's rule 22 -- every gate warns and has an anyway
- * button -- and it is also what keeps a batch from becoming blanket consent.
+ * IT ACKNOWLEDGES ONLY WHAT THE CONFIRM DIALOG SHOWED. Each item may carry
+ * `acknowledgedWarningKeys` -- exactly the keys the Drafts screen's confirm
+ * dialog put the editor on notice for (Nov 16 2026: the owner wanted his
+ * "! Not checked yet" drafts published in one press, and he had just seen that
+ * warning in the dialog). Those keys are handed to `performPublish`, which only
+ * lets through a key naming a warning it recomputed for that exact draft; any
+ * warning the dialog did NOT draw still refuses that one story and comes back
+ * in the result, and the screen offers "Publish anyway" for it alone (Scott's
+ * rule 22). So a batch is never blanket consent it did not show.
  *
  * ONE FAILURE DOES NOT STOP THE REST. A refusal, or an error thrown while
  * printing one story, is recorded against that story and the loop moves on:
@@ -7921,7 +7925,7 @@ export const performPublishAllDrafts = createServerOnlyFn(async function perform
         item.topic,
         undefined,
         {},
-        [],
+        item.acknowledgedWarningKeys ?? [],
         undefined,
       );
       results.push(
