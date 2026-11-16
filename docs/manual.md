@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.91 · publication and deployment are recorded separately**
+**Version 0.6.92 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.91 release guide and evidence boundaries](releases/0.6.91.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.92 release guide and evidence boundaries](releases/0.6.92.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.6.91 does.**
+**What TownReporter 0.6.92 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads out of 20 (four parts, 1 to 5 each: immediacy, impact, conflict and novelty, each with a reason), spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.6.91](releases/0.6.91.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.6.92](releases/0.6.92.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -126,7 +126,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.91, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.92, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -395,7 +395,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 | Part | Meaning |
 |---|---|
 | Tick box | Select the row for the bulk bar |
-| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. Hover the score to see the parts and their reasons. Leads filed before 0.6.91 show only the total |
+| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. The parts also show as a line under the headline, for example **Immediacy 4 · Impact 3 · Conflict 1 · Novelty 2**; hover the score for the reasons. Leads filed before 0.6.91 show only the total |
 | Chips | The section; the status (**New**, **Drafted**, **Held**, **Killed**, **Published**); **Section not chosen — pick one** when the scan guessed the section; **Imported**; **Looks already printed: <headline>**; **Came back N times** |
 | Headline | A link to the story page |
 | Evidence | One small square per source link and a count such as “3 opened · 1 attached” |
@@ -452,6 +452,7 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 - **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
 - **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
+- **Publish all drafts (N)** sits at the top of the list when at least one draft says **Your draft** or **Ready to check**. It counts the whole list, not only the rows on screen. Running, failed and Needs you drafts are left out. Press it, check **Publish these stories?** (each story with its section), then press **Publish N stories**. Each story goes through the same checks as Publish on its story page. The result lists **Published (N)** with a link to each story and **Not published (N)** with the reason. A story refused by a warning has its own **Publish anyway**; a hard refusal has none.
 - **Filter pills:** **All**, **Running**, **Needs you**, **Yours** and **Failed**, each with a count that stays blank until it has loaded. **Needs you** means the checks are waiting on you. **Yours** means you wrote or changed the headline.
 - **A row** shows a chip (for a finished draft, the readiness chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**; for a running one, **Queued · 0:12** or **Writing · 2:18** with a live clock; for a first draft that failed, **Draft failed**), a line such as “Council · AI”, “Council · Written by you” or “Council · Reprint”, the headline, and the model’s name or the time it was saved. A running row carries the full job card with **Cancel**.
 - **The button** names the next step: **Watch** (running), **Retry** (failed), **Check** (evidence to check), **Start story** (no draft yet) or **Review** (ready). Every button opens the story page.
@@ -505,6 +506,7 @@ A follow-up is a source of leads to check, not a proven fact. Read the finding a
 ### How the page is laid out
 
 - **Top:** a **← Today** link, “Story from lead · <section>”, a readiness chip, and **Kill this lead** (hidden once a story is on the paper).
+- **Score:** for a scored lead, **Score N/20**, the four parts (for example **Immediacy 4 · Impact 3 · Conflict 1 · Novelty 2**) and one reason per part. A lead that was never scored shows no score.
 - **Left:** three tabs. **Checks** holds the “Before you can publish” list, the evidence check and **Names and spellings**. **Sources** holds **Find evidence**, **Source documents** and **Sources on the lead**. **Reporting** holds **Redraft settings**, the lead, **Reporting notes** and the **Reporting package**. Notes and sources never print.
 - **Right:** the writing surface: **Headline · yours**, **Summary** (the line under the headline) and **Story**. A closed **Story details** fold holds **Story direction for AI**, **Topic** (the section), **Geography**, the outlet check and **Pulled notes**.
 - **Action row:** **Save edits**, **Check draft against evidence**, **Draft with AI** (or **Redraft…** once there is a draft), **Stop** while a draft runs, and **More ▾**.
@@ -981,10 +983,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.6.91 that is
-`TownReporter-0.6.91-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.6.92 that is
+`TownReporter-0.6.92-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.6.91
+artifact; use a release's Setup.exe only if that release lists one. The 0.6.92
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need

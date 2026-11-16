@@ -6,7 +6,7 @@
     <title>TownReporter — a civic newsroom you run yourself</title>
     <meta
       name="description"
-      content="TownReporter is an open-source civic newsroom you run yourself: a public paper in front, a signed-in editor desk behind it. It reads meetings, packets and public records, and a person presses Publish. MIT licensed. Version 0.6.91."
+      content="TownReporter is an open-source civic newsroom you run yourself: a public paper in front, a signed-in editor desk behind it. It reads meetings, packets and public records, and a person presses Publish. MIT licensed. Version 0.6.92."
     />
     <meta name="color-scheme" content="light dark" />
     <meta property="og:title" content="TownReporter — a civic newsroom you run yourself" />
@@ -848,8 +848,8 @@
             </p>
             <div class="cta-row">
               <a class="btn btn-accent" href="https://townreporter.org">Read the live paper</a>
-              <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91"
-                >Download 0.6.91 for Windows</a
+              <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92"
+                >Download 0.6.92 for Windows</a
               >
               <a
                 class="btn btn-line"
@@ -859,8 +859,8 @@
             </div>
             <p class="tagline">The public record is only the beginning.</p>
             <p class="version-line">
-              Repository release: <b>0.6.91</b>, released November 14, 2026.
-              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.91.md">Release notes</a>
+              Repository release: <b>0.6.92</b>, released November 15, 2026.
+              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.92.md">Release notes</a>
               ·
               <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md">Changelog</a>
               ·
@@ -1042,7 +1042,7 @@
                 shortcuts for each.
               </p>
               <ul class="list">
-                <li>Each lead gets a score out of 20 from four parts: immediacy, impact, conflict and novelty. Hover it to read the reasons.</li>
+                <li>Each lead gets a score out of 20 from four parts: immediacy, impact, conflict and novelty. The parts show under each headline; the story page gives the reasons.</li>
                 <li>Scan scopes: General, one reporting beat, or a custom set.</li>
                 <li>Pages that refuse automated reads get one guarded browser try, then their RSS feed.</li>
                 <li>Subscribed newsletters enter the archive through a mailbox you set up.</li>
@@ -1070,7 +1070,7 @@
                 Every lead arrives with the page or transcript that produced it. Open one, give it a
                 story direction, choose a model, and draft. <b>Draft selected</b> runs up to five
                 leads on one named model. The Drafts list shows each draft’s state and readiness, and
-                the model behind it.
+                the model behind it. <b>Publish all drafts</b> prints every finished draft in one step.
               </p>
               <p>
                 <a class="more" href="https://github.com/scottconverse/TownReporter/blob/main/docs/editor.md">Editor’s guide</a>
@@ -1299,10 +1299,10 @@
       <section id="new" class="alt new">
         <div class="wrap">
           <div class="sec-head">
-            <p class="eyebrow">Version 0.6.91 · November 14, 2026</p>
+            <p class="eyebrow">Version 0.6.92 · November 15, 2026</p>
             <h2>What is new</h2>
             <p>
-              New in 0.6.91: each lead's score now comes in four parts, 1 to 5 each, for immediacy, impact, conflict and novelty, with one reason per part. They add up to the score out of 20 on the Queue; hover a score to see them.
+              New in 0.6.92: <b>Publish all drafts</b> prints every finished draft from one button on Drafts, after one confirm that lists each story's section. The four score parts (immediacy, impact, conflict, novelty, 1 to 5 each) now show on Today, the Queue and the story page, with one reason per part.
               The cards below describe the current release's main capabilities; the
               <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md">changelog</a> has every change.
             </p>
@@ -1432,8 +1432,8 @@
               <ol class="num">
                 <li>
                   Open the
-                  <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91">0.6.91 release</a>
-                  and download <code>TownReporter-0.6.91-windows-x64.zip</code>. Do not use the
+                  <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92">0.6.92 release</a>
+                  and download <code>TownReporter-0.6.92-windows-x64.zip</code>. Do not use the
                   “Source code” archive.
                 </li>
                 <li>Extract it completely into a folder you will keep.</li>
@@ -1518,7 +1518,7 @@ npm run dev
             <div class="grid g3">
               <a class="doc" href="https://github.com/scottconverse/TownReporter"><b>GitHub</b><span>Source, issues and releases.</span></a>
               <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md"><b>Changelog</b><span>Every change, release by release.</span></a>
-              <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.91.md"><b>Release notes 0.6.91</b><span>What changed, upgrade notes, limits.</span></a>
+              <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.92.md"><b>Release notes 0.6.92</b><span>What changed, upgrade notes, limits.</span></a>
               <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/CONTRIBUTING.md"><b>Contributing</b><span>Set up, test and propose a change.</span></a>
               <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/SECURITY.md"><b>Security</b><span>How to report a vulnerability privately.</span></a>
               <a class="doc" href="https://github.com/scottconverse/TownReporter/blob/main/LICENSE"><b>MIT license</b><span>Copyright (c) 2026 Scott Converse.</span></a>
@@ -1533,7 +1533,7 @@ npm run dev
         <div class="foot">
           <a href="https://townreporter.org">The live paper</a>
           <a href="https://github.com/scottconverse/TownReporter">GitHub</a>
-          <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91">Download 0.6.91</a>
+          <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92">Download 0.6.92</a>
           <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/manual.md">Manual</a>
           <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md">Changelog</a>
           <a href="https://github.com/scottconverse/TownReporter/blob/main/SECURITY.md">Security</a>

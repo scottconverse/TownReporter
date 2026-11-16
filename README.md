@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.91](docs/releases/0.6.91.md)** (2026-11-14). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.6.92](docs/releases/0.6.92.md)** (2026-11-15). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,14 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.6.91
+## What is new in 0.6.92
+
+1 pull request since 0.6.91. The long list is in the [changelog](CHANGELOG.md#0692--2026-11-15) and the [release guide](docs/releases/0.6.92.md).
+
+- **Score parts on every desk screen.** Today and the Queue print the four parts under the headline. The story page shows **Score N/20**, the parts and their reasons (#395).
+- **Publish all drafts.** One button on Drafts publishes every draft marked **Your draft** or **Ready to check**, after one confirm that lists each story's section. Refused stories are listed with the reason and their own **Publish anyway** (#395).
+
+## What was new in 0.6.91
 
 1 pull request since 0.6.90. The long list is in the [changelog](CHANGELOG.md#0691--2026-11-14) and the [release guide](docs/releases/0.6.91.md).
 
@@ -276,7 +283,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.91](docs/releases/0.6.91.md)           |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.6.92](docs/releases/0.6.92.md)           |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -290,7 +297,7 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.91](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91) carries three files: `TownReporter-0.6.91-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.92](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92) carries three files: `TownReporter-0.6.92-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
 CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.87, and no fresh-machine human acceptance of it is claimed here.
 
@@ -567,7 +574,8 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-- **[0.6.91](docs/releases/0.6.91.md)** (2026-11-14), the current version. Lead scores come in four parts (immediacy, impact, conflict, novelty) that add up to the 4-20 newsworthiness, and the Queue tooltip shows them.
+- **[0.6.92](docs/releases/0.6.92.md)** (2026-11-15), the current version. The four score parts show on Today, the Queue and the story page, and Drafts has **Publish all drafts**.
+- **[0.6.91](docs/releases/0.6.91.md)** (2026-11-14). Lead scores come in four parts (immediacy, impact, conflict, novelty) that add up to the 4-20 newsworthiness, and the Queue tooltip shows them.
 - **[0.6.90](docs/releases/0.6.90.md)** (2026-11-13). With Large desk text at 1280 px, Dark Desk keeps all of Decide in the first screen and the Queue filters wrap under the tabs.
 - **[0.6.89](docs/releases/0.6.89.md)** (2026-11-13). TownRecord meeting exports import as unpublished leads in Sources & scan, and large desk text fits at 1280 px.
 - **[0.6.88](docs/releases/0.6.88.md)** (2026-11-12). Event feeds and a front-page events week box, the Bulletin reader design, **Community resources** with desk publish, edit and take-down, phone install with **Get the app**, Ollama care on port 11435, roundup **Open** and **Kill** on Drafts, **Opinion pieces waiting**, 16px desk text, Claude Fable 5.2 and a deploy wrapper that no longer hangs.
