@@ -716,13 +716,33 @@ export function plainFinding(summary: string, url?: string | null): string {
   return cleaned;
 }
 
+/**
+ * Nov 15 2026 (queue load): the Queue's "≈ Printed" count runs titlesOverlap
+ * once per lead per printed story -- about 485,000 pairs on the live paper --
+ * and each call lowercased and split BOTH headlines again. That was about one
+ * second of the queue load. The normalised form of a headline never changes,
+ * so it is worked out once and kept. Same strings in, same answer out; the
+ * cache is cleared when it grows past a few thousand headlines.
+ */
+const titleNormCache = new Map<string, { norm: string; words: string[] }>();
+function titleNorm(s: string): { norm: string; words: string[] } {
+  let hit = titleNormCache.get(s);
+  if (hit) return hit;
+  const norm = s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  hit = { norm, words: norm.split(" ").filter((w) => w.length > 3) };
+  if (titleNormCache.size >= 8000) titleNormCache.clear();
+  titleNormCache.set(s, hit);
+  return hit;
+}
+
 export function titlesOverlap(a: string, b: string): boolean {
-  const na = a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const nb = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const ta = titleNorm(a);
+  const na = ta.norm;
+  const nb = titleNorm(b).norm;
   if (!na || !nb) return false;
   if (na === nb) return true;
   if (na.length >= 12 && nb.length >= 12 && (na.includes(nb) || nb.includes(na))) return true;
-  const words = na.split(" ").filter((w) => w.length > 3);
+  const words = ta.words;
   if (words.length < 2) return false;
   const hit = words.filter((w) => nb.includes(w)).length;
   return hit >= 2 && hit / words.length >= 0.5;

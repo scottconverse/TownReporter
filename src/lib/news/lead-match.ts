@@ -387,9 +387,9 @@ export function sharesTightName(
   b: string,
   place?: NewsroomPlace | null,
 ): boolean {
-  const runsA = compoundNameRuns(a, place);
+  const runsA = headlineTokens(a, place).runs;
   if (!runsA.size) return false;
-  const runsB = compoundNameRuns(b, place);
+  const runsB = headlineTokens(b, place).runs;
   for (const run of runsA) if (runsB.has(run)) return true;
   return false;
 }
@@ -963,10 +963,37 @@ export function distinguishingOverlap(
   b: string,
   place?: NewsroomPlace | null,
 ): { subjects: number; names: number } {
+  const ta = headlineTokens(a, place);
+  const tb = headlineTokens(b, place);
   return {
-    subjects: sharedWordCount(contentTokens(a, place), contentTokens(b, place)),
-    names: sharedWordCount(nonStoplistedProperNouns(a, place), nonStoplistedProperNouns(b, place)),
+    subjects: sharedWordCount(ta.content, tb.content),
+    names: sharedWordCount(ta.names, tb.names),
   };
+}
+
+/**
+ * Nov 15 2026 (queue load): the Queue's "≈ Printed" check calls
+ * distinguishingOverlap and sharesTightName for every lead/printed pair whose
+ * titles overlap -- about 29,000 pairs on the live paper -- and each call
+ * re-parsed both headlines. A headline's token sets depend only on the
+ * headline and the newsroom's place, so they are worked out once and kept.
+ * Read-only: callers here only read these sets. The cache is cleared when it
+ * grows past a few thousand entries.
+ */
+type HeadlineTokens = { content: Set<string>; names: Set<string>; runs: Set<string> };
+const HEADLINE_TOKEN_CACHE = new Map<string, HeadlineTokens>();
+function headlineTokens(headline: string, place?: NewsroomPlace | null): HeadlineTokens {
+  const key = `${place?.city ?? ""}|${place?.state ?? ""}|${place?.county ?? ""}|${headline}`;
+  let hit = HEADLINE_TOKEN_CACHE.get(key);
+  if (hit) return hit;
+  hit = {
+    content: contentTokens(headline, place),
+    names: nonStoplistedProperNouns(headline, place),
+    runs: compoundNameRuns(headline, place),
+  };
+  if (HEADLINE_TOKEN_CACHE.size >= 8000) HEADLINE_TOKEN_CACHE.clear();
+  HEADLINE_TOKEN_CACHE.set(key, hit);
+  return hit;
 }
 
 function sharedWordCount(a: Set<string>, b: Set<string>): number {
