@@ -879,8 +879,8 @@ function PublishAllDrafts({
             <h2 className="hl-head">Publish all drafts</h2>
             <p className="wire-sum">
               {candidates.length === 1
-                ? "One story can be published."
-                : `${candidates.length} stories can be published.`}
+                ? "One finished story is ready to print."
+                : `${candidates.length} finished stories are ready to print.`}
             </p>
             {running ? (
               /* The live region: the batch's own progress, in words. */
@@ -976,11 +976,12 @@ function PublishAllDrafts({
         open={confirming}
         onClose={() => setConfirming(false)}
         title="Publish these stories?"
-        subtitle="Each story prints in the section shown beside it. A story with a warning still prints; the warning is recorded."
+        subtitle="Each story prints in the section shown beside it."
         primaryLabel={`Publish ${candidates.length} ${candidates.length === 1 ? "story" : "stories"}`}
         onPrimary={() => void run()}
         cancelLabel="Cancel"
       >
+        <p>A story with a warning still prints, and the warning is recorded.</p>
         <ul>
           {candidates.map((c) => (
             <li key={c.leadId}>
