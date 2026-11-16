@@ -1,8 +1,20 @@
 # Changelog
 
-Current software version: **0.6.91** (released 2026-11-14). Publication state is recorded by GitHub: [release v0.6.91](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.91).
+Current software version: **0.6.92** (released 2026-11-15). Publication state is recorded by GitHub: [release v0.6.92](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92).
 
 ## Unreleased
+
+## 0.6.92 — 2026-11-15
+
+This release covers 1 change after 0.6.91 (#395). The release guide is [docs/releases/0.6.92.md](docs/releases/0.6.92.md). The number after a change is the pull request that made it.
+
+### Lead scores
+
+- **The four score parts show on every desk screen, not only in a tooltip.** Today and the Queue print a line under the headline, for example **Immediacy 4 · Impact 3 · Conflict 1 · Novelty 2**. The story page shows **Score N/20**, the parts line and one reason per part; a part with an empty reason is left out. A lead filed before 0.6.91 shows only its total, and a lead that was never scored shows no score at all (it used to show **0/20**) (#395).
+
+### Drafts
+
+- **Publish all drafts.** Drafts has a **Publish all drafts (N)** button. It takes every draft whose row says **Your draft** or **Ready to check**, from the whole list, not only the rows on screen. Drafts that are running, failed, or waiting on you (a name to review, evidence to check, imported text) are left out. The button hides when nothing qualifies. It opens **Publish these stories?**, which lists each story with its section; **Publish N stories** prints each one in the section shown. Each story still goes through the story page's publish checks. The result lists **Published (N)** with a link to each story and **Not published (N)** with the reason; a story refused by a warning gets its own **Publish anyway**, and a hard refusal gets none. One request carries at most 25 stories; the desk sends a longer list in batches (#395).
 
 ## 0.6.91 — 2026-11-14
 

@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current software version: [0.6.91](releases/0.6.91.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
+**Current software version: [0.6.92](releases/0.6.92.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
 The screenshots in this guide were taken from the running 0.6.84 desk and public paper. If a label ever differs from a picture, the words in the text and on screen are right.
 
@@ -345,7 +345,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 | Part | Meaning |
 |---|---|
 | Tick box | Select the row for the bulk bar |
-| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. Hover the score to see the parts and their reasons. Leads filed before 0.6.91 show only the total |
+| Score | Newsworthiness out of 20 (warm at 10, hot at 14). Since 0.6.91 it is the sum of four parts, 1 to 5 each: immediacy, impact, conflict and novelty. The parts also show as a line under the headline, for example **Immediacy 4 · Impact 3 · Conflict 1 · Novelty 2**; hover the score for the reasons. Leads filed before 0.6.91 show only the total |
 | Chips | The section; the status (**New**, **Drafted**, **Held**, **Killed**, **Published**); **Section not chosen — pick one** when the scan guessed the section; **Imported**; **Looks already printed: <headline>**; **Came back N times** |
 | Headline | A link to the story page |
 | Evidence | One small square per source link and a count such as “3 opened · 1 attached” |
@@ -404,6 +404,7 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 - **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
 - **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
+- **Publish all drafts (N)** sits at the top of the list when at least one draft says **Your draft** or **Ready to check**. It counts the whole list, not only the rows on screen. Running, failed and Needs you drafts are left out. Press it, check **Publish these stories?** (each story with its section), then press **Publish N stories**. Each story goes through the same checks as Publish on its story page. The result lists **Published (N)** with a link to each story and **Not published (N)** with the reason. A story refused by a warning has its own **Publish anyway**; a hard refusal has none.
 - **Filter pills:** **All**, **Running**, **Needs you**, **Yours** and **Failed**, each with a count that stays blank until it has loaded. **Needs you** means the checks are waiting on you. **Yours** means you wrote or changed the headline.
 - **A row** shows a chip (for a finished draft, the readiness chip: **✓ Ready**, **✓ Verified**, **! N to check**, **! Not checked yet**, **✕ Not ready**; for a running one, **Queued · 0:12** or **Writing · 2:18** with a live clock; for a first draft that failed, **Draft failed**), a line such as “Council · AI”, “Council · Written by you” or “Council · Reprint”, the headline, and the model’s name or the time it was saved. A running row carries the full job card with **Cancel**.
 - **The button** names the next step: **Watch** (running), **Retry** (failed), **Check** (evidence to check), **Start story** (no draft yet) or **Review** (ready). Every button opens the story page.
@@ -421,6 +422,7 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 ### How the page is laid out
 
 - **Top:** a **← Today** link, “Story from lead · <section>”, a readiness chip, and **Kill this lead** (hidden once a story is on the paper).
+- **Score:** for a scored lead, **Score N/20**, the four parts (for example **Immediacy 4 · Impact 3 · Conflict 1 · Novelty 2**) and one reason per part. A lead that was never scored shows no score.
 - **Left:** three tabs. **Checks** holds the “Before you can publish” list, the evidence check and **Names and spellings**. **Sources** holds **Find evidence**, **Source documents** and **Sources on the lead**. **Reporting** holds **Redraft settings**, the lead, **Reporting notes** and the **Reporting package**. Notes and sources never print.
 - **Right:** the writing surface: **Headline · yours**, **Summary** (the line under the headline) and **Story**. A closed **Story details** fold holds **Story direction for AI**, **Topic** (the section), **Geography**, the outlet check and **Pulled notes**.
 - **Action row:** **Save edits**, **Check draft against evidence**, **Draft with AI** (or **Redraft…** once there is a draft), **Stop** while a draft runs, and **More ▾**.
