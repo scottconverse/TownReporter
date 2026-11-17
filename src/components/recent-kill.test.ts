@@ -33,7 +33,7 @@ describe("the killed row's own Undo line", () => {
     assert.deepEqual(
       mergeRecentlyKilled(optimisticOpenPage, recent, 10_000 + KILL_TOAST_MS - 1).map((r) => r.id),
       [1, 2, 3, 4],
-      "the row stays where it was for the strip's eight seconds",
+      "the row stays where it was for the strip's three seconds",
     );
     assert.deepEqual(
       mergeRecentlyKilled(optimisticOpenPage, recent, 10_000 + KILL_TOAST_MS).map((r) => r.id),

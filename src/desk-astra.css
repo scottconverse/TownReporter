@@ -8770,6 +8770,19 @@
   line-height: 1.35;
 }
 
+/* Scott, Nov 16 2026: "Small, 3 seconds". The kill strip is small: less
+   padding, smaller words, and only as wide as it needs. */
+.desk-ltr .desk-toaster [data-sonner-toast].desk-toast-small {
+  width: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  gap: 6px;
+  font-size: calc(14px * var(--ts));
+}
+.desk-ltr .desk-toaster [data-sonner-toast].desk-toast-small [data-title] {
+  font-size: calc(14px * var(--ts));
+}
+
 /* The message, and the space it is allowed to take before the buttons. */
 .desk-ltr .desk-toaster [data-title] {
   flex: 1;

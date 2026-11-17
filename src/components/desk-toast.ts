@@ -50,6 +50,9 @@ export type DeskUndo = {
   run: () => void | Promise<void>;
 };
 
+/** A toast that lives exactly this long is the kill strip; it is drawn small. Same value as KILL_TOAST_MS. */
+export const DESK_TOAST_SMALL_MS = 3_000;
+
 export type DeskToastOptions = {
   tone?: DeskTone;
   /** An explicit policy override; it stays visible until its retry answers. */
@@ -311,7 +314,8 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
     : body;
 
   const data: Parameters<typeof toast.success>[1] = {
-    className: "desk-toast desk-toast-" + tone + (chips ? " desk-toast-chips-card" : ""),
+    // Scott, Nov 16 2026: "Small, 3 seconds" -- the kill strip (3 s) is drawn small.
+    className: "desk-toast desk-toast-" + tone + (chips ? " desk-toast-chips-card" : "") + (options.duration === DESK_TOAST_SMALL_MS ? " desk-toast-small" : ""),
     duration: options.duration ?? (tone === "err" ? DESK_TOAST_ERR_MS : DESK_TOAST_OK_MS),
     // Undefined is sonner's own "a fresh toast"; an id replaces the one on
     // screen. See `DeskToastOptions.id`.

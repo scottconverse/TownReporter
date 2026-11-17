@@ -237,11 +237,11 @@ export function killReasonKept(chip: KillReasonChip): string {
 /**
  * How long the kill toast lives, in milliseconds.
  *
- * Longer than `DESK_TOAST_OK_MS` (5s) because the editor needs time to notice
- * and reach for Undo, but short enough that a one-line strip does not cover the
- * next row. It asks no reason question now; Undo stays for the whole life.
+ * Scott, Nov 16 2026: "Small, 3 seconds". The strip keeps its Undo, but it
+ * goes away after 3 seconds and is drawn small (`desk-toast-small`, set in
+ * desk-toast.ts for any toast that lives exactly this long).
  */
-export const KILL_TOAST_MS = 8_000;
+export const KILL_TOAST_MS = 3_000;
 
 /*
   The name a Queue toast is raised under (TNB-3). A kill and a hold on one lead
