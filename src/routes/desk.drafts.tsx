@@ -12,7 +12,14 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { Dialog } from "@/components/dialog";
-import { listDraftsDesk, listDraftsDeskPage, publishAllDrafts, publishLead } from "@/lib/news/desk";
+import {
+  bulkKillLeads,
+  listDraftsDesk,
+  listDraftsDeskPage,
+  publishAllDrafts,
+  publishLead,
+  undoBulkKillLeads,
+} from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import { opinionDraftsWaiting } from "@/lib/news/opinion-drafts-waiting";
 import {
@@ -33,6 +40,7 @@ import {
   publishAllCandidates,
   type DeskDraftFilter,
   type DeskDraftState,
+  type PublishAllCandidate,
 } from "@/lib/news/desk-drafts";
 import { draftItemLabel } from "@/lib/news/draft-item";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
@@ -97,6 +105,19 @@ function DraftsPage() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<DeskDraftFilter>("all");
   const [draftShown, setDraftShown] = useState(PAGE_SIZE);
+  /*
+    feat-bulk-desk (Nov 16 2026): the rows the editor has ticked. One selection
+    serves both presses above the list -- "Publish N selected" and "Kill N
+    selected" -- so an editor picks stories once and chooses what to do with
+    them. The ids are kept even when the filter or the window moves a row off
+    the screen; a row that leaves the desk (printed or killed) is taken out of
+    the selection when the press reports.
+  */
+  const [selectedDraftLeadIds, setSelectedDraftLeadIds] = useState<number[]>([]);
+  const toggleDraftSelection = (leadId: number, on: boolean) =>
+    setSelectedDraftLeadIds((prev) =>
+      on ? [...new Set([...prev, leadId])] : prev.filter((id) => id !== leadId),
+    );
   /*
     HOW MUCH OF THE LIST IS ON THE SCREEN (Unit CZ-long-lists).
 
@@ -209,7 +230,16 @@ function DraftsPage() {
     >
       <WaitingRoundups />
       <OpinionDraftsWaiting />
-      <PublishAllDrafts sectionName={sectionName} />
+      {/* A row that cannot be read arrives as `null` (DraftItemBoundary draws
+          the one alert); it holds no id and so is not selectable. */}
+      <PublishAllDrafts
+        sectionName={sectionName}
+        selected={selectedDraftLeadIds}
+        onSelectionChange={setSelectedDraftLeadIds}
+        listedLeadIds={rows
+          .map((row) => row?.lead_id)
+          .filter((id): id is number => typeof id === "number")}
+      />
       <div className="seg-strip" role="group" aria-label="Filter drafts">
         {FILTERS.map((f) => (
           <button
@@ -258,6 +288,25 @@ function DraftsPage() {
                 return (
                   <div className="drafts-row" key={row.id ?? `draft-${index}`}>
                     <span className="drafts-state">
+                      {/* The row's one tick box (feat-bulk-desk). It is the
+                      Queue's own `queue-check` control, so the mark, the 44px
+                      press area and the focus ring are the desk's existing
+                      ones. A running or failed row can be ticked and killed;
+                      it is simply never in the publish batch. */}
+                      <label className="queue-check drafts-check">
+                        <input
+                          type="checkbox"
+                          className="queue-pick"
+                          checked={selectedDraftLeadIds.includes(row.lead_id)}
+                          aria-label={`Select ${editorTitle(row.headline)}`}
+                          onChange={(event) =>
+                            toggleDraftSelection(row.lead_id, event.target.checked)
+                          }
+                        />
+                        <span className="queue-box" aria-hidden="true">
+                          {selectedDraftLeadIds.includes(row.lead_id) ? "✓" : null}
+                        </span>
+                      </label>
                       <DraftStateChip state={state} />
                     </span>
                     <div className="drafts-main">
@@ -700,13 +749,51 @@ type PublishAllOutcome = {
   hard?: string;
 };
 
+/** One lead's answer from `bulkKillLeads`, in the order it was sent. */
+type BulkKillOutcome = {
+  id: number;
+  ok: boolean;
+  error?: string;
+  warnings?: { key: string; sentence: string }[];
+  hard?: boolean;
+};
+
+/*
+  ── PICKING STORIES TO PUBLISH OR KILL (feat-bulk-desk, Nov 16 2026) ─────────
+
+  Scott's order: "If there are 14 stories drafted that day, i want to publish
+  them all at once on some days by selecting them all, or some subset of them,
+  and clicking a button and having them all publish." And: "I want to be able
+  to ALSO kill stories in bulk (drafted or not drafted) the same way."
+
+  The tick boxes live on the rows in `DraftsPage`; this component owns the two
+  presses they feed. "Publish all drafts (N)" is unchanged and still prints the
+  whole list in one press. "Publish N selected" is the same publish path over
+  the ticked stories only -- the same `publishAllDrafts` call, the same section
+  confirmation and the same acknowledged warning keys, so a story cannot print
+  with more consent from a selection than from the whole-list button. A `hard`
+  refusal still skips that one story and names it.
+
+  "Kill N selected" is one press, one optional reason for every ticked story,
+  and -- after it -- ONE line, "Killed N stories. Undo", with one Undo that puts
+  all of them back. A running or failed draft can still be ticked and killed
+  (Scott asked for drafted or not drafted), but it is never in the publish
+  batch: there is nothing finished to print.
+*/
 function PublishAllDrafts({
   sectionName,
+  selected,
+  onSelectionChange,
+  listedLeadIds,
 }: {
   sectionName: (topic: string | null) => string;
+  selected: number[];
+  onSelectionChange: (ids: number[]) => void;
+  /** The rows the Drafts list is showing: what "Select all" ticks. */
+  listedLeadIds: number[];
 }) {
   const qc = useQueryClient();
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"all" | "selected" | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [batchError, setBatchError] = useState("");
@@ -715,6 +802,15 @@ function PublishAllDrafts({
   >([]);
   const [refused, setRefused] = useState<PublishAllOutcome[]>([]);
   const [anywayId, setAnywayId] = useState<number | null>(null);
+
+  const [killConfirming, setKillConfirming] = useState(false);
+  const [killReason, setKillReason] = useState("");
+  const [killing, setKilling] = useState(false);
+  const [killed, setKilled] = useState<{ id: number; headline: string }[]>([]);
+  const [killFailures, setKillFailures] = useState<BulkKillOutcome[]>([]);
+  const [killError, setKillError] = useState("");
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState("");
 
   /*
     The whole list, not the window: the button counts the stories the desk can
@@ -737,6 +833,23 @@ function PublishAllDrafts({
   );
   const sectionFor = new Map(candidates.map((c) => [c.leadId, c.topic]));
 
+  const selectedSet = new Set(selected);
+  const selectedCandidates = candidates.filter((c) => selectedSet.has(c.leadId));
+  const toPublish = confirming === "selected" ? selectedCandidates : candidates;
+
+  const rowById = new Map(allRows.map((row) => [row.lead_id, row]));
+  const selectedRows = selected
+    .map((id) => rowById.get(id))
+    .filter((row): row is (typeof allRows)[number] => Boolean(row));
+  const listed = new Set(listedLeadIds);
+  const allListedSelected =
+    listedLeadIds.length > 0 && listedLeadIds.every((id) => selectedSet.has(id));
+
+  const toggleAllListed = (on: boolean) => {
+    if (on) onSelectionChange([...new Set([...selected, ...listedLeadIds])]);
+    else onSelectionChange(selected.filter((id) => !listed.has(id)));
+  };
+
   const refresh = (queryKey: readonly unknown[]) => {
     void qc.invalidateQueries({ queryKey }).catch(() => {});
   };
@@ -750,13 +863,13 @@ function PublishAllDrafts({
     for (const leadId of leadIds) refresh(["lead", leadId]);
   };
 
-  async function run() {
-    setConfirming(false);
+  async function run(list: PublishAllCandidate[]) {
+    setConfirming(null);
     setRunning(true);
     setBatchError("");
     setPublished([]);
     setRefused([]);
-    setProgress({ done: 0, total: candidates.length });
+    setProgress({ done: 0, total: list.length });
     const publishedNow: { leadId: number; headline: string; slug: string }[] = [];
     const refusedNow: PublishAllOutcome[] = [];
     let done = 0;
@@ -766,8 +879,8 @@ function PublishAllDrafts({
         than 25 finished drafts still gets them all. Each batch's answers are
         drawn as they land: a long list is never a silent spinner.
       */
-      for (let start = 0; start < candidates.length; start += PUBLISH_ALL_MAX) {
-        const batch = candidates.slice(start, start + PUBLISH_ALL_MAX);
+      for (let start = 0; start < list.length; start += PUBLISH_ALL_MAX) {
+        const batch = list.slice(start, start + PUBLISH_ALL_MAX);
         const answer = await publishAllDrafts({
           data: {
             items: batch.map((c) => ({
@@ -782,7 +895,7 @@ function PublishAllDrafts({
         if ("error" in answer && answer.error) setBatchError(answer.error);
         for (const result of answer.results) {
           done += 1;
-          setProgress({ done, total: candidates.length });
+          setProgress({ done, total: list.length });
           if (result.ok) {
             publishedNow.push({
               leadId: result.leadId,
@@ -800,6 +913,11 @@ function PublishAllDrafts({
         ...publishedNow.map((p) => p.leadId),
         ...refusedNow.map((r) => r.leadId),
       ]);
+      // A published story is no longer selected: it has left the desk's work.
+      if (publishedNow.length) {
+        const gone = new Set(publishedNow.map((p) => p.leadId));
+        onSelectionChange(selected.filter((id) => !gone.has(id)));
+      }
       void all.refetch();
     } catch (error) {
       setBatchError(
@@ -833,6 +951,7 @@ function PublishAllDrafts({
         ]);
         setRefused((prev) => prev.filter((r) => r.leadId !== item.leadId));
         refreshAfterPublish([item.leadId]);
+        onSelectionChange(selected.filter((id) => id !== item.leadId));
         void all.refetch();
       } else {
         setRefused((prev) =>
@@ -862,17 +981,166 @@ function PublishAllDrafts({
     }
   }
 
+  /*
+    The kill, for the ticked stories. One reason for all of them, and the
+    written-draft warning answered by the same press: the dialog marked each
+    story that has a saved draft, so the one press is consent for exactly that.
+  */
+  async function runKill() {
+    const ids = selectedRows.map((row) => row.lead_id);
+    if (ids.length === 0) return;
+    const overrideById: Record<number, string[]> = {};
+    for (const row of selectedRows) {
+      if (row.lead_status === "drafted" || row.has_body) {
+        overrideById[row.lead_id] = ["lead-status-drafted"];
+      }
+    }
+    setKilling(true);
+    setKillError("");
+    setUndoError("");
+    setKilled([]);
+    setKillFailures([]);
+    try {
+      const reason = killReason.trim();
+      const results = await bulkKillLeads({
+        data: {
+          ids,
+          ...(reason ? { killReason: reason } : {}),
+          ...(Object.keys(overrideById).length ? { overrideById } : {}),
+        },
+      });
+      const done = results.filter((result) => result.ok);
+      const failed = results.filter((result) => !result.ok);
+      const killedNow = done.map((result) => ({
+        id: result.id,
+        headline: rowById.get(result.id)?.headline ?? `#${result.id}`,
+      }));
+      setKilled(killedNow);
+      setKillFailures(failed);
+      setKillConfirming(false);
+      setKillReason("");
+      const gone = new Set(done.map((result) => result.id));
+      onSelectionChange(selected.filter((id) => !gone.has(id)));
+      refresh(["drafts-desk"]);
+      refresh(["leads"]);
+      refresh(["paper"]);
+      refresh(["published-desk"]);
+      void all.refetch();
+    } catch (error) {
+      setKillConfirming(false);
+      setKillError(error instanceof Error ? error.message : "Could not kill the stories.");
+    } finally {
+      setKilling(false);
+    }
+  }
+
+  /** The one Undo: every story this press killed goes back where it was. */
+  async function runUndo() {
+    const ids = killed.map((item) => item.id);
+    if (ids.length === 0) return;
+    setUndoing(true);
+    setUndoError("");
+    try {
+      const results = await undoBulkKillLeads({ data: { ids } });
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length) {
+        setUndoError(
+          failed.length === 1
+            ? "One story could not be put back."
+            : `${failed.length} stories could not be put back.`,
+        );
+        setKillFailures((prev) => [...prev, ...failed]);
+        setKilled((prev) => prev.filter((item) => failed.some((f) => f.id === item.id)));
+      } else {
+        setKilled([]);
+      }
+      refresh(["drafts-desk"]);
+      refresh(["leads"]);
+      refresh(["paper"]);
+      refresh(["published-desk"]);
+      void all.refetch();
+    } catch (error) {
+      setUndoError(error instanceof Error ? error.message : "Could not put the stories back.");
+    } finally {
+      setUndoing(false);
+    }
+  }
+
+  /** The short warning the kill dialog prints beside a story, or "". */
+  const selectedKillWarning = (row: (typeof allRows)[number]): string => {
+    const state = deskDraftState({ ...row, story_readiness: row.story_readiness ?? null });
+    if (state.running) return "Still being written";
+    if (state.failed) return "Draft failed";
+    if (row.lead_status === "drafted" || row.has_body) return "Has a written draft; it stays saved";
+    return "";
+  };
+
+  const selectionStrip =
+    listedLeadIds.length > 0 ? (
+      <section aria-label="Selected drafts" className="drafts-bulk">
+        <label className="drafts-bulk-all">
+          <input
+            type="checkbox"
+            checked={allListedSelected}
+            aria-label="Select all drafts shown"
+            onChange={(event) => toggleAllListed(event.target.checked)}
+          />
+          <span>Select all shown</span>
+        </label>
+        {selected.length > 0 ? (
+          <>
+            <span className="drafts-bulk-count">{selected.length} selected</span>
+            <button
+              type="button"
+              className="btn solid"
+              disabled={running || killing || selectedCandidates.length === 0}
+              aria-label={`Publish ${selectedCandidates.length} selected stories`}
+              onClick={() => setConfirming("selected")}
+            >
+              Publish {selectedCandidates.length} selected
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={running || killing}
+              aria-label={`Kill ${selected.length} selected stories`}
+              onClick={() => {
+                setKillError("");
+                setKillConfirming(true);
+              }}
+            >
+              Kill {selected.length} selected
+            </button>
+          </>
+        ) : null}
+        {selected.length > 0 && selectedCandidates.length < selected.length ? (
+          <span className="drafts-bulk-note">
+            {selected.length - selectedCandidates.length === 1
+              ? "1 selected story is not finished, so it cannot print."
+              : `${selected.length - selectedCandidates.length} selected stories are not finished, so they cannot print.`}
+          </span>
+        ) : null}
+      </section>
+    ) : null;
+
   if (
     candidates.length === 0 &&
     published.length === 0 &&
     refused.length === 0 &&
-    !running
+    killed.length === 0 &&
+    killFailures.length === 0 &&
+    !running &&
+    !killing
   ) {
-    return null;
+    // Nothing to publish or report -- but the selection strip may still be
+    // needed to kill, so it is drawn on its own when the list has rows.
+    return selectionStrip;
   }
 
   return (
     <section aria-label="Publish all drafts">
+      {selectionStrip}
+
       {candidates.length > 0 || running ? (
         <div className="drafts-row">
           <div className="drafts-main">
@@ -895,13 +1163,54 @@ function PublishAllDrafts({
               <button
                 type="button"
                 className="btn solid"
-                disabled={running}
-                onClick={() => setConfirming(true)}
+                disabled={running || killing}
+                onClick={() => setConfirming("all")}
               >
                 Publish all drafts ({candidates.length})
               </button>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {killed.length > 0 ? (
+        <p className="published-line" role="status">
+          Killed {killed.length} {killed.length === 1 ? "story" : "stories"}.{" "}
+          <button
+            type="button"
+            className="inline-link"
+            disabled={undoing}
+            onClick={() => void runUndo()}
+          >
+            {undoing ? "Putting back…" : "Undo"}
+          </button>
+        </p>
+      ) : null}
+      {killError ? <p role="alert">{killError}</p> : null}
+      {undoError ? <p role="alert">{undoError}</p> : null}
+      {killFailures.length > 0 ? (
+        <div>
+          <h2 className="hl-head">Not killed ({killFailures.length})</h2>
+          {killFailures.map((item) => (
+            <div className="drafts-row" key={`bulk-kill-no-${item.id}`}>
+              <div className="drafts-main">
+                <h3 className="hl-head">
+                  {editorTitle(rowById.get(item.id)?.headline ?? `#${item.id}`)}
+                </h3>
+                {item.error ? <p role="alert">{item.error}</p> : null}
+              </div>
+              <div className="drafts-side">
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(item.id) }}
+                  className="btn"
+                  aria-label={`Open: ${rowById.get(item.id)?.headline ?? item.id}`}
+                >
+                  Open
+                </Link>
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -973,17 +1282,18 @@ function PublishAllDrafts({
       ) : null}
 
       <Dialog
-        open={confirming}
-        onClose={() => setConfirming(false)}
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
         title="Publish these stories?"
         subtitle="Each story prints in the section shown beside it."
-        primaryLabel={`Publish ${candidates.length} ${candidates.length === 1 ? "story" : "stories"}`}
-        onPrimary={() => void run()}
+        primaryLabel={`Publish ${toPublish.length} ${toPublish.length === 1 ? "story" : "stories"}`}
+        primaryDisabled={toPublish.length === 0 || running}
+        onPrimary={() => void run(toPublish)}
         cancelLabel="Cancel"
       >
         <p>A story with a warning still prints, and the warning is recorded.</p>
         <ul>
-          {candidates.map((c) => (
+          {toPublish.map((c) => (
             <li key={c.leadId}>
               {editorTitle(c.headline)} — {sectionName(c.topic)}
               {c.warning ? (
@@ -992,6 +1302,38 @@ function PublishAllDrafts({
             </li>
           ))}
         </ul>
+      </Dialog>
+
+      <Dialog
+        open={killConfirming}
+        onClose={() => setKillConfirming(false)}
+        title={`Kill ${selectedRows.length} ${selectedRows.length === 1 ? "story" : "stories"}?`}
+        subtitle="Killed stories leave the desk and will not print."
+        primaryLabel={`Yes, kill ${selectedRows.length}`}
+        primaryDisabled={killing || selectedRows.length === 0}
+        onPrimary={() => void runKill()}
+        cancelLabel="Cancel"
+      >
+        <ul>
+          {selectedRows.map((row) => {
+            const warning = selectedKillWarning(row);
+            return (
+              <li key={row.lead_id}>
+                {editorTitle(row.headline)}
+                {warning ? <span className="warn-inline">{warning}</span> : null}
+              </li>
+            );
+          })}
+        </ul>
+        <label>
+          <span>Why? The reason is optional and is written on all of them.</span>
+          <input
+            value={killReason}
+            onChange={(event) => setKillReason(event.target.value)}
+            placeholder="No reason — leave this empty"
+            aria-label="Why these stories are being killed"
+          />
+        </label>
       </Dialog>
     </section>
   );

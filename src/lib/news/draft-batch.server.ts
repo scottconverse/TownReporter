@@ -484,10 +484,15 @@ export async function commitDraftBatchForAuthenticatedEditor(
   await ensureAuditEventsSchema(sql);
   const preflight = await inspectSelection(sql, input, runtimeSnapshot, false);
   if (!preflight.ok) return preflight;
-  if (input.items.length < 1 || input.items.length > 5) {
-    const warning = await editorWarning(input.context, input.override, "draft-batch-size", `You selected ${input.items.length} leads; a usual batch has 1 to 5. It may cost more.`, { kind: "newsroom", id: input.context.newsroomId },
-    );
-    if (warning) return { ...warning, code: "invalid-input" };
+  /*
+    Scott's order (Nov 16 2026): "I want to be able to select several stories
+    that are not drafted and have them bulk drafted. Any number. not just 5."
+    The 1-to-5 size warning is gone: a batch of any size is the editor's call.
+    An EMPTY selection is still refused, because an empty batch is a press that
+    writes nothing and there is no "any number" that includes zero.
+  */
+  if (input.items.length < 1) {
+    return { ok: false, code: "invalid-input", error: "Choose at least one lead to draft." };
   }
   if (deps.accountRate !== false) {
     if (deps.assertRate) {

@@ -165,6 +165,8 @@ import {
   leadIdInput,
   leadStatusInput,
   leadStatusRestoreInput,
+  bulkKillLeadsInput,
+  bulkKillUndoInput,
   leadDuplicateResolutionInput,
   editLeadInput,
   meetingArticleReviewInput,
@@ -6173,6 +6175,64 @@ export const restoreKilledLead = createServerFn({ method: "POST" })
     const { restoreKilledLeadForEditor } = await import("./lead-lifecycle.ts");
     return restoreKilledLeadForEditor(await getSql(), { userId: context.userId, newsroomId: owned(context) }, data);
   });
+
+/**
+ * Kill several leads in one press (feat-bulk-desk, Nov 16 2026).
+ *
+ * Scott's order: "I want to be able to ALSO kill stories in bulk (drafted or
+ * not drafted) the same way." The Drafts screen's tick boxes feed this; the
+ * Queue's own bulk strip keeps its in-browser fan-out, and both end at the same
+ * `setLeadStatusForEditor`. One optional reason is written on every lead, and
+ * a lead the desk refuses is named in the result while the rest are killed.
+ */
+export const bulkKillLeads = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => bulkKillLeadsInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { performBulkKillForEditor } = await import("./lead-lifecycle.ts");
+    return performBulkKillForEditor(
+      await getSql(),
+      { userId: context.userId, newsroomId: owned(context) },
+      {
+        ids: data.ids,
+        killReason: data.killReason,
+        overrideById: normalizeOverrideById(data.overrideById),
+      },
+    );
+  });
+
+/**
+ * The one Undo behind a bulk Kill: every lead the kill took goes back where it
+ * was, through the same `restoreKilledLeadForEditor` the single Undo uses.
+ */
+export const undoBulkKillLeads = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => bulkKillUndoInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { performBulkKillUndoForEditor } = await import("./lead-lifecycle.ts");
+    return performBulkKillUndoForEditor(
+      await getSql(),
+      { userId: context.userId, newsroomId: owned(context) },
+      data.ids,
+    );
+  });
+
+/**
+ * The per-lead override map arrives with numeric-looking string keys (JSON has
+ * no other kind). Turn them back into the lead ids `performBulkKillForEditor`
+ * looks up, dropping anything that is not a positive integer.
+ */
+function normalizeOverrideById(raw: Record<string, string[]> | undefined): Record<number, string[]> {
+  const out: Record<number, string[]> = {};
+  if (!raw) return out;
+  for (const [key, keys] of Object.entries(raw)) {
+    const id = Number(key);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Array.isArray(keys)) continue;
+    const clean = keys.filter((value): value is string => typeof value === "string" && value.trim() !== "");
+    if (clean.length) out[id] = clean;
+  }
+  return out;
+}
 
 /**
  * "Edit the lead" (design review note 2, 0.6.80): the drawn row's own

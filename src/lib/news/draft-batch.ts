@@ -99,7 +99,7 @@ export function cleanDraftBatchInput(
       modelChoiceExplicit?: boolean;
     } | DraftBatchFailure {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
+    return { ok: false, code: "invalid-input", error: "Choose at least one lead to draft." };
   }
   const row = value as Record<string, unknown>;
   if (
@@ -118,7 +118,7 @@ export function cleanDraftBatchInput(
     };
   }
   if (!Array.isArray(row.items)) {
-    return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
+    return { ok: false, code: "invalid-input", error: "Choose at least one lead to draft." };
   }
   const items: DraftBatchStartItem[] = [];
   const ids = new Set<number>();
@@ -162,7 +162,7 @@ export function cleanDraftBatchInput(
 export const startDraftBatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   // `cleanDraftBatchInput` owns the answer here -- it names the refusal
-  // ("Choose between one and five leads.") -- so the boundary bounds and
+  // ("Choose at least one lead to draft.") -- so the boundary bounds and
   // passes the value through rather than throwing over its head.
   .validator((value: unknown) => cleanOrRaw(draftBatchStartInput)(value))
   .handler(async ({ data, context }) => {

@@ -1393,6 +1393,25 @@ export const leadStatusRestoreInput = z.object({
   keepRecord: z.boolean().optional(),
 });
 
+/**
+ * `desk.ts` bulkKillLeads (feat-bulk-desk, Nov 16 2026): the Drafts screen's
+ * "Kill N selected" press. One optional reason is written on every lead in the
+ * list, exactly as the single kill writes the one it was given. `overrideById`
+ * carries the warning keys the confirm dialog put the editor on notice for,
+ * per lead; the server lets through only keys naming a warning it recomputes
+ * for that exact lead.
+ */
+export const bulkKillLeadsInput = z.object({
+  ids: z.array(rowId).min(1).max(500),
+  killReason: z.string().trim().max(500).optional(),
+  overrideById: z.record(z.string(), z.array(z.string())).optional(),
+});
+
+/** `desk.ts` undoBulkKillLeads: the same list, put back by the single Undo. */
+export const bulkKillUndoInput = z.object({
+  ids: z.array(rowId).min(1).max(500),
+});
+
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */
 export const leadDuplicateResolutionInput = z.object({
   override: z.array(z.string()).optional(),
