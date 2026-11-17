@@ -295,7 +295,19 @@ export type PublishAllItem = {
 };
 
 export type PublishAllInput =
-  | { ok: true; items: PublishAllItem[] }
+  | {
+      ok: true;
+      items: PublishAllItem[];
+      /**
+       * Nov 17 2026, Scott: "when i click publish all drafts ... I expected it
+       * to publish them without clicking on anything (why is it there if it
+       * doesn't publish all drafts)". The press IS the "Publish anyway" for
+       * every soft warning on every story in it; each warning is still
+       * recorded by `performPublish`. A `hard` refusal (no headline, no body)
+       * still stops that one story.
+       */
+      acceptAllWarnings?: true;
+    }
   | { ok: false; error: string };
 
 function positiveInt(value: unknown): number | null {
@@ -343,7 +355,31 @@ export function cleanPublishAllInput(raw: unknown): PublishAllInput {
       ...(acknowledgedWarningKeys.length ? { acknowledgedWarningKeys } : {}),
     });
   }
-  return { ok: true, items };
+  const acceptAllWarnings =
+    typeof raw === "object" && raw !== null && (raw as { acceptAllWarnings?: unknown }).acceptAllWarnings === true;
+  return { ok: true, items, ...(acceptAllWarnings ? { acceptAllWarnings: true as const } : {}) };
+}
+
+/**
+ * The warning keys a second try may send when the press accepted every soft
+ * warning: the ones the first try already sent plus every key the server
+ * refused with. Null when there is nothing to retry -- the story printed, the
+ * refusal is `hard`, or the refusal named no warning key a retry could add.
+ */
+export function publishAllRetryKeys(
+  sent: readonly string[],
+  refusal: { ok: boolean; hard?: unknown; warnings?: readonly { key: string }[] },
+): string[] | null {
+  if (refusal.ok || refusal.hard) return null;
+  const keys = new Set(sent);
+  let added = false;
+  for (const warning of refusal.warnings ?? []) {
+    if (!keys.has(warning.key)) {
+      keys.add(warning.key);
+      added = true;
+    }
+  }
+  return added ? [...keys] : null;
 }
 
 /**
