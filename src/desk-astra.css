@@ -4268,6 +4268,50 @@
 }
 .desk-ltr.astra .drafts-state {
   justify-self: start;
+  /* feat-bulk-desk: the row's tick box sits beside its state chip. The chip
+     and the box share the 200px first track, and the chip wraps under the box
+     rather than overflowing the column when the two do not fit. */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+/* The tick box is the Queue's own control (`.queue-check`), already 44px. This
+   only keeps it from stretching in the flex line. */
+.desk-ltr.astra .drafts-check {
+  flex: 0 0 auto;
+}
+/* The strip above the list: Select all shown, the count, and the two presses.
+   It stays in place whenever the list has rows, so "Select all shown" is
+   reachable before anything is ticked. */
+.desk-ltr.astra .drafts-bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .drafts-bulk-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.desk-ltr.astra .drafts-bulk-all > input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--fg);
+}
+.desk-ltr.astra .drafts-bulk-count {
+  font-weight: 600;
+}
+.desk-ltr.astra .drafts-bulk-note {
+  flex-basis: 100%;
+  color: var(--muted, var(--fg));
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .drafts-main {
   min-width: 0;

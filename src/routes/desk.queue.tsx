@@ -722,7 +722,7 @@ function QueuePage() {
   const [panel, setPanel] = useState<"file-lead" | "batch" | null>(null);
   const [batchLeadIds, setBatchLeadIds] = useState<number[]>([]);
   /*
-    The ids the dialog has already queued, so the same five leads cannot be
+    The ids the dialog has already queued, so the same leads cannot be
     queued twice from one press. Cleared when the dialog opens again or when
     the batch list changes.
   */
@@ -2316,7 +2316,7 @@ function QueuePage() {
         open={panel === "batch"}
         onClose={closePanel}
         title="Draft the selected leads"
-        subtitle="Choose leads and one writing runtime. A usual batch has one to five leads; a larger batch asks for your approval. Each lead keeps its own stored research scope."
+        subtitle="Choose leads and one writing runtime. Any number of leads can be drafted in one batch. Each lead keeps its own stored research scope."
         /*
           G34-UI-1 (walk note, Nov 4 2026). After a successful start this dialog
           deliberately stays open: it IS the batch's own panel (Unit BS), and
@@ -2421,7 +2421,7 @@ function QueuePage() {
             disabled={startBatch.isPending}
             compact
           />
-          <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
+          <p className="meta">{selectedBatchLeads.length} selected</p>
           {/*
             FB24 (Oct 11 walk): the bar said "Start 1 story" and this dialog said
             0 with no reason. Say why the count differs from the bar's.

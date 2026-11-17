@@ -427,3 +427,104 @@ export async function restoreKilledLeadForEditor(
   if (!rows.length) return { ok: false as const, error: "That lead is not killed or held." };
   return { ok: true as const, status: back };
 }
+
+/*
+  ── BULK KILL AND ITS UNDO (feat-bulk-desk, Nov 16 2026) ─────────────────────
+
+  Scott's order: "I want to be able to ALSO kill stories in bulk (drafted or
+  not drafted) the same way." The Queue already fans a bulk Kill out over its
+  selection in the browser; the Drafts screen needs the same press, and the
+  press must be ONE write path, so both screens get this server half.
+
+  WHY A LOOP AND NOT A SECOND UPDATE. Every lead goes through
+  `setLeadStatusForEditor`, exactly as a single Kill does, with that lead's own
+  warnings and its own override keys. A refusal on one lead is recorded against
+  that lead and the loop moves on: the editor pressed one button for a batch,
+  and one unkillable row must not strand the others. It is the same shape as
+  `performPublishAllDrafts`.
+
+  THE UNDO IS THE ORDINARY WAY BACK. `performBulkKillUndoForEditor` calls
+  `restoreKilledLeadForEditor` once per lead -- the same write the single
+  kill's Undo uses -- so a lead the desk had drafted comes back `drafted`, a
+  held one comes back `held`, and the kill record is taken off each. The report
+  names the leads that could not be put back rather than stopping at the first.
+*/
+export type BulkKillOutcome = {
+  id: number;
+  ok: boolean;
+  error?: string;
+  /** The warning keys the server returned for this lead, if it refused with one. */
+  warnings?: { key: string; sentence: string }[];
+  /** A `hard` refusal is a wall: the screen offers no "anyway" for it. */
+  hard?: boolean;
+};
+
+function outcomeFrom(value: unknown): { ok: true } | { ok: false; error: string; warnings?: { key: string; sentence: string }[]; hard?: true } {
+  if (!value || typeof value !== "object") return { ok: false, error: "The desk gave no answer." };
+  const answer = value as { ok?: unknown; error?: unknown; warning?: { key: string; sentence: string }; hard?: unknown };
+  if (answer.ok === true) return { ok: true };
+  const error = typeof answer.error === "string" && answer.error.trim()
+    ? answer.error.trim()
+    : "The desk refused that kill and said nothing about why.";
+  return {
+    ok: false,
+    error,
+    ...(answer.warning ? { warnings: [answer.warning] } : {}),
+    ...(answer.hard ? { hard: true as const } : {}),
+  };
+}
+
+/**
+ * Kill every lead in `ids`, one at a time, with one optional shared reason.
+ *
+ * `overrideById` carries the warning keys the editor already approved, per
+ * lead -- the confirm dialog's one press is consent for the warnings it drew,
+ * and nothing it did not draw.
+ */
+export async function performBulkKillForEditor(
+  sql: AuditSqlTag,
+  context: LeadLifecycleContext | number,
+  input: { ids: readonly number[]; killReason?: string; overrideById?: Record<number, readonly string[]> },
+): Promise<BulkKillOutcome[]> {
+  const results: BulkKillOutcome[] = [];
+  for (const id of input.ids) {
+    try {
+      const answer = await setLeadStatusForEditor(sql, context, {
+        id,
+        status: "killed",
+        ...(input.killReason?.trim() ? { killReason: input.killReason.trim() } : {}),
+        ...(input.overrideById?.[id]?.length ? { override: [...input.overrideById[id]] } : {}),
+      });
+      results.push({ id, ...outcomeFrom(answer) });
+    } catch (error) {
+      results.push({
+        id,
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not kill that story.",
+      });
+    }
+  }
+  return results;
+}
+
+/** Put every lead a bulk Kill took back where it was. See the note above. */
+export async function performBulkKillUndoForEditor(
+  sql: AuditSqlTag,
+  context: LeadLifecycleContext | number,
+  ids: readonly number[],
+): Promise<BulkKillOutcome[]> {
+  const results: BulkKillOutcome[] = [];
+  for (const id of ids) {
+    try {
+      const answer = await restoreKilledLeadForEditor(sql, context, { id });
+      results.push({ id, ...outcomeFrom(answer) });
+    } catch (error) {
+      results.push({
+        id,
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not put that story back.",
+      });
+    }
+  }
+  return results;
+}

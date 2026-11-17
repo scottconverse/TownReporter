@@ -33,22 +33,22 @@ it("daily limit warns then saves 13 and the planner uses the approved budget", a
   assert.equal(reset.source_cap_override,null, "returning to a normal cap clears the override");
   assert.equal((await readDailyScanPolicy(1)).sourceCap,8);
 });
-it("six batch leads warn then all six queue with an audit; missing records still refuse", async () => {
+it("six batch leads queue without a size warning; an empty batch and missing records still refuse", async () => {
   const sql = await getSql();
   await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,1,'editor')",[context.userId]);
   const items = [];
   for(let i=0;i<6;i++) { const [r] = await sql.query<{id:number}>("insert into leads(user_id,headline,why,newsroom_id) values($1,'A batch fixture lead','Why this matters',1) returning id",[context.userId]); items.push({leadId:r.id}); }
   const input = {context,items,runtimeSnapshot:{runtime:"claude-sonnet",modelChoice:"claude-sonnet",model:"fixture",transport:"claude-code"}};
-  const first = await commitDraftBatchForAuthenticatedEditor(input,{kick:false,accountRate:false});
-  assert.equal("warning" in first && first.warning?.key,"draft-batch-size");
-  const result = await commitDraftBatchForAuthenticatedEditor({...input,override:["draft-batch-size"]},{kick:false,accountRate:false});
+  /*
+    Scott's order (Nov 16 2026): any number of leads may be bulk drafted, so a
+    batch of six queues with no size warning and no override key to approve.
+    An empty selection is still refused, because there is nothing to draft.
+  */
+  const result = await commitDraftBatchForAuthenticatedEditor(input,{kick:false,accountRate:false});
   assert.equal(result.ok,true); if(result.ok) assert.equal(result.batch.items.length,6);
-  await audited("draft-batch-size");
   const empty = await commitDraftBatchForAuthenticatedEditor({...input,items:[]},{kick:false,accountRate:false});
-  assert.equal("warning" in empty && empty.warning?.key,"draft-batch-size");
-  const approvedEmpty = await commitDraftBatchForAuthenticatedEditor({...input,items:[],override:["draft-batch-size"]},{kick:false,accountRate:false});
-  assert.equal(approvedEmpty.ok,true); if(approvedEmpty.ok) assert.equal(approvedEmpty.batch.items.length,0);
-  const missing = await commitDraftBatchForAuthenticatedEditor({...input,items:[{leadId:2147483000}],override:["draft-batch-size"]},{kick:false,accountRate:false});
+  assert.equal(empty.ok,false); if(!empty.ok) assert.match(empty.error,/at least one lead/i);
+  const missing = await commitDraftBatchForAuthenticatedEditor({...input,items:[{leadId:2147483000}]},{kick:false,accountRate:false});
   assert.equal(missing.ok,false);
 });
 it("batch drafting a killed lead requires an audited override and carries the worker receipt", async () => {
