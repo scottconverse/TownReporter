@@ -33,7 +33,6 @@ import {
 import { StoryBody } from "@/components/story-body";
 import { editorTitle } from "@/lib/news/desk-copy";
 import {
-  PUBLISH_ALL_MAX,
   deskDraftAction,
   deskDraftElapsed,
   deskDraftState,
@@ -233,7 +232,6 @@ function DraftsPage() {
       {/* A row that cannot be read arrives as `null` (DraftItemBoundary draws
           the one alert); it holds no id and so is not selectable. */}
       <PublishAllDrafts
-        sectionName={sectionName}
         selected={selectedDraftLeadIds}
         onSelectionChange={setSelectedDraftLeadIds}
         listedLeadIds={rows
@@ -781,19 +779,16 @@ type BulkKillOutcome = {
   batch: there is nothing finished to print.
 */
 function PublishAllDrafts({
-  sectionName,
   selected,
   onSelectionChange,
   listedLeadIds,
 }: {
-  sectionName: (topic: string | null) => string;
   selected: number[];
   onSelectionChange: (ids: number[]) => void;
   /** The rows the Drafts list is showing: what "Select all" ticks. */
   listedLeadIds: number[];
 }) {
   const qc = useQueryClient();
-  const [confirming, setConfirming] = useState<"all" | "selected" | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [batchError, setBatchError] = useState("");
@@ -835,7 +830,6 @@ function PublishAllDrafts({
 
   const selectedSet = new Set(selected);
   const selectedCandidates = candidates.filter((c) => selectedSet.has(c.leadId));
-  const toPublish = confirming === "selected" ? selectedCandidates : candidates;
 
   const rowById = new Map(allRows.map((row) => [row.lead_id, row]));
   const selectedRows = selected
@@ -863,8 +857,20 @@ function PublishAllDrafts({
     for (const leadId of leadIds) refresh(["lead", leadId]);
   };
 
+  /*
+    ONE PRESS PUBLISHES (Nov 17 2026). Scott: "when i click publish all drafts,
+    it does nothing. I expected it to publish them without clicking on
+    anything". The confirm box is gone, and the press accepts every soft
+    warning (`acceptAllWarnings`); the server still records each one, and a
+    hard refusal (no headline, no body) still lands in "Not published".
+
+    ONE STORY PER REQUEST, so the button counts up as each one prints. A story
+    can take several seconds to print, and a 25-story request drew nothing
+    until all 25 were done -- Scott: "nothing happens for 10-20 seconds (looks
+    frozen or like it didn't get the click)".
+  */
   async function run(list: PublishAllCandidate[]) {
-    setConfirming(null);
+    if (list.length === 0 || running) return;
     setRunning(true);
     setBatchError("");
     setPublished([]);
@@ -875,14 +881,14 @@ function PublishAllDrafts({
     let done = 0;
     try {
       /*
-        Batches of `PUBLISH_ALL_MAX`, one after the other, so a desk with more
-        than 25 finished drafts still gets them all. Each batch's answers are
-        drawn as they land: a long list is never a silent spinner.
+        One story per request, one after the other (see the note above): each
+        answer is drawn as it lands, so a long list is never a silent spinner.
       */
-      for (let start = 0; start < list.length; start += PUBLISH_ALL_MAX) {
-        const batch = list.slice(start, start + PUBLISH_ALL_MAX);
+      for (let start = 0; start < list.length; start += 1) {
+        const batch = list.slice(start, start + 1);
         const answer = await publishAllDrafts({
           data: {
+            acceptAllWarnings: true,
             items: batch.map((c) => ({
               leadId: c.leadId,
               ...(c.topic ? { topic: c.topic } : {}),
@@ -1095,9 +1101,12 @@ function PublishAllDrafts({
               className="btn solid"
               disabled={running || killing || selectedCandidates.length === 0}
               aria-label={`Publish ${selectedCandidates.length} selected stories`}
-              onClick={() => setConfirming("selected")}
+              aria-busy={running}
+              onClick={() => void run(selectedCandidates)}
             >
-              Publish {selectedCandidates.length} selected
+              {running
+                ? `Publishing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
+                : `Publish ${selectedCandidates.length} selected`}
             </button>
             <button
               type="button"
@@ -1153,7 +1162,8 @@ function PublishAllDrafts({
             {running ? (
               /* The live region: the batch's own progress, in words. */
               <p className="published-line" role="status">
-                Publishing {progress.done} of {progress.total}…
+                Publishing story {Math.min(progress.done + 1, progress.total)} of{" "}
+                {progress.total}. Each story takes a few seconds. Stay on this page.
               </p>
             ) : null}
             {batchError ? <p role="alert">{batchError}</p> : null}
@@ -1164,9 +1174,12 @@ function PublishAllDrafts({
                 type="button"
                 className="btn solid"
                 disabled={running || killing}
-                onClick={() => setConfirming("all")}
+                aria-busy={running}
+                onClick={() => void run(candidates)}
               >
-                Publish all drafts ({candidates.length})
+                {running
+                  ? `Publishing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
+                  : `Publish all drafts (${candidates.length})`}
               </button>
             </div>
           ) : null}
@@ -1280,29 +1293,6 @@ function PublishAllDrafts({
           ))}
         </div>
       ) : null}
-
-      <Dialog
-        open={confirming !== null}
-        onClose={() => setConfirming(null)}
-        title="Publish these stories?"
-        subtitle="Each story prints in the section shown beside it."
-        primaryLabel={`Publish ${toPublish.length} ${toPublish.length === 1 ? "story" : "stories"}`}
-        primaryDisabled={toPublish.length === 0 || running}
-        onPrimary={() => void run(toPublish)}
-        cancelLabel="Cancel"
-      >
-        <p>A story with a warning still prints, and the warning is recorded.</p>
-        <ul>
-          {toPublish.map((c) => (
-            <li key={c.leadId}>
-              {editorTitle(c.headline)} — {sectionName(c.topic)}
-              {c.warning ? (
-                <span className="warn-inline">{c.warning}</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </Dialog>
 
       <Dialog
         open={killConfirming}

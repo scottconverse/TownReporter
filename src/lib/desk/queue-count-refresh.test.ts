@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { queueCountRefetchMs } from "./queue-count-refresh.ts";
+import { NAV_COUNT_POLL_MS, queueCountRefetchMs } from "./queue-count-refresh.ts";
 
 /**
  * A11 — the left menu's Queue count froze for the length of a scan.
@@ -15,7 +15,11 @@ describe("the Queue count refetch interval follows the scan", () => {
     assert.equal(queueCountRefetchMs(true), 5000);
   });
 
-  it("does not poll at all when no scan is running", () => {
-    assert.equal(queueCountRefetchMs(false), false);
+  it("still re-reads the small count every 15 seconds when no scan runs", () => {
+    // Nov 17 2026: the count is one number from the server now, not every
+    // lead, so a slow steady poll is cheap and keeps auto-kill and auto-draft
+    // changes visible in the nav.
+    assert.equal(queueCountRefetchMs(false), 15_000);
+    assert.equal(NAV_COUNT_POLL_MS, 15_000);
   });
 });

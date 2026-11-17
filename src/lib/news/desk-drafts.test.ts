@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   PUBLISH_ALL_MAX,
   cleanPublishAllInput,
+  publishAllRetryKeys,
   deskDraftAction,
   deskDraftElapsed,
   deskDraftFilterCounts,
@@ -387,4 +388,31 @@ test("publish all: a request carries positive integers, at most 25, no duplicate
   ]) {
     assert.equal(cleanPublishAllInput(bad).ok, false, JSON.stringify(bad));
   }
+});
+
+test("acceptAllWarnings survives cleaning only as exactly true (Nov 17 2026)", () => {
+  const on = cleanPublishAllInput({ acceptAllWarnings: true, items: [{ leadId: 4 }] });
+  assert.equal(on.ok && on.acceptAllWarnings, true);
+  for (const value of ["true", 1, false, null, undefined]) {
+    const off = cleanPublishAllInput({ acceptAllWarnings: value, items: [{ leadId: 4 }] });
+    assert.equal(off.ok && "acceptAllWarnings" in off, false, String(value));
+  }
+});
+
+test("publishAllRetryKeys: retry adds the refused warning keys, never past a hard refusal", () => {
+  assert.equal(publishAllRetryKeys([], { ok: true }), null);
+  assert.equal(
+    publishAllRetryKeys([], { ok: false, hard: "body", warnings: [{ key: "dek" }] }),
+    null,
+  );
+  assert.deepEqual(
+    publishAllRetryKeys(["unchecked"], {
+      ok: false,
+      warnings: [{ key: "unchecked" }, { key: "claims-unreviewed" }],
+    }),
+    ["unchecked", "claims-unreviewed"],
+  );
+  // Nothing new to add: a second try would only be refused again.
+  assert.equal(publishAllRetryKeys(["dek"], { ok: false, warnings: [{ key: "dek" }] }), null);
+  assert.equal(publishAllRetryKeys([], { ok: false }), null);
 });

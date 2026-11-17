@@ -125,3 +125,52 @@ it("keeps printing after a story that cannot be found", async () => {
   if (!results[0].ok) assert.match(results[0].error, /not found/i);
   assert.equal(results[1].ok, true, JSON.stringify(results[1]));
 });
+
+it("one press publishes past a soft warning, but only when the press accepts warnings (Nov 17 2026)", async () => {
+  /*
+    Scott: "when i click publish all drafts, it does nothing ... why is it
+    there if it doesn't publish all drafts". His one draft carried a warning
+    the batch did not acknowledge, so the server refused it. The press now
+    accepts every soft warning; without the flag the old refusal still holds.
+  */
+  await reset();
+  const lead = await addStory(
+    "Council approves the budget",
+    "The council approved the budget on Tuesday night after a short debate.",
+  );
+  const sql = await getSql();
+  await sql.query("update drafts set dek='' where lead_id=$1", [lead]);
+
+  const [refused] = await performPublishAllDrafts({ userId: USER, newsroomId: NEWSROOM }, [
+    { leadId: lead, topic: "council" },
+  ]);
+  assert.equal(refused.ok, false, "without the flag a soft warning still refuses");
+  if (!refused.ok) {
+    assert.equal(refused.hard, undefined);
+    assert.ok((refused.warnings ?? []).some((w) => w.key === "dek"), JSON.stringify(refused));
+  }
+
+  const [printed] = await performPublishAllDrafts(
+    { userId: USER, newsroomId: NEWSROOM },
+    [{ leadId: lead, topic: "council" }],
+    { acceptAllWarnings: true },
+  );
+  assert.equal(printed.ok, true, JSON.stringify(printed));
+  const [article] = await sql.query<{ status: string }>(
+    "select status from articles where lead_id=$1",
+    [lead],
+  );
+  assert.equal(article?.status, "published");
+});
+
+it("accepting warnings never prints past a hard refusal", async () => {
+  await reset();
+  const empty = await addStory("Story filed with no body", "");
+  const [result] = await performPublishAllDrafts(
+    { userId: USER, newsroomId: NEWSROOM },
+    [{ leadId: empty, topic: "council" }],
+    { acceptAllWarnings: true },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.hard, "body");
+});

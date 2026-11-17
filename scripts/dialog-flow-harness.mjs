@@ -16,7 +16,7 @@ export async function deskOverlayBrowser(fixture) {
     '@/lib/news/claim': `export const myDesk=()=>{},leaveEditor=()=>{};`,
     '@/lib/auth/client': `export const signOut=()=>{};`,
     '@/lib/news/dark': `export const listInvestigations=()=>[];`,
-    '@/lib/news/desk': `export const listFollowUps=()=>[],listLeads=()=>[],countDraftsDesk=()=>0;`,
+    '@/lib/news/desk': `export const listFollowUps=()=>[],listLeads=()=>[],countDraftsDesk=()=>0,countQueueLeads=()=>0;`,
     '@/lib/news/opinion': `export const listEditorials=()=>[];`,
     '@/lib/appearance-context': `export const useAppearance=()=>({appearance:{desk:'light',size:window.deskSize||'normal'},setDesk(){}});`,
     '@/components/desk-chrome-utils': `export const announceToDesk=()=>{};export const deskShellClassName=({size})=>'desk-ltr '+(size==='large'?'large':'');`,

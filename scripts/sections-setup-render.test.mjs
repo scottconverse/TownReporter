@@ -182,7 +182,7 @@ const deskServerStub = inlineModule(`
     (countDraftsDesk) instead of the whole list. This static render never
     invokes it -- there is no click and no live query -- it only has to exist.
   */
-  export async function countDraftsDesk() { return 0; }
+  export async function countQueueLeads() { return 0; } export async function countDraftsDesk() { return 0; }
   export async function addSource() {
     return { ok: false, error: "not called in a static render" };
   }

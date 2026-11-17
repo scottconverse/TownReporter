@@ -111,6 +111,7 @@ import {
   deskDraftMatchesFilter,
   deskDraftState,
   type PublishAllItem,
+  publishAllRetryKeys,
 } from "./desk-drafts.ts";
 import {
   PUBLISHED_FILTERS,
@@ -5686,6 +5687,28 @@ export const countDraftsDesk = createServerFn({ method: "GET" })
   });
 
 /**
+ * The left nav's Queue number, counted on the server (Nov 17 2026).
+ *
+ * The nav used to call `listLeads` for this one number: every lead, with its
+ * notes and evidence -- about 30 MB of JSON on the live paper -- on every desk
+ * screen, and every 5 seconds while a scan ran. Scott: "Load time on drafts
+ * and queue are slow several seconds to 10's of seconds." The count is the
+ * same rule `openLeads` applies to those rows (desk-copy.ts): every lead of
+ * this newsroom that is not killed, published or held.
+ */
+export const countQueueLeads = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    const [row] = await sql.query<{ count: number }>(
+      `select count(*)::int as count from leads
+       where newsroom_id = $1 and coalesce(status, '') not in ('killed', 'published', 'held')`,
+      [owned(context)],
+    );
+    return row?.count ?? 0;
+  });
+
+/**
  * The Drafts screen's window (Unit CZ-long-lists).
  *
  * "Everything not yet printed" is a growing list on a real desk, and the screen
@@ -7972,6 +7995,7 @@ export const publishLead = createServerFn({ method: "POST" })
 export const performPublishAllDrafts = createServerOnlyFn(async function performPublishAllDrafts(
   context: { userId: string; newsroomId?: number },
   items: readonly PublishAllItem[],
+  options: { acceptAllWarnings?: boolean } = {},
 ): Promise<PublishAllResult[]> {
   const sql = await getSql();
   /*
@@ -7994,15 +8018,19 @@ export const performPublishAllDrafts = createServerOnlyFn(async function perform
   for (const item of items) {
     const headline = headlines.get(item.leadId) ?? "";
     try {
-      const outcome = await performPublish(
-        context,
-        item.leadId,
-        item.topic,
-        undefined,
-        {},
-        item.acknowledgedWarningKeys ?? [],
-        undefined,
-      );
+      const sent = item.acknowledgedWarningKeys ?? [];
+      let outcome = await performPublish(context, item.leadId, item.topic, undefined, {}, sent, undefined);
+      /*
+        Nov 17 2026: the one press accepts every soft warning (see
+        `acceptAllWarnings`). The first try names the warnings; the second
+        sends exactly those keys, the same thing the story page's own
+        "Publish anyway" does, so each one is recorded. A hard refusal is
+        never retried.
+      */
+      const retryKeys = options.acceptAllWarnings ? publishAllRetryKeys(sent, outcome) : null;
+      if (retryKeys) {
+        outcome = await performPublish(context, item.leadId, item.topic, undefined, {}, retryKeys, undefined);
+      }
       results.push(
         outcome.ok
           ? { leadId: item.leadId, headline, ok: true, slug: outcome.slug }
@@ -8032,7 +8060,11 @@ export const publishAllDrafts = createServerFn({ method: "POST" })
   .validator((raw: unknown) => cleanPublishAllInput(raw))
   .handler(async ({ context, data }) =>
     data.ok
-      ? { results: await performPublishAllDrafts(context, data.items) }
+      ? {
+          results: await performPublishAllDrafts(context, data.items, {
+            acceptAllWarnings: data.acceptAllWarnings === true,
+          }),
+        }
       : { results: [] as PublishAllResult[], error: data.error },
   );
 

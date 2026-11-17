@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth/client";
 import { leaveEditor } from "@/lib/news/claim";
 import { listInvestigations } from "@/lib/news/dark";
-import { chipLabel, createEditorCopy, editorTitle, openLeads, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
+import { chipLabel, createEditorCopy, editorTitle, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
@@ -28,8 +28,8 @@ import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { jobHeadline, navRunningRows, useJobsDrawnOnPage } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
-import { queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
-import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
+import { NAV_COUNT_POLL_MS, queueCountRefetchMs } from "@/lib/desk/queue-count-refresh";
+import { listFollowUps, listLeads, countDraftsDesk, countQueueLeads } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
 import { runningHeadLabel } from "@/lib/news/running-head-label";
@@ -315,9 +315,16 @@ export function DeskShell({
   const scanRunning = (jobs.data ?? []).some(
     (job) => job.kind === "scan" && (job.status === "queued" || job.status === "running"),
   );
-  const leads = useQuery({
-    queryKey: ["leads"],
-    queryFn: () => listLeads(),
+  /*
+    Nov 17 2026: the Queue number is COUNTED on the server (`countQueueLeads`).
+    This read used to fetch every lead -- about 30 MB on the live paper -- on
+    every desk screen, which made Drafts and Queue take seconds to load. The
+    key keeps the `["leads"]` prefix so every write that invalidates the lead
+    lists refreshes this number too.
+  */
+  const queueCount = useQuery({
+    queryKey: ["leads", "nav-count"],
+    queryFn: () => countQueueLeads(),
     refetchInterval: queueCountRefetchMs(scanRunning),
   });
   /*
@@ -331,7 +338,17 @@ export function DeskShell({
     render that array. The shared `["drafts-desk"]` PREFIX keeps every
     invalidation reaching this read.
   */
-  const drafts = useQuery({ queryKey: ["drafts-desk", "count"], queryFn: () => countDraftsDesk() });
+  /*
+    Polled (Nov 17 2026): auto-draft writes drafts in the background, and
+    nothing on the screen the editor is on invalidates this key, so the number
+    sat still until Drafts was opened. Scott: "drafts does not update the
+    number done in the left side panel until you actually open drafts."
+  */
+  const drafts = useQuery({
+    queryKey: ["drafts-desk", "count"],
+    queryFn: () => countDraftsDesk(),
+    refetchInterval: NAV_COUNT_POLL_MS,
+  });
   const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
   const followUps = useQuery({
     queryKey: ["follow-ups", "all"],
@@ -344,7 +361,6 @@ export function DeskShell({
   const running = (jobs.data ?? []).filter(
     (j) => j.status === "running" || j.status === "queued",
   );
-  const allLeads = leads.data ?? [];
   /*
     THE FIVE DRAWN COUNTS, each one the number its own screen prints:
 
@@ -366,7 +382,7 @@ export function DeskShell({
     slow screen from printing a confident 0.
   */
   const counts: Record<string, number | undefined> = {
-    Queue: allLeads.length ? openLeads(allLeads).length : undefined,
+    Queue: typeof queueCount.data === "number" ? queueCount.data : undefined,
     Drafts: drafts.data,
     Opinion: editorials.data ? editorials.data.length : undefined,
     "Follow-ups": followUps.data
