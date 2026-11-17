@@ -880,7 +880,7 @@ const { Chip } = await import(
       ),
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; } export async function countDraftsDesk() { return 0; }",
+        "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; } export async function countQueueLeads() { return 0; } export async function countDraftsDesk() { return 0; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       "@/components/warning-consent-host": inlineModule("export function WarningConsentHost() { return null; }"),
