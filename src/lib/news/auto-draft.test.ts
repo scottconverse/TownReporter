@@ -118,7 +118,7 @@ describe("the automatic draft rule (Scott: 14 and up)", () => {
     assert.deepEqual(asked, [blank], "a whitespace-only placeholder is not a draft");
   });
 
-  it("skips a lead whose draft job is still queued or running", async () => {
+  it("skips a lead whose draft job is queued, running or stopped by the editor", async () => {
     const queued = await fileLead({ headline: "Queued", score: 18 });
     await fileJob(queued, "queued");
     const running = await fileLead({ headline: "Running", score: 18 });
@@ -127,6 +127,10 @@ describe("the automatic draft rule (Scott: 14 and up)", () => {
     // to be tried again, which is what "no OPEN draft job" means.
     const finished = await fileLead({ headline: "Finished", score: 18 });
     await fileJob(finished, "failed");
+    // A draft the EDITOR stopped ends 'cancelled' (jobs.ts), and is never put
+    // back in the queue by this rule -- brief item 2.
+    const stopped = await fileLead({ headline: "Stopped by the editor", score: 18 });
+    await fileJob(stopped, "cancelled");
 
     const { asked, commitDraft } = recorder();
     await autoDraftEligibleLeads(

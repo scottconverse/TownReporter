@@ -78,8 +78,10 @@ async function noteDraftRefusal(
  *
  * A lead is skipped when it is not `new` (so a killed, held, published or
  * already-drafted lead never comes back through this rule), when it already
- * carries a written draft, when it is at or below the threshold, or when a
- * draft job for it is still queued or running.
+ * carries a written draft, when it is at or below the threshold, when a draft
+ * job for it is still queued or running, or when an editor already STOPPED a
+ * draft for it (that job ends 'cancelled', and a draft the editor killed is
+ * never drafted again by this rule).
  *
  * One lead's refusal never stops the sweep: the refusal note is kept the way
  * the Draft button keeps it, and the next lead is tried. This function never
@@ -112,6 +114,20 @@ export async function autoDraftEligibleLeads(
           and j.kind = 'draft'
           and j.subject_id = l.id
           and j.status in ('queued', 'running')
+      )
+      /*
+        A draft the EDITOR stopped is finished with, not waiting: requestJobCancel
+        ends a story draft as 'cancelled' (jobs.ts). Without this line the next
+        scan would put the same lead back in the queue an editor just cleared,
+        which is the second half of brief item 2. A 'failed' job is different --
+        no editor stopped it -- so it stays retryable.
+      */
+      and not exists (
+        select 1 from desk_jobs j
+        where j.newsroom_id = l.newsroom_id
+          and j.kind = 'draft'
+          and j.subject_id = l.id
+          and j.status = 'cancelled'
       )
     order by l.newsworthiness desc, l.id asc
   `;
