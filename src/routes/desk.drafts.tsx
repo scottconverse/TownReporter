@@ -666,24 +666,29 @@ function WaitingRoundups() {
   page, one screen at a time.
 
   WHAT IS IN THE BATCH. The stories whose row's own state is "Your draft" or
-  "Ready to check" -- `publishAllCandidates`, from the WHOLE list
-  (`listDraftsDesk`), not only the 25 rows the window is showing. A running
-  draft is not finished, a failed or empty one has nothing to print, and the
-  "Needs you" rows (a name to review, evidence to check) are exactly the ones
-  with a decision still outstanding, so they are not offered here. The button
-  hides itself when nothing qualifies.
+  "Ready to check", AND every "Needs you" row that has a finished body --
+  not-checked, to-check, names and evidence to review. The owner's words
+  (Nov 16 2026): "I just want to publish them all at once." His eight drafts
+  were all "! Not checked yet", so a batch limited to "Ready" was a button he
+  could never press. Running, failed and empty drafts are never in. The list is
+  the WHOLE list (`listDraftsDesk`), not only the 25 rows the window is
+  showing. The button hides itself when nothing qualifies.
 
-  THE CONFIRM STEP IS THE SECTION CONFIRMATION. The dialog lists every story
-  with its section, and pressing "Publish N stories" sends each story's shown
-  section as its `topic` -- the same thing the story page's own Publish button
-  does by carrying the section it printed on its face.
+  THE CONFIRM STEP IS THE SECTION CONFIRMATION AND THE WARNING. The dialog lists
+  every story with its section, and marks each story that still needs the
+  editor with a short warning ("Not checked yet", "3 to check", "Names to
+  review"). Pressing "Publish N stories" sends each story's shown section as its
+  `topic`, and -- for a story the dialog warned about -- the warning keys that
+  warning stands for, exactly the keys the story page's own "Publish anyway"
+  sends. That is Scott's rule 22 at the batch's scale: the dialog names what is
+  outstanding, so the one press may acknowledge it. A story with nothing shown
+  acknowledges nothing.
 
-  A REFUSAL IS ONE STORY'S, NOT THE BATCH'S. `publishAllDrafts` never
-  acknowledges a warning, so any gate that fires refuses that story and names
-  what it said; the row then offers "Publish anyway" for that story alone,
-  carrying exactly the keys the server returned (Scott's rule 22: every gate
-  warns and has an anyway button). A `hard` refusal is a wall and gets no
-  button.
+  A REFUSAL IS ONE STORY'S, NOT THE BATCH'S. If a warning the dialog did NOT
+  draw fires, or any gate refuses, that story alone comes back named in "Not
+  published"; the rest still print, and the row offers "Publish anyway" with
+  exactly the keys the server returned (rule 22). A `hard` refusal is a wall
+  and gets no button.
 */
 type PublishAllOutcome = {
   leadId: number;
@@ -768,6 +773,9 @@ function PublishAllDrafts({
             items: batch.map((c) => ({
               leadId: c.leadId,
               ...(c.topic ? { topic: c.topic } : {}),
+              ...(c.acknowledgedWarningKeys.length
+                ? { acknowledgedWarningKeys: c.acknowledgedWarningKeys }
+                : {}),
             })),
           },
         });
@@ -973,10 +981,14 @@ function PublishAllDrafts({
         onPrimary={() => void run()}
         cancelLabel="Cancel"
       >
+        <p>A story with a warning still prints, and the warning is recorded.</p>
         <ul>
           {candidates.map((c) => (
             <li key={c.leadId}>
               {editorTitle(c.headline)} — {sectionName(c.topic)}
+              {c.warning ? (
+                <span className="warn-inline">{c.warning}</span>
+              ) : null}
             </li>
           ))}
         </ul>

@@ -266,24 +266,33 @@ export function deskDraftAction(state: DeskDraftState): string {
   the pure module, rather than in the route or beside the server function, so
   both are tested without a database:
 
-    1. WHICH ROWS QUALIFY. Only a draft whose state is "Your draft" or "Ready
-       to check" is part of the batch. A running draft is not finished, a failed
-       one has nothing to print, an empty one has no prose, and the three
-       "Needs you" states (names, evidence, imported) are exactly the rows with
-       an outstanding decision -- publishing them would be the desk deciding on
-       the editor's behalf. `performPublish` still has the final say per story;
-       this only decides what the button offers.
-    2. WHAT A REQUEST MAY CARRY. Positive integers, at most 25, no duplicates.
-       A duplicate would print one story twice in the same batch, so it is
-       dropped (the first copy is kept), not refused; anything that is not a
-       positive integer, or an empty list, refuses the whole request, because a
-       request built wrong is a client bug and not a list of stories to guess.
+    1. WHICH ROWS QUALIFY. A draft whose state is "Your draft" or "Ready to
+       check" is part of the batch, and so is every "Needs you" draft that has
+       a finished body -- not-checked, to-check, names and evidence to review.
+       The owner's words (Nov 16 2026): "I just want to publish them all at
+       once." His eight drafts were all "! Not checked yet", so a batch limited
+       to "Ready" was a button that never appeared. Running, failed and empty
+       drafts never qualify: there is nothing finished to print. `performPublish`
+       still has the final say per story; this only decides what the button
+       offers, and a `hard` refusal there still skips that one story.
+    2. WHAT A REQUEST MAY CARRY. Positive integers, at most 25, no duplicates,
+       and -- per item -- the warning keys the confirm dialog put the editor on
+       notice for (`acknowledgedWarningKeys`). A duplicate would print one
+       story twice in the same batch, so it is dropped (the first copy is kept),
+       not refused; anything that is not a positive integer, or an empty list,
+       refuses the whole request, because a request built wrong is a client bug
+       and not a list of stories to guess.
 */
 
 /** The most stories one publish-all request may carry (the client batches). */
 export const PUBLISH_ALL_MAX = 25;
 
-export type PublishAllItem = { leadId: number; topic?: string };
+export type PublishAllItem = {
+  leadId: number;
+  topic?: string;
+  /** Warning keys the confirm dialog showed for this story. See `publishAllNotice`. */
+  acknowledgedWarningKeys?: string[];
+};
 
 export type PublishAllInput =
   | { ok: true; items: PublishAllItem[] }
@@ -315,6 +324,7 @@ export function cleanPublishAllInput(raw: unknown): PublishAllInput {
     const o = (typeof entry === "object" && entry !== null ? entry : {}) as {
       leadId?: unknown;
       topic?: unknown;
+      acknowledgedWarningKeys?: unknown;
     };
     const leadId = positiveInt(o.leadId);
     if (leadId === null) {
@@ -326,15 +336,105 @@ export function cleanPublishAllInput(raw: unknown): PublishAllInput {
     // 40 is `LIMITS.topic` in request-input.ts, the same ceiling the single
     // publish request uses for the section key.
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, 40) : "";
-    items.push({ leadId, ...(topic ? { topic } : {}) });
+    const acknowledgedWarningKeys = cleanPublishAllWarningKeys(o.acknowledgedWarningKeys);
+    items.push({
+      leadId,
+      ...(topic ? { topic } : {}),
+      ...(acknowledgedWarningKeys.length ? { acknowledgedWarningKeys } : {}),
+    });
   }
   return { ok: true, items };
 }
 
-/** Is this row part of "Publish all drafts"? */
-export function publishAllQualifies(state: Pick<DeskDraftState, "key">): boolean {
-  return state.key === "yours" || state.key === "ready";
+/**
+ * The warning keys one item may acknowledge, cleaned.
+ *
+ * Only strings that carry text survive, duplicates are dropped, and the list
+ * is capped -- an acknowledgement is a closed set of keys, never free prose,
+ * and `performPublish` only lets through a key that names a warning it
+ * recomputed for this exact draft. The dialog can never send a key it did not
+ * show.
+ */
+function cleanPublishAllWarningKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const key = value.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+    if (keys.length >= 20) break;
+  }
+  return keys;
 }
+
+/** The state fields the publish-all rules read. */
+type PublishAllState = Pick<DeskDraftState, "key"> &
+  Partial<Pick<DeskDraftState, "needsYou" | "running" | "failed" | "readiness">>;
+
+/**
+ * Is this row part of "Publish all drafts"?
+ *
+ * Ready and the editor's own drafts are always in. A "Needs you" row is in too
+ * when it has a finished body -- the desk's own state has already ruled out
+ * running, failed and empty rows before it reaches here, but those are checked
+ * again so no caller can slip one in. See the note above for why the owner
+ * asked for this.
+ */
+export function publishAllQualifies(state: PublishAllState): boolean {
+  if (state.running === true || state.failed === true) return false;
+  if (state.key === "yours" || state.key === "ready") return true;
+  if (state.key === "names" || state.key === "evidence" || state.key === "not-ready") {
+    return state.needsYou === true;
+  }
+  return false;
+}
+
+/**
+ * The short warning the confirm dialog prints beside a story and the warning
+ * keys that warning acknowledges on the one press.
+ *
+ * Scott's rule 22 -- every gate warns and has an anyway button -- is kept here
+ * at the batch's scale: the dialog names what is outstanding before the press,
+ * and the batch may then send exactly those keys, the same ones the story
+ * page's own "Publish anyway" sends. A story with nothing shown acknowledges
+ * nothing, so any warning beyond what the dialog drew still refuses that one
+ * story and it is named in "Not published" with its own button.
+ */
+export function publishAllNotice(
+  state: Pick<DeskDraftState, "key"> & Partial<Pick<DeskDraftState, "needsYou" | "readiness">>,
+): { warning: string; acknowledgedWarningKeys: string[] } {
+  const readiness = state.readiness;
+  if (readiness?.state === "not-checked") {
+    return { warning: "Not checked yet", acknowledgedWarningKeys: ["unchecked"] };
+  }
+  if (readiness?.state === "to-check") {
+    return { warning: storyReadinessChip(readiness).text, acknowledgedWarningKeys: ["readiness"] };
+  }
+  if (readiness?.state === "not-ready") {
+    const reason = readiness.reason.trim();
+    return { warning: reason || "Not ready", acknowledgedWarningKeys: ["readiness"] };
+  }
+  if (state.key === "evidence") {
+    return { warning: "Evidence to check", acknowledgedWarningKeys: [] };
+  }
+  if (state.key === "names") {
+    return { warning: "Names to review", acknowledgedWarningKeys: [] };
+  }
+  return { warning: "", acknowledgedWarningKeys: [] };
+}
+
+export type PublishAllCandidate = {
+  leadId: number;
+  headline: string;
+  topic: string | null;
+  /** What the confirm dialog warns about this story, or "" when nothing is outstanding. */
+  warning: string;
+  /** The warning keys the dialog has put the editor on notice for. */
+  acknowledgedWarningKeys: string[];
+};
 
 /**
  * The stories the button would print, in the order the list holds them.
@@ -345,11 +445,22 @@ export function publishAllQualifies(state: Pick<DeskDraftState, "key">): boolean
  */
 export function publishAllCandidates<R extends { lead_id: number; headline: string; topic: string | null }>(
   rows: readonly R[],
-  stateOf: (row: R) => Pick<DeskDraftState, "key">,
-): { leadId: number; headline: string; topic: string | null }[] {
-  return rows
-    .filter((row) => publishAllQualifies(stateOf(row)))
-    .map((row) => ({ leadId: row.lead_id, headline: row.headline, topic: row.topic }));
+  stateOf: (row: R) => PublishAllState,
+): PublishAllCandidate[] {
+  const candidates: PublishAllCandidate[] = [];
+  for (const row of rows) {
+    const state = stateOf(row);
+    if (!publishAllQualifies(state)) continue;
+    const notice = publishAllNotice(state);
+    candidates.push({
+      leadId: row.lead_id,
+      headline: row.headline,
+      topic: row.topic,
+      warning: notice.warning,
+      acknowledgedWarningKeys: notice.acknowledgedWarningKeys,
+    });
+  }
+  return candidates;
 }
 
 /** The edition and its step counts are derived before any display window. */

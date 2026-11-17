@@ -9,6 +9,7 @@ import {
   deskDraftMatchesFilter,
   deskDraftState,
   publishAllCandidates,
+  publishAllNotice,
   publishAllQualifies,
   type DeskDraftFacts,
 } from "./desk-drafts.ts";
@@ -255,19 +256,27 @@ test("FC24: unreviewed claims and Not checked yet both wait on the editor", () =
   cleaned wrongly prints the same story twice -- so both are pinned here,
   behaviour only, with no database and no source file read.
 */
-test("publish all: only an editor's own or a ready draft is in the batch", () => {
+test("publish all: ready, the editor's own, and finished needs-you drafts are in the batch", () => {
   const included = ["yours", "ready"] as const;
   const excluded = [
     "running",
     "failed",
-    "names",
-    "evidence",
     "imported",
     "empty",
-    "not-ready",
   ] as const;
   for (const key of included) assert.equal(publishAllQualifies({ key }), true, key);
   for (const key of excluded) assert.equal(publishAllQualifies({ key }), false, key);
+
+  // A "Needs you" draft with a finished body is in -- the owner's eight
+  // "! Not checked yet" drafts were the ones the old rule hid the button for.
+  for (const key of ["names", "evidence", "not-ready"] as const) {
+    assert.equal(publishAllQualifies({ key, needsYou: true }), true, key);
+    assert.equal(publishAllQualifies({ key, needsYou: false }), false, `${key} without a need`);
+  }
+  // A row the desk marks running or failed is never in, whatever its need.
+  assert.equal(publishAllQualifies({ key: "not-ready", needsYou: true, running: true }), false);
+  assert.equal(publishAllQualifies({ key: "not-ready", needsYou: true, failed: true }), false);
+  assert.equal(publishAllQualifies({ key: "empty", needsYou: true }), false);
 });
 
 test("publish all: the candidate list keeps order and drops every other row", () => {
@@ -277,20 +286,75 @@ test("publish all: the candidate list keeps order and drops every other row", ()
     { lead_id: 3, headline: "Empty row", topic: null },
     { lead_id: 4, headline: "Your draft", topic: "police" },
     { lead_id: 5, headline: "Name to review", topic: "council" },
+    { lead_id: 6, headline: "Not checked yet", topic: "schools" },
   ];
-  const keys: Record<number, string> = {
-    1: "ready",
-    2: "running",
-    3: "empty",
-    4: "yours",
-    5: "names",
+  const states: Record<number, { key: string; needsYou: boolean; readiness?: { state: string; openCount: number; totalCount: number; reason: string } }> = {
+    1: { key: "ready", needsYou: false },
+    2: { key: "running", needsYou: false },
+    3: { key: "empty", needsYou: false },
+    4: { key: "yours", needsYou: false },
+    5: { key: "names", needsYou: true },
+    6: {
+      key: "not-ready",
+      needsYou: true,
+      readiness: { state: "not-checked", openCount: 0, totalCount: 0, reason: "Nothing has checked this story." },
+    },
   };
-  const candidates = publishAllCandidates(rows, (row) => ({ key: keys[row.lead_id] as never }));
+  const candidates = publishAllCandidates(rows, (row) => states[row.lead_id] as never);
   assert.deepEqual(
     candidates.map((c) => c.leadId),
-    [1, 4],
+    [1, 4, 5, 6],
   );
-  assert.deepEqual(candidates[1], { leadId: 4, headline: "Your draft", topic: "police" });
+  assert.deepEqual(candidates[0], {
+    leadId: 1,
+    headline: "Council vote",
+    topic: "council",
+    warning: "",
+    acknowledgedWarningKeys: [],
+  });
+  // The not-checked story is the one the dialog marks, and the one press
+  // acknowledges the `unchecked` gate it stands for.
+  assert.deepEqual(candidates[3], {
+    leadId: 6,
+    headline: "Not checked yet",
+    topic: "schools",
+    warning: "Not checked yet",
+    acknowledgedWarningKeys: ["unchecked"],
+  });
+});
+
+test("publish all: a notice names the warning and the key it acknowledges", () => {
+  assert.deepEqual(publishAllNotice({ key: "not-ready", needsYou: true,
+    readiness: { state: "not-checked", openCount: 0, totalCount: 0, reason: "" } }),
+    { warning: "Not checked yet", acknowledgedWarningKeys: ["unchecked"] });
+  assert.deepEqual(publishAllNotice({ key: "not-ready", needsYou: true,
+    readiness: { state: "to-check", openCount: 3, totalCount: 5, reason: "3 facts need checking." } }),
+    { warning: "! 3 to check", acknowledgedWarningKeys: ["readiness"] });
+  assert.deepEqual(publishAllNotice({ key: "names", needsYou: true }),
+    { warning: "Names to review", acknowledgedWarningKeys: [] });
+  assert.deepEqual(publishAllNotice({ key: "evidence", needsYou: true }),
+    { warning: "Evidence to check", acknowledgedWarningKeys: [] });
+  // A ready story has nothing to warn about and nothing to acknowledge.
+  assert.deepEqual(publishAllNotice({ key: "ready", needsYou: false }),
+    { warning: "", acknowledgedWarningKeys: [] });
+});
+
+test("publish all: a request keeps the warning keys each item acknowledges", () => {
+  assert.deepEqual(
+    cleanPublishAllInput({
+      items: [
+        { leadId: 3, acknowledgedWarningKeys: ["unchecked", "unchecked", "", 7] },
+        { leadId: 9 },
+      ],
+    }),
+    {
+      ok: true,
+      items: [
+        { leadId: 3, acknowledgedWarningKeys: ["unchecked"] },
+        { leadId: 9 },
+      ],
+    },
+  );
 });
 
 test("publish all: a request carries positive integers, at most 25, no duplicates", () => {
