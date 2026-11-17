@@ -382,7 +382,9 @@ export function DeskShell({
     slow screen from printing a confident 0.
   */
   const counts: Record<string, number | undefined> = {
-    Queue: typeof queueCount.data === "number" ? queueCount.data : undefined,
+    // No number on an empty Queue, as before Nov 17 (the old read showed none
+    // when there were no leads; browser walks find the link by its bare name).
+    Queue: typeof queueCount.data === "number" && queueCount.data > 0 ? queueCount.data : undefined,
     Drafts: drafts.data,
     Opinion: editorials.data ? editorials.data.length : undefined,
     "Follow-ups": followUps.data

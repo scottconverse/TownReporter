@@ -5,6 +5,7 @@ import { getSql } from "../db.ts";
 import {
   fillEvidenceVectorsOnce,
   pruneEvidenceVectorsOnce,
+  resetEvidenceFillCursorForTests,
 } from "./evidence-vector-fill.server.ts";
 import {
   setEmbedderForTests,
@@ -57,6 +58,7 @@ function fakeEmbedder() {
 }
 
 afterEach(() => {
+  resetEvidenceFillCursorForTests();
   setEmbedderForTests(null);
   clearEvidenceVectorCache();
 });
@@ -156,5 +158,50 @@ describe("broken text", () => {
       order by excerpt_md5
     `;
     assert.deepEqual(left.map((row) => row.excerpt_md5), [md5(clean)]);
+  });
+});
+
+describe("walk by id (Nov 17 2026)", () => {
+  // The old fill read the whole table every minute. Each call now reads only
+  // ids after the last one it saw, at most `window` of them.
+  it("reads at most one window per call and does not read the same rows again", async () => {
+    const v = await version();
+    const ids: number[] = [];
+    for (let i = 0; i < 6; i += 1) ids.push(await chunk(v, `Window walk excerpt ${i} on the water plan`));
+    setEmbedderForTests(fakeEmbedder());
+    // Walk up to just before these rows (other tests' rows already have vectors).
+    while ((await fillEvidenceVectorsOnce({ batch: 32, window: 100_000 })) > 0) { /* drain */ }
+    resetEvidenceFillCursorForTests();
+    const sql = await getSql();
+    await sql`delete from evidence_vectors where excerpt_md5 in (select md5(excerpt) from artifact_chunks where id = any(${ids}::int[]))`;
+
+    // Small window: each call sees only some rows, so the six come in pieces.
+    const got: number[] = [];
+    for (let i = 0; i < 1000; i += 1) {
+      const n = await fillEvidenceVectorsOnce({ batch: 32, window: 32 });
+      got.push(n);
+      if (got.reduce((a, b) => a + b, 0) >= 6) break;
+    }
+    assert.equal(got.reduce((a, b) => a + b, 0), 6);
+    // The walk is at the end: nothing more to read, nothing filled.
+    assert.equal(await fillEvidenceVectorsOnce({ batch: 32, window: 32 }), 0);
+
+    // A vector lost behind the walk is not picked up until the walk starts again.
+    await sql`delete from evidence_vectors where excerpt_md5 = md5(${"Window walk excerpt 0 on the water plan"})`;
+    assert.equal(await fillEvidenceVectorsOnce({ batch: 32, window: 100_000 }), 0);
+
+    // A new chunk has a higher id, so the next call finds it.
+    await chunk(v, "A new chunk after the walk passed");
+    assert.equal(await fillEvidenceVectorsOnce({ batch: 32, window: 100_000 }), 1);
+
+    // After a restart (mark back at 0) the lost one is filled again.
+    resetEvidenceFillCursorForTests();
+    let total = 0;
+    for (let i = 0; i < 1000; i += 1) {
+      const before = total;
+      total += await fillEvidenceVectorsOnce({ batch: 32, window: 100_000 });
+      if (total === before && i > 0) break;
+    }
+    assert.equal(total, 1);
   });
 });

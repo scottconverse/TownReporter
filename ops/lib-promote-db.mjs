@@ -1222,9 +1222,15 @@ export async function copyDatabase(options) {
     // The copy gets the live database's owner, not the admin role's.
     const owner = await databaseOwner(client, options.database);
     report.owner = owner;
+    // Nov 17 2026: PostgreSQL 15+ copies a template page by page through the
+    // WAL by default (strategy wal_log). A 2 GB live database then wrote 2 GB
+    // of WAL, forced back-to-back checkpoints (170 s and 133 s in the log), and
+    // ran past the 600 s limit, so the deploy failed. `file_copy` takes one
+    // checkpoint and copies the files, which is the old, fast way.
     await client.query(
       `create database ${quoteIdent(options.copy)} template ${quoteIdent(options.database)}` +
-        (owner ? ` owner ${quoteIdent(owner)}` : ""),
+        (owner ? ` owner ${quoteIdent(owner)}` : "") +
+        " strategy file_copy",
     );
     return null;
   });
