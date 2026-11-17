@@ -26,7 +26,7 @@ import { HOME_AREA } from "@/lib/story-area";
 import { readerSearch, readMinutes } from "@/lib/reader";
 import { PublicSectionsSeed, usePublicSections } from "@/lib/use-sections";
 import { publicSections } from "@/lib/news/sections";
-import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { topicReportingSentence } from "@/lib/paper-phrases";
 import { editionRiverQuery } from "@/lib/news/edition-river";
 import { frontEventsWeek } from "@/lib/news/events-week-public";
@@ -65,15 +65,27 @@ export const Route = createFileRoute("/")({
         opinion: null,
         roundups: [],
         events: null,
+        region: null,
       };
 
     const above = page.stories.slice(0, TOP_STORIES).map((story) => story.id);
-    const [opinion, eventsWeek, roundups] = await Promise.all([
+    const [opinion, eventsWeek, roundups, region] = await Promise.all([
       readerArticles({
         data: { topic: "opinion", page: 1, oldest: false, limit: 1 },
       }),
       frontEventsWeek(),
       readerRoundups(),
+      /*
+        Nov 17 2026 (Scott: "Add a region band"): the edition reads only the
+        home town, so a county or state story was on no front page at all.
+        With no pill pressed, a band below the home-town stories shows the
+        newest stories from everywhere else.
+      */
+      deps.area
+        ? Promise.resolve(null)
+        : readerArticles({
+            data: { notArea: HOME_AREA, notTopic: "opinion", notRoutine: true, limit: 6 },
+          }),
     ]);
     const river = await readerArticles({
       data: editionRiverQuery(area!, RIVER_BATCH, [
@@ -83,7 +95,7 @@ export const Route = createFileRoute("/")({
     });
     /* A seven-day read with no events is no band at all. */
     const events = hasEvents(eventsWeek.days) ? eventsWeek : null;
-    return { sections, listing: page, river, opinion, roundups, events };
+    return { sections, listing: page, river, opinion, roundups, events, region };
   },
   component: FrontPage,
 });
@@ -132,6 +144,7 @@ function Home() {
   const { formatShortDate } = usePaperDateFormatters();
   const search = Route.useSearch();
   const initial = Route.useLoaderData();
+  const areaLabels = useAreaLabels();
   const navigate = useNavigate();
   const reader = useReader();
   const [q, setQ] = useState(search.q || "");
@@ -184,6 +197,7 @@ function Home() {
     meta: `${formatShortDate(story.published_at)} · ${readMinutes(story.body)} min read`,
   }));
   const latest = initial.river?.stories ?? [];
+  const region = initial.region?.stories ?? [];
   const nav = (change: Partial<typeof search>) =>
     void navigate({ to: "/", search: { ...search, ...change, page: change.page } });
 
@@ -377,7 +391,8 @@ function Home() {
                           </h3>
                           <p>{dekOrFallback(story.dek, story.body)}</p>
                           <span className="frontmeta">
-                            {formatShortDate(story.published_at)} · {readMinutes(story.body)} min read
+                            {formatShortDate(story.published_at)} · {readMinutes(story.body)} min
+                            read
                           </span>
                         </article>
                       ))}
@@ -423,8 +438,8 @@ function Home() {
                             <p>{dekOrFallback(story.dek, story.body)}</p>
                             <div className="frontlatestmeta">
                               <span>
-                                {formatShortDate(story.published_at)} · {readMinutes(story.body)} min
-                                read
+                                {formatShortDate(story.published_at)} · {readMinutes(story.body)}{" "}
+                                min read
                               </span>
                               <SaveStory story={story} label />
                             </div>
@@ -437,10 +452,7 @@ function Home() {
                     <aside className="opinionpanel frontopinion" aria-labelledby="opinion-h">
                       <h2 id="opinion-h">Opinion</h2>
                       <h3>
-                        <Link
-                          to="/articles/$slug"
-                          params={{ slug: featuredOpinion.slug }}
-                        >
+                        <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
                           {opinionHeadlineDisplay(featuredOpinion.headline)}
                         </Link>
                       </h3>
@@ -450,6 +462,37 @@ function Home() {
                       </Link>
                     </aside>
                   ) : null}
+                </div>
+              ) : null}
+              {region.length ? (
+                <div className="frontlatestband frontregionband no-opinion">
+                  <section className="frontlatest frontregion" aria-labelledby="region-stories">
+                    <div className="frontsectionhead">
+                      <h2 id="region-stories">Around the region</h2>
+                    </div>
+                    <div className="frontlatestgrid">
+                      {region.map((story) => (
+                        <article className="frontlateststory" key={story.id}>
+                          <FrontKicker topic={story.topic}>
+                            {areaLabels[story.area ?? HOME_AREA]}
+                          </FrontKicker>
+                          <h3>
+                            <Link to="/articles/$slug" params={{ slug: story.slug }}>
+                              {headlineWithTag(story.topic, story.headline)}
+                            </Link>
+                          </h3>
+                          <p>{dekOrFallback(story.dek, story.body)}</p>
+                          <div className="frontlatestmeta">
+                            <span>
+                              {formatShortDate(story.published_at)} · {readMinutes(story.body)} min
+                              read
+                            </span>
+                            <SaveStory story={story} label />
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
                 </div>
               ) : null}
             </>

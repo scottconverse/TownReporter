@@ -82,6 +82,8 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     fallback.
   */
   const area = data.area ?? "";
+  /* The front page's "Around the region" band: every story NOT in this area (null counts as the home town, same rule as above). */
+  const notArea = data.notArea ?? "";
   const where = () => sql<{
     count: string;
   }>`select count(*)::text as count from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
@@ -92,7 +94,8 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
     and (${data.exclude === undefined} or id not in (select (jsonb_array_elements_text(${exclude}::jsonb))::int))
-    and (${area}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) = ${area})`;
+    and (${area}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) = ${area})
+    and (${notArea}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) <> ${notArea})`;
   const counts = await where();
   const rows =
     await sql<Omit<ReaderStory, "area"> & { area: string | null; published_at_text: string }>`select id,slug,headline,dek,body,topic,published_at,published_at::text as published_at_text,area from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
@@ -104,6 +107,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
     and (${data.exclude === undefined} or id not in (select (jsonb_array_elements_text(${exclude}::jsonb))::int))
     and (${area}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) = ${area})
+    and (${notArea}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) <> ${notArea})
     order by case when ${oldest} then published_at end asc, case when ${!oldest} then published_at end desc, id desc
     limit ${river ? batch + 1 : PAGE_SIZE} offset ${river ? 0 : (page - 1) * PAGE_SIZE}`;
   /*
