@@ -3685,6 +3685,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       scanAuditDetail(runId, fetchedCount, committed.leadsCreated, committed.dupCheckCleared),
       owned(context),
     );
+    /*
+      Scott's order (Nov 16 2026): "I want the paper to write a draft on any
+      stories that score higher than 13 (14 and up)." The sweep runs AFTER this
+      scan's own commit, so the leads it just filed or re-scored are visible,
+      and every lead goes through the same Draft path an editor's press uses.
+      It NEVER throws: drafting is a second act on a scan that already
+      succeeded, and a model the desk cannot reach must not turn "the scan
+      worked" into "the scan failed".
+    */
+    try {
+      const { autoDraftEligibleLeads } = await import("./auto-draft.server.ts");
+      await autoDraftEligibleLeads(await getSql(), context);
+    } catch (error) {
+      console.warn("[scan] automatic drafting could not run", error);
+    }
   } catch (error) {
     const failure = postgresText(error instanceof Error ? error.message : String(error));
     const cancelledSummary = error instanceof JobCancelledError
