@@ -47,6 +47,8 @@ export const readerArticlesInput = z.object({
     `story-area.ts` for why the home town is a bucket rather than a value.
   */
   area: z.enum([...STORY_AREAS]).optional(),
+  /* Every story outside this area: the front page's "Around the region" band uses the home area here. */
+  notArea: z.enum([...STORY_AREAS]).optional(),
   /*
     The latest-stories river reads this same query, one batch at a time, BELOW
     A CURSOR rather than at a page offset: with 12-per-page offsets, a story
