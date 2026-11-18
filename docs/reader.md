@@ -65,9 +65,9 @@ The **Save** button beside any story adds it to **Saved**. It reads **Saved** on
 
 **Community resources** is in the top menu on desktop and mobile, and in one line on the front page. The footer link stays. It opens `/registry`.
 
-The page is titled **Where to get help**. It lists only published entries. Each entry shows the organization and service, a description, address, **Phone:**, **Hours:**, **Languages:**, **Category:**, a **Last verified:** date, an editor’s note, and a **Source:** link. **Something wrong here?** opens Corrections with the entry name filled in.
+The page is titled **Where to get help**. It lists only published entries. Each entry shows the organization and service and a description. Under that, each place where the service is offered is listed with its own address, **Phone at this location:** and **Hours at this location:**. Below the places come **Phone for this service:** and **Hours for this service:** (not tied to one place), **Main phone of** the organization (labeled as the organization’s, not a place’s), **Languages:**, **Category:**, a **Last verified:** date, an editor’s note, and a **Source:** link. **Something wrong here?** opens Corrections with the entry name filled in.
 
-Use **All entries** and the category links to browse. If nothing is published, the page says **No entries are published yet.** and explains that TownReporter adds entries after an editor checks them.
+Use **All entries** and the category links to browse. If nothing is published, the page says **No entries are published yet.** and explains that TownReporter adds entries after an editor checks them. If a category has no entries but others do, the page says so and links to **See all entries**. If the page cannot read the list, it says the list could not be loaded, and gives a **Try again** link that keeps the category you were in; it does not say nothing is published.
 
 The page says **Last verified:** and a date. Change detection is not verification. It never says a phone was called, and it never says a program is confirmed open.
 
