@@ -130,9 +130,18 @@ export interface PublishRegistryEntryResult {
  *
  * The service is published and marked active when it was unverified, with the
  * editor's id and the time as its verification. Its organization is published
- * unless it already was. The service's contacts, languages, schedules and
+ * unless it already was. The service's own contacts, languages, schedules and
  * service-at-location rows are published, and the locations those rows point
- * to become active when unverified.
+ * to become active when unverified. Three more things a reader needs are
+ * published by explicit rule, and only these:
+ *
+ *  - schedules that one of the service's service-at-location rows references;
+ *  - the organization's own contacts (no service, no location);
+ *  - contacts of the locations the service is linked to (no service).
+ *
+ * Another service's contacts, schedules and languages, a contact of a location
+ * the service is not linked to, and a schedule none of its rows references stay
+ * as they were.
  *
  * A service id from another newsroom, or one that does not exist, throws and
  * the transaction rolls back: nothing is changed.
@@ -187,6 +196,41 @@ export async function publishRegistryEntryIn(
         [newsroomId, id],
       );
     }
+
+    // Schedules the service's own location rows point to (service_id is null
+    // on such a schedule, so the loop above never reaches it).
+    await tx.query(
+      `update schedules
+          set published = true, updated_at = now()
+        where newsroom_id = $1
+          and id in (
+            select schedule_id from service_at_locations
+             where newsroom_id = $1 and service_id = $2 and schedule_id is not null
+          )`,
+      [newsroomId, id],
+    );
+
+    // The organization's own contacts: the main line, tied to no service and
+    // no location.
+    await tx.query(
+      `update contacts
+          set published = true, updated_at = now()
+        where newsroom_id = $1 and organization_id = $2
+          and service_id is null and location_id is null`,
+      [newsroomId, organizationId],
+    );
+
+    // Contacts of the locations this service is linked to, tied to no service.
+    await tx.query(
+      `update contacts
+          set published = true, updated_at = now()
+        where newsroom_id = $1 and service_id is null
+          and location_id in (
+            select location_id from service_at_locations
+             where newsroom_id = $1 and service_id = $2
+          )`,
+      [newsroomId, id],
+    );
 
     await tx.query(
       `update locations

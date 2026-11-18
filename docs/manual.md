@@ -116,7 +116,7 @@ You are responsible for everything that appears on the paper.
 - An RSS feed at `/feed` (the newest 40 stories), a `sitemap.xml`, and a `robots.txt` that points at it.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
-- A public **Community resources** page at `/registry`. It shows only published entries, with a source link and a **Last verified:** date. **Something wrong here?** opens Corrections with the entry name filled in.
+- A public **Community resources** page at `/registry`. It shows only published entries, with a source link, a **Last verified:** date, and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
 - A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
 - The reader pages use the Bulletin design with self-hosted fonts.
 - No account, no cookie banner, and a visit count that is never tied to a person.

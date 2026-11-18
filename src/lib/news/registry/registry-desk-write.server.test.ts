@@ -103,7 +103,7 @@ test("publishing one entry shows exactly that entry in public, with its phone, p
   const entry = page.entries[0]!;
   assert.equal(entry.organizationName, "OUR Center");
   assert.equal(entry.serviceName, "Help with basic needs");
-  assert.equal(entry.phone, "303-772-5529");
+  assert.deepEqual(entry.servicePhones, ["303-772-5529"]);
   assert.equal(entry.sourceUrl, "https://www.ourcenter.org/referral-program/");
   assert.equal(entry.sourceTitle, "OUR Center referral program");
   assert.deepEqual(entry.languages, ["English", "Spanish"]);

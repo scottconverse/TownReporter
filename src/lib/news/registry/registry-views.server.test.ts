@@ -129,10 +129,10 @@ test("the public list returns published rows with their source, last verified da
   assert.equal(entry.serviceId, seeded.serviceId);
   assert.equal(entry.organizationName, "Example Org");
   assert.equal(entry.serviceName, "Weekly pantry");
-  assert.equal(entry.address, "100 Main St, Longmont, CO, 80501");
-  assert.equal(entry.phone, "555-0100");
+  assert.deepEqual(entry.locations.map((l) => l.address), ["100 Main St, Longmont, CO, 80501"]);
+  assert.deepEqual(entry.servicePhones, ["555-0100"]);
   assert.deepEqual(entry.languages, ["Spanish"]);
-  assert.equal(entry.hours, "Monday, 09:00–11:00");
+  assert.deepEqual(entry.serviceHours, ["Monday, 09:00–11:00"]);
   assert.equal(entry.sourceUrl, `https://registry.test/${newsroomId}`);
   assert.ok(entry.lastVerifiedAt, "last verified date is returned");
   assert.equal(
@@ -213,13 +213,22 @@ test("a published service shows only its published children", async () => {
   const page = await listPublicRegistry(sql, newsroomId);
   assert.equal(page.entries.length, 1);
   const entry = page.entries[0]!;
-  assert.equal(entry.phone, "555-0100", "only the published phone is shown");
-  assert.equal(
-    entry.address,
-    "100 Main St, Longmont, CO, 80501",
+  assert.deepEqual(entry.servicePhones, ["555-0100"], "only the published phone is shown");
+  assert.deepEqual(
+    entry.locations.map((l) => l.address),
+    ["100 Main St, Longmont, CO, 80501"],
     "only the published address is shown",
   );
-  assert.equal(entry.hours, "Monday, 09:00–11:00", "only the published schedule is shown");
+  assert.deepEqual(
+    entry.serviceHours,
+    ["Monday, 09:00–11:00"],
+    "the published schedule is shown service-wide",
+  );
+  assert.deepEqual(
+    entry.locations.map((l) => l.hours),
+    [[]],
+    "no schedule shows under the one published location; the unpublished ones show nowhere",
+  );
   assert.deepEqual(entry.languages, ["Spanish"], "only the published language is shown");
 });
 
@@ -414,11 +423,11 @@ test("a published but inactive location's address never shows, and an active one
   );
 
   const page = await listPublicRegistry(sql, newsroomId);
-  assert.equal(page.entries[0]!.address, "2 Open St, Longmont, CO, 80501");
+  assert.deepEqual(page.entries[0]!.locations.map((l) => l.address), ["2 Open St, Longmont, CO, 80501"]);
 
   await sql.query("update locations set status = 'inactive' where id = $1", [active!.id]);
   const withoutActive = await listPublicRegistry(sql, newsroomId);
-  assert.equal(withoutActive.entries[0]!.address, null, "only an inactive location is left");
+  assert.deepEqual(withoutActive.entries[0]!.locations, [], "only an inactive location is left");
 });
 
 test("all published schedules for a service are shown, in a stable order", async () => {
@@ -433,8 +442,8 @@ test("all published schedules for a service are shown, in a stable order", async
   );
 
   const page = await listPublicRegistry(sql, newsroomId);
-  assert.equal(
-    page.entries[0]!.hours,
-    "Monday, 09:00–11:00; Wednesday, 13:00–15:00",
+  assert.deepEqual(
+    page.entries[0]!.serviceHours,
+    ["Monday, 09:00–11:00", "Wednesday, 13:00–15:00"],
   );
 });

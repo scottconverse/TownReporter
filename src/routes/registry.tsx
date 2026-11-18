@@ -9,8 +9,9 @@ import { listPublicRegistryPage } from "@/lib/news/registry/registry-public";
  *
  * Read-only, server-rendered, indexable. Only published rows appear: an
  * imported row starts unpublished and stays out of this page until an editor
- * confirms it, and Phase 1 has no confirm button, so today the list is empty
- * and the page says so.
+ * presses Publish on the desk. The page has three different empty states: the
+ * data could not be read, nothing is published, and the chosen category has no
+ * entries. It never says "nothing is published" when it could not read.
  *
  * Public copy rule (spec 11, point 6): change detection is not verification.
  * This page says "Last verified" and a date. It never says a phone was called,
@@ -39,9 +40,13 @@ export const Route = createFileRoute("/registry")({
 });
 
 function RegistryPage() {
-  const { entries, categories } = Route.useLoaderData();
+  const result = Route.useLoaderData();
   const { category } = Route.useSearch();
   const { formatShortDate } = usePaperDateFormatters();
+  const unavailable = result.status === "unavailable";
+  const entries = result.status === "ok" ? result.entries : [];
+  const categories = result.status === "ok" ? result.categories : [];
+  const anyPublished = result.status === "ok" ? result.anyPublished : false;
   const current = categories.find((c) => c.id === category) ?? null;
 
   return (
@@ -78,12 +83,20 @@ function RegistryPage() {
           </nav>
         ) : null}
 
-        {entries.length === 0 ? (
+        {unavailable ? (
+          <div className="empty" role="alert">
+            <p>
+              The list of community resources could not be loaded just now. Nothing was lost; the
+              page could not read it.{" "}
+              <a href={category ? `/registry?category=${category}` : "/registry"}>Try again</a>.
+            </p>
+          </div>
+        ) : entries.length === 0 ? (
           <div className="empty">
-            {category && current ? (
+            {category && anyPublished ? (
               <p>
-                No published entries are filed under {current.name} yet.{" "}
-                <a href="/registry">See all entries</a>.
+                No published entries are filed under {current ? current.name : "this category"}{" "}
+                yet. <a href="/registry">See all entries</a>.
               </p>
             ) : (
               <p>
@@ -103,19 +116,50 @@ function RegistryPage() {
                 <article className="correction-entry" key={entry.serviceId}>
                   <h3>{heading}</h3>
                   {entry.description ? <p>{entry.description}</p> : null}
-                  <ul className="needlist">
-                    {entry.address ? <li>{entry.address}</li> : null}
-                    {entry.phone ? <li>Phone: {entry.phone}</li> : null}
-                    {entry.hours ? <li>Hours: {entry.hours}</li> : null}
-                    {entry.languages.length ? (
-                      <li>Languages: {entry.languages.join(", ")}</li>
-                    ) : null}
-                    {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
-                    <li>
-                      Last verified:{" "}
-                      {entry.lastVerifiedAt ? formatShortDate(entry.lastVerifiedAt) : "Not verified yet"}
-                    </li>
-                  </ul>
+                  {entry.locations.map((location) => (
+                    <section key={location.locationId} aria-label="Location">
+                      <p>
+                        <b>{location.name ?? "Location"}</b>
+                      </p>
+                      <ul className="needlist">
+                        {location.address ? <li>{location.address}</li> : null}
+                        {location.phones.map((phone) => (
+                          <li key={phone}>Phone at this location: {phone}</li>
+                        ))}
+                        {location.hours.map((hours) => (
+                          <li key={hours}>Hours at this location: {hours}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                  <section aria-label="About this service">
+                    <p>
+                      <b>About this service</b>
+                    </p>
+                    <ul className="needlist">
+                      {entry.servicePhones.map((phone) => (
+                        <li key={`service-${phone}`}>Phone for this service: {phone}</li>
+                      ))}
+                      {entry.serviceHours.map((hours) => (
+                        <li key={`service-${hours}`}>Hours for this service: {hours}</li>
+                      ))}
+                      {entry.organizationPhones.map((phone) => (
+                        <li key={`org-${phone}`}>
+                          Main phone of {entry.organizationName}: {phone}
+                        </li>
+                      ))}
+                      {entry.languages.length ? (
+                        <li>Languages: {entry.languages.join(", ")}</li>
+                      ) : null}
+                      {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
+                      <li>
+                        Last verified:{" "}
+                        {entry.lastVerifiedAt
+                          ? formatShortDate(entry.lastVerifiedAt)
+                          : "Not verified yet"}
+                      </li>
+                    </ul>
+                  </section>
                   {entry.editorNote ? (
                     <p>
                       <b>Editor's note:</b> {entry.editorNote}

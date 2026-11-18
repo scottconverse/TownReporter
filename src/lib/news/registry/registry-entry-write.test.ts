@@ -77,7 +77,7 @@ test("editing a published entry changes what readers see and keeps it published"
   assert.equal(page.entries.length, 1, "the entry is still on the public page");
   const entry = page.entries[0]!;
   assert.equal(entry.serviceName, "Help with food and bills");
-  assert.equal(entry.phone, "303-772-5530");
+  assert.deepEqual(entry.servicePhones, ["303-772-5530"]);
   assert.equal(entry.description, "A new line the editor read on the page.");
   assert.equal(entry.categoryName, "Food");
   assert.equal(entry.sourceUrl, "https://www.ourcenter.org/updated/");
@@ -253,7 +253,7 @@ test("adding an entry lands it in the waiting list, and publishing it shows its 
 
   const page = await listPublicRegistry(sql, newsroomId);
   assert.equal(page.entries.length, 1);
-  assert.equal(page.entries[0]!.phone, "303-555-0100");
+  assert.deepEqual(page.entries[0]!.servicePhones, ["303-555-0100"]);
   assert.equal(page.entries[0]!.sourceUrl, "https://example.org/longmont-fridge/");
   assert.equal(page.entries[0]!.sourceTitle, "Longmont Community Fridge");
   assert.equal(page.entries[0]!.categoryName, "Food");
