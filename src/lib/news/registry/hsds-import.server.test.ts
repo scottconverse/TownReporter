@@ -630,6 +630,43 @@ test("a value that differs from a pending proposal is a new proposal, and the ol
   assert.deepEqual(pending.map((row) => row.after_value), ["Proposed name A", "Proposed name B"]);
 });
 
+test("an import does not repeat a proposal the change scan already holds as needs-editor", async () => {
+  const sql = await getSql();
+  const newsroomId = 9713;
+  const first = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+
+  // The scan holds this change for an editor (a crisis-flagged service): same
+  // row, same column, same proposed value that the import below would propose.
+  const orgRows = await sql.query<{ id: number }>(
+    "select id from organizations where newsroom_id = $1 and hsds_id = $2",
+    [newsroomId, "org-st-vrain-pantry"],
+  );
+  await sql.query(
+    `insert into resource_changes
+       (newsroom_id, evidence_capture_id, evidence_tier, entity_type, entity_id, field_name,
+        before_value, after_value, change_kind, review_state)
+     values ($1, $2, 'B', 'organization', $3, 'name', $4, $5, 'field_change', 'needs-editor')`,
+    [newsroomId, first.snapshotId, orgRows[0]!.id, "St. Vrain Community Pantry", "Scanned Name"],
+  );
+  const countChanges = async (): Promise<number> => {
+    const rows = await sql.query<{ count: string }>(
+      "select count(*)::text as count from resource_changes where newsroom_id = $1",
+      [newsroomId],
+    );
+    return Number(rows[0]!.count);
+  };
+  const before = await countChanges();
+
+  const changed = sampleCopy();
+  changed.organizations[0]!.name = "Scanned Name";
+  const result = await importHsdsBundle(changed, { newsroomId, directoryName: DIRECTORY });
+
+  assert.deepEqual(result.conflicts, [], "a proposal already waiting as needs-editor is not proposed again");
+  assert.equal(result.tables.organizations.alreadyPending, 1, "the waiting count includes the needs-editor proposal");
+  assert.equal(result.tables.organizations.changed, 0);
+  assert.equal(await countChanges(), before, "the import inserts no new resource_changes row");
+});
+
 /** Thrown by the probe below to stop an import right after its lock statement. */
 class StopAfterLock extends Error {}
 

@@ -77,8 +77,9 @@ export interface TableCounts {
   /** Rows that were there and differ, with at least one new proposed change. */
   changed: number;
   /**
-   * Rows that differ, where every difference is already a pending proposal or
-   * a proposal an editor already rejected.
+   * Rows that differ, where every difference is already waiting for an editor
+   * (a `pending` or `needs-editor` proposal) or is a proposal an editor already
+   * rejected.
    */
   alreadyPending: number;
 }
@@ -91,7 +92,7 @@ export interface ImportResult {
   recordCounts: Record<RegistryTableName, number>;
   /** Inserted, unchanged and changed rows per table. */
   tables: Record<RegistryTableName, TableCounts>;
-  /** New proposals only: a difference that is already pending is not repeated. */
+  /** New proposals only: a difference already waiting for an editor is not repeated. */
   conflicts: ImportConflict[];
   /** True when the run was rolled back; the ids above then point at nothing. */
   dryRun: boolean;
@@ -111,9 +112,10 @@ class DryRunRollback extends Error {
 }
 
 /**
- * Whether a pending proposal for the same table, row, column and proposed
- * value already exists. A second import of the same file must not stack a
- * duplicate on the editor's queue.
+ * Whether a proposal already waiting for an editor exists for the same table,
+ * row, column and proposed value: a `pending` row, or a `needs-editor` row the
+ * change scan wrote for a crisis-flagged service. A second import of the same
+ * file must not stack a duplicate on the editor's queue.
  */
 async function pendingProposalExists(
   sql: Sql,
@@ -126,7 +128,7 @@ async function pendingProposalExists(
   const found = await sql.query<{ id: number }>(
     `select id from resource_changes
       where newsroom_id = $1 and entity_type = $2 and entity_id = $3
-        and field_name = $4 and review_state = 'pending'
+        and field_name = $4 and review_state in ('pending', 'needs-editor')
         and after_value is not distinct from $5
       limit 1`,
     [newsroomId, entityType, entityId, column, after],
