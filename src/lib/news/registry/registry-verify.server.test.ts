@@ -508,3 +508,185 @@ test("legacy values survive every writer and stay readable as legacy", async () 
   assert.equal(read.legacy!.method, "editor");
   assert.equal(read.latest, null, "and still no explicit verification");
 });
+
+test("key facts leave out unpublished phones: a change to one is listed only once it is published", async () => {
+  const sql = await getSql();
+  const s = await seed(9811);
+  const hidden = await one(
+    sql,
+    `insert into contacts (newsroom_id, hsds_id, service_id, phone, published)
+     values ($1, 'c-hidden', $2, '555-0300', false) returning id`,
+    [s.n, s.svc],
+  );
+  await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc));
+  assert.deepEqual(
+    (await readKeyFacts(sql, s.n, s.svc)).phones.map((p) => p.phone).sort(),
+    ["555-0100", "555-0200"],
+    "the snapshot holds only the published phones",
+  );
+
+  await sql.query("update contacts set phone = '555-0399' where id = $1", [hidden]);
+  assert.deepEqual(
+    (await readVerificationIn(sql, s.n, s.svc)).changedFacts,
+    [],
+    "an unpublished phone that changed is not a changed fact",
+  );
+
+  await sql.query("update contacts set published = true where id = $1", [hidden]);
+  assert.deepEqual(
+    (await readVerificationIn(sql, s.n, s.svc)).changedFacts,
+    ["phone"],
+    "publishing it lists the change",
+  );
+});
+
+test("key facts leave out unpublished places, hours, eligibility and documents", async () => {
+  const sql = await getSql();
+  const s = await seed(9812);
+  const back = await one(
+    sql,
+    `insert into locations (newsroom_id, hsds_id, organization_id, name, address_1, city, status, published)
+     values ($1, 'loc-back', $2, 'Back room', '9 Side St', 'Longmont', 'active', false) returning id`,
+    [s.n, s.org],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, published)
+     values ($1, 'sal-back', $2, $3, true)`,
+    [s.n, s.svc, back],
+  );
+  const offHours = await one(
+    sql,
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-off', $2, 'Sat', '10:00', '12:00', false) returning id`,
+    [s.n, s.svc],
+  );
+  const offEligibility = await one(
+    sql,
+    `insert into eligibilities (newsroom_id, hsds_id, service_id, description, published)
+     values ($1, 'el-off', $2, 'Seniors only', false) returning id`,
+    [s.n, s.svc],
+  );
+  const offDocument = await one(
+    sql,
+    `insert into required_documents (newsroom_id, hsds_id, service_id, document, published)
+     values ($1, 'doc-off', $2, 'Lease', false) returning id`,
+    [s.n, s.svc],
+  );
+  await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc));
+  const facts = await readKeyFacts(sql, s.n, s.svc);
+  assert.deepEqual(facts.places.map((p) => p.name), ["Main Street office"]);
+  assert.deepEqual(facts.hours.map((h) => h.days), ["Mon-Fri"]);
+  assert.deepEqual(facts.eligibility.map((e) => e.description), ["Longmont residents"]);
+  assert.deepEqual(facts.requiredDocuments, [{ document: "Photo ID", required: true }]);
+
+  await sql.query("update locations set name = 'Back room 2' where id = $1", [back]);
+  await sql.query("update schedules set days = 'Sun' where id = $1", [offHours]);
+  await sql.query("update eligibilities set description = 'Seniors and kids' where id = $1", [offEligibility]);
+  await sql.query("update required_documents set document = 'Lease copy' where id = $1", [offDocument]);
+  assert.deepEqual(
+    (await readVerificationIn(sql, s.n, s.svc)).changedFacts,
+    [],
+    "changes to unpublished rows are not listed",
+  );
+
+  await sql.query("update locations set published = true where id = $1", [back]);
+  await sql.query("update schedules set published = true where id = $1", [offHours]);
+  await sql.query("update eligibilities set published = true where id = $1", [offEligibility]);
+  await sql.query("update required_documents set published = true where id = $1", [offDocument]);
+  assert.deepEqual((await readVerificationIn(sql, s.n, s.svc)).changedFacts, [
+    "place Back room 2",
+    "hours",
+    "eligibility",
+    "required documents",
+  ]);
+});
+
+test("a saved check that is not a version 1 snapshot is listed as changed and does not throw", async () => {
+  const sql = await getSql();
+  const s = await seed(9813);
+  const unreadable = [
+    '{"version":2}',
+    '{"version":1}',
+    '"not a snapshot"',
+    '{"version":1,"service":{"status":"active"},"organization":{"name":"Helping Hands"},"places":[null],"phones":[],"hours":[],"eligibility":[],"requiredDocuments":[]}',
+  ];
+  for (const facts of unreadable) {
+    await sql.query("delete from resource_verifications where service_id = $1", [s.svc]);
+    await sql.query(
+      `insert into resource_verifications (newsroom_id, service_id, checked_by, method, basis, facts)
+       values ($1, $2, 'ed-1', 'phone', 'Called the desk.', $3::jsonb)`,
+      [s.n, s.svc, facts],
+    );
+    const read = await readVerificationIn(sql, s.n, s.svc);
+    assert.deepEqual(read.changedFacts, ["saved check could not be read"], facts);
+    const item = (await listNeedsCheckingIn(sql, s.n)).find((i) => i.serviceId === s.svc);
+    assert.deepEqual(item?.reasons, ["Changed since verified: saved check could not be read"], facts);
+  }
+});
+
+test("a legacy line with no date is not shown; a dated legacy line is", async () => {
+  const sql = await getSql();
+  const s = await seed(9814);
+  await sql.query(
+    "update services set verification_method = 'imported', last_verified_at = null, last_verified_by = null where id = $1",
+    [s.svc],
+  );
+  assert.equal(
+    (await readVerificationIn(sql, s.n, s.svc)).legacy,
+    null,
+    "a method with no date is not a legacy line",
+  );
+
+  const dated = await seed(9815, { legacy: true });
+  const read = await readVerificationIn(sql, dated.n, dated.svc);
+  assert.equal(read.legacy!.method, "editor");
+  assert.ok(read.legacy!.at, "a seeded legacy date is returned");
+  await sql.query("update services set verification_method = 'imported' where id = $1", [dated.svc]);
+  assert.equal((await readVerificationIn(sql, dated.n, dated.svc)).legacy!.method, "imported");
+});
+
+test("a source address is at most 2000 characters and carries no user name or password", async () => {
+  const sql = await getSql();
+  const s = await seed(9816);
+  const base = "https://example.org/";
+  const exact = base + "a".repeat(2000 - base.length);
+  assert.equal(exact.length, 2000);
+  const ok = await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { sourceUrl: exact }));
+  assert.equal(ok.ok, true, "2000 characters is allowed");
+  const countBefore = await verificationCount(sql, s.n);
+
+  const refused: [string, RegExp][] = [
+    [base + "a".repeat(2001 - base.length), /2000 characters or fewer/],
+    ["https://user:pw@example.org/pantry", /must not include a user name or password/],
+    ["https://user@example.org/pantry", /must not include a user name or password/],
+    ["https://:pw@example.org/pantry", /must not include a user name or password/],
+  ];
+  for (const [sourceUrl, words] of refused) {
+    const result = await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { sourceUrl }));
+    assert.equal(result.ok, false, sourceUrl.slice(0, 40));
+    if (!result.ok) assert.match(result.problems.sourceUrl ?? "", words);
+  }
+  assert.equal(await verificationCount(sql, s.n), countBefore, "a refused address writes nothing");
+
+  const atInPath = await recordVerificationIn(
+    sql, s.n, "ed-1", verifyInput(s.svc, { sourceUrl: "https://example.org/people/a@b" }),
+  );
+  assert.equal(atInPath.ok, true, "an @ in the path is not a user name");
+});
+
+test("a basis with a hidden or direction character is refused; a line break is allowed", async () => {
+  const sql = await getSql();
+  const s = await seed(9817);
+  const hidden = [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0xfeff];
+  for (const code of hidden) {
+    const basis = `Called the desk${String.fromCharCode(code)} and heard the hours.`;
+    const result = await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { basis }));
+    assert.equal(result.ok, false, `U+${code.toString(16).toUpperCase()}`);
+    if (!result.ok) assert.match(result.problems.basis ?? "", /hidden character/);
+  }
+  assert.equal(await verificationCount(sql, s.n), 0, "refused bases write nothing");
+  const line = await recordVerificationIn(
+    sql, s.n, "ed-1", verifyInput(s.svc, { basis: "Called the desk.\nHeard the hours.\r\nThanks." }),
+  );
+  assert.equal(line.ok, true, "a line break is allowed");
+});

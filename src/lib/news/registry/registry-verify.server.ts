@@ -11,7 +11,9 @@
  * the live phones and the place each belongs to; the live hours; eligibility;
  * required documents. Descriptions, notes, languages and accessibility are not
  * key facts, so a spelling change in a description is not a changed fact. A row
- * an editor removed (`removed_at` set) is not part of the facts.
+ * an editor removed (`removed_at` set) is not part of the facts. Only what the
+ * public page can show counts: a row that is not published, and a place that is
+ * not published and active, are not facts until they are.
  */
 
 import { withTransaction, type Sql } from "../../db.ts";
@@ -27,9 +29,17 @@ import {
 export { VERIFY_AFTER_DAYS } from "./registry-verify-methods.ts";
 
 export const VERIFY_BASIS_MAX = 2000;
+export const VERIFY_SOURCE_URL_MAX = 2000;
 export const VERIFY_HISTORY_MAX = 50;
 
 const NOT_IN_NEWSROOM = "That entry is not in this newsroom. Nothing was changed.";
+/** The one changed-fact name when a stored check cannot be read as a snapshot. */
+const UNREADABLE_CHECK = "saved check could not be read";
+/**
+ * Characters a reader cannot see that change how text runs: zero-width and
+ * invisible format characters, and the bidi controls. Line breaks are not here.
+ */
+const HIDDEN_CHARACTER = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
 
 type When = string | Date | null;
 
@@ -139,7 +149,8 @@ export async function readKeyFacts(
             l.state_province, l.postal_code
        from service_at_locations sal
        join locations l on l.id = sal.location_id and l.newsroom_id = sal.newsroom_id
-      where sal.newsroom_id = $1 and sal.service_id = $2 and sal.removed_at is null`,
+      where sal.newsroom_id = $1 and sal.service_id = $2 and sal.removed_at is null
+        and sal.published = true and l.published = true and l.status = 'active'`,
     [newsroomId, serviceId],
   );
   const places: KeyPlace[] = placeRows
@@ -166,9 +177,9 @@ export async function readKeyFacts(
   }>(
     `select organization_id, service_id, location_id, phone, phone_extension
        from contacts
-      where newsroom_id = $1 and removed_at is null
+      where newsroom_id = $1 and published = true and removed_at is null
         and phone is not null and btrim(phone) <> ''
-        and (service_id = $2
+        and ((service_id = $2 and (location_id is null or location_id = any($4::int[])))
              or (service_id is null and location_id is null and organization_id = $3)
              or (service_id is null and location_id = any($4::int[])))`,
     [newsroomId, serviceId, organizationId, placeIds],
@@ -205,10 +216,10 @@ export async function readKeyFacts(
          select schedule_id, min(location_id) as location_id
            from service_at_locations
           where newsroom_id = $1 and service_id = $2
-            and removed_at is null and schedule_id is not null
+            and removed_at is null and published = true and schedule_id is not null
           group by schedule_id
        ) ref on ref.schedule_id = sch.id
-      where sch.newsroom_id = $1 and sch.removed_at is null
+      where sch.newsroom_id = $1 and sch.published = true and sch.removed_at is null
         and (sch.service_id = $2 or ref.schedule_id is not null)`,
     [newsroomId, serviceId],
   );
@@ -227,7 +238,7 @@ export async function readKeyFacts(
 
   const eligibilityRows = await sql.query<{ description: string | null; criteria: unknown }>(
     `select description, criteria from eligibilities
-      where newsroom_id = $1 and service_id = $2 and removed_at is null`,
+      where newsroom_id = $1 and service_id = $2 and published = true and removed_at is null`,
     [newsroomId, serviceId],
   );
   const eligibility = stableSorted(
@@ -241,7 +252,7 @@ export async function readKeyFacts(
 
   const documentRows = await sql.query<{ document: string; required: boolean }>(
     `select document, required from required_documents
-      where newsroom_id = $1 and service_id = $2 and removed_at is null`,
+      where newsroom_id = $1 and service_id = $2 and published = true and removed_at is null`,
     [newsroomId, serviceId],
   );
   const requiredDocuments = stableSorted(
@@ -366,6 +377,16 @@ function checkSourceUrl(value: string): boolean {
   }
 }
 
+/** True when the address carries a user name or a password (user:pw@host). */
+function hasCredentials(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.username !== "" || url.password !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Record that an editor checked one entry. Writes one `resource_verifications`
  * row with the key-facts snapshot and one audit event, in one transaction.
@@ -397,6 +418,9 @@ export async function recordVerificationIn(
       problems.basis = `The basis is too long. Use ${VERIFY_BASIS_MAX} characters or fewer.`;
     } else if (hasControlCharacter(basis, true)) {
       problems.basis = "The basis contains a character that cannot be saved. Remove it and try again.";
+    } else if (HIDDEN_CHARACTER.test(basis)) {
+      problems.basis =
+        "The basis contains a hidden character, such as a direction mark. Remove it and try again.";
     }
     const sourceUrl =
       typeof input.sourceUrl === "string" && input.sourceUrl.trim() !== ""
@@ -404,8 +428,12 @@ export async function recordVerificationIn(
         : null;
     if (input.sourceUrl != null && typeof input.sourceUrl !== "string") {
       problems.sourceUrl = "The web address must be text.";
+    } else if (sourceUrl && sourceUrl.length > VERIFY_SOURCE_URL_MAX) {
+      problems.sourceUrl = `The web address is too long. Use ${VERIFY_SOURCE_URL_MAX} characters or fewer.`;
     } else if (sourceUrl && (hasControlCharacter(sourceUrl, false) || !checkSourceUrl(sourceUrl))) {
       problems.sourceUrl = "The web address must start with https:// or http://.";
+    } else if (sourceUrl && hasCredentials(sourceUrl)) {
+      problems.sourceUrl = "The web address must not include a user name or password.";
     }
     if (Object.keys(problems).length > 0) return { ok: false as const, problems };
 
@@ -443,7 +471,7 @@ export interface VerificationRecord {
 }
 
 export interface LegacyVerification {
-  /** Set by a save or publish before Phase 3; not a check. */
+  /** Set by a save or publish before Phase 3; not a check. Null means no legacy line. */
   at: When;
   method: string | null;
   by: string | null;
@@ -479,8 +507,51 @@ function toRecord(row: VerificationRow): VerificationRecord {
   };
 }
 
-function parseFacts(value: unknown): KeyFacts {
-  return (typeof value === "string" ? JSON.parse(value) : value) as KeyFacts;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * A stored check's snapshot as key facts. Null when the stored value is not a
+ * version 1 snapshot with its arrays (a row this code did not write, or a later
+ * version), so the caller can list the check as changed instead of throwing.
+ */
+function readSavedFacts(value: unknown): KeyFacts | null {
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed) || parsed.version !== 1) return null;
+  const { service, organization } = parsed;
+  if (!isRecord(service) || typeof service.status !== "string") return null;
+  if (!isRecord(organization) || typeof organization.name !== "string") return null;
+  const lists = [
+    parsed.places,
+    parsed.phones,
+    parsed.hours,
+    parsed.eligibility,
+    parsed.requiredDocuments,
+  ];
+  if (!lists.every((list) => Array.isArray(list) && list.every(isRecord))) return null;
+  return parsed as unknown as KeyFacts;
+}
+
+/**
+ * Key facts that differ from a stored check's snapshot. A snapshot that cannot
+ * be read counts as one changed fact, the plain words for that.
+ */
+async function changedSinceSaved(
+  sql: Sql,
+  newsroomId: number,
+  serviceId: number,
+  saved: unknown,
+): Promise<string[]> {
+  const before = readSavedFacts(saved);
+  if (!before) return [UNREADABLE_CHECK];
+  return diffKeyFacts(before, await readKeyFacts(sql, newsroomId, serviceId));
 }
 
 /** Latest check, history, the legacy stamp and the facts changed since. */
@@ -509,22 +580,20 @@ export async function readVerificationIn(
     [newsroomId, serviceId],
   );
 
+  // A legacy line is shown only with its date: a method or editor with no date
+  // is not something the desk can date, so it is not shown at all.
   const legacyRow = service[0];
-  const legacy: LegacyVerification | null =
-    legacyRow.last_verified_at || legacyRow.verification_method || legacyRow.last_verified_by
-      ? {
-          at: legacyRow.last_verified_at,
-          method: legacyRow.verification_method,
-          by: legacyRow.last_verified_by,
-        }
-      : null;
+  const legacy: LegacyVerification | null = legacyRow.last_verified_at
+    ? {
+        at: legacyRow.last_verified_at,
+        method: legacyRow.verification_method,
+        by: legacyRow.last_verified_by,
+      }
+    : null;
 
   let changedFacts: string[] = [];
   if (rows[0]) {
-    changedFacts = diffKeyFacts(
-      parseFacts(rows[0].facts),
-      await readKeyFacts(sql, newsroomId, serviceId),
-    );
+    changedFacts = await changedSinceSaved(sql, newsroomId, serviceId, rows[0].facts);
   }
   return {
     latest: rows[0] ? toRecord(rows[0]) : null,
@@ -585,10 +654,7 @@ export async function listNeedsCheckingIn(
       reasons.push("Never verified");
     } else {
       if (row.overdue) reasons.push(`Last verified more than ${VERIFY_AFTER_DAYS} days ago`);
-      const changed = diffKeyFacts(
-        parseFacts(row.facts),
-        await readKeyFacts(sql, newsroomId, serviceId),
-      );
+      const changed = await changedSinceSaved(sql, newsroomId, serviceId, row.facts);
       if (changed.length > 0) reasons.push(`Changed since verified: ${changed.join(", ")}`);
     }
     if (reasons.length === 0) continue;
