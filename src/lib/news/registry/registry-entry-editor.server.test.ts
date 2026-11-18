@@ -7,9 +7,18 @@ import {
   saveContactIn,
   saveOrganizationDetailsIn,
   saveServiceDetailsIn,
+  type EntrySaveResult,
 } from "./registry-entry-editor.server.ts";
+import type { FieldProblems } from "./registry-entry-editor-fields.ts";
+import { listPublicRegistry } from "./registry-public.server.ts";
 
 await applyMigrationsToTestPglite();
+
+/** The problems a refused save came back with; fails the test if it was saved. */
+function refused(result: EntrySaveResult): FieldProblems {
+  assert.equal(result.ok, false, "the save should be refused");
+  return result.ok ? {} : result.problems;
+}
 
 interface Seed {
   newsroomId: number;
@@ -189,6 +198,19 @@ test("a service save with bad fields returns problems by field and writes nothin
 test("saving the organization changes the shared row and no other organization", async () => {
   const sql = await getSql();
   const seeded = await seed(9607);
+  // An earlier editor verifies the service; later organization and contact saves
+  // must leave that stamp exactly as it is (only the service save stamps).
+  await saveServiceDetailsIn(sql, 9607, seeded.s1, goodService, "ed-1");
+  const stampOf = async () => {
+    const [row] = await sql.query<Record<string, unknown>>(
+      `select last_verified_by, last_verified_at::text as last_verified_at, verification_method
+         from services where id = $1`,
+      [seeded.s1],
+    );
+    return { ...row };
+  };
+  const stampBefore = await stampOf();
+  assert.equal(stampBefore.last_verified_by, "ed-1");
   const result = await saveOrganizationDetailsIn(
     sql,
     9607,
@@ -212,11 +234,17 @@ test("saving the organization changes the shared row and no other organization",
     seeded.orgB,
   ]);
   assert.equal(other!.name, "Other Org");
-  const [stamp] = await sql.query<{ last_verified_by: string | null }>(
-    "select last_verified_by from services where id = $1",
-    [seeded.s1],
+  assert.deepEqual(await stampOf(), stampBefore, "an organization save does not restamp the service");
+
+  const contact = await saveContactIn(
+    sql,
+    9607,
+    seeded.s1,
+    { scope: "service", fields: { name: "Intake", phone: "555-0199" } },
+    "ed-3",
   );
-  assert.equal(stamp!.last_verified_by, "ed-2");
+  assert.equal(contact.ok, true);
+  assert.deepEqual(await stampOf(), stampBefore, "a contact save does not restamp the service");
 });
 
 test("an organization save with a bad email or website returns problems and writes nothing", async () => {
@@ -342,7 +370,7 @@ test("a contact save with bad fields returns problems and writes nothing", async
     seeded.s1,
     {
       contactId: seeded.ownContact,
-      fields: { name: "N", phoneExtension: "9", email: "nope", website: "nope" },
+      fields: { name: "N", phone: "", phoneExtension: "9", email: "nope", website: "nope" },
     },
     "ed-5",
   );
@@ -425,14 +453,33 @@ test("a save that fails part-way writes nothing", async () => {
        for each row execute function test_fail_stamp()`,
     [],
   );
+  // The organization and contact writes fail on a name that starts "Half".
+  await sql.query(
+    `create or replace function test_fail_writes() returns trigger as $$
+     begin
+       if new.name like 'Half%' then raise exception 'write failed'; end if;
+       return new;
+     end $$ language plpgsql`,
+    [],
+  );
+  await sql.query(
+    `create trigger fail_writes_org before update on organizations
+       for each row execute function test_fail_writes()`,
+    [],
+  );
+  await sql.query(
+    `create trigger fail_writes_contact before insert or update on contacts
+       for each row execute function test_fail_writes()`,
+    [],
+  );
   try {
     await assert.rejects(
       saveOrganizationDetailsIn(sql, 9618, seeded.s1, { name: "Half Written" }, "fail-user"),
-      /stamp failed/,
+      /write failed/,
     );
     await assert.rejects(
       saveContactIn(sql, 9618, seeded.s1, { scope: "service", fields: { name: "Half" } }, "fail-user"),
-      /stamp failed/,
+      /write failed/,
     );
     await assert.rejects(
       saveContactIn(
@@ -442,14 +489,19 @@ test("a save that fails part-way writes nothing", async () => {
         { contactId: seeded.ownContact, fields: { name: "Half" } },
         "fail-user",
       ),
-      /stamp failed/,
+      /write failed/,
     );
+    // The service save writes its fields and then its stamp; a failed stamp
+    // must undo the fields too.
     await assert.rejects(
       saveServiceDetailsIn(sql, 9618, seeded.s1, goodService, "fail-user"),
       /stamp failed/,
     );
   } finally {
     await sql.query("drop trigger fail_stamp on services", []);
+    await sql.query("drop trigger fail_writes_org on organizations", []);
+    await sql.query("drop trigger fail_writes_contact on contacts", []);
+    await sql.query("drop function test_fail_writes()", []);
     await sql.query("drop function test_fail_stamp()", []);
   }
   const [org] = await sql.query<{ name: string }>("select name from organizations where id = $1", [
@@ -466,4 +518,164 @@ test("a save that fails part-way writes nothing", async () => {
     [seeded.s1],
   );
   assert.deepEqual({ ...service }, { name: "Food Pantry", last_verified_by: null });
+});
+
+test("a save sends only the fields that changed, so a stale form keeps another editor's change", async () => {
+  const sql = await getSql();
+  const seeded = await seed(9619);
+  // Two editors load the service at the same time; each saves a different field.
+  const first = await saveServiceDetailsIn(sql, 9619, seeded.s1, { name: "Renamed by A" }, "ed-a");
+  assert.deepEqual(first, { ok: true, serviceId: seeded.s1 });
+  const second = await saveServiceDetailsIn(sql, 9619, seeded.s1, { fees: "Five dollars" }, "ed-b");
+  assert.deepEqual(second, { ok: true, serviceId: seeded.s1 });
+  const [service] = await sql.query<{ name: string; fees: string | null }>(
+    "select name, fees from services where id = $1",
+    [seeded.s1],
+  );
+  assert.deepEqual({ ...service }, { name: "Renamed by A", fees: "Five dollars" });
+
+  const org = await saveOrganizationDetailsIn(sql, 9619, seeded.s1, { email: "a@example.org" }, "ed-a");
+  assert.deepEqual(org, { ok: true, serviceId: seeded.s1 });
+  const orgAgain = await saveOrganizationDetailsIn(
+    sql,
+    9619,
+    seeded.s1,
+    { legalStatus: "nonprofit" },
+    "ed-b",
+  );
+  assert.deepEqual(orgAgain, { ok: true, serviceId: seeded.s1 });
+  const [organization] = await sql.query<{ name: string; email: string; legal_status: string }>(
+    "select name, email, legal_status from organizations where id = $1",
+    [seeded.orgA],
+  );
+  assert.deepEqual({ ...organization }, {
+    name: "Helping Hands",
+    email: "a@example.org",
+    legal_status: "nonprofit",
+  });
+});
+
+test("a contact save that sends one field leaves the contact's other fields as they were", async () => {
+  const sql = await getSql();
+  const seeded = await seed(9620);
+  const result = await saveContactIn(
+    sql,
+    9620,
+    seeded.s1,
+    { contactId: seeded.ownContact, fields: { phone: "555-0200" } },
+    "ed-c",
+  );
+  assert.deepEqual(result, { ok: true, serviceId: seeded.s1 });
+  const [row] = await sql.query<{ name: string; phone: string }>(
+    "select name, phone from contacts where id = $1",
+    [seeded.ownContact],
+  );
+  assert.deepEqual({ ...row }, { name: "Contact c-own", phone: "555-0200" });
+});
+
+test("a NUL or other control character is a field problem, not a database error", async () => {
+  const sql = await getSql();
+  const seeded = await seed(9621);
+  const nameProblem = refused(
+    await saveServiceDetailsIn(sql, 9621, seeded.s1, { name: "Food\u0000Pantry" }, "ed-d"),
+  );
+  assert.match(nameProblem.name!, /cannot be saved/);
+  assert.match(
+    refused(await saveServiceDetailsIn(sql, 9621, seeded.s1, { name: "Food\tPantry" }, "ed-d")).name!,
+    /cannot be saved/,
+    "a tab is not allowed in a one-line field",
+  );
+  assert.match(
+    refused(await saveOrganizationDetailsIn(sql, 9621, seeded.s1, { name: "Helping\u0007Hands" }, "ed-d")).name!,
+    /cannot be saved/,
+  );
+  assert.match(
+    refused(
+      await saveContactIn(
+        sql,
+        9621,
+        seeded.s1,
+        { contactId: seeded.ownContact, fields: { name: "Desk\u0000" } },
+        "ed-d",
+      ),
+    ).name!,
+    /cannot be saved/,
+  );
+  const [row] = await sql.query<{ name: string }>("select name from services where id = $1", [
+    seeded.s1,
+  ]);
+  assert.equal(row!.name, "Food Pantry", "no refused save wrote anything");
+
+  // Line breaks and tabs are fine in a multi-line field.
+  const described = await saveServiceDetailsIn(
+    sql,
+    9621,
+    seeded.s1,
+    { ...goodService, description: "Line one\n\tLine two\r\n" },
+    "ed-d",
+  );
+  assert.deepEqual(described, { ok: true, serviceId: seeded.s1 });
+});
+
+test("a javascript: or ftp: web address is refused for the service, the organization and a contact", async () => {
+  const sql = await getSql();
+  const seeded = await seed(9622);
+  for (const url of ["javascript:alert(1)", "ftp://files.example.org/list"]) {
+    assert.match(
+      refused(await saveServiceDetailsIn(sql, 9622, seeded.s1, { ...goodService, url }, "ed-e")).url!,
+      /https:\/\//,
+    );
+    assert.match(
+      refused(await saveOrganizationDetailsIn(sql, 9622, seeded.s1, { name: "Helping Hands", website: url }, "ed-e")).website!,
+      /https:\/\//,
+    );
+    assert.match(
+      refused(
+        await saveContactIn(
+          sql,
+          9622,
+          seeded.s1,
+          { contactId: seeded.ownContact, fields: { website: url } },
+          "ed-e",
+        ),
+      ).website!,
+      /https:\/\//,
+    );
+  }
+  const [row] = await sql.query<{ url: string | null }>("select url from services where id = $1", [
+    seeded.s1,
+  ]);
+  assert.equal(row!.url, null, "nothing was written");
+});
+
+test("an organization-level contact is not public while its organization's only service is unpublished", async () => {
+  const sql = await getSql();
+  const seeded = await seed(9623);
+  await sql.query("update organizations set published = true where id = $1", [seeded.orgA]);
+  const orgContact = await saveContactIn(
+    sql,
+    9623,
+    seeded.s1,
+    { scope: "organization", fields: { name: "Front desk", phone: "555-7001" } },
+    "ed-f",
+  );
+  const serviceContact = await saveContactIn(
+    sql,
+    9623,
+    seeded.s1,
+    { scope: "service", fields: { name: "Intake", phone: "555-7002" } },
+    "ed-f",
+  );
+  assert.equal(orgContact.ok && serviceContact.ok, true);
+  const [flags] = await sql.query<{ org_published: boolean; service_published: boolean }>(
+    `select (select published from contacts where phone = '555-7001') as org_published,
+            (select published from services where id = $1) as service_published`,
+    [seeded.s1],
+  );
+  assert.deepEqual({ ...flags }, { org_published: true, service_published: false });
+  const page = await listPublicRegistry(sql, 9623);
+  const shown = JSON.stringify(page.entries);
+  assert.equal(page.entries.length, 0, "the page lists no entry: the only service is unpublished");
+  assert.ok(!shown.includes("555-7002"), "a service-scope contact is never public here");
+  assert.ok(!shown.includes("555-7001"), "the organization-scope contact is not public here either");
 });

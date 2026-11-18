@@ -175,10 +175,26 @@ async function mount() {
       await React.act(async () => props(form).onSubmit({ preventDefault() {} }));
       await api.settle();
     },
+    /** Two submits of the same form in one tick, before React re-renders. */
+    async submitTwice(scope) {
+      const handler = props(scope.querySelector("form")).onSubmit;
+      await React.act(async () => {
+        handler({ preventDefault() {} });
+        handler({ preventDefault() {} });
+      });
+      await api.settle();
+    },
     async press(button) {
       await React.act(async () => {
         button.dispatchEvent(new window.Event("click", { bubbles: true }));
       });
+    },
+    /** Refetch the entry's detail, as the page does after a save elsewhere. */
+    async refetch() {
+      await React.act(async () => {
+        await client.invalidateQueries({ queryKey: ["registry-entry-detail", 7] });
+      });
+      await api.settle();
     },
     async close() {
       await React.act(async () => root.unmount());
@@ -242,7 +258,7 @@ test("an organization shared with nothing shows no notice", async (t) => {
   assert.equal(page.container.querySelectorAll('[data-testid="shared-notice"]').length, 1, "only the location contact");
 });
 
-test("saving the service sends exactly the fields on screen and says it was saved", async (t) => {
+test("saving the service sends only the fields the editor changed and says it was saved", async (t) => {
   setup();
   const page = await mount();
   t.after(() => page.close());
@@ -258,8 +274,6 @@ test("saving the service sends exactly the fields on screen and says it was save
     serviceId: 7,
     fields: {
       name: "Food Pantry North",
-      description: "Groceries",
-      url: "https://example.org/pantry",
       fees: "Five dollars",
       applicationProcess: "Call first",
       crisis: true,
@@ -271,7 +285,7 @@ test("saving the service sends exactly the fields on screen and says it was save
   assert.ok(page.invalidated.includes('["registry-entry-detail",7]'), "the detail was not refreshed");
 });
 
-test("saving the organization sends its fields", async (t) => {
+test("saving the organization sends only the fields that changed", async (t) => {
   setup();
   const page = await mount();
   t.after(() => page.close());
@@ -282,16 +296,63 @@ test("saving the organization sends its fields", async (t) => {
   const call = globalThis.__editor.calls.find((c) => c[0] === "organization");
   assert.deepEqual(call[1], {
     serviceId: 7,
-    fields: {
-      name: "Helping Hands",
-      alternateName: "",
-      description: "",
-      email: "hello@example.org",
-      website: "",
-      legalStatus: "nonprofit",
-    },
+    fields: { email: "hello@example.org", legalStatus: "nonprofit" },
   });
   assert.match(page.group("Organization details").textContent, /Organization details saved\./);
+});
+
+test("a refetch refreshes a form with no unsaved edits, and keeps the editor's unsaved edits", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const service = () => page.group("Service details");
+  // The stub returns a fresh copy of the entry, as the server would.
+  const changeSavedEntry = (change) => {
+    const next = JSON.parse(JSON.stringify(globalThis.__editor.detail));
+    change(next);
+    globalThis.__editor.detail = next;
+  };
+
+  // Someone else changes the fee. Nothing is unsaved here, so the form follows.
+  changeSavedEntry((d) => {
+    d.service.fees = "Five dollars";
+  });
+  await page.refetch();
+  assert.equal(page.input(service(), "fees").value, "Five dollars", "an untouched form shows the saved value");
+
+  // This editor types a name; meanwhile someone else changes the fee again.
+  await page.type(service(), "name", "Food Pantry North");
+  changeSavedEntry((d) => {
+    d.service.fees = "Ten dollars";
+  });
+  await page.refetch();
+  assert.equal(page.input(service(), "name").value, "Food Pantry North", "the unsaved name is kept");
+  await page.submit(service());
+  const call = globalThis.__editor.calls.filter((c) => c[0] === "service").at(-1);
+  assert.deepEqual(call[1].fields, { name: "Food Pantry North" }, "the other editor's fee is not sent back");
+});
+
+test("pressing Add contact twice in one tick sends one contact", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const add = page.group("Add a contact");
+  await page.type(add, "name", "Front desk");
+  await page.type(add, "phone", "555-0123");
+  await page.submitTwice(add);
+  assert.equal(globalThis.__editor.calls.filter((c) => c[0] === "contact").length, 1, "two submits, one contact");
+});
+
+test("the long-text boxes have the same limit as the server", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  // The attribute is read as React writes it (maxLength); HTML attribute names
+  // are case-insensitive in a browser, so this is the same attribute there.
+  const limit = (group, name) => group.querySelector(`textarea[name="${name}"]`)?.getAttribute("maxLength");
+  assert.equal(limit(page.group("Service details"), "description"), "2000");
+  assert.equal(limit(page.group("Service details"), "applicationProcess"), "2000");
+  assert.equal(limit(page.group("Organization details"), "description"), "2000");
 });
 
 test("problems the server returns show under their field as alerts and say nothing was saved", async (t) => {
@@ -331,7 +392,7 @@ test("a server error says nothing was saved", async (t) => {
   assert.deepEqual(page.alerts(group), ["The connection dropped. Nothing was saved."]);
 });
 
-test("changing a contact sends its id; adding one sends no id and the chosen scope", async (t) => {
+test("changing a contact sends its id and only its changed field; adding one sends no id and the chosen scope", async (t) => {
   setup();
   const page = await mount();
   t.after(() => page.close());
@@ -344,15 +405,7 @@ test("changing a contact sends its id; adding one sends no id and the chosen sco
     serviceId: 7,
     contactId: 11,
     scope: "service",
-    fields: {
-      name: "Pantry desk",
-      role: "",
-      department: "",
-      phone: "555-0100",
-      phoneExtension: "14",
-      email: "",
-      website: "",
-    },
+    fields: { phoneExtension: "14" },
   });
   assert.match(own.textContent, /Contact saved\./);
 
@@ -377,15 +430,7 @@ test("changing a contact sends its id; adding one sends no id and the chosen sco
     serviceId: 7,
     contactId: null,
     scope: "organization",
-    fields: {
-      name: "Front desk",
-      role: "",
-      department: "",
-      phone: "555-0123",
-      phoneExtension: "",
-      email: "",
-      website: "",
-    },
+    fields: { name: "Front desk", phone: "555-0123" },
   });
   assert.match(add.textContent, /Contact added\./);
   assert.equal(page.input(add, "name").value, "", "the add form is empty for the next contact");

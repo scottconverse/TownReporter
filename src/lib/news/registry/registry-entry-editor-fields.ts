@@ -84,14 +84,38 @@ function asRecord(input: unknown): Record<string, unknown> {
   return (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
 }
 
-function checkLength(
+/**
+ * True when the text holds a control character. Tab, line feed and carriage
+ * return are allowed only in a multi-line field; NUL is never allowed (Postgres
+ * refuses it, and the save would fail with a database error instead of a
+ * sentence).
+ */
+function hasControlCharacter(value: string, multiline: boolean): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0x09 || code === 0x0a || code === 0x0d) {
+      if (!multiline) return true;
+    } else if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function checkText(
   problems: FieldProblems,
   key: string,
   label: string,
   value: string,
   max: number,
+  multiline = false,
 ) {
-  if (value.length > max && !problems[key]) {
+  if (problems[key]) return;
+  if (hasControlCharacter(value, multiline)) {
+    problems[key] = `${label} contains a character that cannot be saved. Remove it and try again.`;
+    return;
+  }
+  if (value.length > max) {
     problems[key] = `${label} is too long. Use ${max} characters or fewer.`;
   }
 }
@@ -128,17 +152,18 @@ export function validateServiceDetails(input: unknown): Validated<ServiceDetailF
   };
   const problems: FieldProblems = {};
   if (!values.name) problems.name = "Enter the service's name.";
-  checkLength(problems, "name", "The service's name", values.name, SERVICE_LIMITS.name);
-  checkLength(problems, "description", "The description", values.description, SERVICE_LIMITS.description);
-  checkLength(problems, "url", "The web address", values.url, SERVICE_LIMITS.url);
+  checkText(problems, "name", "The service's name", values.name, SERVICE_LIMITS.name);
+  checkText(problems, "description", "The description", values.description, SERVICE_LIMITS.description, true);
+  checkText(problems, "url", "The web address", values.url, SERVICE_LIMITS.url);
   checkUrl(problems, "url", "The web address", values.url);
-  checkLength(problems, "fees", "The fees", values.fees, SERVICE_LIMITS.fees);
-  checkLength(
+  checkText(problems, "fees", "The fees", values.fees, SERVICE_LIMITS.fees);
+  checkText(
     problems,
     "applicationProcess",
     "The application process",
     values.applicationProcess,
     SERVICE_LIMITS.applicationProcess,
+    true,
   );
   return Object.keys(problems).length ? { ok: false, problems } : { ok: true, values };
 }
@@ -155,14 +180,14 @@ export function validateOrganizationDetails(input: unknown): Validated<Organizat
   };
   const problems: FieldProblems = {};
   if (!values.name) problems.name = "Enter the organization's name.";
-  checkLength(problems, "name", "The organization's name", values.name, ORGANIZATION_LIMITS.name);
-  checkLength(problems, "alternateName", "The other name", values.alternateName, ORGANIZATION_LIMITS.alternateName);
-  checkLength(problems, "description", "The description", values.description, ORGANIZATION_LIMITS.description);
-  checkLength(problems, "email", "The email address", values.email, ORGANIZATION_LIMITS.email);
+  checkText(problems, "name", "The organization's name", values.name, ORGANIZATION_LIMITS.name);
+  checkText(problems, "alternateName", "The other name", values.alternateName, ORGANIZATION_LIMITS.alternateName);
+  checkText(problems, "description", "The description", values.description, ORGANIZATION_LIMITS.description, true);
+  checkText(problems, "email", "The email address", values.email, ORGANIZATION_LIMITS.email);
   checkEmail(problems, "email", "The email address", values.email);
-  checkLength(problems, "website", "The website", values.website, ORGANIZATION_LIMITS.website);
+  checkText(problems, "website", "The website", values.website, ORGANIZATION_LIMITS.website);
   checkUrl(problems, "website", "The website", values.website);
-  checkLength(problems, "legalStatus", "The legal status", values.legalStatus, ORGANIZATION_LIMITS.legalStatus);
+  checkText(problems, "legalStatus", "The legal status", values.legalStatus, ORGANIZATION_LIMITS.legalStatus);
   return Object.keys(problems).length ? { ok: false, problems } : { ok: true, values };
 }
 
@@ -181,17 +206,17 @@ export function validateContactDetails(input: unknown): Validated<ContactDetailF
   if (!values.name && !values.phone && !values.email && !values.website) {
     problems.form = "Enter at least a name, a phone number, an email address or a website.";
   }
-  checkLength(problems, "name", "The name", values.name, CONTACT_LIMITS.name);
-  checkLength(problems, "role", "The role", values.role, CONTACT_LIMITS.role);
-  checkLength(problems, "department", "The department", values.department, CONTACT_LIMITS.department);
-  checkLength(problems, "phone", "The phone number", values.phone, CONTACT_LIMITS.phone);
-  checkLength(problems, "phoneExtension", "The extension", values.phoneExtension, CONTACT_LIMITS.phoneExtension);
+  checkText(problems, "name", "The name", values.name, CONTACT_LIMITS.name);
+  checkText(problems, "role", "The role", values.role, CONTACT_LIMITS.role);
+  checkText(problems, "department", "The department", values.department, CONTACT_LIMITS.department);
+  checkText(problems, "phone", "The phone number", values.phone, CONTACT_LIMITS.phone);
+  checkText(problems, "phoneExtension", "The extension", values.phoneExtension, CONTACT_LIMITS.phoneExtension);
   if (values.phoneExtension && !values.phone && !problems.phoneExtension) {
     problems.phoneExtension = "An extension needs a phone number. Enter the phone number too.";
   }
-  checkLength(problems, "email", "The email address", values.email, CONTACT_LIMITS.email);
+  checkText(problems, "email", "The email address", values.email, CONTACT_LIMITS.email);
   checkEmail(problems, "email", "The email address", values.email);
-  checkLength(problems, "website", "The website", values.website, CONTACT_LIMITS.website);
+  checkText(problems, "website", "The website", values.website, CONTACT_LIMITS.website);
   checkUrl(problems, "website", "The website", values.website);
   return Object.keys(problems).length ? { ok: false, problems } : { ok: true, values };
 }

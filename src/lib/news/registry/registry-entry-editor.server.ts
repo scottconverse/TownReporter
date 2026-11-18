@@ -8,10 +8,18 @@
  * against the newsroom, each validated before anything is written.
  *
  * Published state follows the desk's existing edit (`updateRegistryEntryIn`): a
- * save never changes `published`, and it stamps the service as verified by this
- * editor, exactly as that writer does. A contact the editor adds takes the
- * `published` of the thing it hangs on, as the existing phone writer does. No
- * other stamp is written. Nothing here removes a row.
+ * save never changes `published`. Only a save of the service's own details
+ * stamps the service as verified by this editor, as that writer does. Saving
+ * the organization or a contact does not restamp the service: nobody verified
+ * the service by editing a shared row. A contact the editor adds takes the
+ * `published` of the thing it hangs on, as the existing phone writer does, and
+ * is stamped as the editor's reading. Nothing here removes a row.
+ *
+ * Each save sends only the fields the editor changed. The writer checks the
+ * whole record (the stored values with those changes laid over them), so a
+ * rule that spans fields holds, but it writes only the columns that were sent:
+ * a stale form cannot overwrite another editor's change to a field it did not
+ * touch.
  *
  * A save that names an entry from another newsroom, or one that does not
  * exist, throws and writes nothing; a save whose fields are not valid returns
@@ -71,10 +79,16 @@ interface ServiceRow {
   org_legal_status: string | null;
 }
 
+/**
+ * The service with its organization's details. `lock` takes the service row
+ * for update, so a publish or take-down waits for the save to finish before
+ * it reads or writes `published`.
+ */
 async function loadServiceRow(
   sql: Sql,
   newsroomId: number,
   serviceId: number,
+  lock = false,
 ): Promise<ServiceRow | null> {
   const rows = await sql.query<ServiceRow>(
     `select s.id, s.organization_id, s.name, s.description, s.url, s.fees,
@@ -85,7 +99,8 @@ async function loadServiceRow(
        from services s
        join organizations o
          on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
-      where s.id = $1 and s.newsroom_id = $2`,
+      where s.id = $1 and s.newsroom_id = $2
+      ${lock ? "for update of s" : ""}`,
     [serviceId, newsroomId],
   );
   return rows[0] ?? null;
@@ -263,9 +278,146 @@ export type EntrySaveResult =
   | { ok: true; serviceId: number }
   | { ok: false; problems: FieldProblems };
 
+/** The fields a save sent: only the ones the editor changed, by field name. */
+type Changed = Record<string, unknown>;
+
+/**
+ * For each field: the column it is written to, and the value written (empty
+ * text is stored as null). The column names are fixed here; a request never
+ * names a column.
+ */
+type ColumnMap<T> = {
+  readonly [K in keyof T]: readonly [column: string, value: (fields: T) => unknown];
+};
+
+const SERVICE_COLUMNS: ColumnMap<ServiceDetailFields> = {
+  name: ["name", (f) => f.name],
+  description: ["description", (f) => f.description || null],
+  url: ["url", (f) => f.url || null],
+  fees: ["fees", (f) => f.fees || null],
+  applicationProcess: ["application_process", (f) => f.applicationProcess || null],
+  crisis: ["crisis", (f) => f.crisis],
+};
+
+const ORGANIZATION_COLUMNS: ColumnMap<OrganizationDetailFields> = {
+  name: ["name", (f) => f.name],
+  alternateName: ["alternate_name", (f) => f.alternateName || null],
+  description: ["description", (f) => f.description || null],
+  email: ["email", (f) => f.email || null],
+  website: ["website", (f) => f.website || null],
+  legalStatus: ["legal_status", (f) => f.legalStatus || null],
+};
+
+const CONTACT_COLUMNS: ColumnMap<ContactDetailFields> = {
+  name: ["name", (f) => f.name || null],
+  role: ["role", (f) => f.role || null],
+  department: ["department", (f) => f.department || null],
+  phone: ["phone", (f) => f.phone || null],
+  phoneExtension: ["phone_extension", (f) => f.phoneExtension || null],
+  email: ["email", (f) => f.email || null],
+  website: ["website", (f) => f.website || null],
+};
+
+const NO_CONTACT: ContactDetailFields = {
+  name: "",
+  role: "",
+  department: "",
+  phone: "",
+  phoneExtension: "",
+  email: "",
+  website: "",
+};
+
+function serviceFields(row: ServiceRow): ServiceDetailFields {
+  return {
+    name: row.name,
+    description: row.description ?? "",
+    url: row.url ?? "",
+    fees: row.fees ?? "",
+    applicationProcess: row.application_process ?? "",
+    crisis: row.crisis,
+  };
+}
+
+function organizationFields(row: ServiceRow): OrganizationDetailFields {
+  return {
+    name: row.org_name,
+    alternateName: row.org_alternate_name ?? "",
+    description: row.org_description ?? "",
+    email: row.org_email ?? "",
+    website: row.org_website ?? "",
+    legalStatus: row.org_legal_status ?? "",
+  };
+}
+
+function contactFields(row: ContactRow): ContactDetailFields {
+  return {
+    name: row.name ?? "",
+    role: row.role ?? "",
+    department: row.department ?? "",
+    phone: row.phone ?? "",
+    phoneExtension: row.phone_extension ?? "",
+    email: row.email ?? "",
+    website: row.website ?? "",
+  };
+}
+
+function asChanged(input: unknown): Changed {
+  return (input && typeof input === "object" ? input : {}) as Changed;
+}
+
+function hasField(changed: Changed, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(changed, key);
+}
+
+/**
+ * The stored fields with the editor's changes laid over them: what the record
+ * would hold after the save. Only the fields the map names are taken.
+ */
+function withChanges<T extends object>(
+  stored: T,
+  changed: Changed,
+  map: ColumnMap<T>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(stored as Record<string, unknown>) };
+  for (const key of Object.keys(map)) {
+    if (hasField(changed, key)) next[key] = changed[key];
+  }
+  return next;
+}
+
+/**
+ * Write only the columns of the fields the editor sent. Nothing is written when
+ * the editor sent no field. The table name is one of three fixed names.
+ */
+async function writeChangedColumns<T extends object>(
+  tx: Sql,
+  table: "services" | "organizations" | "contacts",
+  map: ColumnMap<T>,
+  changed: Changed,
+  values: T,
+  id: number,
+  newsroomId: number,
+): Promise<void> {
+  const writes = (Object.keys(map) as (keyof T & string)[])
+    .filter((key) => hasField(changed, key))
+    .map((key) => {
+      const [column, value] = map[key];
+      return { column, value: value(values) };
+    });
+  if (writes.length === 0) return;
+  const sets = writes.map((write, i) => `${write.column} = $${i + 1}`).join(", ");
+  await tx.query(
+    `update ${table}
+        set ${sets}, updated_at = now()
+      where id = $${writes.length + 1} and newsroom_id = $${writes.length + 2}`,
+    [...writes.map((write) => write.value), id, newsroomId],
+  );
+}
+
 /**
  * Stamp the service as verified by this editor now: what the desk's existing
- * edit does for every save, and the only stamp these writers write.
+ * edit does, and written only by the service save.
  */
 async function stampService(
   sql: Sql,
@@ -284,7 +436,10 @@ async function stampService(
   );
 }
 
-/** Save the service's own details. `published` is not touched. */
+/**
+ * Save the service's own details: the fields the editor changed, then the
+ * service's stamp. `published` is not touched.
+ */
 export async function saveServiceDetailsIn(
   sql: Sql,
   newsroomId: number,
@@ -292,70 +447,50 @@ export async function saveServiceDetailsIn(
   input: unknown,
   userId: string,
 ): Promise<EntrySaveResult> {
-  const checked = validateServiceDetails(input);
   return withTransaction(async (tx) => {
     const row = await loadServiceRow(tx, newsroomId, serviceId);
     if (!row) throw new Error(NOT_IN_NEWSROOM);
+    const changed = asChanged(input);
+    const checked = validateServiceDetails(withChanges(serviceFields(row), changed, SERVICE_COLUMNS));
     if (!checked.ok) return checked;
-    const v = checked.values;
     const id = Number(row.id);
-    await tx.query(
-      `update services
-          set name = $1, description = $2, url = $3, fees = $4,
-              application_process = $5, crisis = $6, updated_at = now()
-        where id = $7 and newsroom_id = $8`,
-      [
-        v.name,
-        v.description || null,
-        v.url || null,
-        v.fees || null,
-        v.applicationProcess || null,
-        v.crisis,
-        id,
-        newsroomId,
-      ],
-    );
+    await writeChangedColumns(tx, "services", SERVICE_COLUMNS, changed, checked.values, id, newsroomId);
     await stampService(tx, newsroomId, id, userId);
     return { ok: true as const, serviceId: id };
   });
 }
 
 /**
- * Save the details of the service's organization. The organization may belong
- * to other services too; the reader says which, and this writes the one row.
+ * Save the details of the service's organization: the fields the editor
+ * changed, and nothing else. The organization may belong to other services
+ * too; the reader says which, and this writes the one row. The service is not
+ * restamped: an organization edit is not a verification of the service.
  */
 export async function saveOrganizationDetailsIn(
   sql: Sql,
   newsroomId: number,
   serviceId: number,
   input: unknown,
-  userId: string,
+  _userId: string,
 ): Promise<EntrySaveResult> {
-  const checked = validateOrganizationDetails(input);
   return withTransaction(async (tx) => {
     const row = await loadServiceRow(tx, newsroomId, serviceId);
     if (!row) throw new Error(NOT_IN_NEWSROOM);
-    if (!checked.ok) return checked;
-    const v = checked.values;
-    await tx.query(
-      `update organizations
-          set name = $1, alternate_name = $2, description = $3, email = $4,
-              website = $5, legal_status = $6, updated_at = now()
-        where id = $7 and newsroom_id = $8`,
-      [
-        v.name,
-        v.alternateName || null,
-        v.description || null,
-        v.email || null,
-        v.website || null,
-        v.legalStatus || null,
-        Number(row.organization_id),
-        newsroomId,
-      ],
+    const changed = asChanged(input);
+    const checked = validateOrganizationDetails(
+      withChanges(organizationFields(row), changed, ORGANIZATION_COLUMNS),
     );
-    const id = Number(row.id);
-    await stampService(tx, newsroomId, id, userId);
-    return { ok: true as const, serviceId: id };
+    if (!checked.ok) return checked;
+    await writeChangedColumns(
+      tx,
+      "organizations",
+      ORGANIZATION_COLUMNS,
+      changed,
+      checked.values,
+      Number(row.organization_id),
+      newsroomId,
+    );
+    return { ok: true as const, serviceId: Number(row.id) };
   });
 }
 
@@ -364,6 +499,7 @@ export interface SaveContactInput {
   contactId?: number | null;
   /** Where a new contact belongs. Ignored when changing one. */
   scope?: "service" | "organization";
+  /** The fields the editor changed. */
   fields: unknown;
 }
 
@@ -372,9 +508,10 @@ export interface SaveContactInput {
  *
  * A contact id that is not one of this entry's contacts (another newsroom's, or
  * another service's) throws and writes nothing. A changed contact keeps its
- * `published` and its own stamp; a new one takes the `published` of what it
- * hangs on (the service, or the organization) and is stamped as the editor's
- * reading, the way the desk's phone writer stamps a new phone row.
+ * `published` and its own stamp, and only its changed columns are written; a
+ * new one takes the `published` of what it hangs on (the service, or the
+ * organization) and is stamped as the editor's reading, the way the desk's phone
+ * writer stamps a new phone row. Neither touches the service's stamp.
  */
 export async function saveContactIn(
   sql: Sql,
@@ -383,9 +520,10 @@ export async function saveContactIn(
   input: SaveContactInput,
   userId: string,
 ): Promise<EntrySaveResult> {
-  const checked = validateContactDetails(input?.fields);
   return withTransaction(async (tx) => {
-    const row = await loadServiceRow(tx, newsroomId, serviceId);
+    // The service row is locked: the published state a new contact takes is
+    // read below, and a publish must not change it while this save runs.
+    const row = await loadServiceRow(tx, newsroomId, serviceId, true);
     if (!row) throw new Error(NOT_IN_NEWSROOM);
     const id = Number(row.id);
     const organizationId = Number(row.organization_id);
@@ -399,64 +537,60 @@ export async function saveContactIn(
         throw new Error("That contact is not part of this entry. Nothing was changed.");
       }
     }
+    const changed = asChanged(input?.fields);
+    const checked = validateContactDetails(
+      withChanges(existing ? contactFields(existing) : NO_CONTACT, changed, CONTACT_COLUMNS),
+    );
     if (!checked.ok) return checked;
     const v = checked.values;
 
     if (existing) {
-      await tx.query(
-        `update contacts
-            set name = $1, role = $2, department = $3, phone = $4,
-                phone_extension = $5, email = $6, website = $7, updated_at = now()
-          where id = $8 and newsroom_id = $9`,
-        [
-          v.name || null,
-          v.role || null,
-          v.department || null,
-          v.phone || null,
-          v.phoneExtension || null,
-          v.email || null,
-          v.website || null,
-          Number(existing.id),
-          newsroomId,
-        ],
+      await writeChangedColumns(
+        tx,
+        "contacts",
+        CONTACT_COLUMNS,
+        changed,
+        v,
+        Number(existing.id),
+        newsroomId,
       );
-    } else {
-      const onOrganization = input?.scope === "organization";
-      let published = row.published;
-      if (onOrganization) {
-        const org = await tx.query<{ published: boolean }>(
-          "select published from organizations where id = $1 and newsroom_id = $2",
-          [organizationId, newsroomId],
-        );
-        published = Boolean(org[0]?.published);
-      }
-      const suffix = Math.random().toString(36).slice(2, 10);
-      await tx.query(
-        `insert into contacts
-           (newsroom_id, hsds_id, directory_name, organization_id, service_id,
-            name, role, department, phone, phone_extension, email, website,
-            published, last_verified_at, verification_method, last_verified_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(),
-                 'editor', $14)`,
-        [
-          newsroomId,
-          `desk-contact-${id}-${suffix}`,
-          DESK_DIRECTORY,
-          onOrganization ? organizationId : null,
-          onOrganization ? null : id,
-          v.name || null,
-          v.role || null,
-          v.department || null,
-          v.phone || null,
-          v.phoneExtension || null,
-          v.email || null,
-          v.website || null,
-          published,
-          userId,
-        ],
-      );
+      return { ok: true as const, serviceId: id };
     }
-    await stampService(tx, newsroomId, id, userId);
+
+    const onOrganization = input?.scope === "organization";
+    let published = row.published;
+    if (onOrganization) {
+      const org = await tx.query<{ published: boolean }>(
+        "select published from organizations where id = $1 and newsroom_id = $2 for update",
+        [organizationId, newsroomId],
+      );
+      published = Boolean(org[0]?.published);
+    }
+    const suffix = Math.random().toString(36).slice(2, 10);
+    await tx.query(
+      `insert into contacts
+         (newsroom_id, hsds_id, directory_name, organization_id, service_id,
+          name, role, department, phone, phone_extension, email, website,
+          published, last_verified_at, verification_method, last_verified_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(),
+               'editor', $14)`,
+      [
+        newsroomId,
+        `desk-contact-${id}-${suffix}`,
+        DESK_DIRECTORY,
+        onOrganization ? organizationId : null,
+        onOrganization ? null : id,
+        v.name || null,
+        v.role || null,
+        v.department || null,
+        v.phone || null,
+        v.phoneExtension || null,
+        v.email || null,
+        v.website || null,
+        published,
+        userId,
+      ],
+    );
     return { ok: true as const, serviceId: id };
   });
 }

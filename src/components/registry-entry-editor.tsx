@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type ReactNode } from "react";
+import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import {
@@ -67,26 +67,77 @@ function FieldProblem({ problems, name }: { problems: FieldProblems; name: strin
   );
 }
 
+/** What one group's save sends: the whole form, and the fields the editor changed. */
+interface GroupSaveInput<T> {
+  snapshot: T;
+  changed: Partial<T>;
+}
+
+/** Every field of the two records has the same value. */
+function sameValues<T extends object>(a: T, b: T): boolean {
+  return (Object.keys(a) as (keyof T & string)[]).every((key) => a[key] === b[key]);
+}
+
+/** The fields whose value differs from `seed`: what the editor changed. */
+function changedFrom<T extends object>(fields: T, seed: T): Partial<T> {
+  const changed: Partial<T> = {};
+  for (const key of Object.keys(fields) as (keyof T & string)[]) {
+    if (fields[key] !== seed[key]) changed[key] = fields[key];
+  }
+  return changed;
+}
+
+/**
+ * A form seeded from the entry as loaded. `seed` is the value the form last took
+ * from the server or from a save; the editor's changes are the fields that differ
+ * from it. When the entry is refetched with newer values and the form has no
+ * unsaved changes, the form takes them. With unsaved changes it keeps its own,
+ * so a save sends only what the editor changed.
+ */
+function useSeededForm<T extends object>(loaded: T) {
+  const [state, setState] = useState({ seed: loaded, fields: loaded });
+  let current = state;
+  if (!sameValues(state.seed, loaded) && sameValues(state.fields, state.seed)) {
+    current = { seed: loaded, fields: loaded };
+    setState(current);
+  }
+  return {
+    fields: current.fields,
+    seed: current.seed,
+    setFields: (fields: T) => setState((s) => ({ ...s, fields })),
+    markSaved: (saved: T) => setState((s) => ({ ...s, seed: saved })),
+    reset: (value: T) => setState({ seed: value, fields: value }),
+  };
+}
+
 /**
  * One group's save: the call, the problems it came back with, and its words.
  * Held here so a later save replaces the older answer instead of stacking.
+ * `onSaved` runs only when the save was made, so the form can take the saved
+ * values as its new starting point.
  */
 function useGroupSave<Input>(
   serviceId: number,
   call: (input: Input) => Promise<SaveResult>,
   doneMessage: string,
+  onSaved: (input: Input) => void,
 ) {
   const qc = useQueryClient();
   const [problems, setProblems] = useState<FieldProblems>({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set from the moment a save is sent until it has settled. The button only
+  // shows pending after the next render, so a second submit in the same tick
+  // would otherwise send the same save twice.
+  const saving = useRef(false);
   const mutation = useMutation({
     mutationFn: call,
-    onSuccess: async (result) => {
+    onSuccess: async (result, input) => {
       if (result.ok) {
         setProblems({});
         setError(null);
         setMessage(doneMessage);
+        onSaved(input);
       } else {
         setProblems(result.problems);
         setError(null);
@@ -104,6 +155,9 @@ function useGroupSave<Input>(
       setMessage(null);
       setError(failure instanceof Error ? failure.message : "That change was not saved.");
     },
+    onSettled: () => {
+      saving.current = false;
+    },
   });
   return {
     problems,
@@ -111,6 +165,8 @@ function useGroupSave<Input>(
     error,
     pending: mutation.isPending,
     save: (input: Input) => {
+      if (saving.current) return;
+      saving.current = true;
       setMessage(null);
       mutation.mutate(input);
     },
@@ -176,7 +232,14 @@ function TextField<T extends object>({
     <label className={labelClass}>
       {label}
       {multiline ? (
-        <textarea className={box} name={name} value={value} rows={3} onChange={change} />
+        <textarea
+          className={box}
+          name={name}
+          value={value}
+          rows={3}
+          maxLength={max}
+          onChange={change}
+        />
       ) : (
         <input className={box} name={name} value={value} maxLength={max} onChange={change} />
       )}
@@ -197,7 +260,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 type ServiceForm = ServiceDetailFields;
 
 function ServiceGroup({ serviceId, detail }: { serviceId: number; detail: EntryDetail["service"] }) {
-  const [fields, setFields] = useState<ServiceForm>({
+  const form = useSeededForm<ServiceForm>({
     name: detail.name,
     description: detail.description,
     url: detail.url,
@@ -205,19 +268,21 @@ function ServiceGroup({ serviceId, detail }: { serviceId: number; detail: EntryD
     applicationProcess: detail.applicationProcess,
     crisis: detail.crisis,
   });
-  const group = useGroupSave(
+  const fields = form.fields;
+  const group = useGroupSave<GroupSaveInput<ServiceForm>>(
     serviceId,
-    (input: ServiceForm) => saveRegistryServiceDetails({ data: { serviceId, fields: input } }),
+    (input) => saveRegistryServiceDetails({ data: { serviceId, fields: input.changed } }),
     "Service details saved.",
+    (input) => form.markSaved(input.snapshot),
   );
-  const common = { state: fields, setState: setFields, problems: group.problems };
+  const common = { state: fields, setState: form.setFields, problems: group.problems };
   return (
     <Group title="Service details">
       <form
         className="grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          group.save(fields);
+          group.save({ snapshot: fields, changed: changedFrom(fields, form.seed) });
         }}
       >
         <TextField<ServiceForm> label="Service name" name="name" max={SERVICE_LIMITS.name} {...common} />
@@ -242,7 +307,7 @@ function ServiceGroup({ serviceId, detail }: { serviceId: number; detail: EntryD
             type="checkbox"
             name="crisis"
             checked={fields.crisis}
-            onChange={(event) => setFields({ ...fields, crisis: event.target.checked })}
+            onChange={(event) => form.setFields({ ...fields, crisis: event.target.checked })}
           />
           This is a crisis service
         </label>
@@ -266,7 +331,7 @@ function OrganizationGroup({
   serviceId: number;
   detail: EntryDetail["organization"];
 }) {
-  const [fields, setFields] = useState<OrganizationForm>({
+  const form = useSeededForm<OrganizationForm>({
     name: detail.name,
     alternateName: detail.alternateName,
     description: detail.description,
@@ -274,13 +339,14 @@ function OrganizationGroup({
     website: detail.website,
     legalStatus: detail.legalStatus,
   });
-  const group = useGroupSave(
+  const fields = form.fields;
+  const group = useGroupSave<GroupSaveInput<OrganizationForm>>(
     serviceId,
-    (input: OrganizationForm) =>
-      saveRegistryOrganizationDetails({ data: { serviceId, fields: input } }),
+    (input) => saveRegistryOrganizationDetails({ data: { serviceId, fields: input.changed } }),
     "Organization details saved.",
+    (input) => form.markSaved(input.snapshot),
   );
-  const common = { state: fields, setState: setFields, problems: group.problems };
+  const common = { state: fields, setState: form.setFields, problems: group.problems };
   return (
     <Group title="Organization details">
       <SharedNotice sharedWith={detail.sharedWith} />
@@ -288,7 +354,7 @@ function OrganizationGroup({
         className="grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          group.save(fields);
+          group.save({ snapshot: fields, changed: changedFrom(fields, form.seed) });
         }}
       >
         <TextField<OrganizationForm>
@@ -340,6 +406,7 @@ function OrganizationGroup({
 }
 
 type ContactFormState = ContactDetailFields;
+type ContactSave = GroupSaveInput<ContactFormState> & { scope: "service" | "organization" };
 type EntryContact = EntryDetail["contacts"][number];
 
 const EMPTY_CONTACT: ContactFormState = {
@@ -385,21 +452,23 @@ function ContactForm({
     organizationSharedWith: readonly SharedEntry[];
   };
 }) {
-  const [fields, setFields] = useState<ContactFormState>(initial);
+  const form = useSeededForm<ContactFormState>(initial);
+  const fields = form.fields;
   const [chosenScope, setChosenScope] = useState<"service" | "organization">(scope);
-  const group = useGroupSave(
+  const group = useGroupSave<ContactSave>(
     serviceId,
-    async (input: { fields: ContactFormState; scope: "service" | "organization" }) => {
-      const result = await saveRegistryContact({
-        data: { serviceId, contactId, scope: input.scope, fields: input.fields },
-      });
-      // A new contact leaves the form empty for the next one.
-      if (result.ok && contactId === null) setFields(initial);
-      return result;
-    },
+    (input) =>
+      saveRegistryContact({
+        data: { serviceId, contactId, scope: input.scope, fields: input.changed },
+      }),
     doneMessage,
+    (input) => {
+      // A new contact leaves the form empty for the next one.
+      if (contactId === null) form.reset(initial);
+      else form.markSaved(input.snapshot);
+    },
   );
-  const common = { state: fields, setState: setFields, problems: group.problems };
+  const common = { state: fields, setState: form.setFields, problems: group.problems };
   const shown =
     scopeChoice && chosenScope === "organization" ? scopeChoice.organizationSharedWith : sharedWith;
   return (
@@ -409,7 +478,11 @@ function ContactForm({
         className="grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          group.save({ fields, scope: chosenScope });
+          group.save({
+            snapshot: fields,
+            changed: changedFrom(fields, form.seed),
+            scope: chosenScope,
+          });
         }}
       >
         {scopeChoice ? (
