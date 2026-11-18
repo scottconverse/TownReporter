@@ -11,6 +11,12 @@ import { saveDraftRefusalNote } from "./draft-refusal-note.server.ts";
  * parts (./lead-score.ts), and 14 is already the "hot" line the Queue draws, so
  * the threshold lives here once and every reader (this rule, a test) uses it.
  * A lead at 13 or below is never queued by this rule.
+ *
+ * Held leads are drafted too (Scott, Nov 17 2026: "Yes, held too"). A scan
+ * holds a lead it thinks may repeat a story the paper already has. Drafting
+ * does not un-hold it: the draft path keeps the status, and Publish still
+ * refuses a held lead until an editor un-holds it (draft-order.server.ts), so
+ * the editor still decides whether it is a repeat.
  */
 export const AUTO_DRAFT_SCORE_THRESHOLD = 14;
 
@@ -76,7 +82,7 @@ async function noteDraftRefusal(
  * Queue a draft for every lead in this newsroom that scores
  * `AUTO_DRAFT_SCORE_THRESHOLD` or more and is not already in hand.
  *
- * A lead is skipped when it is not `new` (so a killed, held, published or
+ * A lead is skipped when it is not `new` or `held` (so a killed, published or
  * already-drafted lead never comes back through this rule), when it already
  * carries a written draft, when it is at or below the threshold, when a draft
  * job for it is still queued or running, or when an editor already STOPPED a
@@ -97,7 +103,7 @@ export async function autoDraftEligibleLeads(
     select l.id
     from leads l
     where l.newsroom_id = ${context.newsroomId}
-      and l.status = 'new'
+      and l.status in ('new', 'held')
       and coalesce(l.newsworthiness, 0) >= ${AUTO_DRAFT_SCORE_THRESHOLD}
       and not exists (
         select 1 from drafts d
