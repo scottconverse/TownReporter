@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
+import { RegistryVerificationPanel } from "@/components/registry-verification-panel";
 import {
   readRegistryEntryDetail,
   removeRegistryRow,
@@ -1140,6 +1141,7 @@ export function RegistryEntryEditor({
         </p>
       ) : (
         <>
+          <RegistryVerificationPanel serviceId={serviceId} />
           <ServiceGroup
             key={`service-${detail.service.id}`}
             serviceId={serviceId}

@@ -1,0 +1,67 @@
+import { useQuery } from "@tanstack/react-query";
+import { InkButton } from "@/components/desk-chrome";
+import { listRegistryNeedsChecking } from "@/lib/news/registry/registry-verify";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
+
+/**
+ * The "Needs checking" view (spec 24, Phase 3): published entries with no
+ * explicit verification, a verification older than the limit, or key facts
+ * changed since the last check. Each row names the entry, says why it is
+ * listed, and opens that entry in the editor, where the Verify form is.
+ *
+ * Every line is the page's normal body size and full-contrast text.
+ */
+const NEEDS_CHECKING_KEY = ["registry-needs-checking"];
+
+export function RegistryNeedsChecking({ onOpen }: { onOpen: (serviceId: number) => void }) {
+  const { formatShortDate } = usePaperDateFormatters();
+  const query = useQuery({
+    queryKey: NEEDS_CHECKING_KEY,
+    queryFn: () => listRegistryNeedsChecking(),
+  });
+  if (query.isError) {
+    return (
+      <p className="text-base text-rust" role="alert">
+        {query.error instanceof Error ? query.error.message : "The list could not be loaded."}
+      </p>
+    );
+  }
+  if (!query.data) {
+    return (
+      <p className="text-base" role="status">
+        Loading the entries that need checking…
+      </p>
+    );
+  }
+  if (query.data.length === 0) {
+    return <p className="text-base">Every published entry has a current verification.</p>;
+  }
+  return (
+    <ul className="astra-plain" data-testid="needs-checking-list">
+      {query.data.map((item) => (
+        <li key={item.serviceId}>
+          <div className="astra-row-t">
+            {item.organizationName} — {item.serviceName}
+          </div>
+          {item.reasons.map((reason) => (
+            <p className="text-base" key={reason}>
+              {reason}
+            </p>
+          ))}
+          {item.lastCheckedAt ? (
+            <p className="text-base">Last checked {formatShortDate(item.lastCheckedAt)}.</p>
+          ) : null}
+          <div className="mt-2">
+            <InkButton
+              tone="ghost"
+              ariaLabel={`Open in the editor: ${item.serviceName}`}
+              onClick={() => onOpen(item.serviceId)}
+            >
+              Open in the editor
+            </InkButton>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
