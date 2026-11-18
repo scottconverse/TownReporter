@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
 import { RegistryImportPanel } from "@/components/registry-import-panel";
+import { RegistryEntryEditor } from "@/components/registry-entry-editor";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import {
   addRegistryEntry,
@@ -264,6 +265,8 @@ function RegistryDeskPage() {
   // Which row's form is open. One at a time, so the desk never shows two
   // half-edited entries and an editor cannot lose track of which Save is which.
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Which row's full details editor (organization, service and contacts) is open.
+  const [detailId, setDetailId] = useState<number | null>(null);
   // Bumped after an add so the add form remounts empty.
   const [addVersion, setAddVersion] = useState(0);
   // The last write's word to the editor. Held here rather than read off a
@@ -453,6 +456,15 @@ function RegistryDeskPage() {
                         >
                           Edit
                         </InkButton>
+                        <InkButton
+                          tone="ghost"
+                          ariaLabel={`All details: ${row.serviceName}`}
+                          onClick={() =>
+                            setDetailId(detailId === row.serviceId ? null : row.serviceId)
+                          }
+                        >
+                          All details
+                        </InkButton>
                       </div>
                       {editingId === row.serviceId ? (
                         <RegistryEntryForm
@@ -462,6 +474,12 @@ function RegistryDeskPage() {
                           pendingLabel="Saving…"
                           onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
                           onCancel={() => setEditingId(null)}
+                        />
+                      ) : null}
+                      {detailId === row.serviceId ? (
+                        <RegistryEntryEditor
+                          serviceId={row.serviceId}
+                          onClose={() => setDetailId(null)}
                         />
                       ) : null}
                     </li>
@@ -536,6 +554,15 @@ function RegistryDeskPage() {
                       </InkButton>
                       <InkButton
                         tone="ghost"
+                        ariaLabel={`All details: ${row.serviceName}`}
+                        onClick={() =>
+                          setDetailId(detailId === row.serviceId ? null : row.serviceId)
+                        }
+                      >
+                        All details
+                      </InkButton>
+                      <InkButton
+                        tone="ghost"
                         ariaLabel={`Take down: ${row.serviceName}`}
                         disabled={takeDown.isPending}
                         pending={takeDown.isPending && takeDown.variables === row.serviceId}
@@ -553,6 +580,12 @@ function RegistryDeskPage() {
                         pendingLabel="Saving…"
                         onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
                         onCancel={() => setEditingId(null)}
+                      />
+                    ) : null}
+                    {detailId === row.serviceId ? (
+                      <RegistryEntryEditor
+                        serviceId={row.serviceId}
+                        onClose={() => setDetailId(null)}
                       />
                     ) : null}
                   </li>
