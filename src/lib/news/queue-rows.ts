@@ -271,6 +271,22 @@ export function queueRowTick(picked: readonly number[], leadId: number, selected
   return selected ? [...picked.filter((id) => id !== leadId), leadId] : picked.filter((id) => id !== leadId);
 }
 
+/**
+ * The leads "Start N stories" drafts: EVERY lead the editor ticked, also one
+ * the list on screen no longer shows (it moved down past the window when the
+ * list reloaded, or the recently-killed merge changed). Scott, Nov 18 2026: he
+ * ticked 6 and the paper wrote 5, with no message. `offScreen` counts the
+ * ticked leads the screen does not show, so the bar can say they still count.
+ */
+export function queueDraftPickIds(
+  picked: readonly number[],
+  shownIds: readonly number[],
+): { ids: number[]; offScreen: number } {
+  const ids = [...new Set(picked)];
+  const shown = new Set(shownIds);
+  return { ids, offScreen: ids.filter((id) => !shown.has(id)).length };
+}
+
 export function queueSelectAllShown(shownIds: readonly number[], checked: boolean): number[] {
   return checked ? [...shownIds] : [];
 }

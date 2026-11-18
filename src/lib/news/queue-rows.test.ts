@@ -23,6 +23,7 @@ import {
   queueMatchesSearch,
   queueKeepsRowsWhileLoading,
   queueNeedle,
+  queueDraftPickIds,
   queueRowTick,
   queueSelect,
   queueSelectAllShown,
@@ -418,4 +419,13 @@ test("DHE1-6: the Killed pile's two orders read as two lists after a press, not 
   assert.notDeepEqual(newest, oldest);
   // Pressing Oldest on the Killed tab must not keep the Newest page on screen.
   assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { filter: "killed", section: "all", sort: "oldest" }), false);
+});
+
+test("Start drafts every ticked lead, also one the list no longer shows (Scott, Nov 18: 6 ticked, 5 written)", () => {
+  const picked = [11, 12, 13, 14, 15, 16];
+  const shownNow = [11, 12, 13, 14, 15, 20];
+  assert.deepEqual(queueDraftPickIds(picked, shownNow), { ids: picked, offScreen: 1 });
+  assert.deepEqual(queueDraftPickIds(picked, picked), { ids: picked, offScreen: 0 });
+  assert.deepEqual(queueDraftPickIds([5, 5, 6], [5]), { ids: [5, 6], offScreen: 1 }, "a lead ticked twice is drafted once");
+  assert.deepEqual(queueDraftPickIds([], [1, 2]), { ids: [], offScreen: 0 });
 });
