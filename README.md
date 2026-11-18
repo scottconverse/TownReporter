@@ -238,7 +238,7 @@ TownReporter is one Node 22 web application (TanStack Start on Vite) with a Post
 
 - **Front end.** The public paper and the desk are React routes in `src/routes`. The paper is self-contained: fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to an outside host.
 - **Server functions.** Every desk and Dark Desk mutation runs through `deskMiddleware`, which resolves the signed-in user and requires owner or editor membership.
-- **Database.** Migrations in `migrations/` (0001 to 0165); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
+- **Database.** Migrations in `migrations/` (0001 to 0166); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
 - **Lead scores.** The model rates each lead 1 to 5 on four parts. The desk adds them (`src/lib/news/lead-score.ts`). `leads.newsworthiness` keeps the 4-20 total and `leads.score_parts` keeps the parts and reasons:
 
 ```mermaid

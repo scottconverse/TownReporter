@@ -46,8 +46,8 @@ Each import is saved in the list of imports with its date, format and these coun
 ## What never happens
 
 - **Nothing is published.** Every imported row starts unpublished and unverified. A reader sees a row only after an editor presses **Publish** on its entry.
-- **A stored row is never overwritten.** A difference waits as a proposal in **Detected changes**. Review of these proposals is not built yet, so a proposal does not change the directory.
-- **The same proposal is not repeated.** A second import of the same file adds no new proposals for differences that are already waiting.
+- **A stored row is never overwritten.** A difference waits as a proposal in **Detected changes**. A proposal changes the directory only when an editor presses **Accept and apply** on it. See [Review a proposal](#review-a-proposal).
+- **The same proposal is not repeated.** A second import of the same file adds no new proposals for differences that are already waiting, or that an editor already accepted or rejected. See [Repeat imports and the import lock](#repeat-imports-and-the-import-lock).
 - **A status is not a change** when the file says **unverified** or gives no status.
 - **A removed row does not come back.** If an editor removed a row from an entry, an import leaves it removed. It counts as unchanged.
 - **A bad file writes nothing.** A failed import is rolled back as a whole.
@@ -62,6 +62,29 @@ Each import is saved in the list of imports with its date, format and these coun
 
 A removal is a marker. Nothing is deleted. Removing a place removes this entry's link to the place. The place itself stays, because other entries can use it. Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
 
+## Review a proposal
+
+Open `/desk/registry` and find **Detected changes**. Use the filters **Waiting for an editor** and **Needs the editor** to see the changes that wait. Each one has a **Note** box (optional, up to 1000 characters) and three buttons:
+
+- **Accept and apply** puts the proposed value on the entry, and marks the proposal accepted.
+- **Accept without applying** marks the proposal accepted. The entry does not change. Use it when you will edit the entry yourself.
+- **Reject** marks the proposal rejected. The entry does not change.
+
+A proposal that the scan marked **Needs the editor** (a crisis resource) has the same three buttons.
+
+Some proposals cannot be applied:
+
+- **Stale.** The field no longer holds the value the proposal was made against. The row says **This field now says** and **The proposal expected**. **Accept and apply** is not shown, and the server refuses it. **Accept without applying** and **Reject** still work.
+- **No target.** The proposal does not point at one live row. It may be a new entry, or a row that was removed. The row says the proposal cannot be applied. Only **Accept without applying** and **Reject** are shown.
+- **Value refused.** The field cannot hold the proposed value. **Accept and apply** is refused, and the page says **The proposed value cannot be stored in that field.** Nothing changes.
+
+A proposal that is already accepted or rejected cannot be decided again. The page says who decided it and when, and nothing changes. Accepting never verifies an entry. Each accept and each reject writes one audit record.
+
+## Repeat imports and the import lock
+
+- An import does not propose again a change that an editor already accepted or rejected. The match covers the field, the row, the value the file gives and the value the entry holds now. If the entry changed after the decision, the change can be proposed again.
+- Each import takes a lock for one newsroom and one directory name. A second import of the same directory waits until the first one finishes. It then sees the first import's proposals, so it does not repeat them. A preview takes the same lock.
+
 ## Not yet
 
-Review of the proposals (accept, reject, send back) and the verification steps are not built. A public search and a public JSON feed are not built either.
+Sending a proposal back for another look is not built. A public search and a public JSON feed are not built either.
