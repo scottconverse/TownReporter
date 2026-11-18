@@ -57,10 +57,10 @@ Each import is saved in the list of imports with its date, format and these coun
 1. On the entry, press **All details**.
 2. Find the row. Contacts, places, hours, eligibility rules, required documents, languages and accessibility notes can be removed.
 3. Press **Remove**. If other entries share the row, a notice names them first. Then press **Yes, remove**. Press **Keep it** to stop.
-4. The row leaves its group and appears in **Removed** at the bottom. The public page stops reading it at once. **Publish** skips it.
-5. To bring it back, press **Restore** on the row in **Removed**.
+4. The row leaves its group and appears in **Removed** at the bottom. A contact, place, hours or language stops showing on the public page at once. An eligibility rule, required document or accessibility note is kept on the desk only and is not shown on the public page. **Publish** skips it.
+5. To bring it back, press **Restore** on the row in **Removed**. If the entry is already linked to that place, the restore is refused: **This place is already linked to the entry. Nothing was restored.**
 
-A removal is a marker. Nothing is deleted. Removing a place removes this entry's link to the place. The place itself stays, because other entries can use it.
+A removal is a marker. Nothing is deleted. Removing a place removes this entry's link to the place. The place itself stays, because other entries can use it. Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
 
 ## Not yet
 

@@ -994,11 +994,18 @@ Only **Save service details** stamps the service as verified by you. Saving the 
 
 Each saved contact, place, hours, eligibility rule, required document, language and accessibility note has **Remove**.
 
-1. Press **Remove**. The editor asks to remove the row from the entry, and says it stops showing on the public page right away and can be brought back from the Removed list. If other entries share the row, the shared notice comes first.
+1. Press **Remove**. The editor asks a question such as **Remove this place from the entry?** If other entries share the row, the shared notice comes first.
 2. Press **Yes, remove**, or **Keep it** to stop.
-3. The row leaves its group. It is in **Removed** at the bottom of the editor. Press **Restore** there to bring it back as it was.
+3. The row leaves its group. It is in **Removed** at the bottom of the editor. Press **Restore** there to bring it back as it was. If the entry is already linked to that place, the restore is refused: **This place is already linked to the entry. Nothing was restored.**
 
-A removal is a marker. Nothing is deleted. The public page stops reading the row at once. **Publish** skips it. An import does not bring it back. Removing a place removes this entry's link to the place. The place stays, because other entries can use it.
+What the question says next depends on the row:
+
+- Contacts, places, hours and languages: **It stops showing on the public page right away. You can bring it back from the Removed list.**
+- Eligibility rules, required documents and accessibility notes: **It is kept on the desk only and is not shown on the public page. You can bring it back from the Removed list.**
+
+A removal is a marker. Nothing is deleted. Contacts, places, hours and languages stop showing on the public page at once. Eligibility rules, required documents and accessibility notes are not shown on the public page at all. **Publish** skips a removed row. An import does not bring it back. Removing a place removes this entry's link to the place. The place stays, because other entries can use it.
+
+Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
 
 Not yet: review of the proposals that imports and the scan make, and a public search and feed.
 
