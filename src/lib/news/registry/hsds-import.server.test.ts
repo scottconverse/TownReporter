@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getSql, withTransaction } from "../../db.ts";
+import { getSql, withTransaction, type Sql } from "../../db.ts";
 import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
 import { bundleToRows, REGISTRY_TABLE_NAMES, rowsToBundle } from "./hsds-map.ts";
 import type { HsdsBundle } from "./hsds-types.ts";
@@ -628,4 +628,45 @@ test("a value that differs from a pending proposal is a new proposal, and the ol
     [newsroomId],
   );
   assert.deepEqual(pending.map((row) => row.after_value), ["Proposed name A", "Proposed name B"]);
+});
+
+/** Thrown by the probe below to stop an import right after its lock statement. */
+class StopAfterLock extends Error {}
+
+/**
+ * How many advisory locks this session holds right after the importer's lock
+ * statement, for one directory name. That statement is the importer's first
+ * query, so the probe counts there and stops the import.
+ */
+async function advisoryLocksHeldFor(directoryName: string): Promise<number> {
+  let held = -1;
+  await withTransaction(async (tx) => {
+    const probe = {
+      query: async (text: string, params?: unknown[]) => {
+        const rows = await tx.query(text, params);
+        if (text.includes("pg_advisory_xact_lock")) {
+          const counted = await tx.query<{ n: number }>(
+            "select count(*)::int as n from pg_locks where locktype = 'advisory'",
+            [],
+          );
+          held = Number(counted[0]!.n);
+          throw new StopAfterLock("stop after the lock");
+        }
+        return rows;
+      },
+    } as unknown as Sql;
+    await importHsdsBundle(sampleCopy(), { newsroomId: 9801, directoryName, tx: probe }).catch((error) => {
+      if (!(error instanceof StopAfterLock)) throw error;
+    });
+  });
+  return held;
+}
+
+test("the importer takes its lock even when the directory name is null", async () => {
+  assert.equal(await advisoryLocksHeldFor(DIRECTORY), 1, "control: a named directory takes the lock");
+  assert.equal(
+    await advisoryLocksHeldFor(null as unknown as string),
+    1,
+    "a null directory name must still take the lock",
+  );
 });

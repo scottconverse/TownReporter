@@ -135,24 +135,29 @@ async function pendingProposalExists(
 }
 
 /**
- * Whether an editor already rejected this same proposal (same table, row,
- * column and proposed value). A rejected proposal is not made again.
+ * Whether an editor already settled this same proposal: accepted (applied or
+ * not) or rejected. Same table, row, column, current value (`before`) and
+ * proposed value (`after`). A settled proposal is not made again. The current
+ * value is part of the match, so an entry edited since the proposal can be
+ * proposed again.
  */
-async function rejectedProposalExists(
+async function settledProposalExists(
   sql: Sql,
   newsroomId: number,
   entityType: string,
   entityId: number,
   column: string,
+  before: string | null,
   after: string | null,
 ): Promise<boolean> {
   const found = await sql.query<{ id: number }>(
     `select id from resource_changes
       where newsroom_id = $1 and entity_type = $2 and entity_id = $3
-        and field_name = $4 and review_state = 'rejected'
-        and after_value is not distinct from $5
+        and field_name = $4 and review_state in ('accepted', 'rejected')
+        and before_value is not distinct from $5
+        and after_value is not distinct from $6
       limit 1`,
-    [newsroomId, entityType, entityId, column, after],
+    [newsroomId, entityType, entityId, column, before, after],
   );
   return found.length > 0;
 }
@@ -575,7 +580,15 @@ async function writeTable(
       const proposedValue = asText(row[column]);
       if (
         (await pendingProposalExists(sql, context.newsroomId, ENTITY_TYPE[table], id, column, proposedValue)) ||
-        (await rejectedProposalExists(sql, context.newsroomId, ENTITY_TYPE[table], id, column, proposedValue))
+        (await settledProposalExists(
+          sql,
+          context.newsroomId,
+          ENTITY_TYPE[table],
+          id,
+          column,
+          asText(prior[column]),
+          proposedValue,
+        ))
       ) {
         continue;
       }
@@ -662,7 +675,8 @@ async function importHsdsBundleIn(
   // Two imports of one directory into one newsroom run one after the other, so
   // neither can read the proposals before the other's are committed. The lock
   // is held to the end of this transaction (a dry run too).
-  await sql.query("select pg_advisory_xact_lock($1, hashtext($2))", [
+  // coalesce: hashtext(NULL) is NULL, and a NULL key makes the lock a no-op.
+  await sql.query("select pg_advisory_xact_lock($1, hashtext(coalesce($2, '')))", [
     options.newsroomId,
     options.directoryName,
   ]);
@@ -741,7 +755,15 @@ async function importHsdsBundleIn(
       const parentCounts = tables.taxonomies;
       if (
         (await pendingProposalExists(sql, context.newsroomId, "taxonomy", selfId, "parent_id", String(parentId))) ||
-        (await rejectedProposalExists(sql, context.newsroomId, "taxonomy", selfId, "parent_id", String(parentId)))
+        (await settledProposalExists(
+          sql,
+          context.newsroomId,
+          "taxonomy",
+          selfId,
+          "parent_id",
+          String(priorParent),
+          String(parentId),
+        ))
       ) {
         if (taxonomyWrite.unchangedIds.delete(row.hsds_id)) {
           parentCounts.unchanged -= 1;

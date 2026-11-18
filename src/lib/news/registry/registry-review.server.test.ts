@@ -6,7 +6,7 @@ import { applyMigrationsToTestPglite } from "../../test-support/pglite-migration
 import type { HsdsBundle } from "./hsds-types.ts";
 import { importHsdsBundle } from "./hsds-import.server.ts";
 import { listDeskChanges } from "./registry-desk.server.ts";
-import { acceptChangeIn, rejectChangeIn } from "./registry-review.server.ts";
+import { acceptChange, rejectChange } from "./registry-review.server.ts";
 
 await applyMigrationsToTestPglite();
 
@@ -69,7 +69,7 @@ test("accepting with apply changes the one value and leaves last_verified_* alon
     [room],
   );
 
-  const result = await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: true, note: "Checked by phone" });
+  const result = await acceptChange(room, EDITOR, { changeId: id, apply: true, note: "Checked by phone" });
   assert.deepEqual(result.ok, true);
 
   assert.equal(await orgName(room), "St. Vrain Community Food Pantry");
@@ -100,7 +100,7 @@ test("rejecting leaves the value, records who and why, and writes one audit row"
   const sql = await getSql();
   const room = 9302;
   const id = await seedNameProposal(room, "Some Other Name");
-  const result = await rejectChangeIn(sql, room, EDITOR, { changeId: id, note: "Not what the page says" });
+  const result = await rejectChange(room, EDITOR, { changeId: id, note: "Not what the page says" });
   assert.equal(result.ok, true);
   assert.equal(await orgName(room), "St. Vrain Community Pantry");
   const change = await sql.query<Record<string, unknown>>(
@@ -118,27 +118,26 @@ test("rejecting leaves the value, records who and why, and writes one audit row"
 });
 
 test("repeating an accept or a reject changes nothing and writes no second audit row", async () => {
-  const sql = await getSql();
   const room = 9303;
   const id = await seedNameProposal(room, "Repeat Name");
-  assert.equal((await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: true })).ok, true);
-  const again = await acceptChangeIn(sql, room, "someone-else", { changeId: id, apply: true });
+  assert.equal((await acceptChange(room, EDITOR, { changeId: id, apply: true })).ok, true);
+  const again = await acceptChange(room, "someone-else", { changeId: id, apply: true });
   assert.equal(again.ok, false);
   if (!again.ok) {
     assert.equal(again.reason, "resolved");
     assert.match(again.message, /already accepted by editor-1 on \d{4}-\d{2}-\d{2}\. Nothing was changed\./);
   }
-  const rejectAfter = await rejectChangeIn(sql, room, "someone-else", { changeId: id });
+  const rejectAfter = await rejectChange(room, "someone-else", { changeId: id });
   assert.equal(rejectAfter.ok, false);
   assert.equal((await auditRows(room, id)).length, 1);
 
   const room2 = 9304;
   const id2 = await seedNameProposal(room2, "Repeat Reject");
-  assert.equal((await rejectChangeIn(sql, room2, EDITOR, { changeId: id2 })).ok, true);
-  const again2 = await rejectChangeIn(sql, room2, EDITOR, { changeId: id2 });
+  assert.equal((await rejectChange(room2, EDITOR, { changeId: id2 })).ok, true);
+  const again2 = await rejectChange(room2, EDITOR, { changeId: id2 });
   assert.equal(again2.ok, false);
   if (!again2.ok) assert.equal(again2.reason, "resolved");
-  const acceptRejected = await acceptChangeIn(sql, room2, EDITOR, { changeId: id2, apply: true });
+  const acceptRejected = await acceptChange(room2, EDITOR, { changeId: id2, apply: true });
   assert.equal(acceptRejected.ok, false);
   assert.equal(await orgName(room2), "St. Vrain Community Pantry");
   assert.equal((await auditRows(room2, id2)).length, 1);
@@ -152,7 +151,7 @@ test("a proposal made against an older value is refused as stale and nothing cha
     "update organizations set name = 'Edited By Hand' where newsroom_id = $1 and hsds_id = 'org-st-vrain-pantry'",
     [room],
   );
-  const result = await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: true });
+  const result = await acceptChange(room, EDITOR, { changeId: id, apply: true });
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.reason, "stale");
@@ -167,7 +166,7 @@ test("a proposal made against an older value is refused as stale and nothing cha
   assert.equal(change[0]!.review_state, "pending");
   assert.equal((await auditRows(room, id)).length, 0);
   // The editor can still accept it without applying.
-  const without = await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: false });
+  const without = await acceptChange(room, EDITOR, { changeId: id, apply: false });
   assert.equal(without.ok, true);
   assert.equal(await orgName(room), "Edited By Hand");
 });
@@ -216,7 +215,7 @@ test("a proposal with no target, a removed target, or a field it cannot change i
     [pointer, "not-applicable"],
   ];
   for (const [id, reason] of expected) {
-    const result = await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: true });
+    const result = await acceptChange(room, EDITOR, { changeId: id, apply: true });
     assert.equal(result.ok, false, `change ${id}`);
     if (!result.ok) {
       assert.equal(result.reason, reason, `change ${id}`);
@@ -229,7 +228,7 @@ test("a proposal with no target, a removed target, or a field it cannot change i
     assert.equal(state[0]!.review_state, "pending");
   }
   // Without applying, each can be accepted and nothing else changes.
-  const accepted = await acceptChangeIn(sql, room, EDITOR, { changeId: noId, apply: false });
+  const accepted = await acceptChange(room, EDITOR, { changeId: noId, apply: false });
   assert.equal(accepted.ok, true);
   const row = await sql.query<{ applied_at: unknown; review_state: string }>(
     "select applied_at, review_state from resource_changes where id = $1",
@@ -240,10 +239,9 @@ test("a proposal with no target, a removed target, or a field it cannot change i
 });
 
 test("a proposal in another newsroom is refused", async () => {
-  const sql = await getSql();
   const id = await seedNameProposal(9307, "Other Room Name");
-  const accept = await acceptChangeIn(sql, 9308, EDITOR, { changeId: id, apply: true });
-  const reject = await rejectChangeIn(sql, 9308, EDITOR, { changeId: id });
+  const accept = await acceptChange(9308, EDITOR, { changeId: id, apply: true });
+  const reject = await rejectChange(9308, EDITOR, { changeId: id });
   for (const result of [accept, reject]) {
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -258,8 +256,8 @@ test("a note that is too long or holds control characters is refused", async () 
   const sql = await getSql();
   const room = 9309;
   const id = await seedNameProposal(room, "Note Name");
-  const tooLong = await rejectChangeIn(sql, room, EDITOR, { changeId: id, note: "x".repeat(1001) });
-  const control = await acceptChangeIn(sql, room, EDITOR, { changeId: id, apply: true, note: "a\u0000b" });
+  const tooLong = await rejectChange(room, EDITOR, { changeId: id, note: "x".repeat(1001) });
+  const control = await acceptChange(room, EDITOR, { changeId: id, apply: true, note: "a\u0000b" });
   assert.equal(tooLong.ok, false);
   assert.equal(control.ok, false);
   assert.equal(await orgName(room), "St. Vrain Community Pantry");
@@ -284,7 +282,7 @@ test("the desk list carries the review fields and the current value of the targe
   assert.equal(entry.targetLive, true);
   assert.equal(entry.reviewedBy, null);
   assert.equal(entry.appliedAt, null);
-  await rejectChangeIn(sql, room, EDITOR, { changeId: id, note: "no" });
+  await rejectChange(room, EDITOR, { changeId: id, note: "no" });
   list = await listDeskChanges(sql, room);
   entry = list.find((item) => item.id === id)!;
   assert.equal(entry.reviewedBy, EDITOR);
@@ -296,7 +294,7 @@ test("a rejected proposal is not proposed again on re-import, and the counts sta
   const sql = await getSql();
   const room = 9311;
   const id = await seedNameProposal(room, "Rejected Name");
-  await rejectChangeIn(sql, room, EDITOR, { changeId: id });
+  await rejectChange(room, EDITOR, { changeId: id });
   const changed = sampleCopy();
   changed.organizations[0]!.name = "Rejected Name";
   const again = await importHsdsBundle(changed, { newsroomId: room, directoryName: DIRECTORY });
@@ -316,7 +314,10 @@ test("a rejected proposal is not proposed again on re-import, and the counts sta
   assert.equal(third.conflicts.length, 1);
 });
 
-test("two imports of one directory at once do not duplicate a proposal", async () => {
+// This checks the outcome only, not the lock. PGlite has one connection, so the
+// two imports below run one after the other and never contend for the advisory
+// lock. A pass here does not show the lock works.
+test("two imports of one directory at once leave one proposal (checks the outcome, not the lock)", async () => {
   const sql = await getSql();
   const room = 9312;
   await importHsdsBundle(sampleCopy(), { newsroomId: room, directoryName: DIRECTORY });
@@ -356,4 +357,189 @@ test("legacy last_verified_* values on a service survive migration 0166", async 
   assert.deepEqual(after, before);
   const table = await sql.query<{ count: string }>("select count(*)::text as count from resource_verifications", []);
   assert.equal(Number(table[0]!.count), 0);
+});
+
+test("a rejected proposal is made again once the entry has changed under it", async () => {
+  const sql = await getSql();
+  const room = 9314;
+  const id = await seedNameProposal(room, "Rejected Then Edited");
+  assert.equal((await rejectChange(room, EDITOR, { changeId: id })).ok, true);
+  // The entry now says something else, so the old "X -> Y" no longer describes it.
+  await sql.query(
+    "update organizations set name = 'Edited After Rejection' where newsroom_id = $1 and hsds_id = 'org-st-vrain-pantry'",
+    [room],
+  );
+  const again = sampleCopy();
+  again.organizations[0]!.name = "Rejected Then Edited";
+  const result = await importHsdsBundle(again, { newsroomId: room, directoryName: DIRECTORY });
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.conflicts[0]!.before_value, "Edited After Rejection");
+  assert.equal(result.conflicts[0]!.after_value, "Rejected Then Edited");
+  assert.equal(result.tables.organizations.changed, 1);
+  const pending = await sql.query<{ before_value: string; after_value: string }>(
+    "select before_value, after_value from resource_changes where newsroom_id = $1 and review_state = 'pending' order by id",
+    [room],
+  );
+  assert.deepEqual(pending, [{ before_value: "Edited After Rejection", after_value: "Rejected Then Edited" }]);
+});
+
+test("a proposal accepted without applying is not proposed again on re-import", async () => {
+  const sql = await getSql();
+  const room = 9315;
+  const id = await seedNameProposal(room, "Accepted Unapplied");
+  assert.equal((await acceptChange(room, EDITOR, { changeId: id, apply: false })).ok, true);
+  assert.equal(await orgName(room), "St. Vrain Community Pantry");
+  const again = sampleCopy();
+  again.organizations[0]!.name = "Accepted Unapplied";
+  const result = await importHsdsBundle(again, { newsroomId: room, directoryName: DIRECTORY });
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.tables.organizations.alreadyPending, 1);
+  assert.equal(result.tables.organizations.changed, 0);
+  const all = await sql.query<{ count: string }>(
+    "select count(*)::text as count from resource_changes where newsroom_id = $1",
+    [room],
+  );
+  assert.equal(Number(all[0]!.count), 1);
+});
+
+test("a proposal accepted with apply is not proposed again once the entry is back to the old value", async () => {
+  const sql = await getSql();
+  const room = 9316;
+  const id = await seedNameProposal(room, "Accepted Applied");
+  assert.equal((await acceptChange(room, EDITOR, { changeId: id, apply: true })).ok, true);
+  assert.equal(await orgName(room), "Accepted Applied");
+  await sql.query(
+    "update organizations set name = 'St. Vrain Community Pantry' where newsroom_id = $1 and hsds_id = 'org-st-vrain-pantry'",
+    [room],
+  );
+  const again = sampleCopy();
+  again.organizations[0]!.name = "Accepted Applied";
+  const result = await importHsdsBundle(again, { newsroomId: room, directoryName: DIRECTORY });
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.tables.organizations.alreadyPending, 1);
+  const all = await sql.query<{ count: string }>(
+    "select count(*)::text as count from resource_changes where newsroom_id = $1",
+    [room],
+  );
+  assert.equal(Number(all[0]!.count), 1);
+});
+
+test("a value the field cannot hold is not-applicable, and the proposal, the entry and the audit stay as they were", async () => {
+  const sql = await getSql();
+  const room = 9317;
+  await importHsdsBundle(sampleCopy(), { newsroomId: room, directoryName: DIRECTORY });
+  const snapshot = await sql.query<{ id: number }>("select id from snapshots where newsroom_id = $1 limit 1", [room]);
+  const service = await sql.query<{ id: number }>("select id from services where newsroom_id = $1 order by id limit 1", [room]);
+  const schedule = await sql.query<{ id: number }>("select id from schedules where newsroom_id = $1 order by id limit 1", [room]);
+  const location = await sql.query<{ id: number }>("select id from locations where newsroom_id = $1 order by id limit 1", [room]);
+  // Known starting values, so each proposal is made against the value the row holds.
+  await sql.query("update services set status = 'active' where id = $1", [service[0]!.id]);
+  await sql.query("update schedules set by_appointment = false where id = $1", [schedule[0]!.id]);
+  await sql.query("update locations set latitude = null where id = $1", [location[0]!.id]);
+
+  const cases = [
+    // A check constraint: the status list does not allow "retired" (SQLSTATE 23514).
+    { entityType: "service", entityId: service[0]!.id, field: "status", table: "services", column: "status", before: "active", after: "retired", stored: "active" },
+    // A boolean that is not true or false (SQLSTATE 22P02).
+    { entityType: "schedule", entityId: schedule[0]!.id, field: "by_appointment", table: "schedules", column: "by_appointment", before: "false", after: "maybe", stored: false },
+    // A number that is not a number (SQLSTATE 22P02).
+    { entityType: "location", entityId: location[0]!.id, field: "latitude", table: "locations", column: "latitude", before: null, after: "north", stored: null },
+  ];
+  for (const c of cases) {
+    const inserted = await sql.query<{ id: number }>(
+      `insert into resource_changes
+         (newsroom_id, evidence_capture_id, evidence_tier, entity_type, entity_id, field_name,
+          before_value, after_value, change_kind, review_state)
+       values ($1, $2, 'B', $3, $4, $5, $6, $7, 'field_change', 'pending') returning id`,
+      [room, snapshot[0]!.id, c.entityType, c.entityId, c.field, c.before, c.after],
+    );
+    const changeId = Number(inserted[0]!.id);
+    const result = await acceptChange(room, EDITOR, { changeId, apply: true });
+    assert.equal(result.ok, false, c.field);
+    if (!result.ok) assert.equal(result.reason, "not-applicable", c.field);
+    const state = await sql.query<{ review_state: string }>(
+      "select review_state from resource_changes where id = $1",
+      [changeId],
+    );
+    assert.equal(state[0]!.review_state, "pending", c.field);
+    const value = await sql.query<{ value: unknown }>(
+      `select ${c.column} as value from ${c.table} where id = $1`,
+      [c.entityId],
+    );
+    assert.deepEqual(value[0]!.value, c.stored, c.field);
+    assert.equal((await auditRows(room, changeId)).length, 0, c.field);
+  }
+});
+
+test("an error that is not a value refusal is rethrown, and the proposal, the entry and the audit stay as they were", async () => {
+  const sql = await getSql();
+  const room = 9318;
+  const id = await seedNameProposal(room, "Trigger Name");
+  // Fails the update with SQLSTATE P0001, which is neither class 22 nor class 23.
+  await sql.query(
+    `create or replace function registry_test_refuse_room() returns trigger language plpgsql as $$
+     begin
+       if new.newsroom_id = 9318 then
+         raise exception 'test refusal' using errcode = 'P0001';
+       end if;
+       return new;
+     end $$`,
+  );
+  await sql.query(
+    "create trigger registry_test_refuse_room before update on organizations for each row execute function registry_test_refuse_room()",
+  );
+  await assert.rejects(() => acceptChange(room, EDITOR, { changeId: id, apply: true }), /test refusal/);
+  assert.equal(await orgName(room), "St. Vrain Community Pantry");
+  const state = await sql.query<{ review_state: string }>(
+    "select review_state from resource_changes where id = $1",
+    [id],
+  );
+  assert.equal(state[0]!.review_state, "pending");
+  assert.equal((await auditRows(room, id)).length, 0);
+});
+
+test("a needs-editor proposal can be accepted with apply and rejected", async () => {
+  const sql = await getSql();
+  const room = 9319;
+  await importHsdsBundle(sampleCopy(), { newsroomId: room, directoryName: DIRECTORY });
+  const snapshot = await sql.query<{ id: number }>("select id from snapshots where newsroom_id = $1 limit 1", [room]);
+  const org = await sql.query<{ id: number }>(
+    "select id from organizations where newsroom_id = $1 and hsds_id = 'org-st-vrain-pantry'",
+    [room],
+  );
+  const service = await sql.query<{ id: number; name: string }>(
+    "select id, name from services where newsroom_id = $1 order by id limit 1",
+    [room],
+  );
+  async function needsEditor(field: string, entityType: string, entityId: number, before: string, after: string) {
+    const rows = await sql.query<{ id: number }>(
+      `insert into resource_changes
+         (newsroom_id, evidence_capture_id, evidence_tier, entity_type, entity_id, field_name,
+          before_value, after_value, change_kind, review_state)
+       values ($1, $2, 'B', $3, $4, $5, $6, $7, 'field_change', 'needs-editor') returning id`,
+      [room, snapshot[0]!.id, entityType, entityId, field, before, after],
+    );
+    return Number(rows[0]!.id);
+  }
+  const toAccept = await needsEditor("name", "organization", Number(org[0]!.id), "St. Vrain Community Pantry", "Crisis Name");
+  const toReject = await needsEditor("name", "service", service[0]!.id, service[0]!.name, "Crisis Service Name");
+
+  const accepted = await acceptChange(room, EDITOR, { changeId: toAccept, apply: true });
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.applied, true);
+  assert.equal(await orgName(room), "Crisis Name");
+  const acceptedState = await sql.query<{ review_state: string; applied_at: unknown }>(
+    "select review_state, applied_at from resource_changes where id = $1",
+    [toAccept],
+  );
+  assert.equal(acceptedState[0]!.review_state, "accepted");
+  assert.ok(acceptedState[0]!.applied_at);
+
+  const rejected = await rejectChange(room, EDITOR, { changeId: toReject, note: "Not a crisis" });
+  assert.equal(rejected.ok, true);
+  const rejectedState = await sql.query<{ review_state: string }>(
+    "select review_state from resource_changes where id = $1",
+    [toReject],
+  );
+  assert.equal(rejectedState[0]!.review_state, "rejected");
 });

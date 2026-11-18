@@ -123,6 +123,21 @@ function describe(row: ChangeRow): string {
 
 type ApplyOutcome = { ok: true } | { ok: false; reason: ReviewRefusal; message: string };
 
+/**
+ * Whether a write error means the value itself cannot be stored: SQLSTATE class
+ * 22 (data exception, e.g. a bad number) or class 23 (integrity constraint, e.g.
+ * a check the value breaks). PGlite checks a boolean on the client and throws
+ * "Invalid input for boolean type" before the statement is sent, with no
+ * SQLSTATE; pg sends the text and Postgres raises 22P02. That is the same
+ * refusal, so it counts too. Any other error is a failure of the database or of
+ * this code, not a refusal of the value.
+ */
+function isValueRefusal(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  if (typeof code === "string") return code.startsWith("22") || code.startsWith("23");
+  return typeof message === "string" && /^Invalid input for \w+ type$/.test(message);
+}
+
 /** Check the target row under a lock and write the one column. */
 async function applyToTarget(sql: Sql, newsroomId: number, row: ChangeRow): Promise<ApplyOutcome> {
   if (row.entity_id === null) return { ok: false, reason: "no-target", message: NO_TARGET_ADVICE };
@@ -156,8 +171,9 @@ async function applyToTarget(sql: Sql, newsroomId: number, row: ChangeRow): Prom
       message: `This entry changed after the proposal was made. It now says ${current === null ? "nothing" : `"${current}"`}; the proposal would change it to ${row.after_value === null ? "nothing" : `"${row.after_value}"`}. Nothing was changed. Reject the proposal, or accept it without applying.`,
     };
   }
-  // A value the column cannot hold (wrong type) must refuse, not abort the
-  // transaction, so the write sits inside a savepoint.
+  // A value the column cannot hold must refuse, not abort the transaction, so
+  // the write sits inside a savepoint. Only a value refusal is "not applicable";
+  // any other error is rethrown and the whole transaction rolls back with it.
   await sql.query("savepoint registry_apply");
   try {
     await sql.query(
@@ -165,7 +181,8 @@ async function applyToTarget(sql: Sql, newsroomId: number, row: ChangeRow): Prom
       [row.after_value, row.entity_id, newsroomId],
     );
     await sql.query("release savepoint registry_apply");
-  } catch {
+  } catch (error) {
+    if (!isValueRefusal(error)) throw error;
     await sql.query("rollback to savepoint registry_apply");
     return {
       ok: false,
@@ -188,9 +205,11 @@ export interface RejectChangeInput {
   note?: string | null;
 }
 
-/** Accept one proposal, applying it to the entry when `apply` is true. */
-export async function acceptChangeIn(
-  sql: Sql,
+/**
+ * Accept one proposal, applying it to the entry when `apply` is true. Opens its
+ * own transaction; the caller passes no connection.
+ */
+export async function acceptChange(
   newsroomId: number,
   userId: string,
   input: AcceptChangeInput,
@@ -230,9 +249,8 @@ export async function acceptChangeIn(
   });
 }
 
-/** Reject one proposal. The entry is never changed. */
-export async function rejectChangeIn(
-  sql: Sql,
+/** Reject one proposal. The entry is never changed. Opens its own transaction. */
+export async function rejectChange(
   newsroomId: number,
   userId: string,
   input: RejectChangeInput,

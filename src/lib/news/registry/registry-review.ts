@@ -5,11 +5,10 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "../../db.ts";
 import { deskMiddleware } from "../desk-auth.ts";
 import {
-  acceptChangeIn,
-  rejectChangeIn,
+  acceptChange,
+  rejectChange,
   type ReviewResult,
 } from "./registry-review.server.ts";
 
@@ -35,8 +34,7 @@ export const acceptRegistryChange = createServerFn({ method: "POST" })
     note: noteOf(input),
   }))
   .handler(async ({ data, context }): Promise<ReviewResult> => {
-    const sql = await getSql();
-    return acceptChangeIn(sql, context.newsroomId, context.userId, data);
+    return acceptChange(context.newsroomId, context.userId, data);
   });
 
 /** Reject one proposal in this newsroom. The entry is not changed. */
@@ -47,6 +45,5 @@ export const rejectRegistryChange = createServerFn({ method: "POST" })
     note: noteOf(input),
   }))
   .handler(async ({ data, context }): Promise<ReviewResult> => {
-    const sql = await getSql();
-    return rejectChangeIn(sql, context.newsroomId, context.userId, data);
+    return rejectChange(context.newsroomId, context.userId, data);
   });
