@@ -1231,7 +1231,11 @@ function QueuePage() {
     bar, and every press in the bar is a press the row itself already offers.
   */
   const selectedLeads = leads.filter((lead) => selectedDeleteLeads.includes(lead.id));
-  const bulkDraftable = selectedLeads;
+  // Start N stories drafts every ticked lead, also one the list no longer
+  // shows (Scott, Nov 18 2026: 6 ticked, 5 written). Hold, Kill and Delete
+  // still act only on the rows on screen.
+  const bulkDraftable = Array.from(new Set(selectedDeleteLeadIds));
+  const offScreenPicks = bulkDraftable.filter((leadId) => !shownIds.includes(leadId)).length;
   /*
     M7 of the batch-6 pre-merge audit. This loop used to be
     `for (const lead of selectedLeads) setStatus.mutate({id, status})`, so a
@@ -1703,7 +1707,7 @@ function QueuePage() {
                   }
                   onClick={() => {
                     setBatchNotice(null);
-                    setBatchLeadIds(bulkDraftable.map((l) => l.id));
+                    setBatchLeadIds(bulkDraftable);
                     setPanel("batch");
                   }}
                 >
@@ -1873,10 +1877,11 @@ function QueuePage() {
                   Clear
                 </InkButton>
               </div>
-              {bulkDraftable.length !== selectedDeleteLeads.length ? (
+              {offScreenPicks > 0 ? (
                 <span className="queue-bulk-what">
-                  {selectedDeleteLeads.length - bulkDraftable.length} of these cannot be drafted
-                  (held, killed or already printed).
+                  {offScreenPicks} more ticked{" "}
+                  {offScreenPicks === 1 ? "lead is" : "leads are"} not in the list on screen
+                  now. Start still drafts {offScreenPicks === 1 ? "it" : "them"}.
                 </span>
               ) : null}
             </>
