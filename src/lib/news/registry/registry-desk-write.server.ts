@@ -13,7 +13,13 @@
  */
 
 import { withTransaction, type Sql } from "../../db.ts";
-import { importHsdsBundle } from "./hsds-import.server.ts";
+import {
+  importHsdsBundle,
+  type ImportConflict,
+  type TableCounts,
+} from "./hsds-import.server.ts";
+import { REGISTRY_TABLE_NAMES, type RegistryTableName } from "./hsds-map.ts";
+import { parseHsdsJson } from "./hsds-validate.ts";
 import {
   DESK_DIRECTORY,
   deskSlug,
@@ -550,4 +556,131 @@ export async function takeDownRegistryEntryIn(
 
     return { serviceId: id };
   });
+}
+
+export interface HsdsImportInput {
+  /** The text of the uploaded HSDS JSON file. */
+  json: string;
+  /** The directory the file came from; part of every row's identity. */
+  directoryName: string;
+}
+
+export interface HsdsImportSummary {
+  /** Inserted, unchanged and changed rows per table. */
+  tables: Record<RegistryTableName, TableCounts>;
+  /** New proposed changes; nothing stored was overwritten. */
+  conflicts: ImportConflict[];
+}
+
+export type HsdsImportPreviewResult =
+  | { ok: false; problems: string[] }
+  | {
+      ok: true;
+      directoryName: string;
+      /** Rows already stored under this directory name in this newsroom. */
+      existingRows: number;
+      /** True when no earlier import used this name, so a typo is possible. */
+      looksLikeNewDirectory: boolean;
+      summary: HsdsImportSummary;
+    };
+
+export type HsdsImportRunResult =
+  | { ok: false; problems: string[] }
+  | {
+      ok: true;
+      directoryName: string;
+      importId: number;
+      summary: HsdsImportSummary;
+    };
+
+/** Both writers check the same things first: a name, then the file. */
+function checkImportInput(input: HsdsImportInput) {
+  const directoryName = typeof input?.directoryName === "string" ? input.directoryName.trim() : "";
+  const problems: string[] = [];
+  if (!directoryName) {
+    problems.push("directory name: enter the name of the directory this file came from");
+  } else if (directoryName.length > 200) {
+    problems.push("directory name: use 200 characters or fewer");
+  } else if (directoryName.toLowerCase() === DESK_DIRECTORY.toLowerCase()) {
+    problems.push(
+      `directory name: "${DESK_DIRECTORY}" is the desk's own list and cannot be used for an import`,
+    );
+  }
+  const parsed = parseHsdsJson(typeof input?.json === "string" ? input.json : "");
+  if (!parsed.ok) problems.push(...parsed.problems);
+  if (problems.length || !parsed.ok) return { ok: false as const, problems };
+  return { ok: true as const, directoryName, bundle: parsed.bundle };
+}
+
+async function countDirectoryRows(
+  sql: Sql,
+  newsroomId: number,
+  directoryName: string,
+): Promise<number> {
+  let total = 0;
+  for (const table of REGISTRY_TABLE_NAMES) {
+    const rows = await sql.query<{ count: string }>(
+      `select count(*)::text as count from ${table}
+        where newsroom_id = $1 and directory_name = $2`,
+      [newsroomId, directoryName],
+    );
+    total += Number(rows[0]!.count);
+  }
+  return total;
+}
+
+/**
+ * Say what importing this file would do, and write nothing. Invalid input
+ * returns its problems. The import runs for real inside a transaction that is
+ * rolled back, so the counts are exactly what `runHsdsImportIn` would produce.
+ */
+export async function previewHsdsImportIn(
+  sql: Sql,
+  newsroomId: number,
+  input: HsdsImportInput,
+  userId: string,
+): Promise<HsdsImportPreviewResult> {
+  const checked = checkImportInput(input);
+  if (!checked.ok) return checked;
+  const existingRows = await countDirectoryRows(sql, newsroomId, checked.directoryName);
+  const result = await importHsdsBundle(checked.bundle, {
+    newsroomId,
+    directoryName: checked.directoryName,
+    userId,
+    dryRun: true,
+  });
+  return {
+    ok: true,
+    directoryName: checked.directoryName,
+    existingRows,
+    looksLikeNewDirectory: existingRows === 0,
+    summary: { tables: result.tables, conflicts: result.conflicts },
+  };
+}
+
+/**
+ * Import the file. New rows are written unpublished; rows already stored are
+ * never overwritten, a difference becomes a pending proposal. Nothing is
+ * published. Invalid input returns its problems and writes nothing; a failure
+ * part-way rolls the whole import back.
+ */
+export async function runHsdsImportIn(
+  _sql: Sql,
+  newsroomId: number,
+  input: HsdsImportInput,
+  userId: string,
+): Promise<HsdsImportRunResult> {
+  const checked = checkImportInput(input);
+  if (!checked.ok) return checked;
+  const result = await importHsdsBundle(checked.bundle, {
+    newsroomId,
+    directoryName: checked.directoryName,
+    userId,
+  });
+  return {
+    ok: true,
+    directoryName: checked.directoryName,
+    importId: result.importId,
+    summary: { tables: result.tables, conflicts: result.conflicts },
+  };
 }

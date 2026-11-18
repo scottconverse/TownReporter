@@ -48,6 +48,12 @@ export interface ImportOptions {
    * connection.
    */
   tx?: Sql;
+  /**
+   * Run the whole import, then roll it back. The result has the same shape and
+   * counts as a real run, but no row in any table is changed. Cannot be
+   * combined with `tx`: a caller's transaction is not ours to roll back.
+   */
+  dryRun?: boolean;
 }
 
 export interface ImportConflict {
@@ -59,12 +65,77 @@ export interface ImportConflict {
   after_value: string | null;
 }
 
+/** What one import did to one table. */
+export interface TableCounts {
+  /** Rows that were not there before. */
+  inserted: number;
+  /** Rows that were there and equal to the file. */
+  unchanged: number;
+  /** Rows that were there and differ, with at least one new proposed change. */
+  changed: number;
+  /** Rows that differ, where every difference is already a pending proposal. */
+  alreadyPending: number;
+}
+
 export interface ImportResult {
   importId: number;
   snapshotId: number;
   sourceId: number;
+  /** Inserted rows per table (kept for existing callers; see `tables`). */
   recordCounts: Record<RegistryTableName, number>;
+  /** Inserted, unchanged and changed rows per table. */
+  tables: Record<RegistryTableName, TableCounts>;
+  /** New proposals only: a difference that is already pending is not repeated. */
   conflicts: ImportConflict[];
+  /** True when the run was rolled back; the ids above then point at nothing. */
+  dryRun: boolean;
+}
+
+function emptyCounts(): TableCounts {
+  return { inserted: 0, unchanged: 0, changed: 0, alreadyPending: 0 };
+}
+
+/** Thrown inside the transaction of a dry run, to roll it back. */
+class DryRunRollback extends Error {
+  readonly result: ImportResult;
+  constructor(result: ImportResult) {
+    super("dry run rollback");
+    this.result = result;
+  }
+}
+
+/**
+ * Whether a pending proposal for the same table, row, column and proposed
+ * value already exists. A second import of the same file must not stack a
+ * duplicate on the editor's queue.
+ */
+async function pendingProposalExists(
+  sql: Sql,
+  newsroomId: number,
+  entityType: string,
+  entityId: number,
+  column: string,
+  after: string | null,
+): Promise<boolean> {
+  const found = await sql.query<{ id: number }>(
+    `select id from resource_changes
+      where newsroom_id = $1 and entity_type = $2 and entity_id = $3
+        and field_name = $4 and review_state = 'pending'
+        and after_value is not distinct from $5
+      limit 1`,
+    [newsroomId, entityType, entityId, column, after],
+  );
+  return found.length > 0;
+}
+
+/**
+ * The file's status counts as a claim only when it says something beyond the
+ * importer's own default. A missing status, or "unverified", leaves the stored
+ * status alone: Publish moves it to 'active', and re-reading the same file
+ * must not propose moving it back.
+ */
+function statusIsClaim(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "unverified";
 }
 
 /** Every table the importer writes, in dependency order. */
@@ -371,7 +442,9 @@ function resolveRows(rows: RegistryRows, maps: IdMaps): ResolvedRows {
 }
 
 interface TableWrite {
-  inserted: number;
+  counts: TableCounts;
+  /** hsds ids of existing rows that matched the file exactly. */
+  unchangedIds: Set<string>;
   ids: Map<string, number>;
   conflicts: ImportConflict[];
 }
@@ -391,7 +464,9 @@ async function writeTable(
   const columns = TABLE_COLUMNS[table];
   const ids = new Map<string, number>();
   const conflicts: ImportConflict[] = [];
-  if (!rows.length) return { inserted: 0, ids, conflicts };
+  const counts = emptyCounts();
+  const unchangedIds = new Set<string>();
+  if (!rows.length) return { counts, unchangedIds, ids, conflicts };
 
   const hsdsIds = rows.map((row) => row.hsds_id as string);
   const existing = await sql.query<Record<string, unknown>>(
@@ -402,7 +477,6 @@ async function writeTable(
   );
   const byHsdsId = new Map(existing.map((row) => [String(row.hsds_id), row]));
 
-  let inserted = 0;
   for (const row of rows) {
     const hsdsId = row.hsds_id as string;
     const prior = byHsdsId.get(hsdsId);
@@ -418,7 +492,9 @@ async function writeTable(
         context.newsroomId,
         hsdsId,
         context.directoryName,
-        ...columns.map((column) => parameterValue(row[column])),
+        ...columns.map((column) =>
+          column === "status" ? (row.status ?? "unverified") : parameterValue(row[column]),
+        ),
         ...provenanceValues,
       ];
       const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
@@ -429,14 +505,31 @@ async function writeTable(
       );
       const id = returned[0]!.id;
       ids.set(hsdsId, id);
-      inserted += 1;
+      counts.inserted += 1;
       continue;
     }
 
     const id = Number(prior.id);
     ids.set(hsdsId, id);
+    let differs = false;
+    let proposed = false;
     for (const column of columns) {
+      if (column === "status" && !statusIsClaim(row.status)) continue;
       if (sameValue(prior[column], row[column])) continue;
+      differs = true;
+      if (
+        await pendingProposalExists(
+          sql,
+          context.newsroomId,
+          ENTITY_TYPE[table],
+          id,
+          column,
+          asText(row[column]),
+        )
+      ) {
+        continue;
+      }
+      proposed = true;
       await sql.query(
         `insert into resource_changes
            (newsroom_id, source_id, source_capture_id, evidence_capture_id, evidence_tier,
@@ -465,9 +558,15 @@ async function writeTable(
         after_value: asText(row[column]),
       });
     }
+    if (proposed) counts.changed += 1;
+    else if (differs) counts.alreadyPending += 1;
+    else {
+      counts.unchanged += 1;
+      unchangedIds.add(hsdsId);
+    }
   }
 
-  return { inserted, ids, conflicts };
+  return { counts, unchangedIds, ids, conflicts };
 }
 
 /**
@@ -486,6 +585,21 @@ export async function importHsdsBundle(
   bundle: HsdsBundle,
   options: ImportOptions,
 ): Promise<ImportResult> {
+  if (options.dryRun) {
+    if (options.tx) {
+      throw new Error("A dry run cannot join a caller's transaction.");
+    }
+    try {
+      await withTransaction(async (tx) => {
+        const result = await importHsdsBundleIn(tx, bundle, options);
+        throw new DryRunRollback({ ...result, dryRun: true });
+      });
+    } catch (error) {
+      if (error instanceof DryRunRollback) return error.result;
+      throw error;
+    }
+    throw new Error("Dry run did not finish.");
+  }
   if (options.tx) return importHsdsBundleIn(options.tx, bundle, options);
   return withTransaction((tx) => importHsdsBundleIn(tx, bundle, options));
 }
@@ -496,9 +610,9 @@ async function importHsdsBundleIn(
   options: ImportOptions,
 ): Promise<ImportResult> {
   const payload = JSON.stringify(bundle);
-  const recordCounts = Object.fromEntries(
-    REGISTRY_TABLE_NAMES.map((name) => [name, 0]),
-  ) as Record<RegistryTableName, number>;
+  const tables = Object.fromEntries(
+    REGISTRY_TABLE_NAMES.map((name) => [name, emptyCounts()]),
+  ) as Record<RegistryTableName, TableCounts>;
 
   const sourceId = await ensureSource(sql, options);
   /*
@@ -552,7 +666,7 @@ async function importHsdsBundleIn(
   }));
   const taxonomyWrite = await writeTable(sql, "taxonomies", taxonomyRows, context);
   maps.taxonomies = taxonomyWrite.ids;
-  recordCounts.taxonomies = taxonomyWrite.inserted;
+  tables.taxonomies = taxonomyWrite.counts;
   conflicts.push(...taxonomyWrite.conflicts);
   for (const row of mapped.taxonomies) {
     if (!row.parent_hsds_id) continue;
@@ -567,6 +681,27 @@ async function importHsdsBundleIn(
     if (priorParent === parentId) continue;
     if (priorParent !== null) {
       // A changed parent is a conflict, not an overwrite.
+      const parentCounts = tables.taxonomies;
+      if (
+        await pendingProposalExists(
+          sql,
+          context.newsroomId,
+          "taxonomy",
+          selfId,
+          "parent_id",
+          String(parentId),
+        )
+      ) {
+        if (taxonomyWrite.unchangedIds.delete(row.hsds_id)) {
+          parentCounts.unchanged -= 1;
+          parentCounts.alreadyPending += 1;
+        }
+        continue;
+      }
+      if (taxonomyWrite.unchangedIds.delete(row.hsds_id)) {
+        parentCounts.unchanged -= 1;
+        parentCounts.changed += 1;
+      }
       await sql.query(
         `insert into resource_changes
            (newsroom_id, source_id, source_capture_id, evidence_capture_id, evidence_tier,
@@ -605,14 +740,14 @@ async function importHsdsBundleIn(
     const resolved = resolveRows(mapped, maps);
     const write = await writeTable(sql, table, resolved[table], context);
     maps[table] = write.ids;
-    recordCounts[table] = write.inserted;
+    tables[table] = write.counts;
     conflicts.push(...write.conflicts);
   }
 
   const afterParents = resolveRows(mapped, maps);
   const scheduleWrite = await writeTable(sql, "schedules", afterParents.schedules, context);
   maps.schedules = scheduleWrite.ids;
-  recordCounts.schedules = scheduleWrite.inserted;
+  tables.schedules = scheduleWrite.counts;
   conflicts.push(...scheduleWrite.conflicts);
 
   const final = resolveRows(mapped, maps);
@@ -627,9 +762,13 @@ async function importHsdsBundleIn(
       continue;
     }
     const write = await writeTable(sql, table, final[table], context);
-    recordCounts[table] = write.inserted;
+    tables[table] = write.counts;
     conflicts.push(...write.conflicts);
   }
+
+  const recordCounts = Object.fromEntries(
+    REGISTRY_TABLE_NAMES.map((name) => [name, tables[name].inserted]),
+  ) as Record<RegistryTableName, number>;
 
   await sql.query(
     `update resource_imports
@@ -643,7 +782,7 @@ async function importHsdsBundleIn(
     ],
   );
 
-  return { importId, snapshotId, sourceId, recordCounts, conflicts };
+  return { importId, snapshotId, sourceId, recordCounts, tables, conflicts, dryRun: false };
 }
 
 interface StoredRow {
