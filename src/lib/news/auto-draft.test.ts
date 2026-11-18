@@ -22,12 +22,13 @@ async function fileLead(opts: {
   headline: string;
   score: number | null;
   status?: string;
+  possibleDuplicateOf?: number;
 }): Promise<number> {
   const sql = await getSql();
   const [row] = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, status, newsworthiness)
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, newsworthiness, possible_duplicate_of)
     values ('owner', ${NEWSROOM}, ${opts.headline}, 'the reason it matters', 'council',
-            ${opts.status ?? "new"}, ${opts.score})
+            ${opts.status ?? "new"}, ${opts.score}, ${opts.possibleDuplicateOf ?? null})
     returning id
   `;
   return Number(row.id);
@@ -117,6 +118,41 @@ describe("the automatic draft rule (Scott: 14 and up)", () => {
     assert.ok(!asked.includes(heldCool));
     const [row] = await (await getSql())<{ status: string }>`select status from leads where id = ${heldHot}`;
     assert.equal(row?.status, "held", "the sweep itself never un-holds a lead");
+  });
+
+  it("skips a repeat of a published or killed story, but drafts one linked to an open lead", async () => {
+    const printed = await fileLead({ headline: "Printed before", score: 18, status: "published" });
+    const dropped = await fileLead({ headline: "Killed before", score: 18, status: "killed" });
+    const stillOpen = await fileLead({ headline: "Still on the desk", score: 10, status: "drafted" });
+    const repeatOfPrinted = await fileLead({
+      headline: "Repeat of a printed story",
+      score: 19,
+      status: "held",
+      possibleDuplicateOf: printed,
+    });
+    const repeatOfKilled = await fileLead({
+      headline: "Repeat of a killed story",
+      score: 19,
+      possibleDuplicateOf: dropped,
+    });
+    const linkedToOpen = await fileLead({
+      headline: "Linked to an open lead",
+      score: 16,
+      status: "held",
+      possibleDuplicateOf: stillOpen,
+    });
+
+    const { asked, commitDraft } = recorder();
+    const outcome = await autoDraftEligibleLeads(
+      await getSql(),
+      { userId: "owner", newsroomId: NEWSROOM },
+      { commitDraft },
+    );
+
+    assert.deepEqual(asked, [linkedToOpen]);
+    assert.equal(outcome.considered, 1);
+    assert.ok(!asked.includes(repeatOfPrinted));
+    assert.ok(!asked.includes(repeatOfKilled));
   });
 
   it("skips a lead that already carries a written draft", async () => {
