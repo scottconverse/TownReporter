@@ -12,12 +12,17 @@ import { getSql } from "../../db.ts";
 import { deskMiddleware } from "../desk-auth.ts";
 import {
   getRegistryEntryDetail,
+  removeEntryRowIn,
+  restoreEntryRowIn,
   saveContactIn,
+  saveEntryRowIn,
   saveOrganizationDetailsIn,
   saveServiceDetailsIn,
   type EntrySaveResult,
   type RegistryEntryDetail,
+  type RemoveRowInput,
   type SaveContactInput,
+  type SaveRowInput,
 } from "./registry-entry-editor.server.ts";
 
 function serviceIdOf(input: unknown): number {
@@ -91,4 +96,74 @@ export const saveRegistryContact = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<EntrySaveResult> => {
     const sql = await getSql();
     return saveContactIn(sql, context.newsroomId, data.serviceId, data.contact, context.userId);
+  });
+
+function rowIdOf(raw: { rowId?: unknown }): number | null {
+  if (raw.rowId === undefined || raw.rowId === null) return null;
+  const rowId = Number(raw.rowId);
+  if (!Number.isInteger(rowId) || rowId <= 0) {
+    throw new Error("That row could not be found. Nothing was changed.");
+  }
+  return rowId;
+}
+
+/**
+ * Add a place, hours, an eligibility rule, a required document, a language or
+ * an accessibility note to the entry, or change one of them.
+ */
+export const saveRegistryRow = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown): { serviceId: number; row: SaveRowInput } => {
+    const raw = (input ?? {}) as {
+      kind?: unknown;
+      rowId?: unknown;
+      fields?: unknown;
+      locationId?: unknown;
+    };
+    const locationId =
+      raw.locationId === undefined || raw.locationId === null ? null : Number(raw.locationId);
+    if (locationId !== null && (!Number.isInteger(locationId) || locationId <= 0)) {
+      throw new Error("That place could not be found. Nothing was changed.");
+    }
+    return {
+      serviceId: serviceIdOf(input),
+      row: {
+        kind: raw.kind as SaveRowInput["kind"],
+        rowId: rowIdOf(raw),
+        fields: raw.fields,
+        locationId,
+      },
+    };
+  })
+  .handler(async ({ data, context }): Promise<EntrySaveResult> => {
+    const sql = await getSql();
+    return saveEntryRowIn(sql, context.newsroomId, data.serviceId, data.row, context.userId);
+  });
+
+function removeInput(input: unknown): { serviceId: number; row: RemoveRowInput } {
+  const raw = (input ?? {}) as { kind?: unknown; rowId?: unknown };
+  const rowId = rowIdOf(raw);
+  if (rowId === null) throw new Error("That row could not be found. Nothing was changed.");
+  return {
+    serviceId: serviceIdOf(input),
+    row: { kind: raw.kind as RemoveRowInput["kind"], rowId },
+  };
+}
+
+/** Remove one row from the entry. A marker only: nothing is deleted. */
+export const removeRegistryRow = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(removeInput)
+  .handler(async ({ data, context }): Promise<EntrySaveResult> => {
+    const sql = await getSql();
+    return removeEntryRowIn(sql, context.newsroomId, data.serviceId, data.row, context.userId);
+  });
+
+/** Bring a removed row back to the entry. */
+export const restoreRegistryRow = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(removeInput)
+  .handler(async ({ data, context }): Promise<EntrySaveResult> => {
+    const sql = await getSql();
+    return restoreEntryRowIn(sql, context.newsroomId, data.serviceId, data.row, context.userId);
   });

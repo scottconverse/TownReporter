@@ -29,8 +29,8 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 
 const chromeUrl = stubUrl(`
 import { createElement as h } from ${JSON.stringify(import.meta.resolve("react"))};
-export function InkButton({ children, onClick, disabled, pending, pendingLabel, type }) {
-  return h("button", { type: type || "button", disabled: Boolean(disabled || pending), onClick },
+export function InkButton({ children, onClick, disabled, pending, pendingLabel, type, ariaLabel }) {
+  return h("button", { type: type || "button", disabled: Boolean(disabled || pending), onClick, "aria-label": ariaLabel },
     pending && pendingLabel ? pendingLabel : children);
 }
 `);
@@ -52,6 +52,18 @@ export async function saveRegistryOrganizationDetails({ data }) {
 export async function saveRegistryContact({ data }) {
   globalThis.__editor.calls.push(["contact", data]);
   return globalThis.__editor.save(data);
+}
+export async function saveRegistryRow({ data }) {
+  globalThis.__editor.calls.push(["row", data]);
+  return globalThis.__editor.save(data);
+}
+export async function removeRegistryRow({ data }) {
+  globalThis.__editor.calls.push(["remove", data]);
+  return globalThis.__editor.remove(data);
+}
+export async function restoreRegistryRow({ data }) {
+  globalThis.__editor.calls.push(["restore", data]);
+  return globalThis.__editor.remove(data);
 }
 `);
 const fieldsUrl = await moduleUrl("src/lib/news/registry/registry-entry-editor-fields.ts");
@@ -113,6 +125,55 @@ const makeDetail = () => ({
       sharedWith: [sibling],
     },
   ],
+  places: [
+    {
+      id: 21,
+      locationId: 5,
+      locationName: null,
+      sharedWith: [],
+      fields: {
+        name: "Main Hall",
+        address1: "1 Main St",
+        address2: "",
+        city: "Longmont",
+        stateProvince: "CO",
+        postalCode: "80501",
+        accessibilityNotes: "",
+        transportationNotes: "",
+      },
+    },
+  ],
+  schedules: [
+    {
+      id: 31,
+      locationId: null,
+      locationName: null,
+      sharedWith: [],
+      fields: { days: "Monday", opensAt: "9:00", closesAt: "17:00", notes: "", byAppointment: false },
+    },
+  ],
+  eligibilities: [],
+  requiredDocuments: [
+    {
+      id: 41,
+      locationId: null,
+      locationName: null,
+      sharedWith: [],
+      fields: { document: "Photo ID", description: "", required: true },
+    },
+  ],
+  languages: [
+    {
+      id: 51,
+      locationId: null,
+      locationName: null,
+      sharedWith: [],
+      fields: { language: "Spanish", note: "" },
+    },
+  ],
+  accessibilities: [],
+  linkablePlaces: [{ locationId: 6, name: "Annex, 3 Pine St" }],
+  removed: [],
 });
 
 function setup() {
@@ -120,6 +181,7 @@ function setup() {
     calls: [],
     detail: makeDetail(),
     save: async () => ({ ok: true, serviceId: 7 }),
+    remove: async () => ({ ok: true, serviceId: 7 }),
   };
 }
 
@@ -151,6 +213,8 @@ async function mount() {
     closed: () => closed,
     text: () => container.textContent.replace(/\s+/g, " "),
     group: (title) => container.querySelector(`section[aria-label="${title}"]`),
+    groupStarting: (title) =>
+      [...container.querySelectorAll("section")].find((g) => g.getAttribute("aria-label").startsWith(title)),
     contactGroups: () =>
       [...container.querySelectorAll("section")].filter((g) => /\(.*contact/i.test(g.getAttribute("aria-label"))),
     button: (scope, label) =>
@@ -444,6 +508,9 @@ export async function readRegistryEntryDetail() { throw new Error("That entry is
 export const saveRegistryServiceDetails = readRegistryEntryDetail;
 export const saveRegistryOrganizationDetails = readRegistryEntryDetail;
 export const saveRegistryContact = readRegistryEntryDetail;
+export const saveRegistryRow = readRegistryEntryDetail;
+export const removeRegistryRow = readRegistryEntryDetail;
+export const restoreRegistryRow = readRegistryEntryDetail;
 `);
   const failUrl = await moduleUrl("src/components/registry-entry-editor.tsx", {
     "@/components/desk-chrome": chromeUrl,
@@ -475,4 +542,242 @@ export const saveRegistryContact = readRegistryEntryDetail;
   const alert = container.querySelector('[role="alert"]');
   assert.match(alert.textContent, /not in this newsroom\. Nothing was changed\./);
   assert.equal(container.querySelectorAll("form").length, 0);
+});
+
+/* ---- Job C2: places, hours, documents, languages, removal ---- */
+
+const REMOVE_WORDS =
+  "Remove this language from the entry? It stops showing on the public page right away. " +
+  "You can bring it back from the Removed list.";
+
+test("the other groups show their rows, and each row's form is filled from the entry", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const place = page.groupStarting("Place: ");
+  assert.equal(page.input(place, "city").value, "Longmont");
+  assert.equal(page.input(page.groupStarting("Hours: "), "days").value, "Monday");
+  assert.equal(page.input(page.groupStarting("Required document: "), "document").value, "Photo ID");
+  assert.equal(page.input(page.groupStarting("Required document: "), "required").checked, true);
+  assert.equal(page.input(page.groupStarting("Language: "), "language").value, "Spanish");
+  for (const title of [
+    "Add a new place",
+    "Link a place this organization already has",
+    "Add hours",
+    "Add who can use this service",
+    "Add a required document",
+    "Add a language",
+    "Add an accessibility note",
+    "Removed from this entry",
+  ]) {
+    assert.ok(page.group(title), title);
+  }
+  assert.match(page.group("Removed from this entry").textContent, /Nothing has been removed from this entry\./);
+});
+
+test("saving a language sends its row id and only the field that changed", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Language: ");
+  await page.type(group(), "note", "Tuesdays only");
+  await page.submit(group());
+  const call = globalThis.__editor.calls.find((c) => c[0] === "row");
+  assert.deepEqual(call[1], {
+    serviceId: 7,
+    kind: "language",
+    rowId: 51,
+    locationId: null,
+    fields: { note: "Tuesdays only" },
+  });
+  assert.match(group().textContent, /Saved\./);
+  assert.ok(page.invalidated.includes('["registry-entry-detail",7]'));
+});
+
+test("adding hours sends no row id, the chosen place and only the boxes that were filled", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const add = page.group("Add hours");
+  const select = add.querySelector('select[name="locationId"]');
+  assert.deepEqual([...select.querySelectorAll("option")].map((o) => o.textContent), [
+    "At the service as a whole",
+    "At Main Hall",
+  ]);
+  await React.act(async () => select[Object.keys(select).find((k) => k.startsWith("__reactProps"))].onChange({ target: { value: "5" } }));
+  await page.type(add, "days", "Friday");
+  await page.check(add, "byAppointment", true);
+  await page.submit(add);
+  const call = globalThis.__editor.calls.find((c) => c[0] === "row");
+  assert.deepEqual(call[1], {
+    serviceId: 7,
+    kind: "schedule",
+    rowId: null,
+    locationId: 5,
+    fields: { days: "Friday", byAppointment: true },
+  });
+  assert.match(add.textContent, /Hours added\./);
+  assert.equal(page.input(add, "days").value, "", "the add form is empty for the next one");
+});
+
+test("a new required document starts with 'required' ticked and sends only what was typed", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const add = page.group("Add a required document");
+  assert.equal(page.input(add, "required").checked, true);
+  await page.type(add, "document", "Lease");
+  await page.submit(add);
+  assert.deepEqual(globalThis.__editor.calls.find((c) => c[0] === "row")[1].fields, { document: "Lease" });
+});
+
+test("problems on a row show under their box as alerts and say nothing was saved", async (t) => {
+  setup();
+  globalThis.__editor.save = async () => ({
+    ok: false,
+    problems: { language: "Enter the language.", form: "Enter something." },
+  });
+  const page = await mount();
+  t.after(() => page.close());
+  const add = page.group("Add a language");
+  await page.submit(add);
+  const alerts = page.alerts(add);
+  assert.ok(alerts.includes("Enter the language."));
+  assert.ok(alerts.some((a) => /Nothing was saved/.test(a)));
+  assert.doesNotMatch(add.textContent, /Language added\./);
+});
+
+test("linking an existing place sends its id", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const link = page.group("Link a place this organization already has");
+  await page.submit(link);
+  assert.deepEqual(globalThis.__editor.calls.find((c) => c[0] === "row")[1], {
+    serviceId: 7,
+    kind: "location",
+    rowId: null,
+    locationId: 6,
+    fields: {},
+  });
+  assert.match(link.textContent, /Place linked\./);
+});
+
+test("Remove asks first, in plain words, and Keep it sends nothing", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Language: ");
+  assert.equal(group().querySelector('[data-testid="remove-confirm"]'), null, "no question until Remove is pressed");
+  await page.press(page.button(group(), "Remove"));
+  const confirm = group().querySelector('[data-testid="remove-confirm"]');
+  assert.ok(page.text().includes(REMOVE_WORDS), "the sentence says what happens");
+  assert.equal(globalThis.__editor.calls.filter((c) => c[0] === "remove").length, 0);
+  await page.press(page.button(confirm, "Keep it"));
+  assert.equal(group().querySelector('[data-testid="remove-confirm"]'), null);
+  assert.equal(globalThis.__editor.calls.filter((c) => c[0] === "remove").length, 0, "nothing was sent");
+});
+
+test("a shared row says who else uses it before the removal is confirmed", async (t) => {
+  setup();
+  globalThis.__editor.detail.places[0].sharedWith = [sibling];
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Place: ");
+  await page.press(page.button(group(), "Remove"));
+  const notice = group().querySelector('[data-testid="remove-shared-notice"]');
+  assert.equal(
+    notice.textContent,
+    "This is shared with 1 other entry: Helping Hands — Clothing Closet. A change here changes them too.",
+  );
+  assert.match(group().querySelector('[data-testid="remove-confirm"]').textContent, /Remove this place from the entry\?/);
+});
+
+test("confirming a removal sends the kind and row id once, refreshes, and says where it went", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Hours: ");
+  await page.press(page.button(group(), "Remove"));
+  const yes = page.button(group().querySelector('[data-testid="remove-confirm"]'), "Yes, remove");
+  await React.act(async () => {
+    yes.dispatchEvent(new window.Event("click", { bubbles: true }));
+    yes.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await page.settle();
+  const calls = globalThis.__editor.calls.filter((c) => c[0] === "remove");
+  assert.equal(calls.length, 1, "two presses, one removal");
+  assert.deepEqual(calls[0][1], { serviceId: 7, kind: "schedule", rowId: 31 });
+  assert.ok(page.invalidated.includes('["registry-entry-detail",7]'));
+  assert.ok(page.invalidated.includes('["registry-desk"]'));
+  const status = [...page.group("Removed from this entry").querySelectorAll('[role="status"]')].map((n) => n.textContent);
+  assert.deepEqual(status, ["Removed. It is in the Removed list below, and Restore brings it back."]);
+});
+
+test("a contact is removed the same way, with its own words", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const [own] = page.contactGroups();
+  await page.press(page.button(own, "Remove"));
+  assert.match(own.querySelector('[data-testid="remove-confirm"]').textContent, /Remove this contact from the entry\?/);
+  await page.press(page.button(own.querySelector('[data-testid="remove-confirm"]'), "Yes, remove"));
+  await page.settle();
+  assert.deepEqual(globalThis.__editor.calls.find((c) => c[0] === "remove")[1], { serviceId: 7, kind: "contact", rowId: 11 });
+  assert.equal(page.button(page.group("Add a contact"), "Remove"), undefined, "the add form has no Remove");
+});
+
+test("a removal that fails says nothing was removed and keeps the question open", async (t) => {
+  setup();
+  globalThis.__editor.remove = async () => {
+    throw new Error("The connection dropped.");
+  };
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Language: ");
+  await page.press(page.button(group(), "Remove"));
+  await page.press(page.button(group().querySelector('[data-testid="remove-confirm"]'), "Yes, remove"));
+  await page.settle();
+  assert.deepEqual(page.alerts(group()), ["The connection dropped. Nothing was removed."]);
+  assert.ok(group().querySelector('[data-testid="remove-confirm"]'), "the question stays so it can be tried again");
+});
+
+test("the Removed list shows each removed row, with who else uses it, and Restore sends its kind and id", async (t) => {
+  setup();
+  globalThis.__editor.detail.removed = [
+    { kind: "language", id: 52, label: "Vietnamese", sharedWith: [] },
+    { kind: "contact", id: 13, label: "Old desk, phone 555-0000", sharedWith: [sibling] },
+  ];
+  const page = await mount();
+  t.after(() => page.close());
+  const list = page.group("Removed from this entry");
+  const items = [...list.querySelectorAll('[data-testid="removed-item"]')];
+  assert.deepEqual(items.map((i) => i.querySelector("p:last-of-type").textContent), [
+    "Language: Vietnamese",
+    "Contact: Old desk, phone 555-0000",
+  ]);
+  assert.equal(items[0].querySelectorAll('[data-testid="shared-notice"]').length, 0);
+  assert.equal(items[1].querySelectorAll('[data-testid="shared-notice"]').length, 1, "the shared notice shows before a shared row is restored");
+  assert.match(list.textContent, /Nothing is deleted: Restore puts a row back\./);
+
+  await page.press(page.button(items[1], "Restore"));
+  await page.settle();
+  assert.deepEqual(globalThis.__editor.calls.find((c) => c[0] === "restore")[1], { serviceId: 7, kind: "contact", rowId: 13 });
+  const status = [...list.querySelectorAll('[role="status"]')].map((n) => n.textContent);
+  assert.deepEqual(status, ["Restored. It is back in the entry as it was before it was removed."]);
+  assert.ok(page.invalidated.includes('["registry-entry-detail",7]'));
+});
+
+test("a restore that fails says nothing was restored", async (t) => {
+  setup();
+  globalThis.__editor.detail.removed = [{ kind: "language", id: 52, label: "Vietnamese", sharedWith: [] }];
+  globalThis.__editor.remove = async () => {
+    throw new Error("The connection dropped.");
+  };
+  const page = await mount();
+  t.after(() => page.close());
+  const item = page.container.querySelector('[data-testid="removed-item"]');
+  await page.press(page.button(item, "Restore"));
+  await page.settle();
+  assert.deepEqual(page.alerts(item), ["The connection dropped. Nothing was restored."]);
 });

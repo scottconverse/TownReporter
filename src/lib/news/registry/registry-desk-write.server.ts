@@ -145,6 +145,10 @@ export interface PublishRegistryEntryResult {
  *  - the organization's own contacts (no service, no location);
  *  - contacts of the locations the service is linked to (no service).
  *
+ * A row an editor removed from the entry (`removed_at` set) is skipped by every
+ * one of these, so it stays unpublished until it is restored and the entry is
+ * published again.
+ *
  * Another service's contacts, schedules and languages, a contact of a location
  * the service is not linked to, and a schedule none of its rows references stay
  * as they were.
@@ -198,7 +202,7 @@ export async function publishRegistryEntryIn(
       await tx.query(
         `update ${table}
             set published = true, updated_at = now()
-          where newsroom_id = $1 and service_id = $2`,
+          where newsroom_id = $1 and service_id = $2 and removed_at is null`,
         [newsroomId, id],
       );
     }
@@ -209,9 +213,11 @@ export async function publishRegistryEntryIn(
       `update schedules
           set published = true, updated_at = now()
         where newsroom_id = $1
+          and removed_at is null
           and id in (
             select schedule_id from service_at_locations
              where newsroom_id = $1 and service_id = $2 and schedule_id is not null
+               and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -222,7 +228,7 @@ export async function publishRegistryEntryIn(
       `update contacts
           set published = true, updated_at = now()
         where newsroom_id = $1 and organization_id = $2
-          and service_id is null and location_id is null`,
+          and service_id is null and location_id is null and removed_at is null`,
       [newsroomId, organizationId],
     );
 
@@ -230,10 +236,10 @@ export async function publishRegistryEntryIn(
     await tx.query(
       `update contacts
           set published = true, updated_at = now()
-        where newsroom_id = $1 and service_id is null
+        where newsroom_id = $1 and service_id is null and removed_at is null
           and location_id in (
             select location_id from service_at_locations
-             where newsroom_id = $1 and service_id = $2
+             where newsroom_id = $1 and service_id = $2 and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -246,7 +252,7 @@ export async function publishRegistryEntryIn(
         where newsroom_id = $1
           and id in (
             select location_id from service_at_locations
-             where newsroom_id = $1 and service_id = $2
+             where newsroom_id = $1 and service_id = $2 and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -311,7 +317,7 @@ async function saveServicePhone(
 ): Promise<void> {
   const existing = await sql.query<{ id: number }>(
     `select id from contacts
-      where newsroom_id = $1 and service_id = $2
+      where newsroom_id = $1 and service_id = $2 and removed_at is null
       order by id
       limit 1`,
     [newsroomId, serviceId],
@@ -326,12 +332,21 @@ async function saveServicePhone(
     return;
   }
   if (!phone) return;
+  // An earlier row of this id may still be there, removed by an editor: the
+  // key is unique, so a later phone takes a different one.
+  let hsdsId = `desk-contact-${serviceId}`;
+  const taken = await sql.query(
+    `select 1 from contacts
+      where newsroom_id = $1 and directory_name = $2 and hsds_id = $3`,
+    [newsroomId, DESK_DIRECTORY, hsdsId],
+  );
+  if (taken.length > 0) hsdsId = `${hsdsId}-${Math.random().toString(36).slice(2, 10)}`;
   await sql.query(
     `insert into contacts
        (newsroom_id, hsds_id, directory_name, service_id, phone, published,
         last_verified_at, verification_method, last_verified_by)
      values ($1, $2, $3, $4, $5, $6, now(), 'editor', $7)`,
-    [newsroomId, `desk-contact-${serviceId}`, DESK_DIRECTORY, serviceId, phone, published, userId],
+    [newsroomId, hsdsId, DESK_DIRECTORY, serviceId, phone, published, userId],
   );
 }
 

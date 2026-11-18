@@ -3,18 +3,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import {
   readRegistryEntryDetail,
+  removeRegistryRow,
+  restoreRegistryRow,
   saveRegistryContact,
   saveRegistryOrganizationDetails,
+  saveRegistryRow,
   saveRegistryServiceDetails,
 } from "@/lib/news/registry/registry-entry-editor";
 import {
   CONTACT_LIMITS,
   ORGANIZATION_LIMITS,
+  REMOVE_THING,
+  ROW_SPECS,
   SERVICE_LIMITS,
+  emptyRow,
   sharedScopeNotice,
   type ContactDetailFields,
   type FieldProblems,
   type OrganizationDetailFields,
+  type RemovableKind,
+  type RowKind,
+  type RowValues,
   type ServiceDetailFields,
   type SharedEntry,
 } from "@/lib/news/registry/registry-entry-editor-fields";
@@ -25,9 +34,10 @@ type EntryDetail = Awaited<ReturnType<typeof readRegistryEntryDetail>>;
 type SaveResult = Awaited<ReturnType<typeof saveRegistryServiceDetails>>;
 
 /**
- * The registry entry editor (spec 24, Phase 2, job C1): every desk-meaningful
- * detail of one entry, in three groups that each save on their own -- the
- * service, its organization, and its contacts.
+ * The registry entry editor (spec 24, Phase 2, jobs C1 and C2): every
+ * desk-meaningful detail of one entry, in groups that each save on their own --
+ * the service, its organization, its contacts, its places, hours, eligibility,
+ * required documents, languages and accessibility.
  *
  * An organization, or a contact on the organization or on a location, can be
  * used by more than one entry. Above each such group a notice says so, with the
@@ -35,8 +45,12 @@ type SaveResult = Awaited<ReturnType<typeof saveRegistryServiceDetails>>;
  *
  * A save that the server refuses for its fields shows each problem under the
  * field it belongs to and says nothing was saved. A save that fails for any
- * other reason says the same. Nothing is removed here, and nothing is
- * published or taken down: that stays with Publish and Take down.
+ * other reason says the same. Nothing is published or taken down here: that
+ * stays with Publish and Take down.
+ *
+ * Any row can be removed from the entry. A removal is a marker, never a delete:
+ * the public page stops reading the row at once, Publish skips it, and the
+ * Removed list at the bottom brings it back with Restore.
  */
 
 const box = "w-full border border-rule bg-paper p-2 text-base";
@@ -439,6 +453,7 @@ function ContactForm({
   submitLabel,
   doneMessage,
   scopeChoice,
+  onChanged,
 }: {
   serviceId: number;
   initial: ContactFormState;
@@ -451,6 +466,7 @@ function ContactForm({
   scopeChoice?: {
     organizationSharedWith: readonly SharedEntry[];
   };
+  onChanged: (message: string) => void;
 }) {
   const form = useSeededForm<ContactFormState>(initial);
   const fields = form.fields;
@@ -519,13 +535,495 @@ function ContactForm({
         <TextField<ContactFormState> label="Email address" name="email" max={CONTACT_LIMITS.email} {...common} />
         <TextField<ContactFormState> label="Website" name="website" max={CONTACT_LIMITS.website} {...common} />
         <GroupStatus problems={group.problems} message={group.message} error={group.error} />
-        <div>
+        <div className="flex flex-wrap gap-2">
           <InkButton type="submit" tone="solid" pending={group.pending} pendingLabel="Saving…">
             {submitLabel}
+          </InkButton>
+          {contactId !== null ? (
+            <RemoveControl
+              serviceId={serviceId}
+              kind="contact"
+              rowId={contactId}
+              sharedWith={sharedWith}
+              onChanged={onChanged}
+            />
+          ) : null}
+        </div>
+      </form>
+    </Group>
+  );
+}
+
+/**
+ * A remove or restore call: the words of its failure, and a guard so it is
+ * sent once however fast it is pressed. On success `onDone` runs and the detail
+ * and the desk lists are refreshed.
+ */
+function useRowAction(
+  serviceId: number,
+  call: () => Promise<SaveResult>,
+  onDone: () => void,
+  failureWords: string,
+) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const running = useRef(false);
+  const mutation = useMutation({
+    mutationFn: call,
+    onSuccess: async (result) => {
+      if (result.ok) {
+        setError(null);
+        onDone();
+      } else {
+        setError(`That change was refused. ${failureWords}`);
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: DETAIL_KEY(serviceId) }),
+        qc.invalidateQueries({ queryKey: ["registry-desk"] }),
+      ]);
+    },
+    onError: (failure) => {
+      setError(`${failure instanceof Error ? failure.message : "That change was not made."} ${failureWords}`);
+    },
+    onSettled: () => {
+      running.current = false;
+    },
+  });
+  return {
+    error,
+    pending: mutation.isPending,
+    run: () => {
+      if (running.current) return;
+      running.current = true;
+      setError(null);
+      mutation.mutate();
+    },
+  };
+}
+
+/**
+ * The Remove button of a row and, once pressed, the question that comes before
+ * it. What it says matches what happens: the row is marked removed, the public
+ * page stops reading it at once, nothing is deleted, and the Removed list below
+ * brings it back. A row other entries use says so first.
+ */
+function RemoveControl({
+  serviceId,
+  kind,
+  rowId,
+  sharedWith,
+  onChanged,
+}: {
+  serviceId: number;
+  kind: RemovableKind;
+  rowId: number;
+  sharedWith: readonly SharedEntry[];
+  onChanged: (message: string) => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const action = useRowAction(
+    serviceId,
+    () => removeRegistryRow({ data: { serviceId, kind, rowId } }),
+    () => {
+      setAsking(false);
+      onChanged("Removed. It is in the Removed list below, and Restore brings it back.");
+    },
+    "Nothing was removed.",
+  );
+  if (!asking) {
+    return (
+      <InkButton tone="ghost" onClick={() => setAsking(true)}>
+        Remove
+      </InkButton>
+    );
+  }
+  const shared = sharedScopeNotice(sharedWith);
+  return (
+    <div
+      className="grid gap-2 border-2 border-rust bg-paper p-3"
+      role="group"
+      aria-label="Confirm removal"
+      data-testid="remove-confirm"
+    >
+      {shared ? (
+        <p className="text-lg font-semibold text-ink" data-testid="remove-shared-notice">
+          {shared}
+        </p>
+      ) : null}
+      <p className="text-lg text-ink">
+        Remove {REMOVE_THING[kind]} from the entry? It stops showing on the public page right
+        away. You can bring it back from the Removed list.
+      </p>
+      {action.error ? (
+        <p className="text-base text-rust" role="alert">
+          {action.error}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <InkButton tone="danger" pending={action.pending} pendingLabel="Removing…" onClick={action.run}>
+          Yes, remove
+        </InkButton>
+        <InkButton tone="ghost" onClick={() => setAsking(false)}>
+          Keep it
+        </InkButton>
+      </div>
+    </div>
+  );
+}
+
+type RowForm = RowValues;
+
+/** The group's heading for a row already in the entry. */
+function rowTitle(kind: RowKind, fields: RowValues, locationName: string | null): string {
+  const text = (key: string) => (typeof fields[key] === "string" ? (fields[key] as string) : "");
+  switch (kind) {
+    case "location":
+      return `Place: ${[text("name"), text("address1")].filter(Boolean).join(", ") || "unnamed"}`;
+    case "schedule": {
+      const times = [text("opensAt"), text("closesAt")].filter(Boolean).join(" to ");
+      const hours =
+        fields.byAppointment === true
+          ? "By appointment"
+          : [text("days"), times].filter(Boolean).join(", ") || "see notes";
+      return `Hours: ${hours}${locationName ? ` at ${locationName}` : ""}`;
+    }
+    case "eligibility":
+      return `Who can use it: ${text("description").slice(0, 60)}`;
+    case "requiredDocument":
+      return `Required document: ${text("document")}`;
+    case "language":
+      return `Language: ${text("language")}`;
+    case "accessibility":
+      return `Accessibility: ${text("accessibility")}`;
+  }
+}
+
+/**
+ * The fields of one place, hours, eligibility rule, document, language or
+ * accessibility note: to change one already in the entry (`rowId`) or to add
+ * one. Which boxes there are, and their limits, come from ROW_SPECS, the same
+ * list the server checks with.
+ */
+function RowEditForm({
+  serviceId,
+  kind,
+  rowId,
+  initial,
+  sharedWith,
+  title,
+  submitLabel,
+  doneMessage,
+  placeChoices,
+  onChanged,
+}: {
+  serviceId: number;
+  kind: RowKind;
+  rowId: number | null;
+  initial: RowValues;
+  sharedWith: readonly SharedEntry[];
+  title: string;
+  submitLabel: string;
+  doneMessage: string;
+  /** Hours being added may be tied to one of the entry's places. */
+  placeChoices?: readonly { locationId: number; name: string }[];
+  onChanged: (message: string) => void;
+}) {
+  const spec = ROW_SPECS[kind];
+  const form = useSeededForm<RowForm>(initial);
+  const fields = form.fields;
+  const [place, setPlace] = useState("");
+  const group = useGroupSave<GroupSaveInput<RowForm> & { place: string }>(
+    serviceId,
+    (input) =>
+      saveRegistryRow({
+        data: {
+          serviceId,
+          kind,
+          rowId,
+          locationId: input.place ? Number(input.place) : null,
+          fields: input.changed,
+        },
+      }),
+    doneMessage,
+    (input) => {
+      if (rowId === null) {
+        form.reset(initial);
+        setPlace("");
+      } else form.markSaved(input.snapshot);
+    },
+  );
+  const common = { state: fields, setState: form.setFields, problems: group.problems };
+  return (
+    <Group title={title}>
+      <SharedNotice sharedWith={sharedWith} />
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          group.save({ snapshot: fields, changed: changedFrom(fields, form.seed), place });
+        }}
+      >
+        {placeChoices && rowId === null ? (
+          <label className={labelClass}>
+            Where are these hours?
+            <select
+              className={box}
+              name="locationId"
+              value={place}
+              onChange={(event) => setPlace(event.target.value)}
+            >
+              <option value="">At the service as a whole</option>
+              {placeChoices.map((choice) => (
+                <option key={choice.locationId} value={String(choice.locationId)}>
+                  At {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {spec.text.map((field) => (
+          <TextField<RowForm>
+            key={field.key}
+            label={field.label}
+            name={field.key}
+            max={field.max}
+            multiline={field.multiline}
+            {...common}
+          />
+        ))}
+        {spec.flags.map((flag) => (
+          <label key={flag.key} className="flex items-center gap-2 text-base">
+            <input
+              type="checkbox"
+              name={flag.key}
+              checked={fields[flag.key] === true}
+              onChange={(event) => form.setFields({ ...fields, [flag.key]: event.target.checked })}
+            />
+            {flag.label}
+          </label>
+        ))}
+        <GroupStatus problems={group.problems} message={group.message} error={group.error} />
+        <div className="flex flex-wrap gap-2">
+          <InkButton type="submit" tone="solid" pending={group.pending} pendingLabel="Saving…">
+            {submitLabel}
+          </InkButton>
+          {rowId !== null ? (
+            <RemoveControl
+              serviceId={serviceId}
+              kind={kind}
+              rowId={rowId}
+              sharedWith={sharedWith}
+              onChanged={onChanged}
+            />
+          ) : null}
+        </div>
+      </form>
+    </Group>
+  );
+}
+
+/** Link a place the organization already has to this entry. */
+function LinkPlaceForm({
+  serviceId,
+  places,
+}: {
+  serviceId: number;
+  places: EntryDetail["linkablePlaces"];
+}) {
+  const [chosen, setChosen] = useState(String(places[0]?.locationId ?? ""));
+  const group = useGroupSave<{ locationId: string }>(
+    serviceId,
+    (input) =>
+      saveRegistryRow({
+        data: { serviceId, kind: "location", rowId: null, locationId: Number(input.locationId), fields: {} },
+      }),
+    "Place linked.",
+    () => undefined,
+  );
+  return (
+    <Group title="Link a place this organization already has">
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          group.save({ locationId: chosen });
+        }}
+      >
+        <label className={labelClass}>
+          Place
+          <select
+            className={box}
+            name="locationId"
+            value={chosen}
+            onChange={(event) => setChosen(event.target.value)}
+          >
+            {places.map((place) => (
+              <option key={place.locationId} value={String(place.locationId)}>
+                {place.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <GroupStatus problems={group.problems} message={group.message} error={group.error} />
+        <div>
+          <InkButton type="submit" tone="solid" pending={group.pending} pendingLabel="Linking…">
+            Link this place
           </InkButton>
         </div>
       </form>
     </Group>
+  );
+}
+
+const REMOVED_KIND_WORD: Record<RemovableKind, string> = {
+  contact: "Contact",
+  location: "Place",
+  schedule: "Hours",
+  eligibility: "Who can use it",
+  requiredDocument: "Required document",
+  language: "Language",
+  accessibility: "Accessibility",
+};
+
+/** One removed row, and the button that brings it back. */
+function RemovedItem({
+  serviceId,
+  item,
+  onChanged,
+}: {
+  serviceId: number;
+  item: EntryDetail["removed"][number];
+  onChanged: (message: string) => void;
+}) {
+  const action = useRowAction(
+    serviceId,
+    () => restoreRegistryRow({ data: { serviceId, kind: item.kind, rowId: item.id } }),
+    () => onChanged("Restored. It is back in the entry as it was before it was removed."),
+    "Nothing was restored.",
+  );
+  return (
+    <li className="grid gap-2 border border-rule p-3" data-testid="removed-item">
+      <SharedNotice sharedWith={item.sharedWith} />
+      <p className="text-lg">
+        <span className="font-semibold">{REMOVED_KIND_WORD[item.kind]}:</span> {item.label}
+      </p>
+      {action.error ? (
+        <p className="text-base text-rust" role="alert">
+          {action.error}
+        </p>
+      ) : null}
+      <div>
+        <InkButton
+          tone="ghost"
+          ariaLabel={`Restore ${REMOVED_KIND_WORD[item.kind].toLowerCase()}: ${item.label}`}
+          pending={action.pending}
+          pendingLabel="Restoring…"
+          onClick={action.run}
+        >
+          Restore
+        </InkButton>
+      </div>
+    </li>
+  );
+}
+
+/** Rows removed from this entry, each with Restore. */
+function RemovedList({
+  serviceId,
+  removed,
+  notice,
+  onChanged,
+}: {
+  serviceId: number;
+  removed: EntryDetail["removed"];
+  notice: string | null;
+  onChanged: (message: string) => void;
+}) {
+  return (
+    <section className="mt-4 border border-rule p-3" aria-label="Removed from this entry">
+      <h4 className="mb-2 font-display text-xl">Removed</h4>
+      {notice ? (
+        <p className="mb-2 text-base text-ink-2" role="status" aria-live="polite">
+          {notice}
+        </p>
+      ) : null}
+      {removed.length === 0 ? (
+        <p className="text-base">Nothing has been removed from this entry.</p>
+      ) : (
+        <>
+          <p className="mb-2 text-base">
+            These are not on the public page. Nothing is deleted: Restore puts a row back.
+          </p>
+          <ul className="grid gap-3">
+            {removed.map((item) => (
+              <RemovedItem
+                key={`${item.kind}-${item.id}`}
+                serviceId={serviceId}
+                item={item}
+                onChanged={onChanged}
+              />
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** One kind's heading, its rows, and the form that adds one. */
+function RowSection({
+  serviceId,
+  kind,
+  heading,
+  rows,
+  addTitle,
+  addLabel,
+  addedMessage,
+  placeChoices,
+  onChanged,
+}: {
+  serviceId: number;
+  kind: RowKind;
+  heading: string;
+  rows: EntryDetail["places"];
+  addTitle: string;
+  addLabel: string;
+  addedMessage: string;
+  placeChoices?: readonly { locationId: number; name: string }[];
+  onChanged: (message: string) => void;
+}) {
+  return (
+    <>
+      <h4 className="mt-4 font-display text-xl">{heading}</h4>
+      {rows.length === 0 ? <p className="mt-2 text-base">None yet.</p> : null}
+      {rows.map((row) => (
+        <RowEditForm
+          key={`${kind}-${row.id}`}
+          serviceId={serviceId}
+          kind={kind}
+          rowId={row.id}
+          initial={row.fields}
+          sharedWith={row.sharedWith}
+          title={rowTitle(kind, row.fields, row.locationName)}
+          submitLabel="Save"
+          doneMessage="Saved."
+          onChanged={onChanged}
+        />
+      ))}
+      <RowEditForm
+        key={`add-${kind}`}
+        serviceId={serviceId}
+        kind={kind}
+        rowId={null}
+        initial={emptyRow(kind)}
+        sharedWith={[]}
+        title={addTitle}
+        submitLabel={addLabel}
+        doneMessage={addedMessage}
+        placeChoices={placeChoices}
+        onChanged={onChanged}
+      />
+    </>
   );
 }
 
@@ -545,6 +1043,9 @@ export function RegistryEntryEditor({
     queryFn: () => readRegistryEntryDetail({ data: { serviceId } }),
   });
   const detail = query.data;
+  // What the last remove or restore said. The row has left the page by then, so
+  // the words are kept here, with the Removed list.
+  const [notice, setNotice] = useState<string | null>(null);
 
   return (
     <div className="mt-4 border-t-2 border-ink pt-3" aria-label="Entry details editor">
@@ -585,6 +1086,7 @@ export function RegistryEntryEditor({
               serviceId={serviceId}
               contactId={contact.id}
               scope={contact.scope === "organization" ? "organization" : "service"}
+              onChanged={setNotice}
               sharedWith={contact.sharedWith}
               title={contactTitle(contact)}
               submitLabel="Save contact"
@@ -611,6 +1113,84 @@ export function RegistryEntryEditor({
             submitLabel="Add contact"
             doneMessage="Contact added."
             initial={EMPTY_CONTACT}
+            onChanged={setNotice}
+          />
+          <RowSection
+            serviceId={serviceId}
+            kind="location"
+            heading="Places"
+            rows={detail.places}
+            addTitle="Add a new place"
+            addLabel="Add place"
+            addedMessage="Place added."
+            onChanged={setNotice}
+          />
+          {detail.linkablePlaces.length > 0 ? (
+            <LinkPlaceForm
+              key={detail.linkablePlaces.map((place) => place.locationId).join("-")}
+              serviceId={serviceId}
+              places={detail.linkablePlaces}
+            />
+          ) : null}
+          <RowSection
+            serviceId={serviceId}
+            kind="schedule"
+            heading="Hours"
+            rows={detail.schedules}
+            addTitle="Add hours"
+            addLabel="Add hours"
+            addedMessage="Hours added."
+            placeChoices={detail.places.map((place) => ({
+              locationId: place.locationId ?? 0,
+              name: String(place.fields.name || place.fields.address1 || "this place"),
+            }))}
+            onChanged={setNotice}
+          />
+          <RowSection
+            serviceId={serviceId}
+            kind="eligibility"
+            heading="Who can use this service"
+            rows={detail.eligibilities}
+            addTitle="Add who can use this service"
+            addLabel="Add"
+            addedMessage="Added."
+            onChanged={setNotice}
+          />
+          <RowSection
+            serviceId={serviceId}
+            kind="requiredDocument"
+            heading="Required documents"
+            rows={detail.requiredDocuments}
+            addTitle="Add a required document"
+            addLabel="Add document"
+            addedMessage="Document added."
+            onChanged={setNotice}
+          />
+          <RowSection
+            serviceId={serviceId}
+            kind="language"
+            heading="Languages"
+            rows={detail.languages}
+            addTitle="Add a language"
+            addLabel="Add language"
+            addedMessage="Language added."
+            onChanged={setNotice}
+          />
+          <RowSection
+            serviceId={serviceId}
+            kind="accessibility"
+            heading="Accessibility"
+            rows={detail.accessibilities}
+            addTitle="Add an accessibility note"
+            addLabel="Add note"
+            addedMessage="Accessibility note added."
+            onChanged={setNotice}
+          />
+          <RemovedList
+            serviceId={serviceId}
+            removed={detail.removed}
+            notice={notice}
+            onChanged={setNotice}
           />
         </>
       )}

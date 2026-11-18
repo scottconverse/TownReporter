@@ -69,7 +69,10 @@ export interface ImportConflict {
 export interface TableCounts {
   /** Rows that were not there before. */
   inserted: number;
-  /** Rows that were there and equal to the file. */
+  /**
+   * Rows that were there and equal to the file. A row an editor removed from
+   * its entry is counted here too: the import does not touch it.
+   */
   unchanged: number;
   /** Rows that were there and differ, with at least one new proposed change. */
   changed: number;
@@ -219,6 +222,20 @@ const TABLE_COLUMNS: Record<RegistryTableName, string[]> = {
   languages: ["service_id", "language", "note"],
   accessibilities: ["service_id", "location_id", "accessibility", "details"],
 };
+
+/**
+ * Tables whose rows an editor can remove from an entry (migration 0165). A row
+ * that is removed is left alone by an import of the same file.
+ */
+const REMOVABLE_TABLES = new Set<RegistryTableName>([
+  "contacts",
+  "service_at_locations",
+  "schedules",
+  "eligibilities",
+  "required_documents",
+  "languages",
+  "accessibilities",
+]);
 
 /**
  * Tables that carry the field-level provenance columns (7.2). The join and
@@ -462,6 +479,7 @@ async function writeTable(
   },
 ): Promise<TableWrite> {
   const columns = TABLE_COLUMNS[table];
+  const removable = REMOVABLE_TABLES.has(table);
   const ids = new Map<string, number>();
   const conflicts: ImportConflict[] = [];
   const counts = emptyCounts();
@@ -470,7 +488,7 @@ async function writeTable(
 
   const hsdsIds = rows.map((row) => row.hsds_id as string);
   const existing = await sql.query<Record<string, unknown>>(
-    `select id, hsds_id, ${columns.join(", ")}
+    `select id, hsds_id, ${columns.join(", ")}${removable ? ", removed_at" : ""}
        from ${table}
       where newsroom_id = $1 and directory_name = $2 and hsds_id = any($3::text[])`,
     [context.newsroomId, context.directoryName, hsdsIds],
@@ -511,6 +529,14 @@ async function writeTable(
 
     const id = Number(prior.id);
     ids.set(hsdsId, id);
+    // An editor removed this row from its entry. The import leaves it removed:
+    // it is not restored, not inserted again (the key matched), and no
+    // proposal is made that would change it. It counts as unchanged.
+    if (removable && prior.removed_at !== null && prior.removed_at !== undefined) {
+      counts.unchanged += 1;
+      unchangedIds.add(hsdsId);
+      continue;
+    }
     let differs = false;
     let proposed = false;
     for (const column of columns) {

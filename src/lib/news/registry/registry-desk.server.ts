@@ -335,7 +335,7 @@ const ENTRY_COLUMNS = `s.id as service_id, s.hsds_id as service_hsds_id, s.name 
             t.name as category_name,
             (select c.phone from contacts c
               where c.newsroom_id = s.newsroom_id and c.service_id = s.id
-                and c.phone is not null and c.phone <> ''
+                and c.phone is not null and c.phone <> '' and c.removed_at is null
               order by c.id limit 1) as phone,
             src.title as source_title, src.url as source_url`;
 
