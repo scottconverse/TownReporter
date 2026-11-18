@@ -76,7 +76,10 @@ export interface TableCounts {
   unchanged: number;
   /** Rows that were there and differ, with at least one new proposed change. */
   changed: number;
-  /** Rows that differ, where every difference is already a pending proposal. */
+  /**
+   * Rows that differ, where every difference is already a pending proposal or
+   * a proposal an editor already rejected.
+   */
   alreadyPending: number;
 }
 
@@ -132,6 +135,29 @@ async function pendingProposalExists(
 }
 
 /**
+ * Whether an editor already rejected this same proposal (same table, row,
+ * column and proposed value). A rejected proposal is not made again.
+ */
+async function rejectedProposalExists(
+  sql: Sql,
+  newsroomId: number,
+  entityType: string,
+  entityId: number,
+  column: string,
+  after: string | null,
+): Promise<boolean> {
+  const found = await sql.query<{ id: number }>(
+    `select id from resource_changes
+      where newsroom_id = $1 and entity_type = $2 and entity_id = $3
+        and field_name = $4 and review_state = 'rejected'
+        and after_value is not distinct from $5
+      limit 1`,
+    [newsroomId, entityType, entityId, column, after],
+  );
+  return found.length > 0;
+}
+
+/**
  * The file's status counts as a claim only when it says something beyond the
  * importer's own default. A missing status, or "unverified", leaves the stored
  * status alone: Publish moves it to 'active', and re-reading the same file
@@ -157,7 +183,7 @@ const TABLE_ORDER: RegistryTableName[] = [
 ];
 
 /** Data columns compared on re-import, per table (hsds_id is the key). */
-const TABLE_COLUMNS: Record<RegistryTableName, string[]> = {
+export const TABLE_COLUMNS: Record<RegistryTableName, string[]> = {
   taxonomies: ["name"],
   organizations: [
     "name",
@@ -227,7 +253,7 @@ const TABLE_COLUMNS: Record<RegistryTableName, string[]> = {
  * Tables whose rows an editor can remove from an entry (migration 0165). A row
  * that is removed is left alone by an import of the same file.
  */
-const REMOVABLE_TABLES = new Set<RegistryTableName>([
+export const REMOVABLE_TABLES = new Set<RegistryTableName>([
   "contacts",
   "service_at_locations",
   "schedules",
@@ -252,7 +278,7 @@ const TABLES_WITH_SOURCE_PROVENANCE = new Set<RegistryTableName>([
 ]);
 
 /** Table -> entity_type written on a resource_changes row. */
-const ENTITY_TYPE: Record<RegistryTableName, string> = {
+export const ENTITY_TYPE: Record<RegistryTableName, string> = {
   taxonomies: "taxonomy",
   organizations: "organization",
   services: "service",
@@ -288,7 +314,7 @@ interface ResolvedRows {
   accessibilities: RowValues[];
 }
 
-function asText(value: unknown): string | null {
+export function asText(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   return typeof value === "string" ? value : JSON.stringify(value);
 }
@@ -543,15 +569,13 @@ async function writeTable(
       if (column === "status" && !statusIsClaim(row.status)) continue;
       if (sameValue(prior[column], row[column])) continue;
       differs = true;
+      // A proposal already waiting, or one an editor already rejected, is not
+      // made again. Both count as "already waiting" so the report's shape stays
+      // the same.
+      const proposedValue = asText(row[column]);
       if (
-        await pendingProposalExists(
-          sql,
-          context.newsroomId,
-          ENTITY_TYPE[table],
-          id,
-          column,
-          asText(row[column]),
-        )
+        (await pendingProposalExists(sql, context.newsroomId, ENTITY_TYPE[table], id, column, proposedValue)) ||
+        (await rejectedProposalExists(sql, context.newsroomId, ENTITY_TYPE[table], id, column, proposedValue))
       ) {
         continue;
       }
@@ -635,6 +659,13 @@ async function importHsdsBundleIn(
   bundle: HsdsBundle,
   options: ImportOptions,
 ): Promise<ImportResult> {
+  // Two imports of one directory into one newsroom run one after the other, so
+  // neither can read the proposals before the other's are committed. The lock
+  // is held to the end of this transaction (a dry run too).
+  await sql.query("select pg_advisory_xact_lock($1, hashtext($2))", [
+    options.newsroomId,
+    options.directoryName,
+  ]);
   const payload = JSON.stringify(bundle);
   const tables = Object.fromEntries(
     REGISTRY_TABLE_NAMES.map((name) => [name, emptyCounts()]),
@@ -709,14 +740,8 @@ async function importHsdsBundleIn(
       // A changed parent is a conflict, not an overwrite.
       const parentCounts = tables.taxonomies;
       if (
-        await pendingProposalExists(
-          sql,
-          context.newsroomId,
-          "taxonomy",
-          selfId,
-          "parent_id",
-          String(parentId),
-        )
+        (await pendingProposalExists(sql, context.newsroomId, "taxonomy", selfId, "parent_id", String(parentId))) ||
+        (await rejectedProposalExists(sql, context.newsroomId, "taxonomy", selfId, "parent_id", String(parentId)))
       ) {
         if (taxonomyWrite.unchangedIds.delete(row.hsds_id)) {
           parentCounts.unchanged -= 1;
