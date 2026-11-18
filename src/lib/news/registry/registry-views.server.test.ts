@@ -220,9 +220,14 @@ test("a published service shows only its published children", async () => {
     "only the published address is shown",
   );
   assert.deepEqual(
-    [...entry.serviceHours, ...entry.locations.flatMap((l) => l.hours)],
+    entry.serviceHours,
     ["Monday, 09:00–11:00"],
-    "only the published schedule is shown",
+    "the published schedule is shown service-wide",
+  );
+  assert.deepEqual(
+    entry.locations.map((l) => l.hours),
+    [[]],
+    "no schedule shows under the one published location; the unpublished ones show nowhere",
   );
   assert.deepEqual(entry.languages, ["Spanish"], "only the published language is shown");
 });

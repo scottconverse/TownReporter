@@ -88,10 +88,7 @@ function RegistryPage() {
             <p>
               The list of community resources could not be loaded just now. Nothing was lost; the
               page could not read it.{" "}
-              <a className="textlink" href={category ? `/registry?category=${category}` : "/registry"}>
-                Try again
-              </a>
-              .
+              <a href={category ? `/registry?category=${category}` : "/registry"}>Try again</a>.
             </p>
           </div>
         ) : entries.length === 0 ? (
@@ -135,27 +132,34 @@ function RegistryPage() {
                       </ul>
                     </section>
                   ))}
-                  <ul className="needlist">
-                    {entry.servicePhones.map((phone) => (
-                      <li key={`service-${phone}`}>Phone for this service: {phone}</li>
-                    ))}
-                    {entry.serviceHours.map((hours) => (
-                      <li key={`service-${hours}`}>Hours for this service: {hours}</li>
-                    ))}
-                    {entry.organizationPhones.map((phone) => (
-                      <li key={`org-${phone}`}>
-                        Main phone of {entry.organizationName}: {phone}
+                  <section aria-label="About this service">
+                    <p>
+                      <b>About this service</b>
+                    </p>
+                    <ul className="needlist">
+                      {entry.servicePhones.map((phone) => (
+                        <li key={`service-${phone}`}>Phone for this service: {phone}</li>
+                      ))}
+                      {entry.serviceHours.map((hours) => (
+                        <li key={`service-${hours}`}>Hours for this service: {hours}</li>
+                      ))}
+                      {entry.organizationPhones.map((phone) => (
+                        <li key={`org-${phone}`}>
+                          Main phone of {entry.organizationName}: {phone}
+                        </li>
+                      ))}
+                      {entry.languages.length ? (
+                        <li>Languages: {entry.languages.join(", ")}</li>
+                      ) : null}
+                      {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
+                      <li>
+                        Last verified:{" "}
+                        {entry.lastVerifiedAt
+                          ? formatShortDate(entry.lastVerifiedAt)
+                          : "Not verified yet"}
                       </li>
-                    ))}
-                    {entry.languages.length ? (
-                      <li>Languages: {entry.languages.join(", ")}</li>
-                    ) : null}
-                    {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
-                    <li>
-                      Last verified:{" "}
-                      {entry.lastVerifiedAt ? formatShortDate(entry.lastVerifiedAt) : "Not verified yet"}
-                    </li>
-                  </ul>
+                    </ul>
+                  </section>
                   {entry.editorNote ? (
                     <p>
                       <b>Editor's note:</b> {entry.editorNote}

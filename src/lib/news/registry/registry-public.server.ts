@@ -306,7 +306,15 @@ export async function listPublicRegistry(
 
   // Hours: a schedule tied to a place stays with that place; one tied to the
   // service alone is service-wide. The query orders them by weekday / opening
-  // time / id, so each list is stable. A schedule reached twice shows once.
+  // time / id, so each list is stable. A schedule that a service's link to a
+  // place also points to comes back twice, once service-wide and once through
+  // the link. It belongs to that place, so the service-wide copy is dropped.
+  const placedSchedules = new Set<string>(); // `${service}:${schedule}`
+  for (const row of schedules) {
+    if (row.location_id != null) {
+      placedSchedules.add(`${Number(row.service_id)}:${Number(row.schedule_id)}`);
+    }
+  }
   const serviceHours = new Map<number, string[]>();
   const placeHours = new Map<string, string[]>(); // `${service}:${location}`
   for (const row of schedules) {
@@ -314,8 +322,11 @@ export async function listPublicRegistry(
     const locationId = row.location_id == null ? null : Number(row.location_id);
     const text = formatHours(row);
     if (!text) continue;
-    if (locationId == null) pushUnique(serviceHours, serviceId, text);
-    else pushUnique(placeHours, `${serviceId}:${locationId}`, text);
+    if (locationId != null) {
+      pushUnique(placeHours, `${serviceId}:${locationId}`, text);
+    } else if (!placedSchedules.has(`${serviceId}:${Number(row.schedule_id)}`)) {
+      pushUnique(serviceHours, serviceId, text);
+    }
   }
 
   const locationsByService = new Map<number, PublicRegistryLocation[]>();
