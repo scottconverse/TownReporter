@@ -27,10 +27,28 @@ const window = installDom();
 const { createRoot } = await import("react-dom/client");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
+/*
+  linkedom has no focus. A focus() call is kept, and document.activeElement is
+  that element while it is still in the page, else the body -- what a browser
+  does when the focused element is removed. This is the blind spot the harness
+  header names for default actions, so focus is measured here by its effect.
+*/
+let focused = null;
+const takeFocus = (element) => {
+  focused = element;
+};
+window.HTMLElement.prototype.focus = function focus() {
+  takeFocus(this);
+};
+Object.defineProperty(document, "activeElement", {
+  configurable: true,
+  get: () => (focused && focused.isConnected ? focused : document.body),
+});
+
 const chromeUrl = stubUrl(`
 import { createElement as h } from ${JSON.stringify(import.meta.resolve("react"))};
-export function InkButton({ children, onClick, disabled, pending, pendingLabel, type, ariaLabel }) {
-  return h("button", { type: type || "button", disabled: Boolean(disabled || pending), onClick, "aria-label": ariaLabel },
+export function InkButton({ children, onClick, disabled, pending, pendingLabel, type, ariaLabel, ref }) {
+  return h("button", { type: type || "button", disabled: Boolean(disabled || pending), onClick, "aria-label": ariaLabel, ref },
     pending && pendingLabel ? pendingLabel : children);
 }
 `);
@@ -864,4 +882,60 @@ test("hours at a place the entry is no longer linked to show under a note, with 
     false,
     "no live form for these hours",
   );
+});
+
+/* ---- Keyboard focus through Remove, Keep it, a removal and a restore ---- */
+
+/*
+  Names the focused element for a failure message. The node itself is never put
+  in an assert.equal: its diff would inspect the whole linkedom tree, and that
+  does not finish. So focus is compared with ===, and this says where it is.
+*/
+const focusedAs = () => {
+  const el = document.activeElement;
+  if (!el || el === document.body) return "the body";
+  return `<${el.tagName.toLowerCase()}> "${(el.getAttribute("aria-label") || el.textContent || "").slice(0, 40)}"`;
+};
+
+test("Remove moves focus to Keep it, and Keep it returns focus to the row's Remove", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Language: ");
+  await page.press(page.button(group(), "Remove"));
+  const keep = page.button(group().querySelector('[data-testid="remove-confirm"]'), "Keep it");
+  assert.ok(document.activeElement === keep, `focus should be on Keep it, the safe choice; it is on ${focusedAs()}`);
+  await page.press(keep);
+  const remove = page.button(group(), "Remove");
+  assert.ok(document.activeElement === remove, `focus should be back on this row's Remove; it is on ${focusedAs()}`);
+});
+
+test("after a removal goes through, focus moves to the message that says where it went", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const group = () => page.groupStarting("Hours: ");
+  await page.press(page.button(group(), "Remove"));
+  await page.press(page.button(group().querySelector('[data-testid="remove-confirm"]'), "Yes, remove"));
+  await page.settle();
+  const status = page.group("Removed from this entry").querySelector('[role="status"]');
+  assert.equal(status.textContent, "Removed. It is in the Removed list below, and Restore brings it back.");
+  assert.ok(document.activeElement === status, `focus should be on the message; it is on ${focusedAs()}`);
+});
+
+test("after a restore goes through, focus moves to the message, since the restored row has left the list", async (t) => {
+  setup();
+  globalThis.__editor.detail.removed = [{ kind: "language", id: 52, label: "Vietnamese", sharedWith: [] }];
+  globalThis.__editor.remove = async () => {
+    globalThis.__editor.detail.removed = [];
+    return { ok: true, serviceId: 7 };
+  };
+  const page = await mount();
+  t.after(() => page.close());
+  await page.press(page.button(page.container.querySelector('[data-testid="removed-item"]'), "Restore"));
+  await page.settle();
+  assert.equal(page.container.querySelectorAll('[data-testid="removed-item"]').length, 0, "the row left the Removed list");
+  const status = page.group("Removed from this entry").querySelector('[role="status"]');
+  assert.equal(status.textContent, "Restored. It is back in the entry as it was before it was removed.");
+  assert.ok(document.activeElement === status, `focus should be on the message; it is on ${focusedAs()}`);
 });

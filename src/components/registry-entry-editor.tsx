@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import {
@@ -633,6 +633,19 @@ function RemoveControl({
   onChanged: (message: string) => void;
 }) {
   const [asking, setAsking] = useState(false);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
+  // Set by Keep it: the question closes and focus goes back to this row's Remove.
+  // A removal that succeeds leaves focus to the message instead (see RegistryEntryEditor).
+  const backToRemove = useRef(false);
+  useEffect(() => {
+    // The Remove button leaves the page when the question opens, so the safe choice gets focus.
+    if (asking) keepButton.current?.focus();
+    else if (backToRemove.current) {
+      backToRemove.current = false;
+      removeButton.current?.focus();
+    }
+  }, [asking]);
   const action = useRowAction(
     serviceId,
     () => removeRegistryRow({ data: { serviceId, kind, rowId } }),
@@ -644,7 +657,7 @@ function RemoveControl({
   );
   if (!asking) {
     return (
-      <InkButton tone="ghost" onClick={() => setAsking(true)}>
+      <InkButton ref={removeButton} tone="ghost" onClick={() => setAsking(true)}>
         Remove
       </InkButton>
     );
@@ -672,7 +685,14 @@ function RemoveControl({
         <InkButton tone="danger" pending={action.pending} pendingLabel="Removing…" onClick={action.run}>
           Yes, remove
         </InkButton>
-        <InkButton tone="ghost" onClick={() => setAsking(false)}>
+        <InkButton
+          ref={keepButton}
+          tone="ghost"
+          onClick={() => {
+            backToRemove.current = true;
+            setAsking(false);
+          }}
+        >
           Keep it
         </InkButton>
       </div>
@@ -941,18 +961,27 @@ function RemovedList({
   serviceId,
   removed,
   notice,
+  noticeRef,
   onChanged,
 }: {
   serviceId: number;
   removed: EntryDetail["removed"];
   notice: string | null;
+  /** Where focus goes after a removal or restore: the message that says so. */
+  noticeRef: RefObject<HTMLParagraphElement | null>;
   onChanged: (message: string) => void;
 }) {
   return (
     <section className="mt-4 border border-rule p-3" aria-label="Removed from this entry">
       <h4 className="mb-2 font-display text-xl">Removed</h4>
       {notice ? (
-        <p className="mb-2 text-base text-ink-2" role="status" aria-live="polite">
+        <p
+          ref={noticeRef}
+          tabIndex={-1}
+          className="mb-2 text-base text-ink-2"
+          role="status"
+          aria-live="polite"
+        >
           {notice}
         </p>
       ) : null}
@@ -1079,7 +1108,18 @@ export function RegistryEntryEditor({
   const detail = query.data;
   // What the last remove or restore said. The row has left the page by then, so
   // the words are kept here, with the Removed list.
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeText] = useState<string | null>(null);
+  // Counts each message, so the same words said twice in a row still move focus.
+  const [noticeCount, setNoticeCount] = useState(0);
+  const setNotice = (message: string) => {
+    setNoticeText(message);
+    setNoticeCount((count) => count + 1);
+  };
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    // The row's button left the page when the removal or restore went through, so focus goes to what was said.
+    if (noticeCount > 0) noticeRef.current?.focus();
+  }, [noticeCount]);
 
   return (
     <div className="mt-4 border-t-2 border-ink pt-3" aria-label="Entry details editor">
@@ -1225,6 +1265,7 @@ export function RegistryEntryEditor({
             serviceId={serviceId}
             removed={detail.removed}
             notice={notice}
+            noticeRef={noticeRef}
             onChanged={setNotice}
           />
         </>
