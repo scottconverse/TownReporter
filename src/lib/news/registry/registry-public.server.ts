@@ -17,8 +17,11 @@
  *    The organization's main phone and the service-wide phone and hours are
  *    listed apart, so nothing from one place shows under another.
  *
- * "Last verified" is `last_verified_at`, the service's own where it has one and
- * the organization's otherwise. It is never inferred from an import date.
+ * "Verified" is an explicit verification record an editor made (the latest one
+ * for the service). The older `last_verified_at` (the service's own where it has
+ * one, the organization's otherwise) is only a legacy date: it was set by saves
+ * and publishes, so it is returned apart and worded "Last updated". Neither is
+ * ever inferred from an import date.
  */
 
 import type { Sql } from "../../db.ts";
@@ -48,7 +51,15 @@ export interface PublicRegistryEntry {
   serviceHours: string[];
   locations: PublicRegistryLocation[];
   languages: string[];
+  /**
+   * The old "last verified" date, set by saves and publishes before Phase 3.
+   * It is not a check. The page words it "Last updated", never "Verified".
+   */
   lastVerifiedAt: WhenValue;
+  /** The latest explicit verification an editor recorded; null when none. */
+  verifiedAt: WhenValue;
+  /** How that check was made (one of VERIFY_METHODS); null when none. */
+  verifiedMethod: string | null;
   sourceUrl: string | null;
   sourceTitle: string | null;
   editorNote: string | null;
@@ -373,6 +384,24 @@ export async function listPublicRegistry(
     languagesByService.set(id, [...(languagesByService.get(id) ?? []), row.language]);
   }
 
+  // The latest explicit verification per service. The basis text is desk-only
+  // and is not read here.
+  const verifications = await sql.query<{
+    service_id: number;
+    checked_at: WhenValue;
+    method: string;
+  }>(
+    `select distinct on (service_id) service_id, checked_at, method
+       from resource_verifications
+      where newsroom_id = $1 and service_id = any($2::int[])
+      order by service_id, checked_at desc, id desc`,
+    [newsroomId, serviceIds],
+  );
+  const verificationByService = new Map<number, { at: WhenValue; method: string }>();
+  for (const row of verifications) {
+    verificationByService.set(Number(row.service_id), { at: row.checked_at, method: row.method });
+  }
+
   const entries: PublicRegistryEntry[] = baseRows.map((row) => {
     const serviceId = Number(row.service_id);
     const organizationId = Number(row.organization_id);
@@ -387,6 +416,8 @@ export async function listPublicRegistry(
       locations: locationsByService.get(serviceId) ?? [],
       languages: languagesByService.get(serviceId) ?? [],
       lastVerifiedAt: row.last_verified_at,
+      verifiedAt: verificationByService.get(serviceId)?.at ?? null,
+      verifiedMethod: verificationByService.get(serviceId)?.method ?? null,
       sourceUrl: row.source_url,
       sourceTitle: row.source_title,
       editorNote: row.service_note?.trim() || row.organization_note?.trim() || null,

@@ -12,8 +12,11 @@
  * stamps the service as verified by this editor, as that writer does. Saving
  * the organization or a contact does not restamp the service: nobody verified
  * the service by editing a shared row. A contact the editor adds takes the
- * `published` of the thing it hangs on, as the existing phone writer does, and
- * is stamped as the editor's reading.
+ * `published` of the thing it hangs on, as the existing phone writer does.
+ *
+ * Since Phase 3 no save writes the old verification columns
+ * (`last_verified_*`, `verification_method`) on any row: a save is not a check.
+ * An explicit verification is its own record (registry-verify.server.ts).
  *
  * The same holds for the rest of the entry's rows (job C2): places (the
  * service's links to locations, and the location rows), hours, eligibility,
@@ -325,14 +328,6 @@ const REMOVE_TABLE = {
   language: "languages",
   accessibility: "accessibilities",
 } as const satisfies Record<RemovableKind, string>;
-
-/** Tables whose rows carry the editor-stamp columns (the others do not). */
-const STAMPED_ROW_TABLES = new Set<string>([
-  "locations",
-  "schedules",
-  "eligibilities",
-  "required_documents",
-]);
 
 const ROW_ID_PREFIX: Record<RowKind, string> = {
   location: "location",
@@ -841,36 +836,16 @@ async function writeChangedColumns<T extends object>(
 }
 
 /**
- * Stamp the service as verified by this editor now: what the desk's existing
- * edit does, and written only by the service save.
- */
-async function stampService(
-  sql: Sql,
-  newsroomId: number,
-  serviceId: number,
-  userId: string,
-): Promise<void> {
-  await sql.query(
-    `update services
-        set last_verified_at = now(),
-            verification_method = 'editor',
-            last_verified_by = $1,
-            updated_at = now()
-      where id = $2 and newsroom_id = $3`,
-    [userId, serviceId, newsroomId],
-  );
-}
-
-/**
- * Save the service's own details: the fields the editor changed, then the
- * service's stamp. `published` is not touched.
+ * Save the service's own details: the fields the editor changed. `published`
+ * is not touched, and the old verification columns are not written: a save is
+ * not a check (Phase 3). Only `updated_at` moves.
  */
 export async function saveServiceDetailsIn(
   sql: Sql,
   newsroomId: number,
   serviceId: number,
   input: unknown,
-  userId: string,
+  _userId: string,
 ): Promise<EntrySaveResult> {
   return withTransaction(async (tx) => {
     const row = await loadServiceRow(tx, newsroomId, serviceId);
@@ -880,7 +855,10 @@ export async function saveServiceDetailsIn(
     if (!checked.ok) return checked;
     const id = Number(row.id);
     await writeChangedColumns(tx, "services", SERVICE_COLUMNS, changed, checked.values, id, newsroomId);
-    await stampService(tx, newsroomId, id, userId);
+    await tx.query(
+      "update services set updated_at = now() where id = $1 and newsroom_id = $2",
+      [id, newsroomId],
+    );
     return { ok: true as const, serviceId: id };
   });
 }
@@ -943,7 +921,7 @@ export async function saveContactIn(
   newsroomId: number,
   serviceId: number,
   input: SaveContactInput,
-  userId: string,
+  _userId: string,
 ): Promise<EntrySaveResult> {
   return withTransaction(async (tx) => {
     // The service row is locked: the published state a new contact takes is
@@ -996,9 +974,8 @@ export async function saveContactIn(
       `insert into contacts
          (newsroom_id, hsds_id, directory_name, organization_id, service_id,
           name, role, department, phone, phone_extension, email, website,
-          published, last_verified_at, verification_method, last_verified_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(),
-               'editor', $14)`,
+          published)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         newsroomId,
         `desk-contact-${id}-${suffix}`,
@@ -1013,7 +990,6 @@ export async function saveContactIn(
         v.email || null,
         v.website || null,
         published,
-        userId,
       ],
     );
     return { ok: true as const, serviceId: id };
@@ -1083,7 +1059,7 @@ export async function saveEntryRowIn(
   newsroomId: number,
   serviceId: number,
   input: SaveRowInput,
-  userId: string,
+  _userId: string,
 ): Promise<EntrySaveResult> {
   return withTransaction(async (tx) => {
     // Locked: the published state a new row takes is read here, and a publish
@@ -1174,14 +1150,8 @@ export async function saveEntryRowIn(
     }
     add("published", service.published);
     const placeholders = params.map((_, index) => `$${index + 1}`);
-    let stamp = "";
-    if (STAMPED_ROW_TABLES.has(table)) {
-      params.push(userId);
-      stamp = ", last_verified_at, verification_method, last_verified_by";
-      placeholders.push("now()", "'editor'", `$${params.length}`);
-    }
     const inserted = await tx.query<{ id: number }>(
-      `insert into ${table} (${columns.join(", ")}${stamp})
+      `insert into ${table} (${columns.join(", ")})
        values (${placeholders.join(", ")}) returning id`,
       params,
     );

@@ -90,7 +90,7 @@ function asRecord(input: unknown): Record<string, unknown> {
  * refuses it, and the save would fail with a database error instead of a
  * sentence).
  */
-function hasControlCharacter(value: string, multiline: boolean): boolean {
+export function hasControlCharacter(value: string, multiline: boolean): boolean {
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (code === 0x09 || code === 0x0a || code === 0x0d) {

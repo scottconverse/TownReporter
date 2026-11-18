@@ -271,7 +271,7 @@ test("changing a place writes only the fields sent, on the shared place, and sta
   assert.deepEqual({ ...service }, { last_verified_by: null, published: true });
 });
 
-test("adding a row to an unpublished entry leaves it unpublished and stamps only the tables that have a stamp", async () => {
+test("adding a row to an unpublished entry leaves it unpublished and writes no verification stamp", async () => {
   const sql = await getSql();
   const s = await seed(9704);
   const before = await rowCount(sql, "service_at_locations", 9704);
@@ -308,7 +308,8 @@ test("adding a row to an unpublished entry leaves it unpublished and stamps only
     const rows = await sql.query<{ last_verified_by: string | null; verification_method: string | null }>(
       `select last_verified_by, verification_method from ${table}
         where newsroom_id = 9704 and hsds_id like 'desk-%'`, []);
-    assert.ok(rows.every((r) => r.last_verified_by === "ed-1" && r.verification_method === "editor"), table);
+    assert.ok(rows.length >= 1, `${table} has a desk row`);
+    assert.ok(rows.every((r) => r.last_verified_by === null && r.verification_method === null), `${table}: a new row is not stamped`);
   }
   const [place] = await sql.query<{ status: string; organization_id: number }>(
     "select status, organization_id from locations where newsroom_id = 9704 and name = 'Church basement'", []);
