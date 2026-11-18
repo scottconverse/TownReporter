@@ -43,6 +43,13 @@ export interface DeskRegistryChange {
   createdAt: WhenValue;
 }
 
+/** Row outcomes of one import, summed over every table. */
+export interface ImportOutcomes {
+  inserted: number;
+  unchanged: number;
+  changed: number;
+}
+
 export interface DeskRegistryImport {
   id: number;
   directoryName: string;
@@ -52,6 +59,8 @@ export interface DeskRegistryImport {
   recordCount: number;
   conflictCount: number;
   report: string | null;
+  /** Null for an import that stored no per-table breakdown; no totals are invented. */
+  outcomes: ImportOutcomes | null;
 }
 
 export interface DeskRegistrySource {
@@ -199,6 +208,24 @@ function asArrayLength(value: unknown): number {
   return 0;
 }
 
+/**
+ * The per-table breakdown an import stored under `record_counts.byTable`,
+ * summed over the tables. Null when none was stored.
+ */
+function outcomesOf(byTable: unknown): ImportOutcomes | null {
+  const tables = asRecord(byTable);
+  if (Object.keys(tables).length === 0) return null;
+  const totals: ImportOutcomes = { inserted: 0, unchanged: 0, changed: 0 };
+  for (const counts of Object.values(tables)) {
+    const table = asRecord(counts);
+    for (const key of ["inserted", "unchanged", "changed"] as const) {
+      const n = Number(table[key]);
+      if (Number.isFinite(n)) totals[key] += n;
+    }
+  }
+  return totals;
+}
+
 /** Every HSDS import in this newsroom, newest first. */
 export async function listRegistryImports(
   sql: Sql,
@@ -224,7 +251,8 @@ export async function listRegistryImports(
   );
 
   return rows.map((row) => {
-    const counts = asRecord(row.record_counts);
+    // `byTable` is the breakdown, not a table count: it is kept out of the sum.
+    const { byTable, ...counts } = asRecord(row.record_counts);
     const recordCount = Object.values(counts).reduce<number>((total, value) => {
       const n = Number(value);
       return total + (Number.isFinite(n) ? n : 0);
@@ -236,6 +264,7 @@ export async function listRegistryImports(
       sourceUrl: row.source_url,
       importedAt: row.imported_at,
       recordCount,
+      outcomes: outcomesOf(byTable),
       conflictCount: asArrayLength(row.conflicts),
       report: row.report,
     };

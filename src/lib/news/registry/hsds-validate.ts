@@ -36,18 +36,23 @@ class Problems {
   }
 }
 
+function tooLarge(): HsdsValidation {
+  return {
+    ok: false,
+    problems: ["file: the file is larger than 8 MiB. Choose a smaller file."],
+  };
+}
+
 /** Parse the file's text, enforcing the size cap, then validate its shape. */
 export function parseHsdsJson(text: string): HsdsValidation {
+  // Every UTF-16 code unit takes at least one UTF-8 byte, so text longer than
+  // the cap is over it already and needs no encoding.
+  if (typeof text === "string" && text.length > MAX_HSDS_JSON_BYTES) return tooLarge();
   if (typeof text !== "string" || text.trim() === "") {
     return { ok: false, problems: ["file: the file is empty"] };
   }
   const bytes = new TextEncoder().encode(text).length;
-  if (bytes > MAX_HSDS_JSON_BYTES) {
-    return {
-      ok: false,
-      problems: ["file: the file is larger than 8 MiB. Choose a smaller file."],
-    };
-  }
+  if (bytes > MAX_HSDS_JSON_BYTES) return tooLarge();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

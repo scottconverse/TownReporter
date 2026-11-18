@@ -308,3 +308,18 @@ test("the import panel's directory names are this newsroom's own, without the de
   assert.deepEqual(await listRegistryDirectoryNames(sql, other), ["other-newsroom-only"]);
   assert.deepEqual(await listRegistryDirectoryNames(sql, 9813), []);
 });
+
+test("a file over 8 MiB in UTF-8 is refused with zero writes even when its text is shorter", async () => {
+  const sql = await getSql();
+  const newsroomId = 9805;
+  const before = await watchedCounts(newsroomId);
+  // Each "é" is one UTF-16 unit but two UTF-8 bytes. 5 Mi of them is under the
+  // cap as text length and over it as bytes, so only the byte check refuses it.
+  const multibyte = `{"organizations":[],"pad":"${"é".repeat(5 * 1024 * 1024)}"}`;
+  for (const fn of [previewHsdsImportIn, runHsdsImportIn]) {
+    const result = await fn(sql, newsroomId, { json: multibyte, directoryName: "county-211" }, "editor-1");
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.problems.join("\n"), /larger than 8 MiB/);
+  }
+  assert.deepEqual(await watchedCounts(newsroomId), before);
+});

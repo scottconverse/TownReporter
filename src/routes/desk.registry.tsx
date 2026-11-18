@@ -667,10 +667,22 @@ function RegistryDeskPage() {
                       {" · "}
                       {row.format.toUpperCase()}
                       {" · "}
-                      {row.recordCount} new row{row.recordCount === 1 ? "" : "s"} added
-                      {" · "}
-                      {row.conflictCount} difference{row.conflictCount === 1 ? "" : "s"} proposed
-                      for review
+                      {row.outcomes ? (
+                        <>
+                          {row.outcomes.inserted} new
+                          {" · "}
+                          {row.outcomes.unchanged} unchanged
+                          {" · "}
+                          {row.outcomes.changed} changed for review
+                        </>
+                      ) : (
+                        <>
+                          {row.recordCount} new row{row.recordCount === 1 ? "" : "s"} added
+                          {" · "}
+                          {row.conflictCount} difference{row.conflictCount === 1 ? "" : "s"} proposed
+                          for review
+                        </>
+                      )}
                     </p>
                     {row.sourceUrl ? (
                       <p className="astra-row-meta">

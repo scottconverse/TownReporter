@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { getSql, withTransaction } from "../../db.ts";
 import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
-import { bundleToRows, rowsToBundle } from "./hsds-map.ts";
+import { bundleToRows, REGISTRY_TABLE_NAMES, rowsToBundle } from "./hsds-map.ts";
 import type { HsdsBundle } from "./hsds-types.ts";
 import { importHsdsBundle, readRegistryBundle } from "./hsds-import.server.ts";
 import { publishRegistryEntryIn } from "./registry-desk-write.server.ts";
@@ -558,4 +558,74 @@ test("an import that fails at insert time part-way leaves no partial writes", as
     importHsdsBundle(broken, { newsroomId, directoryName: "half-written" }),
   );
   assert.deepEqual(await rowCounts(newsroomId), before);
+});
+
+test("filling a null taxonomy parent from the file counts the row as changed, and a dry run keeps it null", async () => {
+  const sql = await getSql();
+  const newsroomId = 9710;
+  // The first import names no parents, so every taxonomy starts with a null parent.
+  const flat = sampleCopy();
+  for (const taxonomy of flat.taxonomies ?? []) delete taxonomy.parent_id;
+  await importHsdsBundle(flat, { newsroomId, directoryName: DIRECTORY });
+
+  const parentOfPantry = async (): Promise<number | null> => {
+    const rows = await sql.query<{ parent_id: number | null }>(
+      "select parent_id from taxonomies where newsroom_id = $1 and hsds_id = $2",
+      [newsroomId, "tax-pantry"],
+    );
+    return rows[0]!.parent_id;
+  };
+  assert.equal(await parentOfPantry(), null);
+
+  const dry = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY, dryRun: true });
+  assert.deepEqual(dry.tables.taxonomies, { inserted: 0, unchanged: 1, changed: 1, alreadyPending: 0 });
+  assert.equal(await parentOfPantry(), null, "a dry run leaves the parent null");
+
+  const real = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+  assert.deepEqual(real.tables.taxonomies, { inserted: 0, unchanged: 1, changed: 1, alreadyPending: 0 });
+  assert.deepEqual(real.conflicts, [], "a null parent filled from the file is not a proposal");
+  assert.notEqual(await parentOfPantry(), null, "the real run fills the parent");
+
+  const repeat = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+  assert.deepEqual(repeat.tables.taxonomies, { inserted: 0, unchanged: 2, changed: 0, alreadyPending: 0 });
+});
+
+test("the stored import keeps its top-level counts and adds the per-table totals under byTable", async () => {
+  const sql = await getSql();
+  const newsroomId = 9711;
+  const result = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+  const [stored] = await sql.query<{ record_counts: Record<string, unknown> }>(
+    "select record_counts from resource_imports where id = $1",
+    [result.importId],
+  );
+  const counts = stored!.record_counts;
+  for (const name of REGISTRY_TABLE_NAMES) {
+    assert.equal(counts[name], result.recordCounts[name], `${name} top-level count`);
+  }
+  assert.deepEqual(counts.byTable, result.tables);
+});
+
+test("a value that differs from a pending proposal is a new proposal, and the older one stays pending", async () => {
+  const sql = await getSql();
+  const newsroomId = 9712;
+  await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+
+  const first = sampleCopy();
+  first.organizations[0]!.name = "Proposed name A";
+  const a = await importHsdsBundle(first, { newsroomId, directoryName: DIRECTORY });
+  assert.equal(a.conflicts.length, 1);
+
+  const second = sampleCopy();
+  second.organizations[0]!.name = "Proposed name B";
+  const b = await importHsdsBundle(second, { newsroomId, directoryName: DIRECTORY });
+  assert.equal(b.conflicts.length, 1, "a different value is not deduped against the pending one");
+  assert.equal(b.conflicts[0]!.after_value, "Proposed name B");
+
+  const pending = await sql.query<{ after_value: string }>(
+    `select after_value from resource_changes
+      where newsroom_id = $1 and entity_type = 'organization' and field_name = 'name'
+        and review_state = 'pending' order by id`,
+    [newsroomId],
+  );
+  assert.deepEqual(pending.map((row) => row.after_value), ["Proposed name A", "Proposed name B"]);
 });

@@ -729,6 +729,13 @@ async function importHsdsBundleIn(
       });
       continue;
     }
+    // A null parent filled from the file changes a row that was counted as
+    // unchanged, so it counts as changed. The fill itself stays; it is not a
+    // proposal.
+    if (taxonomyWrite.unchangedIds.delete(row.hsds_id)) {
+      taxonomyWrite.counts.unchanged -= 1;
+      taxonomyWrite.counts.changed += 1;
+    }
     await sql.query("update taxonomies set parent_id = $1, updated_at = now() where id = $2", [
       parentId,
       selfId,
@@ -775,7 +782,8 @@ async function importHsdsBundleIn(
         set record_counts = $1::jsonb, conflicts = $2::jsonb, report = $3
       where id = $4`,
     [
-      JSON.stringify(recordCounts),
+      // The top-level counts are unchanged; the per-table breakdown sits under its own key.
+      JSON.stringify({ ...recordCounts, byTable: tables }),
       JSON.stringify(conflicts),
       `${Object.values(recordCounts).reduce((sum, count) => sum + count, 0)} rows from ${options.directoryName}, ${conflicts.length} conflicts.`,
       importId,

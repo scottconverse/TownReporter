@@ -105,3 +105,11 @@ test("a malformed opens_at is rejected and a null one is fine", () => {
   schedule.opens_at = null;
   assert.equal(validateHsdsBundle(bundle).ok, true);
 });
+
+test("a file whose text is over the cap is refused before anything is encoded", (t) => {
+  const encode = t.mock.method(TextEncoder.prototype, "encode");
+  const result = parseHsdsJson(`{"organizations":[],"pad":"${"x".repeat(MAX_HSDS_JSON_BYTES)}"}`);
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.problems[0]!, /larger than 8 MiB/);
+  assert.equal(encode.mock.callCount(), 0);
+});

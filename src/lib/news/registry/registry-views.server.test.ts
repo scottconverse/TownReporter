@@ -447,3 +447,37 @@ test("all published schedules for a service are shown, in a stable order", async
     ["Monday, 09:00–11:00", "Wednesday, 13:00–15:00"],
   );
 });
+
+test("the desk's import list shows per-table totals only for imports that stored them", async () => {
+  const sql = await getSql();
+  const newsroomId = 9420;
+  await seedNewsroom(newsroomId);
+  await sql.query(
+    `insert into resource_imports (newsroom_id, directory_name, format, record_counts, conflicts)
+     values ($1, 'Stored with totals', 'json', $2::jsonb, '[]'::jsonb)`,
+    [
+      newsroomId,
+      JSON.stringify({
+        organizations: 2,
+        services: 1,
+        byTable: {
+          organizations: { inserted: 2, unchanged: 0, changed: 0, alreadyPending: 0 },
+          services: { inserted: 1, unchanged: 4, changed: 2, alreadyPending: 1 },
+        },
+      }),
+    ],
+  );
+  await sql.query(
+    `insert into resource_imports (newsroom_id, directory_name, format, record_counts, conflicts)
+     values ($1, 'Stored before totals', 'json', '{"organizations": 2, "services": 1}'::jsonb, '[]'::jsonb)`,
+    [newsroomId],
+  );
+
+  const imports = await listRegistryImports(sql, newsroomId);
+  const withTotals = imports.find((row) => row.directoryName === "Stored with totals")!;
+  const beforeTotals = imports.find((row) => row.directoryName === "Stored before totals")!;
+  assert.equal(withTotals.recordCount, 3, "byTable is not summed into the rows");
+  assert.deepEqual(withTotals.outcomes, { inserted: 3, unchanged: 4, changed: 2 });
+  assert.equal(beforeTotals.recordCount, 3);
+  assert.equal(beforeTotals.outcomes, null, "no totals are invented for an import that stored none");
+});
