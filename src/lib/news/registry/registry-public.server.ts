@@ -11,6 +11,8 @@
  *    when it has one (spec 11: change detection is not verification, and the
  *    public copy never claims a phone was called or a program is open);
  *  - an editor note is shown when an editor wrote one;
+ *  - a row an editor removed from the entry (`removed_at` set) is never read,
+ *    whatever its published flag says;
  *  - each published, active location keeps its own address, phones and hours.
  *    The organization's main phone and the service-wide phone and hours are
  *    listed apart, so nothing from one place shows under another.
@@ -215,7 +217,7 @@ export async function listPublicRegistry(
        from service_at_locations sal
        join locations l on l.id = sal.location_id and l.newsroom_id = sal.newsroom_id
       where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
-        and sal.published = true
+        and sal.published = true and sal.removed_at is null
         and l.published = true and l.status = 'active'
       order by sal.service_id, sal.id`,
     [newsroomId, serviceIds],
@@ -231,7 +233,7 @@ export async function listPublicRegistry(
     }>(
       `select organization_id, service_id, location_id, phone
          from contacts
-        where newsroom_id = $1 and published = true
+        where newsroom_id = $1 and published = true and removed_at is null
           and phone is not null and phone <> ''
           and (service_id = any($2::int[])
                or (service_id is null and organization_id = any($3::int[]))
@@ -253,14 +255,15 @@ export async function listPublicRegistry(
               sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from schedules sc
         where sc.newsroom_id = $1 and sc.service_id = any($2::int[])
-          and sc.published = true
+          and sc.published = true and sc.removed_at is null
         union all
        select sal.service_id, sal.location_id, sc.id as schedule_id,
               sc.by_appointment, sc.days, sc.opens_at, sc.closes_at, sc.notes
          from service_at_locations sal
          join schedules sc on sc.id = sal.schedule_id and sc.newsroom_id = sal.newsroom_id
         where sal.newsroom_id = $1 and sal.service_id = any($2::int[])
-          and sal.published = true and sc.published = true
+          and sal.published = true and sal.removed_at is null
+          and sc.published = true and sc.removed_at is null
         order by service_id, days nulls last, opens_at nulls last, schedule_id`,
       [newsroomId, serviceIds],
     ),
@@ -268,7 +271,7 @@ export async function listPublicRegistry(
       `select service_id, language
          from languages
         where newsroom_id = $1 and service_id = any($2::int[])
-          and published = true
+          and published = true and removed_at is null
         order by id`,
       [newsroomId, serviceIds],
     ),

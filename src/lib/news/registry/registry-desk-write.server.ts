@@ -13,7 +13,13 @@
  */
 
 import { withTransaction, type Sql } from "../../db.ts";
-import { importHsdsBundle } from "./hsds-import.server.ts";
+import {
+  importHsdsBundle,
+  type ImportConflict,
+  type TableCounts,
+} from "./hsds-import.server.ts";
+import { REGISTRY_TABLE_NAMES, type RegistryTableName } from "./hsds-map.ts";
+import { parseHsdsJson } from "./hsds-validate.ts";
 import {
   DESK_DIRECTORY,
   deskSlug,
@@ -139,6 +145,11 @@ export interface PublishRegistryEntryResult {
  *  - the organization's own contacts (no service, no location);
  *  - contacts of the locations the service is linked to (no service).
  *
+ * A row an editor removed from the entry (`removed_at` set) is skipped by every
+ * one of these, so it stays unpublished until it is restored and the entry is
+ * published again. The service's hours at a place it is no longer linked to are
+ * skipped too, and come back with the link.
+ *
  * Another service's contacts, schedules and languages, a contact of a location
  * the service is not linked to, and a schedule none of its rows references stay
  * as they were.
@@ -189,10 +200,18 @@ export async function publishRegistryEntryIn(
     );
 
     for (const table of ["contacts", "languages", "schedules", "service_at_locations"]) {
+      // Hours at a place the service is no longer linked to stay unpublished
+      // until the link is restored.
+      const atLinkedPlace =
+        table === "schedules"
+          ? `and (location_id is null or location_id in (
+                select location_id from service_at_locations
+                 where newsroom_id = $1 and service_id = $2 and removed_at is null))`
+          : "";
       await tx.query(
         `update ${table}
             set published = true, updated_at = now()
-          where newsroom_id = $1 and service_id = $2`,
+          where newsroom_id = $1 and service_id = $2 and removed_at is null ${atLinkedPlace}`,
         [newsroomId, id],
       );
     }
@@ -203,9 +222,11 @@ export async function publishRegistryEntryIn(
       `update schedules
           set published = true, updated_at = now()
         where newsroom_id = $1
+          and removed_at is null
           and id in (
             select schedule_id from service_at_locations
              where newsroom_id = $1 and service_id = $2 and schedule_id is not null
+               and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -216,7 +237,7 @@ export async function publishRegistryEntryIn(
       `update contacts
           set published = true, updated_at = now()
         where newsroom_id = $1 and organization_id = $2
-          and service_id is null and location_id is null`,
+          and service_id is null and location_id is null and removed_at is null`,
       [newsroomId, organizationId],
     );
 
@@ -224,10 +245,10 @@ export async function publishRegistryEntryIn(
     await tx.query(
       `update contacts
           set published = true, updated_at = now()
-        where newsroom_id = $1 and service_id is null
+        where newsroom_id = $1 and service_id is null and removed_at is null
           and location_id in (
             select location_id from service_at_locations
-             where newsroom_id = $1 and service_id = $2
+             where newsroom_id = $1 and service_id = $2 and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -240,7 +261,7 @@ export async function publishRegistryEntryIn(
         where newsroom_id = $1
           and id in (
             select location_id from service_at_locations
-             where newsroom_id = $1 and service_id = $2
+             where newsroom_id = $1 and service_id = $2 and removed_at is null
           )`,
       [newsroomId, id],
     );
@@ -305,7 +326,7 @@ async function saveServicePhone(
 ): Promise<void> {
   const existing = await sql.query<{ id: number }>(
     `select id from contacts
-      where newsroom_id = $1 and service_id = $2
+      where newsroom_id = $1 and service_id = $2 and removed_at is null
       order by id
       limit 1`,
     [newsroomId, serviceId],
@@ -320,12 +341,21 @@ async function saveServicePhone(
     return;
   }
   if (!phone) return;
+  // An earlier row of this id may still be there, removed by an editor: the
+  // key is unique, so a later phone takes a different one.
+  let hsdsId = `desk-contact-${serviceId}`;
+  const taken = await sql.query(
+    `select 1 from contacts
+      where newsroom_id = $1 and directory_name = $2 and hsds_id = $3`,
+    [newsroomId, DESK_DIRECTORY, hsdsId],
+  );
+  if (taken.length > 0) hsdsId = `${hsdsId}-${Math.random().toString(36).slice(2, 10)}`;
   await sql.query(
     `insert into contacts
        (newsroom_id, hsds_id, directory_name, service_id, phone, published,
         last_verified_at, verification_method, last_verified_by)
      values ($1, $2, $3, $4, $5, $6, now(), 'editor', $7)`,
-    [newsroomId, `desk-contact-${serviceId}`, DESK_DIRECTORY, serviceId, phone, published, userId],
+    [newsroomId, hsdsId, DESK_DIRECTORY, serviceId, phone, published, userId],
   );
 }
 
@@ -550,4 +580,131 @@ export async function takeDownRegistryEntryIn(
 
     return { serviceId: id };
   });
+}
+
+export interface HsdsImportInput {
+  /** The text of the uploaded HSDS JSON file. */
+  json: string;
+  /** The directory the file came from; part of every row's identity. */
+  directoryName: string;
+}
+
+export interface HsdsImportSummary {
+  /** Inserted, unchanged and changed rows per table. */
+  tables: Record<RegistryTableName, TableCounts>;
+  /** New proposed changes; nothing stored was overwritten. */
+  conflicts: ImportConflict[];
+}
+
+export type HsdsImportPreviewResult =
+  | { ok: false; problems: string[] }
+  | {
+      ok: true;
+      directoryName: string;
+      /** Rows already stored under this directory name in this newsroom. */
+      existingRows: number;
+      /** True when no earlier import used this name, so a typo is possible. */
+      looksLikeNewDirectory: boolean;
+      summary: HsdsImportSummary;
+    };
+
+export type HsdsImportRunResult =
+  | { ok: false; problems: string[] }
+  | {
+      ok: true;
+      directoryName: string;
+      importId: number;
+      summary: HsdsImportSummary;
+    };
+
+/** Both writers check the same things first: a name, then the file. */
+function checkImportInput(input: HsdsImportInput) {
+  const directoryName = typeof input?.directoryName === "string" ? input.directoryName.trim() : "";
+  const problems: string[] = [];
+  if (!directoryName) {
+    problems.push("directory name: enter the name of the directory this file came from");
+  } else if (directoryName.length > 200) {
+    problems.push("directory name: use 200 characters or fewer");
+  } else if (directoryName.toLowerCase() === DESK_DIRECTORY.toLowerCase()) {
+    problems.push(
+      `directory name: "${DESK_DIRECTORY}" is the desk's own list and cannot be used for an import`,
+    );
+  }
+  const parsed = parseHsdsJson(typeof input?.json === "string" ? input.json : "");
+  if (!parsed.ok) problems.push(...parsed.problems);
+  if (problems.length || !parsed.ok) return { ok: false as const, problems };
+  return { ok: true as const, directoryName, bundle: parsed.bundle };
+}
+
+async function countDirectoryRows(
+  sql: Sql,
+  newsroomId: number,
+  directoryName: string,
+): Promise<number> {
+  let total = 0;
+  for (const table of REGISTRY_TABLE_NAMES) {
+    const rows = await sql.query<{ count: string }>(
+      `select count(*)::text as count from ${table}
+        where newsroom_id = $1 and directory_name = $2`,
+      [newsroomId, directoryName],
+    );
+    total += Number(rows[0]!.count);
+  }
+  return total;
+}
+
+/**
+ * Say what importing this file would do, and write nothing. Invalid input
+ * returns its problems. The import runs for real inside a transaction that is
+ * rolled back, so the counts are exactly what `runHsdsImportIn` would produce.
+ */
+export async function previewHsdsImportIn(
+  sql: Sql,
+  newsroomId: number,
+  input: HsdsImportInput,
+  userId: string,
+): Promise<HsdsImportPreviewResult> {
+  const checked = checkImportInput(input);
+  if (!checked.ok) return checked;
+  const existingRows = await countDirectoryRows(sql, newsroomId, checked.directoryName);
+  const result = await importHsdsBundle(checked.bundle, {
+    newsroomId,
+    directoryName: checked.directoryName,
+    userId,
+    dryRun: true,
+  });
+  return {
+    ok: true,
+    directoryName: checked.directoryName,
+    existingRows,
+    looksLikeNewDirectory: existingRows === 0,
+    summary: { tables: result.tables, conflicts: result.conflicts },
+  };
+}
+
+/**
+ * Import the file. New rows are written unpublished; rows already stored are
+ * never overwritten, a difference becomes a pending proposal. Nothing is
+ * published. Invalid input returns its problems and writes nothing; a failure
+ * part-way rolls the whole import back.
+ */
+export async function runHsdsImportIn(
+  _sql: Sql,
+  newsroomId: number,
+  input: HsdsImportInput,
+  userId: string,
+): Promise<HsdsImportRunResult> {
+  const checked = checkImportInput(input);
+  if (!checked.ok) return checked;
+  const result = await importHsdsBundle(checked.bundle, {
+    newsroomId,
+    directoryName: checked.directoryName,
+    userId,
+  });
+  return {
+    ok: true,
+    directoryName: checked.directoryName,
+    importId: result.importId,
+    summary: { tables: result.tables, conflicts: result.conflicts },
+  };
 }

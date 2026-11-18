@@ -1,10 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { getSql } from "../../db.ts";
 import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
-import { listUnpublishedRegistryEntries } from "./registry-desk.server.ts";
+import {
+  listRegistryDirectoryNames,
+  listUnpublishedRegistryEntries,
+} from "./registry-desk.server.ts";
 import { listPublicRegistry } from "./registry-public.server.ts";
-import { loadStarterListIn, publishRegistryEntryIn } from "./registry-desk-write.server.ts";
+import {
+  loadStarterListIn,
+  previewHsdsImportIn,
+  publishRegistryEntryIn,
+  runHsdsImportIn,
+} from "./registry-desk-write.server.ts";
+import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import {
   STARTER_ENTRIES,
   STARTER_LIST_DIRECTORY,
@@ -147,4 +157,183 @@ test("a service id from another newsroom is refused and changes nothing", async 
 
   const page = await listPublicRegistry(sql, otherNewsroom);
   assert.equal(page.entries.length, 0);
+});
+
+// --- Phase 2: preview and import of an HSDS JSON file ---------------------------
+
+
+const sampleJson = readFileSync(
+  new URL("./__fixtures__/sample-bundle.json", import.meta.url),
+  "utf8",
+);
+
+const WATCHED = [
+  "organizations",
+  "services",
+  "locations",
+  "contacts",
+  "taxonomies",
+  "sources",
+  "snapshots",
+  "resource_imports",
+  "resource_changes",
+];
+
+async function watchedCounts(newsroomId: number): Promise<Record<string, number>> {
+  const sql = await getSql();
+  const out: Record<string, number> = {};
+  for (const table of WATCHED) {
+    const rows = await sql.query<{ count: string }>(
+      `select count(*)::text as count from ${table} where newsroom_id = $1`,
+      [newsroomId],
+    );
+    out[table] = Number(rows[0]!.count);
+  }
+  return out;
+}
+
+test("previewing a valid file writes nothing and says the directory looks new", async () => {
+  const sql = await getSql();
+  const newsroomId = 9801;
+  const before = await watchedCounts(newsroomId);
+  const preview = await previewHsdsImportIn(
+    sql,
+    newsroomId,
+    { json: sampleJson, directoryName: "county-211" },
+    "editor-1",
+  );
+  assert.equal(preview.ok, true);
+  if (!preview.ok) return;
+  assert.equal(preview.looksLikeNewDirectory, true);
+  assert.equal(preview.existingRows, 0);
+  assert.equal(preview.summary.tables.services.inserted, 3);
+  assert.deepEqual(await watchedCounts(newsroomId), before);
+});
+
+test("previewing a changed file after an import shows one proposal and writes nothing", async () => {
+  const sql = await getSql();
+  const newsroomId = 9802;
+  const run = await runHsdsImportIn(
+    sql,
+    newsroomId,
+    { json: sampleJson, directoryName: "county-211" },
+    "editor-1",
+  );
+  assert.equal(run.ok, true);
+  const afterImport = await watchedCounts(newsroomId);
+  assert.ok(afterImport.services > 0);
+
+  const changed = JSON.parse(sampleJson);
+  changed.organizations[0].name = "A different name";
+  const preview = await previewHsdsImportIn(
+    sql,
+    newsroomId,
+    { json: JSON.stringify(changed), directoryName: "county-211" },
+    "editor-1",
+  );
+  assert.equal(preview.ok, true);
+  if (!preview.ok) return;
+  assert.equal(preview.looksLikeNewDirectory, false);
+  assert.ok(preview.existingRows > 0);
+  assert.equal(preview.summary.conflicts.length, 1);
+  assert.deepEqual(await watchedCounts(newsroomId), afterImport);
+});
+
+test("an import writes unpublished rows and never publishes", async () => {
+  const sql = await getSql();
+  const newsroomId = 9803;
+  const run = await runHsdsImportIn(
+    sql,
+    newsroomId,
+    { json: sampleJson, directoryName: "county-211" },
+    "editor-1",
+  );
+  assert.equal(run.ok, true);
+  const published = await sql.query<{ count: string }>(
+    `select (select count(*) from services where newsroom_id = $1 and published)
+          + (select count(*) from organizations where newsroom_id = $1 and published) as count`,
+    [newsroomId],
+  );
+  assert.equal(Number(published[0]!.count), 0);
+});
+
+test("bad input is refused with a message that names the problem and writes nothing", async () => {
+  const sql = await getSql();
+  const newsroomId = 9804;
+  const before = await watchedCounts(newsroomId);
+
+  const noName = JSON.parse(sampleJson);
+  delete noName.organizations[1].services[0].name;
+  const cases: { json: string; directoryName: string; expect: RegExp }[] = [
+    { json: '{"organizations": [', directoryName: "county-211", expect: /not valid JSON/ },
+    { json: JSON.stringify(noName), directoryName: "county-211", expect: /organizations\[1\]\.services\[0\]: name is missing/ },
+    {
+      json: `{"organizations":[],"pad":"${"x".repeat(8 * 1024 * 1024)}"}`,
+      directoryName: "county-211",
+      expect: /larger than 8 MiB/,
+    },
+    { json: sampleJson, directoryName: DESK_DIRECTORY, expect: /desk's own list/ },
+    { json: sampleJson, directoryName: "  ", expect: /enter the name of the directory/ },
+  ];
+  for (const testCase of cases) {
+    for (const fn of [previewHsdsImportIn, runHsdsImportIn]) {
+      const result = await fn(
+        sql,
+        newsroomId,
+        { json: testCase.json, directoryName: testCase.directoryName },
+        "editor-1",
+      );
+      assert.equal(result.ok, false);
+      assert.match(result.ok ? "" : result.problems.join("\n"), testCase.expect);
+    }
+  }
+  assert.deepEqual(await watchedCounts(newsroomId), before);
+});
+
+test("the import panel's directory names are this newsroom's own, without the desk's list", async () => {
+  const sql = await getSql();
+  const mine = 9811;
+  const other = 9812;
+  await runHsdsImportIn(sql, mine, { json: sampleJson, directoryName: "county-211" }, "editor-1");
+  await runHsdsImportIn(sql, mine, { json: sampleJson, directoryName: "Another directory" }, "editor-1");
+  await runHsdsImportIn(sql, other, { json: sampleJson, directoryName: "other-newsroom-only" }, "editor-2");
+  // The desk's own list is not an import, but a row under its name must not show.
+  await sql.query(
+    `insert into resource_imports (newsroom_id, directory_name, format, payload)
+     values ($1, $2, 'json', '{}'::jsonb)`,
+    [mine, DESK_DIRECTORY],
+  );
+
+  assert.deepEqual(await listRegistryDirectoryNames(sql, mine), ["Another directory", "county-211"]);
+  assert.deepEqual(await listRegistryDirectoryNames(sql, other), ["other-newsroom-only"]);
+  assert.deepEqual(await listRegistryDirectoryNames(sql, 9813), []);
+});
+
+test("the import panel's directory names leave out the starter list's directory", async () => {
+  const sql = await getSql();
+  const newsroomId = 9806;
+  await loadStarterListIn(sql, newsroomId, "starter-editor");
+  await runHsdsImportIn(sql, newsroomId, { json: sampleJson, directoryName: "county-211" }, "editor-1");
+  // The premise: loading the starter list did leave an import row under its name.
+  const rows = await sql.query<{ n: string }>(
+    `select count(*)::text as n from resource_imports where newsroom_id = $1 and directory_name = $2`,
+    [newsroomId, STARTER_LIST_DIRECTORY],
+  );
+  assert.ok(Number(rows[0]!.n) > 0, "the starter list left no import row to exclude");
+  assert.deepEqual(await listRegistryDirectoryNames(sql, newsroomId), ["county-211"]);
+});
+
+test("a file over 8 MiB in UTF-8 is refused with zero writes even when its text is shorter", async () => {
+  const sql = await getSql();
+  const newsroomId = 9805;
+  const before = await watchedCounts(newsroomId);
+  // Each "é" is one UTF-16 unit but two UTF-8 bytes. 5 Mi of them is under the
+  // cap as text length and over it as bytes, so only the byte check refuses it.
+  const multibyte = `{"organizations":[],"pad":"${"é".repeat(5 * 1024 * 1024)}"}`;
+  for (const fn of [previewHsdsImportIn, runHsdsImportIn]) {
+    const result = await fn(sql, newsroomId, { json: multibyte, directoryName: "county-211" }, "editor-1");
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.problems.join("\n"), /larger than 8 MiB/);
+  }
+  assert.deepEqual(await watchedCounts(newsroomId), before);
 });

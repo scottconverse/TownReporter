@@ -15,6 +15,7 @@ import {
   listDeskChanges,
   listPublishedRegistryEntries,
   listRegistryCategoryNames,
+  listRegistryDirectoryNames,
   listRegistryImports,
   listRegistrySourcesWithHealth,
   listUnpublishedRegistryEntries,
@@ -34,6 +35,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       waiting,
       published,
       categories,
+      directoryNames,
       publishedCount,
       starterLoaded,
     ] = await Promise.all([
@@ -43,6 +45,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       listUnpublishedRegistryEntries(sql, context.newsroomId),
       listPublishedRegistryEntries(sql, context.newsroomId),
       listRegistryCategoryNames(sql, context.newsroomId),
+      listRegistryDirectoryNames(sql, context.newsroomId),
       countPublishedRegistryServices(sql, context.newsroomId),
       starterListIsLoaded(sql, context.newsroomId),
     ]);
@@ -53,6 +56,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       waiting,
       published,
       categories,
+      directoryNames,
       publishedCount,
       starterLoaded,
     };

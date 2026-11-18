@@ -3,6 +3,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
+import { RegistryImportPanel } from "@/components/registry-import-panel";
+import { RegistryEntryEditor } from "@/components/registry-entry-editor";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import {
   addRegistryEntry,
@@ -263,6 +265,8 @@ function RegistryDeskPage() {
   // Which row's form is open. One at a time, so the desk never shows two
   // half-edited entries and an editor cannot lose track of which Save is which.
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Which row's full details editor (organization, service and contacts) is open.
+  const [detailId, setDetailId] = useState<number | null>(null);
   // Bumped after an add so the add form remounts empty.
   const [addVersion, setAddVersion] = useState(0);
   // The last write's word to the editor. Held here rather than read off a
@@ -357,6 +361,10 @@ function RegistryDeskPage() {
               count={waiting.length}
               sub="Loaded from the starter list or an import. Nothing here shows to readers until you publish it."
             />
+            <p className="wire-sum">
+              There are three ways to add entries: load the starter list (once), add one by hand
+              below, or import a directory file under Imports.
+            </p>
             {!query.data?.starterLoaded || load.data ? (
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 {!query.data?.starterLoaded ? (
@@ -448,6 +456,15 @@ function RegistryDeskPage() {
                         >
                           Edit
                         </InkButton>
+                        <InkButton
+                          tone="ghost"
+                          ariaLabel={`All details: ${row.serviceName}`}
+                          onClick={() =>
+                            setDetailId(detailId === row.serviceId ? null : row.serviceId)
+                          }
+                        >
+                          All details
+                        </InkButton>
                       </div>
                       {editingId === row.serviceId ? (
                         <RegistryEntryForm
@@ -457,6 +474,12 @@ function RegistryDeskPage() {
                           pendingLabel="Saving…"
                           onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
                           onCancel={() => setEditingId(null)}
+                        />
+                      ) : null}
+                      {detailId === row.serviceId ? (
+                        <RegistryEntryEditor
+                          serviceId={row.serviceId}
+                          onClose={() => setDetailId(null)}
                         />
                       ) : null}
                     </li>
@@ -531,6 +554,15 @@ function RegistryDeskPage() {
                       </InkButton>
                       <InkButton
                         tone="ghost"
+                        ariaLabel={`All details: ${row.serviceName}`}
+                        onClick={() =>
+                          setDetailId(detailId === row.serviceId ? null : row.serviceId)
+                        }
+                      >
+                        All details
+                      </InkButton>
+                      <InkButton
+                        tone="ghost"
                         ariaLabel={`Take down: ${row.serviceName}`}
                         disabled={takeDown.isPending}
                         pending={takeDown.isPending && takeDown.variables === row.serviceId}
@@ -548,6 +580,12 @@ function RegistryDeskPage() {
                         pendingLabel="Saving…"
                         onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
                         onCancel={() => setEditingId(null)}
+                      />
+                    ) : null}
+                    {detailId === row.serviceId ? (
+                      <RegistryEntryEditor
+                        serviceId={row.serviceId}
+                        onClose={() => setDetailId(null)}
                       />
                     ) : null}
                   </li>
@@ -649,6 +687,7 @@ function RegistryDeskPage() {
               count={query.data?.imports.length ?? 0}
               sub="Directories the desk read into the registry. Every imported row starts unpublished."
             />
+            <RegistryImportPanel directoryNames={query.data?.directoryNames ?? []} />
             {!query.data?.imports.length ? (
               <p className="wire-sum">No directory has been imported yet.</p>
             ) : (
@@ -661,9 +700,22 @@ function RegistryDeskPage() {
                       {" · "}
                       {row.format.toUpperCase()}
                       {" · "}
-                      {row.recordCount} record{row.recordCount === 1 ? "" : "s"}
-                      {" · "}
-                      {row.conflictCount} conflict{row.conflictCount === 1 ? "" : "s"}
+                      {row.outcomes ? (
+                        <>
+                          {row.outcomes.inserted} new
+                          {" · "}
+                          {row.outcomes.unchanged} unchanged
+                          {" · "}
+                          {row.outcomes.changed} changed for review
+                        </>
+                      ) : (
+                        <>
+                          {row.recordCount} new row{row.recordCount === 1 ? "" : "s"} added
+                          {" · "}
+                          {row.conflictCount} difference{row.conflictCount === 1 ? "" : "s"} proposed
+                          for review
+                        </>
+                      )}
                     </p>
                     {row.sourceUrl ? (
                       <p className="astra-row-meta">

@@ -1058,6 +1058,7 @@ export function InkButton({
   pending = false,
   pendingLabel,
   ariaLabel,
+  ref,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -1091,6 +1092,8 @@ export function InkButton({
   /** The word drawn while pending. Ignored unless `pending`. */
   pendingLabel?: React.ReactNode;
   ariaLabel?: string;
+  /** The button element, so a caller can move keyboard focus to it. */
+  ref?: React.Ref<HTMLButtonElement>;
 }) {
   const cls =
     "btn" +
@@ -1100,6 +1103,7 @@ export function InkButton({
     (small ? " small" : "");
   return (
     <button
+      ref={ref}
       type={type}
       onClick={onClick}
       disabled={disabled || pending}

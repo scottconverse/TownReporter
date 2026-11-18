@@ -38,7 +38,8 @@ export interface OrganizationRow {
   email: string | null;
   website: string | null;
   legal_status: string | null;
-  status: HsdsStatus;
+  /** null when the file states no status; the importer then keeps what it has. */
+  status: HsdsStatus | null;
 }
 
 export interface ServiceRow {
@@ -47,7 +48,8 @@ export interface ServiceRow {
   name: string;
   description: string | null;
   url: string | null;
-  status: HsdsStatus;
+  /** null when the file states no status; the importer then keeps what it has. */
+  status: HsdsStatus | null;
   taxonomy_hsds_id: string | null;
   fees: string | null;
   application_process: string | null;
@@ -69,7 +71,8 @@ export interface LocationRow {
   longitude: number | null;
   accessibility_notes: string | null;
   transportation_notes: string | null;
-  status: HsdsStatus;
+  /** null when the file states no status; the importer then keeps what it has. */
+  status: HsdsStatus | null;
 }
 
 export interface ScheduleRow {
@@ -171,9 +174,6 @@ export const REGISTRY_TABLE_NAMES = [
 
 export type RegistryTableName = (typeof REGISTRY_TABLE_NAMES)[number];
 
-/** Every imported row is unverified until a scan or an editor confirms it. */
-const IMPORTED_STATUS: HsdsStatus = "unverified";
-
 /**
  * A nested HSDS phone usually carries no id. Give it a stable one derived from
  * its parent and position so a re-import matches the same row.
@@ -228,7 +228,7 @@ function mapService(rows: RegistryRows, org: HsdsOrganization, service: HsdsServ
     name: service.name,
     description: service.description ?? null,
     url: service.url ?? null,
-    status: service.status ?? IMPORTED_STATUS,
+    status: service.status ?? null,
     taxonomy_hsds_id: service.taxonomy_id ?? null,
     fees: service.fees ?? null,
     application_process: service.application_process ?? null,
@@ -315,7 +315,7 @@ function mapLocation(rows: RegistryRows, org: HsdsOrganization, location: HsdsLo
     longitude: location.longitude ?? null,
     accessibility_notes: location.accessibility_notes ?? null,
     transportation_notes: location.transportation_notes ?? null,
-    status: location.status ?? IMPORTED_STATUS,
+    status: location.status ?? null,
   });
 
   for (const schedule of location.schedules ?? []) {
@@ -365,7 +365,7 @@ export function bundleToRows(bundle: HsdsBundle): RegistryRows {
       email: org.email ?? null,
       website: org.website ?? null,
       legal_status: org.legal_status ?? null,
-      status: org.status ?? IMPORTED_STATUS,
+      status: org.status ?? null,
     });
 
     mapPhones(rows, org.phones, org.id, { organization: org.id });

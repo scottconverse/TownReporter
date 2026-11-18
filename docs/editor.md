@@ -954,7 +954,60 @@ Owner only. **Time per call** is how long the desk waits for one answer from a m
 - **Edit** opens the same seven fields: organization name, service name, category, phone, description, source title and source URL. **Save** keeps a published entry published and stamps it as checked by the editor. **Cancel** closes the form.
 - **Add an entry** uses the same form. The new entry goes to the waiting list. Readers see it only after you press **Publish**.
 - **Take down** removes a published entry from `/registry` and puts it back in the waiting list. Nothing is deleted. **Publish** brings it back.
-- The page also shows **Detected changes**, **Imports** and **Registry sources**. The change list has no review buttons in this phase; it applies no change to the directory. Every imported row starts unpublished.
+- **All details** opens **All details for this entry**. It edits more than **Edit** does. See [All details: the entry editor](#all-details-the-entry-editor) below.
+- **Import a directory file** is in the **Imports** section. It reads a JSON file in the HSDS bundle shape. See [Import a directory file](#import-a-directory-file) below, and the step-by-step guide in [navigator/hsds-import.md](navigator/hsds-import.md).
+- The page also shows **Detected changes**, **Imports** and **Registry sources**. The change list has no review buttons yet; it applies no change to the directory. Every imported row starts unpublished.
+
+### Import a directory file
+
+1. Open **Imports**. Find **Import a directory file**.
+2. Under **JSON file**, choose a file that ends in `.json`. The file must be 8 MB or smaller. Another kind of file is refused, and the panel says **Nothing was read.**
+3. Under **Directory name**, type the name of the directory the file came from. Use the same name every time you import that directory. The name is how a repeat import finds the same rows. The box suggests the names of earlier imports.
+4. Press **Preview**. Preview saves nothing. It shows a table with the columns **Kind**, **New**, **Unchanged**, **Changed, for review** and **Already waiting**, and a list of each difference from what is stored.
+5. If the panel says **This looks like a new directory.**, check the spelling of the name. Press **Import** only when the preview is what you expect. **Import** stays off until a good preview of this exact file and name is on screen. If you change the file or the name, the preview is cleared.
+6. After **Import**, the panel says **Imported** and the directory name, then **Nothing was published.** The new rows are in the waiting list. They are not on `/registry`.
+
+If the file is wrong, the panel says **The file could not be used:** and names each bad record. Nothing is imported. If the connection fails while you press **Import**, the panel says the import may or may not have finished. Look at the list of imports below the panel before you try again.
+
+An import never overwrites a stored row. When the file says something different, the stored row stays. The difference becomes a pending proposal. The same proposal is not added twice. A status of **unverified**, or no status, is not a change. An import does not bring back a row that an editor removed from an entry.
+
+Each past import shows its date, format, and counts: **new**, **unchanged** and **changed for review**. The counts are stored with the import.
+
+### All details: the entry editor
+
+Press **All details** on a waiting or published entry. The editor opens under the entry. Press **Close the details editor** to close it. Each group has its own save button. A save in one group does not save the others. A save writes only the fields you changed.
+
+- **Service details:** **Service name**, **Description**, **Web address**, **Fees**, **How to apply**, and **This is a crisis service**. Press **Save service details**.
+- **Organization details:** **Organization name**, **Other name**, **Description**, **Email address**, **Website**, **Legal status**. Press **Save organization details**.
+- **Contacts:** one form per contact, with **Save contact**. **Add a contact** adds one. A choice, **Who is this contact for?**, offers **This service only** or **The whole organization (its main contact)**.
+- **Places:** each place has its name, street address, city, state, ZIP code, access notes and transportation notes. **Add a new place** adds one. **Link a place this organization already has** links an existing place to this entry.
+- **Hours:** days, **Opens at**, **Closes at**, notes and **By appointment only**. New hours can be tied to one of the entry's places.
+- **Who can use this service**, **Required documents**, **Languages** and **Accessibility:** one form per row, and an add form for each.
+
+If an organization, or a contact on the organization or on a place, is used by other entries, a notice appears above it: **This is shared with** a number of other entries, their names, and **A change here changes them too.** Read it before you save.
+
+If a field is not accepted, the problem shows under the field and the group says **Nothing was saved. Fix what is marked below, then save again.**
+
+Only **Save service details** stamps the service as verified by you. Saving the organization, a contact, or any other row does not. Saving here never publishes an entry and never takes one down. **Publish** and **Take down** do that.
+
+### Remove and restore a row
+
+Each saved contact, place, hours, eligibility rule, required document, language and accessibility note has **Remove**.
+
+1. Press **Remove**. The editor asks a question such as **Remove this place from the entry?** If other entries share the row, the shared notice comes first.
+2. Press **Yes, remove**, or **Keep it** to stop.
+3. The row leaves its group. It is in **Removed** at the bottom of the editor. Press **Restore** there to bring it back as it was. If the entry is already linked to that place, the restore is refused: **This place is already linked to the entry. Nothing was restored.**
+
+What the question says next depends on the row:
+
+- Contacts, places, hours and languages: **It stops showing on the public page right away. You can bring it back from the Removed list.**
+- Eligibility rules, required documents and accessibility notes: **It is kept on the desk only and is not shown on the public page. You can bring it back from the Removed list.**
+
+A removal is a marker. Nothing is deleted. Contacts, places, hours and languages stop showing on the public page at once. Eligibility rules, required documents and accessibility notes are not shown on the public page at all. **Publish** skips a removed row. An import does not bring it back. Removing a place removes this entry's link to the place. The place stays, because other entries can use it.
+
+Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
+
+Not yet: review of the proposals that imports and the scan make, and a public search and feed.
 
 ---
 

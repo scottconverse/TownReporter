@@ -14,6 +14,11 @@ import { deskMiddleware } from "../desk-auth.ts";
 import { normalizeRegistryEntryFields } from "./registry-entry-fields.ts";
 import {
   addRegistryEntryIn,
+  previewHsdsImportIn,
+  runHsdsImportIn,
+  type HsdsImportInput,
+  type HsdsImportPreviewResult,
+  type HsdsImportRunResult,
   loadStarterListIn,
   publishRegistryEntryIn,
   takeDownRegistryEntryIn,
@@ -92,4 +97,30 @@ export const takeDownRegistryEntry = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<TakeDownRegistryEntryResult> => {
     const sql = await getSql();
     return takeDownRegistryEntryIn(sql, context.newsroomId, data.serviceId, context.userId);
+  });
+
+function normalizeHsdsImportInput(input: unknown): HsdsImportInput {
+  const value = input as { json?: unknown; directoryName?: unknown } | null;
+  return {
+    json: typeof value?.json === "string" ? value.json : "",
+    directoryName: typeof value?.directoryName === "string" ? value.directoryName : "",
+  };
+}
+
+/** Say what importing an HSDS JSON file would do. Writes nothing. */
+export const previewHsdsImport = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(normalizeHsdsImportInput)
+  .handler(async ({ data, context }): Promise<HsdsImportPreviewResult> => {
+    const sql = await getSql();
+    return previewHsdsImportIn(sql, context.newsroomId, data, context.userId);
+  });
+
+/** Import an HSDS JSON file. New rows wait unpublished; nothing is published. */
+export const runHsdsImport = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(normalizeHsdsImportInput)
+  .handler(async ({ data, context }): Promise<HsdsImportRunResult> => {
+    const sql = await getSql();
+    return runHsdsImportIn(sql, context.newsroomId, data, context.userId);
   });

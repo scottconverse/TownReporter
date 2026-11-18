@@ -28,6 +28,12 @@ once the review lane and the hash detector are in real use.
 
 ## Scope note
 
+An HSDS file import (Phase 2) makes proposals in the same table. When the file
+says something different from a stored row, the stored row stays and the
+difference becomes one pending row in `resource_changes`. The same pending
+proposal is not added twice. The desk lists these under **Detected changes**.
+Review of these proposals is not built yet. See [hsds-import.md](hsds-import.md).
+
 Phase 1 covers the registry tables and the HSDS import. Change detection here
 is the stored design and the review-lane table; the scan pipeline that fills
 it is Phase 2.

@@ -17,6 +17,7 @@
  */
 
 import type { Sql } from "../../db.ts";
+import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
 
 /** A timestamp as the driver hands it back: pg gives a Date, PGlite a Date. */
@@ -42,6 +43,13 @@ export interface DeskRegistryChange {
   createdAt: WhenValue;
 }
 
+/** Row outcomes of one import, summed over every table. */
+export interface ImportOutcomes {
+  inserted: number;
+  unchanged: number;
+  changed: number;
+}
+
 export interface DeskRegistryImport {
   id: number;
   directoryName: string;
@@ -51,6 +59,8 @@ export interface DeskRegistryImport {
   recordCount: number;
   conflictCount: number;
   report: string | null;
+  /** Null for an import that stored no per-table breakdown; no totals are invented. */
+  outcomes: ImportOutcomes | null;
 }
 
 export interface DeskRegistrySource {
@@ -198,6 +208,24 @@ function asArrayLength(value: unknown): number {
   return 0;
 }
 
+/**
+ * The per-table breakdown an import stored under `record_counts.byTable`,
+ * summed over the tables. Null when none was stored.
+ */
+function outcomesOf(byTable: unknown): ImportOutcomes | null {
+  const tables = asRecord(byTable);
+  if (Object.keys(tables).length === 0) return null;
+  const totals: ImportOutcomes = { inserted: 0, unchanged: 0, changed: 0 };
+  for (const counts of Object.values(tables)) {
+    const table = asRecord(counts);
+    for (const key of ["inserted", "unchanged", "changed"] as const) {
+      const n = Number(table[key]);
+      if (Number.isFinite(n)) totals[key] += n;
+    }
+  }
+  return totals;
+}
+
 /** Every HSDS import in this newsroom, newest first. */
 export async function listRegistryImports(
   sql: Sql,
@@ -223,7 +251,8 @@ export async function listRegistryImports(
   );
 
   return rows.map((row) => {
-    const counts = asRecord(row.record_counts);
+    // `byTable` is the breakdown, not a table count: it is kept out of the sum.
+    const { byTable, ...counts } = asRecord(row.record_counts);
     const recordCount = Object.values(counts).reduce<number>((total, value) => {
       const n = Number(value);
       return total + (Number.isFinite(n) ? n : 0);
@@ -235,6 +264,7 @@ export async function listRegistryImports(
       sourceUrl: row.source_url,
       importedAt: row.imported_at,
       recordCount,
+      outcomes: outcomesOf(byTable),
       conflictCount: asArrayLength(row.conflicts),
       report: row.report,
     };
@@ -305,7 +335,7 @@ const ENTRY_COLUMNS = `s.id as service_id, s.hsds_id as service_hsds_id, s.name 
             t.name as category_name,
             (select c.phone from contacts c
               where c.newsroom_id = s.newsroom_id and c.service_id = s.id
-                and c.phone is not null and c.phone <> ''
+                and c.phone is not null and c.phone <> '' and c.removed_at is null
               order by c.id limit 1) as phone,
             src.title as source_title, src.url as source_url`;
 
@@ -408,6 +438,24 @@ export async function listRegistryCategoryNames(
   return rows.map((row) => row.name);
 }
 
+/**
+ * The directory names earlier imports used in this newsroom, for the import
+ * panel's name box. The desk's own list and the starter list are not imports
+ * the editor made, so both are left out.
+ */
+export async function listRegistryDirectoryNames(
+  sql: Sql,
+  newsroomId: number,
+): Promise<string[]> {
+  const rows = await sql.query<{ directory_name: string }>(
+    `select distinct directory_name from resource_imports
+      where newsroom_id = $1 and directory_name <> $2 and directory_name <> $3
+      order by directory_name`,
+    [newsroomId, DESK_DIRECTORY, STARTER_LIST_DIRECTORY],
+  );
+  return rows.map((row) => row.directory_name);
+}
+
 /** How many registry services in this newsroom are published. */
 export async function countPublishedRegistryServices(
   sql: Sql,
@@ -442,6 +490,8 @@ export interface RegistryDeskView {
   published: DeskRegistryPublishedEntry[];
   /** The newsroom's category names, for the edit and add forms' datalist. */
   categories: string[];
+  /** Directory names earlier imports used, for the import panel's name box. */
+  directoryNames: string[];
   publishedCount: number;
   starterLoaded: boolean;
 }
