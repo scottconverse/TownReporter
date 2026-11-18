@@ -13,10 +13,16 @@ import { saveDraftRefusalNote } from "./draft-refusal-note.server.ts";
  * A lead at 13 or below is never queued by this rule.
  *
  * Held leads are drafted too (Scott, Nov 17 2026: "Yes, held too"). A scan
- * holds a lead it thinks may repeat a story the paper already has. Drafting
- * does not un-hold it: the draft path keeps the status, and Publish still
- * refuses a held lead until an editor un-holds it (draft-order.server.ts), so
- * the editor still decides whether it is a repeat.
+ * holds a lead it thinks may repeat a story the paper already has. Drafting a
+ * held lead DOES move it to 'drafted' (the draft path sets the status; the
+ * Nov 18 6 AM scan showed it), so the hold does not survive the draft.
+ *
+ * Repeats are skipped (Scott, Nov 18 2026, option 1: "Skip repeats"). A lead
+ * whose `possible_duplicate_of` link points at an earlier lead the paper
+ * already PUBLISHED or KILLED is not drafted by this rule. A link to a lead
+ * that is still open (new, held, drafted) does not skip it. The cost Scott
+ * accepted: a real update to an old story gets no automatic draft. A repeat
+ * the scan never linked (no `possible_duplicate_of`) is not caught here.
  */
 export const AUTO_DRAFT_SCORE_THRESHOLD = 14;
 
@@ -85,9 +91,10 @@ async function noteDraftRefusal(
  * A lead is skipped when it is not `new` or `held` (so a killed, published or
  * already-drafted lead never comes back through this rule), when it already
  * carries a written draft, when it is at or below the threshold, when a draft
- * job for it is still queued or running, or when an editor already STOPPED a
+ * job for it is still queued or running, when an editor already STOPPED a
  * draft for it (that job ends 'cancelled', and a draft the editor killed is
- * never drafted again by this rule).
+ * never drafted again by this rule), or when it is linked as a possible repeat
+ * of a lead the paper already published or killed.
  *
  * One lead's refusal never stops the sweep: the refusal note is kept the way
  * the Draft button keeps it, and the next lead is tried. This function never
@@ -134,6 +141,13 @@ export async function autoDraftEligibleLeads(
           and j.kind = 'draft'
           and j.subject_id = l.id
           and j.status = 'cancelled'
+      )
+      /* A repeat of a story the paper already published or killed (Scott, Nov 18). */
+      and not exists (
+        select 1 from leads p
+        where p.id = l.possible_duplicate_of
+          and p.newsroom_id = l.newsroom_id
+          and p.status in ('published', 'killed')
       )
     order by l.newsworthiness desc, l.id asc
   `;
