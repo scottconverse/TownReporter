@@ -440,7 +440,8 @@ export async function listRegistryCategoryNames(
 
 /**
  * The directory names earlier imports used in this newsroom, for the import
- * panel's name box. The desk's own list is not an import and is left out.
+ * panel's name box. The desk's own list and the starter list are not imports
+ * the editor made, so both are left out.
  */
 export async function listRegistryDirectoryNames(
   sql: Sql,
@@ -448,9 +449,9 @@ export async function listRegistryDirectoryNames(
 ): Promise<string[]> {
   const rows = await sql.query<{ directory_name: string }>(
     `select distinct directory_name from resource_imports
-      where newsroom_id = $1 and directory_name <> $2
+      where newsroom_id = $1 and directory_name <> $2 and directory_name <> $3
       order by directory_name`,
-    [newsroomId, DESK_DIRECTORY],
+    [newsroomId, DESK_DIRECTORY, STARTER_LIST_DIRECTORY],
   );
   return rows.map((row) => row.directory_name);
 }

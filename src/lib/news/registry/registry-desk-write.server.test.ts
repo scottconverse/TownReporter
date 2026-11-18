@@ -309,6 +309,20 @@ test("the import panel's directory names are this newsroom's own, without the de
   assert.deepEqual(await listRegistryDirectoryNames(sql, 9813), []);
 });
 
+test("the import panel's directory names leave out the starter list's directory", async () => {
+  const sql = await getSql();
+  const newsroomId = 9806;
+  await loadStarterListIn(sql, newsroomId, "starter-editor");
+  await runHsdsImportIn(sql, newsroomId, { json: sampleJson, directoryName: "county-211" }, "editor-1");
+  // The premise: loading the starter list did leave an import row under its name.
+  const rows = await sql.query<{ n: string }>(
+    `select count(*)::text as n from resource_imports where newsroom_id = $1 and directory_name = $2`,
+    [newsroomId, STARTER_LIST_DIRECTORY],
+  );
+  assert.ok(Number(rows[0]!.n) > 0, "the starter list left no import row to exclude");
+  assert.deepEqual(await listRegistryDirectoryNames(sql, newsroomId), ["county-211"]);
+});
+
 test("a file over 8 MiB in UTF-8 is refused with zero writes even when its text is shorter", async () => {
   const sql = await getSql();
   const newsroomId = 9805;

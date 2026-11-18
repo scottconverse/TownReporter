@@ -173,6 +173,12 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
   // A preview or import that comes back after the editor changed the file or
   // name belongs to something no longer on screen; this counter drops it.
   const generation = useRef(0);
+  // Set while an import is in flight, so a second press before React has
+  // re-rendered the pending button cannot send the same import again.
+  const importing = useRef(false);
+  // Counts file picks only. Typing a name does not discard a file still being
+  // read; a newer pick does, so an older read cannot overwrite it.
+  const pickGeneration = useRef(0);
 
   const name = directoryName.trim();
   const currentKey = picked ? JSON.stringify([picked.name, picked.text, name]) : null;
@@ -193,6 +199,17 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
     );
   };
 
+  // A thrown error during Import is not a refusal: the server may have
+  // committed the rows before the connection failed, so the panel cannot say
+  // that nothing was imported.
+  const importFailed = (error: unknown) => {
+    const detail =
+      error instanceof Error && error.message ? error.message : "That did not work.";
+    setFailure(
+      `${detail} The import may or may not have finished. Check the Imports list below before trying again.`,
+    );
+  };
+
   const previewMutation = useMutation({
     mutationFn: (input: { json: string; directoryName: string }) =>
       previewHsdsImport({ data: input }),
@@ -204,6 +221,7 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
 
   const onPick = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
+    const mine = ++pickGeneration.current;
     clearResults();
     setFileError(null);
     setPicked(null);
@@ -216,12 +234,11 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
       setFileError("That file is larger than 8 MB. Choose a smaller file. Nothing was read.");
       return;
     }
-    const mine = generation.current;
     try {
       const text = await file.text();
-      if (mine === generation.current) setPicked({ name: file.name, text });
+      if (mine === pickGeneration.current) setPicked({ name: file.name, text });
     } catch {
-      if (mine === generation.current) {
+      if (mine === pickGeneration.current) {
         setFileError("That file could not be read. Nothing was imported.");
       }
     }
@@ -246,24 +263,31 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
   };
 
   const onImport = () => {
-    if (!picked || !preview?.result.ok || preview.key !== currentKey) return;
+    if (importing.current || !picked || !preview?.result.ok || preview.key !== currentKey) return;
+    importing.current = true;
     const mine = generation.current;
     importMutation.mutate(
       { json: picked.text, directoryName: name },
       {
         onSuccess: (result) => {
+          importing.current = false;
+          // Refresh the desk lists whatever happened: a refusal may still
+          // leave a row behind, and a dropped response must not leave them stale.
+          void qc.invalidateQueries({ queryKey: ["registry-desk"] });
           if (mine !== generation.current) return;
+          setPreview(null);
           if (result.ok) {
-            setPreview(null);
             setImported(result);
-            void qc.invalidateQueries({ queryKey: ["registry-desk"] });
           } else {
-            setPreview(null);
             setImportProblems(result.problems);
           }
         },
         onError: (error) => {
-          if (mine === generation.current) failed(error);
+          importing.current = false;
+          void qc.invalidateQueries({ queryKey: ["registry-desk"] });
+          if (mine !== generation.current) return;
+          setPreview(null);
+          importFailed(error);
         },
       },
     );
@@ -291,6 +315,7 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
             type="file"
             accept=".json,application/json"
             className={field}
+            disabled={importMutation.isPending}
             onChange={(event) => void onPick(event)}
           />
         </label>
@@ -305,6 +330,7 @@ export function RegistryImportPanel({ directoryNames }: { directoryNames: string
             className={field}
             value={directoryName}
             maxLength={200}
+            disabled={importMutation.isPending}
             list={DIRECTORY_LIST_ID}
             onChange={(event) => {
               clearResults();
