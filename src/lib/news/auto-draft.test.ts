@@ -83,9 +83,8 @@ describe("the automatic draft rule (Scott: 14 and up)", () => {
     assert.ok(!asked.includes(thirteen));
   });
 
-  it("skips a killed, held, published or already-drafted lead", async () => {
+  it("skips a killed, published or already-drafted lead", async () => {
     const killed = await fileLead({ headline: "Killed", score: 18, status: "killed" });
-    const held = await fileLead({ headline: "Held", score: 18, status: "held" });
     const published = await fileLead({ headline: "Published", score: 18, status: "published" });
     const drafted = await fileLead({ headline: "Drafted", score: 18, status: "drafted" });
     const open = await fileLead({ headline: "Open", score: 18 });
@@ -99,7 +98,25 @@ describe("the automatic draft rule (Scott: 14 and up)", () => {
 
     assert.deepEqual(asked, [open]);
     assert.equal(outcome.considered, 1);
-    for (const id of [killed, held, published, drafted]) assert.ok(!asked.includes(id));
+    for (const id of [killed, published, drafted]) assert.ok(!asked.includes(id));
+  });
+
+  it("drafts a held lead at 14 and up, but not a held lead at 13", async () => {
+    const heldHot = await fileLead({ headline: "Held hot", score: 14, status: "held" });
+    const heldCool = await fileLead({ headline: "Held cool", score: 13, status: "held" });
+
+    const { asked, commitDraft } = recorder();
+    const outcome = await autoDraftEligibleLeads(
+      await getSql(),
+      { userId: "owner", newsroomId: NEWSROOM },
+      { commitDraft },
+    );
+
+    assert.deepEqual(asked, [heldHot]);
+    assert.equal(outcome.considered, 1);
+    assert.ok(!asked.includes(heldCool));
+    const [row] = await (await getSql())<{ status: string }>`select status from leads where id = ${heldHot}`;
+    assert.equal(row?.status, "held", "the sweep itself never un-holds a lead");
   });
 
   it("skips a lead that already carries a written draft", async () => {
