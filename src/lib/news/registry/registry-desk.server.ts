@@ -17,6 +17,7 @@
  */
 
 import type { Sql } from "../../db.ts";
+import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
 
 /** A timestamp as the driver hands it back: pg gives a Date, PGlite a Date. */
@@ -408,6 +409,23 @@ export async function listRegistryCategoryNames(
   return rows.map((row) => row.name);
 }
 
+/**
+ * The directory names earlier imports used in this newsroom, for the import
+ * panel's name box. The desk's own list is not an import and is left out.
+ */
+export async function listRegistryDirectoryNames(
+  sql: Sql,
+  newsroomId: number,
+): Promise<string[]> {
+  const rows = await sql.query<{ directory_name: string }>(
+    `select distinct directory_name from resource_imports
+      where newsroom_id = $1 and directory_name <> $2
+      order by directory_name`,
+    [newsroomId, DESK_DIRECTORY],
+  );
+  return rows.map((row) => row.directory_name);
+}
+
 /** How many registry services in this newsroom are published. */
 export async function countPublishedRegistryServices(
   sql: Sql,
@@ -442,6 +460,8 @@ export interface RegistryDeskView {
   published: DeskRegistryPublishedEntry[];
   /** The newsroom's category names, for the edit and add forms' datalist. */
   categories: string[];
+  /** Directory names earlier imports used, for the import panel's name box. */
+  directoryNames: string[];
   publishedCount: number;
   starterLoaded: boolean;
 }

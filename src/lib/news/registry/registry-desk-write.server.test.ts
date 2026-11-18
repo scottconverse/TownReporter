@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { getSql } from "../../db.ts";
 import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
-import { listUnpublishedRegistryEntries } from "./registry-desk.server.ts";
+import {
+  listRegistryDirectoryNames,
+  listUnpublishedRegistryEntries,
+} from "./registry-desk.server.ts";
 import { listPublicRegistry } from "./registry-public.server.ts";
 import {
   loadStarterListIn,
@@ -285,4 +288,23 @@ test("bad input is refused with a message that names the problem and writes noth
     }
   }
   assert.deepEqual(await watchedCounts(newsroomId), before);
+});
+
+test("the import panel's directory names are this newsroom's own, without the desk's list", async () => {
+  const sql = await getSql();
+  const mine = 9811;
+  const other = 9812;
+  await runHsdsImportIn(sql, mine, { json: sampleJson, directoryName: "county-211" }, "editor-1");
+  await runHsdsImportIn(sql, mine, { json: sampleJson, directoryName: "Another directory" }, "editor-1");
+  await runHsdsImportIn(sql, other, { json: sampleJson, directoryName: "other-newsroom-only" }, "editor-2");
+  // The desk's own list is not an import, but a row under its name must not show.
+  await sql.query(
+    `insert into resource_imports (newsroom_id, directory_name, format, payload)
+     values ($1, $2, 'json', '{}'::jsonb)`,
+    [mine, DESK_DIRECTORY],
+  );
+
+  assert.deepEqual(await listRegistryDirectoryNames(sql, mine), ["Another directory", "county-211"]);
+  assert.deepEqual(await listRegistryDirectoryNames(sql, other), ["other-newsroom-only"]);
+  assert.deepEqual(await listRegistryDirectoryNames(sql, 9813), []);
 });

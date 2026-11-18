@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
+import { RegistryImportPanel } from "@/components/registry-import-panel";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import {
   addRegistryEntry,
@@ -357,6 +358,10 @@ function RegistryDeskPage() {
               count={waiting.length}
               sub="Loaded from the starter list or an import. Nothing here shows to readers until you publish it."
             />
+            <p className="wire-sum">
+              There are three ways to add entries: load the starter list (once), add one by hand
+              below, or import a directory file under Imports.
+            </p>
             {!query.data?.starterLoaded || load.data ? (
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 {!query.data?.starterLoaded ? (
@@ -649,6 +654,7 @@ function RegistryDeskPage() {
               count={query.data?.imports.length ?? 0}
               sub="Directories the desk read into the registry. Every imported row starts unpublished."
             />
+            <RegistryImportPanel directoryNames={query.data?.directoryNames ?? []} />
             {!query.data?.imports.length ? (
               <p className="wire-sum">No directory has been imported yet.</p>
             ) : (
@@ -661,9 +667,10 @@ function RegistryDeskPage() {
                       {" · "}
                       {row.format.toUpperCase()}
                       {" · "}
-                      {row.recordCount} record{row.recordCount === 1 ? "" : "s"}
+                      {row.recordCount} new row{row.recordCount === 1 ? "" : "s"} added
                       {" · "}
-                      {row.conflictCount} conflict{row.conflictCount === 1 ? "" : "s"}
+                      {row.conflictCount} difference{row.conflictCount === 1 ? "" : "s"} proposed
+                      for review
                     </p>
                     {row.sourceUrl ? (
                       <p className="astra-row-meta">
