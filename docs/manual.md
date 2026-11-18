@@ -2623,7 +2623,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/desk/filed-draft/:draftId`                 | The version of a draft that a reporting run filed, kept as filed                           |
 | `/desk/import`                               | Import finished stories                                                                    |
 | `/desk/published`                            | Live stories and corrections; beat memory (`/desk/memory` redirects here)                  |
-| `/desk/registry`                             | Community resources desk: starter list, publish, edit, add and take down                   |
+| `/desk/registry`                             | Community resources desk: starter list, publish, edit, add and take down, import, all details, remove and restore |
 | `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
 | `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
 | `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
@@ -2815,6 +2815,7 @@ For the shape of the whole database see the
 | 0156-0158 | `evidence_vectors`; trigram indexes on `artifact_chunks` (`pg_trgm`); `story_meaning_vectors`                              |
 | 0159      | `routine_events` (one row per source, event and day; additive)                                                             |
 | 0160      | Resource registry tables: HSDS 3.0 core tables plus `resource_sources`, `resource_changes`, `resource_queries`, `resource_imports`; every registry row starts `published = false` |
+| 0165      | Registry removal markers: nullable `removed_at` and `removed_by` on `contacts`, `service_at_locations`, `schedules`, `eligibilities`, `required_documents`, `languages`, `accessibilities`; additive, nothing filled or dropped |
 
 ## Manual investigative page watches
 

@@ -47,7 +47,7 @@ MIT licensed. Clone it. Point it at your city.
 37 pull requests since 0.6.87. The short list; the long list is in the [changelog](CHANGELOG.md#0688--2026-11-12) and the [release guide](docs/releases/0.6.88.md).
 
 - **Reader pages and events.** New ICS and site event readers, the `routine_events` table, a front-page events week box and 37 event feeds. The Bulletin redesign changes every reader page, and the events box meets 14px text and 44px tap targets on a phone.
-- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries.
+- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries. Phase 2 adds a JSON file import with a preview, an editor for every detail of an entry, and remove and restore for the rows of an entry. See [docs/navigator/hsds-import.md](docs/navigator/hsds-import.md).
 - **Phone app install.** Readers can add TownReporter to the Android or iPhone home screen. New icons, manifest and a service worker show **You are offline.** when the phone is offline.
 - **Desk and Drafts.** Same-day routine updates post one short note. The scan model picker moves below the header. Waiting roundups have **Open / Close** and **Kill**. Opinion drafts show on Drafts. Desk text and buttons reach 16px.
 - **Scan, models and Ollama.** The scan reads news first and files leads during a hand-started scan. Repeats and distinct finder refs are fixed. The scan warns when speech-to-text is missing. TownReporter looks after Ollama. Claude Fable uses **Claude Fable 5.2** and `claude-fable-5-2`.
@@ -238,7 +238,7 @@ TownReporter is one Node 22 web application (TanStack Start on Vite) with a Post
 
 - **Front end.** The public paper and the desk are React routes in `src/routes`. The paper is self-contained: fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to an outside host.
 - **Server functions.** Every desk and Dark Desk mutation runs through `deskMiddleware`, which resolves the signed-in user and requires owner or editor membership.
-- **Database.** Migrations in `migrations/` (0001 to 0164); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
+- **Database.** Migrations in `migrations/` (0001 to 0165); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
 - **Lead scores.** The model rates each lead 1 to 5 on four parts. The desk adds them (`src/lib/news/lead-score.ts`). `leads.newsworthiness` keeps the 4-20 total and `leads.score_parts` keeps the parts and reasons:
 
 ```mermaid
