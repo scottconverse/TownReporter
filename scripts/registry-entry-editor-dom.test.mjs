@@ -152,6 +152,7 @@ const makeDetail = () => ({
       fields: { days: "Monday", opensAt: "9:00", closesAt: "17:00", notes: "", byAppointment: false },
     },
   ],
+  unlinkedSchedules: [],
   eligibilities: [],
   requiredDocuments: [
     {
@@ -780,4 +781,87 @@ test("a restore that fails says nothing was restored", async (t) => {
   await page.press(page.button(item, "Restore"));
   await page.settle();
   assert.deepEqual(page.alerts(item), ["The connection dropped. Nothing was restored."]);
+});
+
+/* ---- Removal words and hours at an unlinked place ---- */
+
+const words = (node) => node.textContent.replace(/\s+/g, " ");
+
+const KEPT_ON_DESK = (noun) =>
+  `Remove ${noun} from the entry? It is kept on the desk only and is not shown on the public page. ` +
+  "You can bring it back from the Removed list.";
+
+test("removing a row the public page never shows says it is kept on the desk only", async (t) => {
+  setup();
+  globalThis.__editor.detail.eligibilities = [
+    { id: 42, locationId: null, locationName: null, sharedWith: [], fields: { description: "Residents of the county" } },
+  ];
+  globalThis.__editor.detail.accessibilities = [
+    {
+      id: 61,
+      locationId: null,
+      locationName: null,
+      sharedWith: [],
+      fields: { accessibility: "Ramp at the front door", details: "" },
+    },
+  ];
+  const page = await mount();
+  t.after(() => page.close());
+  for (const [title, noun] of [
+    ["Who can use it: ", "this eligibility rule"],
+    ["Required document: ", "this required document"],
+    ["Accessibility: ", "this accessibility note"],
+  ]) {
+    const group = () => page.groupStarting(title);
+    await page.press(page.button(group(), "Remove"));
+    const confirm = group().querySelector('[data-testid="remove-confirm"]');
+    assert.ok(words(confirm).includes(KEPT_ON_DESK(noun)), `${title}: ${words(confirm)}`);
+    await page.press(page.button(confirm, "Keep it"));
+    assert.equal(group().querySelector('[data-testid="remove-confirm"]'), null, `${title}: kept`);
+  }
+});
+
+test("removing a row the public page shows keeps the words that say it stops showing", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  for (const [title, sentence] of [
+    ["Place: ", "Remove this place from the entry? It stops showing on the public page right away."],
+    ["Hours: ", "Remove these hours from the entry? It stops showing on the public page right away."],
+    ["Language: ", "Remove this language from the entry? It stops showing on the public page right away."],
+  ]) {
+    const group = () => page.groupStarting(title);
+    await page.press(page.button(group(), "Remove"));
+    const confirm = group().querySelector('[data-testid="remove-confirm"]');
+    assert.ok(words(confirm).includes(sentence), `${title}: ${words(confirm)}`);
+    await page.press(page.button(confirm, "Keep it"));
+  }
+});
+
+test("hours at a place the entry is no longer linked to show under a note, with no way to change them", async (t) => {
+  setup();
+  globalThis.__editor.detail.unlinkedSchedules = [
+    {
+      id: 34,
+      locationId: 6,
+      locationName: "Annex",
+      sharedWith: [],
+      fields: { days: "Tuesday", opensAt: "9:00", closesAt: "12:00", notes: "", byAppointment: false },
+    },
+  ];
+  const page = await mount();
+  t.after(() => page.close());
+  const note = page.container.querySelector('[data-testid="unlinked-hours"]');
+  assert.ok(note, "the note shows");
+  assert.match(
+    words(note),
+    /These hours belong to a place that is no longer linked; they come back if the place is restored\./,
+  );
+  assert.match(words(note), /Hours: Tuesday, 9:00 to 12:00 at Annex/);
+  assert.equal(note.querySelectorAll("input, select, textarea, button").length, 0, "nothing in the note can be changed");
+  assert.equal(
+    [...page.container.querySelectorAll("section")].some((s) => s.getAttribute("aria-label").includes("Tuesday")),
+    false,
+    "no live form for these hours",
+  );
 });

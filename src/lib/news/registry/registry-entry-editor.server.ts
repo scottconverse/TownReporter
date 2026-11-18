@@ -26,7 +26,9 @@
  * row is not on the public page and is not published by Publish; the reader
  * lists it apart so it can be restored. A place is never removed itself, since
  * other entries may use it: removing a place from an entry removes the entry's
- * link to it.
+ * link to it. The entry's hours at a place it is no longer linked to are not
+ * offered as live hours and are not published; the reader lists them apart, and
+ * restoring the link brings them back. Nothing is marked for them.
  *
  * Each save sends only the fields the editor changed. The writer checks the
  * whole record (the stored values with those changes laid over them), so a
@@ -109,6 +111,8 @@ export interface RegistryEntryDetail {
   contacts: EntryDetailContact[];
   places: EntryRow[];
   schedules: EntryRow[];
+  /** Hours at a place this entry is no longer linked to: shown, not live. */
+  unlinkedSchedules: EntryRow[];
   eligibilities: EntryRow[];
   requiredDocuments: EntryRow[];
   languages: EntryRow[];
@@ -358,6 +362,14 @@ type RawRow = Record<string, unknown> & { id: number };
 const removedClause = (removed: boolean) => (removed ? "is not null" : "is null");
 
 /**
+ * True when the service (`$2`) has a live link to the place of the schedule
+ * `sc`. Hours at a place without one belong to no live entry row.
+ */
+const LINKED_TO_SCHEDULES_PLACE = `exists (select 1 from service_at_locations sal
+            where sal.newsroom_id = sc.newsroom_id and sal.service_id = $2
+              and sal.location_id = sc.location_id and sal.removed_at is null)`;
+
+/**
  * The entry's rows of one kind, as stored. `removed` picks the rows an editor
  * removed instead of the live ones. A place is the service's link to it.
  */
@@ -382,13 +394,16 @@ async function loadRows(
     );
   }
   if (kind === "schedule") {
+    // Live hours at a place the service is no longer linked to are left out:
+    // they are listed apart (loadUnlinkedSchedules). Removed hours are not.
+    const atLinkedPlace = removed ? "" : `and (sc.location_id is null or ${LINKED_TO_SCHEDULES_PLACE})`;
     return sql.query<RawRow>(
       `select sc.id, sc.location_id, l.name as location_name, sc.by_appointment,
               sc.days, sc.opens_at, sc.closes_at, sc.notes
          from schedules sc
          left join locations l on l.id = sc.location_id and l.newsroom_id = sc.newsroom_id
         where sc.newsroom_id = $1 and sc.removed_at ${is}
-          and (sc.service_id = $2
+          and ((sc.service_id = $2 ${atLinkedPlace})
                or sc.id in (select schedule_id from service_at_locations
                              where newsroom_id = $1 and service_id = $2
                                and removed_at is null and schedule_id is not null))
@@ -493,13 +508,13 @@ function removedLabel(kind: RemovableKind, stored: object, raw?: RawRow): string
   }
 }
 
-async function loadEntryRows(
+async function entryRowsOf(
   sql: Sql,
   kind: RowKind,
+  rows: RawRow[],
   newsroomId: number,
   serviceId: number,
 ): Promise<EntryRow[]> {
-  const rows = await loadRows(sql, kind, newsroomId, serviceId, false);
   const out: EntryRow[] = [];
   for (const raw of rows) {
     out.push({
@@ -511,6 +526,41 @@ async function loadEntryRows(
     });
   }
   return out;
+}
+
+async function loadEntryRows(
+  sql: Sql,
+  kind: RowKind,
+  newsroomId: number,
+  serviceId: number,
+): Promise<EntryRow[]> {
+  return entryRowsOf(sql, kind, await loadRows(sql, kind, newsroomId, serviceId, false), newsroomId, serviceId);
+}
+
+/**
+ * The service's hours at a place it is no longer linked to. They are shown
+ * apart from the live hours, with no way to change or remove them here; nothing
+ * is marked removed, so restoring the link brings them back as they were.
+ */
+async function loadUnlinkedSchedules(
+  sql: Sql,
+  newsroomId: number,
+  serviceId: number,
+): Promise<EntryRow[]> {
+  const rows = await sql.query<RawRow>(
+    `select sc.id, sc.location_id, l.name as location_name, sc.by_appointment,
+            sc.days, sc.opens_at, sc.closes_at, sc.notes
+       from schedules sc
+       join locations l on l.id = sc.location_id and l.newsroom_id = sc.newsroom_id
+      where sc.newsroom_id = $1 and sc.service_id = $2 and sc.removed_at is null
+        and not ${LINKED_TO_SCHEDULES_PLACE}
+        and sc.id not in (select schedule_id from service_at_locations
+                           where newsroom_id = $1 and service_id = $2
+                             and removed_at is null and schedule_id is not null)
+      order by sc.id`,
+    [newsroomId, serviceId],
+  );
+  return entryRowsOf(sql, "schedule", rows, newsroomId, serviceId);
 }
 
 async function loadRemovedRows(
@@ -639,6 +689,7 @@ export async function getRegistryEntryDetail(
     contacts,
     places: await loadEntryRows(sql, "location", newsroomId, id),
     schedules: await loadEntryRows(sql, "schedule", newsroomId, id),
+    unlinkedSchedules: await loadUnlinkedSchedules(sql, newsroomId, id),
     eligibilities: await loadEntryRows(sql, "eligibility", newsroomId, id),
     requiredDocuments: await loadEntryRows(sql, "requiredDocument", newsroomId, id),
     languages: await loadEntryRows(sql, "language", newsroomId, id),
@@ -1193,6 +1244,22 @@ async function setRemoved(
       const after = await entryRowIds(tx, kind, newsroomId, id, organizationId, remove);
       if (after.includes(rowId)) return { ok: true as const, serviceId: id };
       throw new Error(NOT_IN_ENTRY);
+    }
+    if (!remove && kind === "location") {
+      // A removed link comes back only if the entry has no live link to the same
+      // place: restoring it would list the place twice.
+      const clash = await tx.query(
+        `select 1
+           from service_at_locations removed_link
+           join service_at_locations live_link
+             on live_link.newsroom_id = removed_link.newsroom_id
+            and live_link.service_id = removed_link.service_id
+            and live_link.location_id = removed_link.location_id
+            and live_link.removed_at is null
+          where removed_link.id = $1 and removed_link.newsroom_id = $2`,
+        [rowId, newsroomId],
+      );
+      if (clash.length > 0) throw new Error("This place is already linked to the entry.");
     }
     await tx.query(
       `update ${REMOVE_TABLE[kind]}

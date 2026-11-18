@@ -147,7 +147,8 @@ export interface PublishRegistryEntryResult {
  *
  * A row an editor removed from the entry (`removed_at` set) is skipped by every
  * one of these, so it stays unpublished until it is restored and the entry is
- * published again.
+ * published again. The service's hours at a place it is no longer linked to are
+ * skipped too, and come back with the link.
  *
  * Another service's contacts, schedules and languages, a contact of a location
  * the service is not linked to, and a schedule none of its rows references stay
@@ -199,10 +200,18 @@ export async function publishRegistryEntryIn(
     );
 
     for (const table of ["contacts", "languages", "schedules", "service_at_locations"]) {
+      // Hours at a place the service is no longer linked to stay unpublished
+      // until the link is restored.
+      const atLinkedPlace =
+        table === "schedules"
+          ? `and (location_id is null or location_id in (
+                select location_id from service_at_locations
+                 where newsroom_id = $1 and service_id = $2 and removed_at is null))`
+          : "";
       await tx.query(
         `update ${table}
             set published = true, updated_at = now()
-          where newsroom_id = $1 and service_id = $2 and removed_at is null`,
+          where newsroom_id = $1 and service_id = $2 and removed_at is null ${atLinkedPlace}`,
         [newsroomId, id],
       );
     }

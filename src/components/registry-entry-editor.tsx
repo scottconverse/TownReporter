@@ -601,11 +601,23 @@ function useRowAction(
   };
 }
 
+/** Kinds the public page never shows: their removal is kept on the desk only. */
+const KEPT_ON_DESK_ONLY = new Set<RemovableKind>(["eligibility", "requiredDocument", "accessibility"]);
+
+/** What the question says will happen to a row of this kind. */
+function removeWarning(kind: RemovableKind): string {
+  const lead = `Remove ${REMOVE_THING[kind]} from the entry?`;
+  if (KEPT_ON_DESK_ONLY.has(kind)) {
+    return `${lead} It is kept on the desk only and is not shown on the public page. You can bring it back from the Removed list.`;
+  }
+  return `${lead} It stops showing on the public page right away. You can bring it back from the Removed list.`;
+}
+
 /**
  * The Remove button of a row and, once pressed, the question that comes before
- * it. What it says matches what happens: the row is marked removed, the public
- * page stops reading it at once, nothing is deleted, and the Removed list below
- * brings it back. A row other entries use says so first.
+ * it. What it says matches what happens: the row is marked removed, nothing is
+ * deleted, and the Removed list below brings it back. A row other entries use
+ * says so first.
  */
 function RemoveControl({
   serviceId,
@@ -650,10 +662,7 @@ function RemoveControl({
           {shared}
         </p>
       ) : null}
-      <p className="text-lg text-ink">
-        Remove {REMOVE_THING[kind]} from the entry? It stops showing on the public page right
-        away. You can bring it back from the Removed list.
-      </p>
+      <p className="text-lg text-ink">{removeWarning(kind)}</p>
       {action.error ? (
         <p className="text-base text-rust" role="alert">
           {action.error}
@@ -970,12 +979,34 @@ function RemovedList({
   );
 }
 
+/**
+ * Hours at a place this entry is no longer linked to. They are shown, not
+ * offered: no form and no Remove. Restoring the place's link brings them back.
+ */
+function UnlinkedHours({ rows }: { rows: EntryDetail["schedules"] }) {
+  return (
+    <div className="mt-3 border-l-4 border-rust bg-paper p-3" data-testid="unlinked-hours">
+      <p className="text-lg font-semibold text-ink">
+        These hours belong to a place that is no longer linked; they come back if the place is restored.
+      </p>
+      <ul className="mt-2 grid gap-1">
+        {rows.map((row) => (
+          <li key={row.id} className="text-base">
+            {rowTitle("schedule", row.fields, row.locationName)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** One kind's heading, its rows, and the form that adds one. */
 function RowSection({
   serviceId,
   kind,
   heading,
   rows,
+  unlinked,
   addTitle,
   addLabel,
   addedMessage,
@@ -986,6 +1017,8 @@ function RowSection({
   kind: RowKind;
   heading: string;
   rows: EntryDetail["places"];
+  /** Hours kept for a place the entry is no longer linked to (not live). */
+  unlinked?: EntryDetail["schedules"];
   addTitle: string;
   addLabel: string;
   addedMessage: string;
@@ -1010,6 +1043,7 @@ function RowSection({
           onChanged={onChanged}
         />
       ))}
+      {unlinked && unlinked.length > 0 ? <UnlinkedHours rows={unlinked} /> : null}
       <RowEditForm
         key={`add-${kind}`}
         serviceId={serviceId}
@@ -1137,6 +1171,7 @@ export function RegistryEntryEditor({
             kind="schedule"
             heading="Hours"
             rows={detail.schedules}
+            unlinked={detail.unlinkedSchedules}
             addTitle="Add hours"
             addLabel="Add hours"
             addedMessage="Hours added."

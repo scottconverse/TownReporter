@@ -673,3 +673,65 @@ test("an import of the same file leaves removed rows removed: no new row, no pro
   const third = await importHsdsBundle(structuredClone(sample), { newsroomId: n + 1, directoryName });
   assert.ok(third.tables.contacts.changed > 0, "a live row with a changed field is proposed");
 });
+
+test("a removed place link cannot be restored while the entry is linked to that place again", async () => {
+  const sql = await getSql();
+  const s = await seed(9718);
+  await removeEntryRowIn(sql, 9718, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
+  const relinked = await saveEntryRowIn(sql, 9718, s.s1, { kind: "location", locationId: s.l1, fields: {} }, "ed-1");
+  assert.equal(relinked.ok, true);
+  await assert.rejects(
+    restoreEntryRowIn(sql, 9718, s.s1, { kind: "location", rowId: s.link1 }, "ed-1"),
+    /This place is already linked to the entry\./,
+  );
+  const detail = (await getRegistryEntryDetail(sql, 9718, s.s1))!;
+  assert.deepEqual(detail.places.map((p) => p.locationId), [s.l1], "the place is listed once");
+  assert.deepEqual(detail.removed.filter((r) => r.kind === "location").map((r) => r.id), [s.link1],
+    "the removed link is still removed");
+});
+
+test("hours at a place the entry is no longer linked to are not published or offered, and come back with the link", async () => {
+  const sql = await getSql();
+  const s = await seed(9719);
+  await removeEntryRowIn(sql, 9719, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
+  await publishRegistryEntryIn(sql, 9719, s.s1, "ed-1");
+  const flag = async (id: number) =>
+    (await sql.query<{ published: boolean; removed_at: unknown }>(
+      "select published, removed_at from schedules where id = $1", [id]))[0]!;
+  assert.equal((await flag(s.sc2)).published, false, "hours at the unlinked place are not published");
+  assert.equal((await flag(s.sc2)).removed_at, null, "and they are not marked removed either");
+  assert.equal((await flag(s.sc1)).published, true, "the service's own hours still publish");
+
+  const detail = (await getRegistryEntryDetail(sql, 9719, s.s1))!;
+  assert.deepEqual(detail.schedules.map((x) => x.id), [s.sc1], "not offered as live hours");
+  assert.deepEqual(detail.unlinkedSchedules.map((x) => [x.id, x.locationName, x.fields.days]), [
+    [s.sc2, "Main Hall", "Tuesday"],
+  ], "shown under the note, with the place they belong to");
+  assert.ok(!detail.removed.some((r) => r.kind === "schedule" && r.id === s.sc2), "not in the removed list");
+  const page = await publicEntry(sql, 9719, s.s1);
+  assert.ok(page, "the entry is published");
+  assert.deepEqual(page!.locations, []);
+  assert.ok(!JSON.stringify(page).includes("Tuesday"), "the public page does not show them");
+
+  await restoreEntryRowIn(sql, 9719, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
+  const back = (await getRegistryEntryDetail(sql, 9719, s.s1))!;
+  assert.deepEqual(back.schedules.map((x) => x.id), [s.sc1, s.sc2, s.sc3], "back in the entry as live hours");
+  assert.deepEqual(back.unlinkedSchedules, []);
+  await publishRegistryEntryIn(sql, 9719, s.s1, "ed-1");
+  assert.equal((await flag(s.sc2)).published, true, "publish picks them up once the link is back");
+  const again = (await publicEntry(sql, 9719, s.s1))!;
+  assert.ok(JSON.stringify(again.locations).includes("Tuesday"), "and the public page shows them under the place");
+});
+
+test("a removed place contact stays removed while its place is unlinked, and is listed again when the link is restored", async () => {
+  const sql = await getSql();
+  const s = await seed(9720);
+  await removeEntryRowIn(sql, 9720, s.s1, { kind: "contact", rowId: s.locContact }, "ed-1");
+  await removeEntryRowIn(sql, 9720, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
+  await restoreEntryRowIn(sql, 9720, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
+  const detail = (await getRegistryEntryDetail(sql, 9720, s.s1))!;
+  assert.ok(detail.removed.some((r) => r.kind === "contact" && r.id === s.locContact), "listed as removed again");
+  assert.ok(!detail.contacts.some((c) => c.id === s.locContact), "not offered as a live contact");
+  const [row] = await sql.query<{ removed_at: unknown }>("select removed_at from contacts where id = $1", [s.locContact]);
+  assert.ok(row!.removed_at, "still marked removed");
+});
