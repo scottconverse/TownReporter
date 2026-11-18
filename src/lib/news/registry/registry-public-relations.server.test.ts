@@ -292,6 +292,76 @@ test("an inactive location with a published schedule and phone shows none of the
   assert.deepEqual(leaked, [], "north's phone, address and hours stay hidden");
 });
 
+/**
+ * A schedule tied to the service alone, which the service's published link to
+ * `locationId` also points to: the shape the shared-schedule test above uses.
+ */
+async function addSharedServiceSchedule(
+  sql: Sql,
+  newsroomId: number,
+  serviceId: number,
+  locationId: number,
+): Promise<void> {
+  const [shared] = await sql.query<{ id: number }>(
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, $2, $3, 'Friday', '10:00', '12:00', true) returning id`,
+    [newsroomId, `sch-shared-${newsroomId}`, serviceId],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, schedule_id, published)
+     values ($1, $2, $3, $4, $5, true)`,
+    [newsroomId, `sal-shared-${newsroomId}`, serviceId, locationId, shared!.id],
+  );
+}
+
+test("a service-wide schedule that a link to an inactive location points to shows as service-wide hours", async () => {
+  const sql = await getSql();
+  const newsroomId = 9510;
+  const world = await seedWorld(newsroomId);
+  await publishRegistryEntryIn(sql, newsroomId, world.serviceA, "editor");
+  await addSharedServiceSchedule(sql, newsroomId, world.serviceA, world.locationOne);
+  await sql.query(
+    "update locations set status = 'inactive' where newsroom_id = $1 and hsds_id = $2",
+    [newsroomId, `loc-north-${newsroomId}`],
+  );
+
+  const entry = (await listPublicRegistry(sql, newsroomId)).entries[0]!;
+  assert.deepEqual(
+    entry.locations.map((l) => l.locationId),
+    [world.locationTwo],
+    "the inactive north location is not shown",
+  );
+  assert.deepEqual(
+    entry.serviceHours,
+    ["Friday, 10:00–12:00"],
+    "the schedule shows service-wide, since no place the public sees carries it",
+  );
+});
+
+test("a service-wide schedule that a link to an unpublished location points to shows as service-wide hours", async () => {
+  const sql = await getSql();
+  const newsroomId = 9511;
+  const world = await seedWorld(newsroomId);
+  await publishRegistryEntryIn(sql, newsroomId, world.serviceA, "editor");
+  await addSharedServiceSchedule(sql, newsroomId, world.serviceA, world.locationOne);
+  await sql.query(
+    "update locations set published = false where newsroom_id = $1 and hsds_id = $2",
+    [newsroomId, `loc-north-${newsroomId}`],
+  );
+
+  const entry = (await listPublicRegistry(sql, newsroomId)).entries[0]!;
+  assert.deepEqual(
+    entry.locations.map((l) => l.locationId),
+    [world.locationTwo],
+    "the unpublished north location is not shown",
+  );
+  assert.deepEqual(
+    entry.serviceHours,
+    ["Friday, 10:00–12:00"],
+    "the schedule shows service-wide, since no place the public sees carries it",
+  );
+});
+
 test("another newsroom's rows with the same identifiers are not shown here or published by a publish here", async () => {
   const sql = await getSql();
   const here = 9508;

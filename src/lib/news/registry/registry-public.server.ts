@@ -308,11 +308,20 @@ export async function listPublicRegistry(
   // service alone is service-wide. The query orders them by weekday / opening
   // time / id, so each list is stable. A schedule that a service's link to a
   // place also points to comes back twice, once service-wide and once through
-  // the link. It belongs to that place, so the service-wide copy is dropped.
-  const placedSchedules = new Set<string>(); // `${service}:${schedule}`
+  // the link. When the public sees that place (it is in `locations`), the
+  // schedule belongs to the place, so the service-wide copy is dropped. When the
+  // place is hidden (unpublished or inactive), the schedule is not shown under
+  // it, so it stays service-wide.
+  const shownPlaces = new Set<string>(); // `${service}:${location}`, as in `locations`
+  for (const row of locations) {
+    shownPlaces.add(`${Number(row.service_id)}:${Number(row.location_id)}`);
+  }
+  const placedSchedules = new Set<string>(); // `${service}:${schedule}` shown under a place
   for (const row of schedules) {
-    if (row.location_id != null) {
-      placedSchedules.add(`${Number(row.service_id)}:${Number(row.schedule_id)}`);
+    const serviceId = Number(row.service_id);
+    const locationId = row.location_id == null ? null : Number(row.location_id);
+    if (locationId != null && shownPlaces.has(`${serviceId}:${locationId}`)) {
+      placedSchedules.add(`${serviceId}:${Number(row.schedule_id)}`);
     }
   }
   const serviceHours = new Map<number, string[]>();
