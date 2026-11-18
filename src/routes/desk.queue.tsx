@@ -49,7 +49,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { queueDraftPickIds, queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   bulkKillConfirmWords,
@@ -1234,8 +1234,8 @@ function QueuePage() {
   // Start N stories drafts every ticked lead, also one the list no longer
   // shows (Scott, Nov 18 2026: 6 ticked, 5 written). Hold, Kill and Delete
   // still act only on the rows on screen.
-  const draftPicks = queueDraftPickIds(selectedDeleteLeadIds, shownIds);
-  const bulkDraftable = draftPicks.ids;
+  const bulkDraftable = Array.from(new Set(selectedDeleteLeadIds));
+  const offScreenPicks = bulkDraftable.filter((leadId) => !shownIds.includes(leadId)).length;
   /*
     M7 of the batch-6 pre-merge audit. This loop used to be
     `for (const lead of selectedLeads) setStatus.mutate({id, status})`, so a
@@ -1877,11 +1877,11 @@ function QueuePage() {
                   Clear
                 </InkButton>
               </div>
-              {draftPicks.offScreen > 0 ? (
+              {offScreenPicks > 0 ? (
                 <span className="queue-bulk-what">
-                  {draftPicks.offScreen} more ticked{" "}
-                  {draftPicks.offScreen === 1 ? "lead is" : "leads are"} not in the list on screen
-                  now. Start still drafts {draftPicks.offScreen === 1 ? "it" : "them"}.
+                  {offScreenPicks} more ticked{" "}
+                  {offScreenPicks === 1 ? "lead is" : "leads are"} not in the list on screen
+                  now. Start still drafts {offScreenPicks === 1 ? "it" : "them"}.
                 </span>
               ) : null}
             </>
