@@ -14,6 +14,7 @@ import {
   runDueMonitors,
   seedInvestigation,
   watchSource,
+  writeCaptureChunks,
   type FetchFn,
   type HopPlan,
 } from "./investigate.ts";
@@ -77,6 +78,64 @@ describe("capture persistence", () => {
     assert.equal(chunks[0]?.page_number, 14);
     assert.equal(chunks[0]?.excerpt.includes(String.fromCharCode(0)), false);
     assert.equal(chunks[0]?.excerpt, "Council approved the packet after public comment.");
+  });
+});
+
+describe("deferred evidence chunks (Nov 18 2026 lock fix)", () => {
+  it("writes no chunk inside the capture, then all of them once, in their own write", async () => {
+    const user = `forensic-defer-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Deferred chunks");
+    const text = "Council approved the sidewalk contract after a long public hearing. ".repeat(80);
+    const capture = await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: `https://example.org/${user}/minutes.html`,
+      title: "Minutes",
+      text,
+      hash: `defer-${Date.now()}`,
+      status: 200,
+      outcome: "fetched",
+      deferChunks: true,
+    });
+    assert.ok(capture.pendingChunks, "the capture hands its chunks back");
+    const count = async () =>
+      Number(
+        (await sql<{ c: number }>`select count(*)::int as c from artifact_chunks where version_id = ${capture.versionId}`)[0]?.c ?? 0,
+      );
+    assert.equal(await count(), 0, "nothing written inside the capture");
+
+    const written = await writeCaptureChunks(capture.pendingChunks!);
+    assert.ok(written > 1, "the long text makes more than one chunk");
+    assert.equal(await count(), written);
+
+    const rows = await sql<{ chunk_index: number }>`
+      select chunk_index from artifact_chunks where version_id = ${capture.versionId} order by chunk_index
+    `;
+    assert.deepEqual(rows.map((r) => Number(r.chunk_index)), [...Array(written).keys()]);
+
+    assert.equal(await writeCaptureChunks(capture.pendingChunks!), 0, "a second call writes nothing");
+    assert.equal(await count(), written);
+  });
+
+  it("writes nothing for a version taken down before the chunks went in", async () => {
+    const user = `forensic-defer-down-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Deferred chunks, taken down");
+    const capture = await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: `https://example.org/${user}/page.html`,
+      title: "Page",
+      text: "A page the publisher later asked us to remove.",
+      hash: `defer-down-${Date.now()}`,
+      status: 200,
+      outcome: "fetched",
+      deferChunks: true,
+    });
+    assert.ok(capture.pendingChunks);
+    await sql`update artifact_versions set taken_down_at = now() where id = ${capture.versionId}`;
+    assert.equal(await writeCaptureChunks(capture.pendingChunks!), 0);
+    const [row] = await sql<{ c: number }>`select count(*)::int as c from artifact_chunks where version_id = ${capture.versionId}`;
+    assert.equal(Number(row?.c ?? 0), 0);
   });
 });
 

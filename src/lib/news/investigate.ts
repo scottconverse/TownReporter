@@ -1,4 +1,4 @@
-import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
   grokChat,
@@ -382,7 +382,82 @@ export type CaptureRecord = {
   captureEventId: number;
   contentHash: string;
   url: string;
+  /**
+   * Set only when the caller asked for `deferChunks` and this capture still
+   * needs its evidence chunks. The caller writes them with
+   * `writeCaptureChunks`, after its own transaction has ended.
+   */
+  pendingChunks?: PendingCaptureChunks;
 };
+
+/** The evidence chunks one capture still has to write (see `writeCaptureChunks`). */
+export type PendingCaptureChunks = {
+  versionId: number;
+  userId: string;
+  newsroomId: number;
+  text: string;
+  pages?: PdfPage[];
+};
+
+/** Rows per insert statement when chunks are written in bulk. */
+const CHUNK_INSERT_BATCH = 200;
+
+/**
+ * Write the evidence chunks one capture deferred, in a transaction of their own.
+ *
+ * WHY (Nov 18 2026). A draft job captured its sources inside the job's lease
+ * transaction, which holds `for update` on the desk_jobs row. The chunk rows
+ * were inserted one at a time inside it, and each insert also updates the large
+ * trigram index on `artifact_chunks`. One slow capture held the job row for 24
+ * minutes and 12 other sessions queued behind it; the whole site slowed down.
+ * The draft path now asks `rememberCapture` to defer the chunks and calls this
+ * after the lease has committed, so no job row is locked while the chunks go in.
+ *
+ * The rules are the same as the inline write: nothing is written for a taken-down
+ * version, and nothing is written when the version already has chunks. An
+ * advisory lock on the version serialises two writers for the same version, so
+ * they cannot both see "no chunks yet" and write the set twice.
+ */
+export async function writeCaptureChunks(pending: PendingCaptureChunks, sqlArg?: Sql): Promise<number> {
+  const work = async (sql: Sql): Promise<number> => {
+    await sql.query("select pg_advisory_xact_lock($1::int, $2::int)", [CAPTURE_CHUNK_LOCK, pending.versionId]);
+    const [state] = await sql.query<{ taken_down_at: string | null }>(
+      "select taken_down_at::text as taken_down_at from artifact_versions where id = $1 and newsroom_id = $2 for share",
+      [pending.versionId, pending.newsroomId],
+    );
+    if (!state || state.taken_down_at) return 0;
+    const [already] = await sql.query<{ c: number }>(
+      "select count(*)::int as c from artifact_chunks where version_id = $1 and newsroom_id = $2",
+      [pending.versionId, pending.newsroomId],
+    );
+    if (Number(already?.c ?? 0) > 0) return 0;
+    const chunks = chunksFromEvidence(pending.text, pending.pages);
+    for (let start = 0; start < chunks.length; start += CHUNK_INSERT_BATCH) {
+      const part = chunks.slice(start, start + CHUNK_INSERT_BATCH);
+      await sql.query(
+        `insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)
+         select $1, $2, $3, c.chunk_index, c.page_number, c.section, c.excerpt, c.locator
+         from unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[])
+           as c(chunk_index, page_number, section, excerpt, locator)`,
+        [
+          pending.versionId,
+          pending.userId,
+          pending.newsroomId,
+          part.map((c) => c.index),
+          part.map((c) => c.page_number ?? null),
+          part.map((c) => c.section),
+          part.map((c) => c.excerpt),
+          part.map((c) => c.locator),
+        ],
+      );
+    }
+    return chunks.length;
+  };
+  return sqlArg ? work(sqlArg) : withTransaction(work);
+}
+
+/** First key of the advisory lock `writeCaptureChunks` takes per version. */
+const CAPTURE_CHUNK_LOCK = 471_118;
 
 export function hypothesisStatusForPlan(supporting: string, contradicting: string) {
   // These fields are the planner's proposed searches, not captured evidence.
@@ -1760,6 +1835,12 @@ export async function rememberCapture(opts: {
   /** Skip automatic monitor creation for an explicit one-off capture. */
   autoWatch?: boolean;
   /**
+   * Do not write the evidence chunks here. Return them as `pendingChunks` so
+   * the caller writes them with `writeCaptureChunks` after its transaction
+   * ends (the draft job's lease transaction, Nov 18 2026).
+   */
+  deferChunks?: boolean;
+  /**
    * The caller's real newsroom (0.6.13). Threaded down to the `artifacts`
    * and `artifact_blobs` inserts below -- the two tables 0.6.11 claimed were
    * newsroom-scoped here but weren't (audit-lite 0.6.11, FINDING-001).
@@ -1898,7 +1979,10 @@ export async function rememberCapture(opts: {
     `;
     takenDown = Boolean(state?.taken_down_at);
   }
-  if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText) {
+  let pendingChunks: PendingCaptureChunks | undefined;
+  if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText && opts.deferChunks) {
+    pendingChunks = { versionId, userId: opts.userId, newsroomId, text: fullText, pages };
+  } else if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
       select count(*)::int as c from artifact_chunks where version_id = ${versionId} and newsroom_id = ${newsroomId}
     `;
@@ -2002,7 +2086,9 @@ export async function rememberCapture(opts: {
     );
   }
 
-  return { versionId, captureEventId, contentHash: opts.hash, url };
+  return pendingChunks
+    ? { versionId, captureEventId, contentHash: opts.hash, url, pendingChunks }
+    : { versionId, captureEventId, contentHash: opts.hash, url };
 }
 
 /**

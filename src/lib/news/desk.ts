@@ -4362,10 +4362,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       await batchGuard();
       return webSearch(query);
     };
-    reportDeps.capture = async (_userId, document) =>
-      batchServer.withDraftBatchLease(job, async (transactionSql) => {
-        const { rememberCapture } = await import("./investigate.ts");
-        const rec = await rememberCapture({
+    reportDeps.capture = async (_userId, document) => {
+      const { rememberCapture, writeCaptureChunks } = await import("./investigate.ts");
+      // Nov 18 2026: the evidence chunks are written AFTER the lease commits.
+      // Writing them inside it held the job row locked for 24 minutes once,
+      // and the whole site queued behind that lock.
+      const rec = await batchServer.withDraftBatchLease(job, async (transactionSql) => {
+        const captured = await rememberCapture({
           sql: transactionSql,
           userId: job.user_id,
           newsroomId: job.newsroom_id,
@@ -4379,9 +4382,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           classification: "discovered",
           triggerKind: "draft",
           pages: document.pages,
+          deferChunks: true,
         });
-        return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
+        return captured;
       });
+      if (rec.pendingChunks) {
+        try {
+          await writeCaptureChunks(rec.pendingChunks);
+        } catch (error) {
+          // The capture itself is saved; only its search chunks are missing.
+          // The draft goes on.
+          console.warn(`[desk] could not write the evidence chunks for version ${rec.versionId}`, error);
+        }
+      }
+      return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
+    };
   }
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);

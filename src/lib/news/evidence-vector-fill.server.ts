@@ -36,6 +36,14 @@ import { clearEvidenceVectorCache } from "./evidence-search.server.ts";
  */
 let scannedThroughId = 0;
 
+/**
+ * Nov 18 2026: 2,000 rows per call, not 20,000. After a restart the walk
+ * starts at id 0, and a 20,000-row window (md5 and a regexp on each excerpt,
+ * read from disk) ran for over 8 minutes while the desk was slow. 2,000 rows
+ * a minute still walks the whole table (about 92,000 rows) in under an hour.
+ */
+export const DEFAULT_FILL_WINDOW = 2_000;
+
 /** Tests only: start the walk again at id 0. */
 export function resetEvidenceFillCursorForTests(): void {
   scannedThroughId = 0;
@@ -45,7 +53,7 @@ export async function fillEvidenceVectorsOnce(
   options: { batch?: number; window?: number } = {},
 ): Promise<number> {
   const batch = Math.max(1, Math.min(200, Math.floor(options.batch ?? 32)));
-  const window = Math.max(batch, Math.min(100_000, Math.floor(options.window ?? 20_000)));
+  const window = Math.max(batch, Math.min(100_000, Math.floor(options.window ?? DEFAULT_FILL_WINDOW)));
   const sql = await getSql();
   const [top] = await sql<{ max_id: number | null }>`
     select max(id)::int as max_id from artifact_chunks
