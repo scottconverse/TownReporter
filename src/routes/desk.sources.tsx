@@ -630,7 +630,14 @@ function SourcesPage() {
                   aria-pressed={sourceTab === g.k}
                   onClick={() => setSourceTab(g.k)}
                 >
-                  {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested" : "Rejected"}
+                  {/*
+                    Walk F15: this pill counts suggested source ROWS -- one per
+                    suggested link -- while the Inventory screen's "suggested
+                    sites" counts the websites those links point at. Same word,
+                    two units (3095 links on 616 sites on the live desk), so
+                    the pill says "links".
+                  */}
+                  {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested links" : "Rejected"}
                   {" · "}
                   {g.k === "accepted"
                     ? (counts?.accepted ?? 0)

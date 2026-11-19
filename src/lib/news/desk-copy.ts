@@ -2712,7 +2712,17 @@ export function killRecordLine(input: {
  * the tab (as a tooltip and as visible text) says what it counts.
  */
 export const PRINTED_TAB_NOTE =
-  "≈ Printed counts leads that match a story already in print. It is not every published story.";
+  "≈ Printed counts leads that match a story already in print; one story can match more than one lead. It is not the number of published stories — that is the Published screen.";
+
+/**
+ * Walk F15: the Queue's tabs are not a partition. Open, Held and Killed are the
+ * lead's status; ≈ Printed is a duplicate-match and overlaps all three; and
+ * All also counts the leads whose story has already been published, which have
+ * no tab of their own. So the five numbers do not add up, and the strip says so
+ * rather than leaving an editor to think one of them is wrong.
+ */
+export const ALL_TAB_NOTE =
+  "The tabs overlap. Open, Held and Killed are a lead's status, ≈ Printed is a match to a story in print, and All also counts leads whose story is already published.";
 
 /**
  * THT-21: the line under the bulk Start button. Start runs AI drafts for every

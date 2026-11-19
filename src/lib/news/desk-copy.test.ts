@@ -20,6 +20,7 @@ import {
   PUBLISHED_TAKE_OFF_OPENER,
   MOVE_TO_NEW_LABEL,
   PRINTED_TAB_NOTE,
+  ALL_TAB_NOTE,
   queueTabCountText,
   movedToNewNote,
   printedDuplicateLine,
@@ -2130,7 +2131,13 @@ describe("Unit AK: duplicate and kill wording", () => {
 
   it("THT-11: the Printed count says it is a duplicate-match count, not every published story", () => {
     assert.match(PRINTED_TAB_NOTE, /counts leads that match a story already in print/);
-    assert.match(PRINTED_TAB_NOTE, /not every published story/);
+    assert.match(PRINTED_TAB_NOTE, /not the number of published stories/);
+  });
+
+  it("Walk F15: the tab strip says the tabs overlap and that All is the whole ledger", () => {
+    assert.match(ALL_TAB_NOTE, /The tabs overlap/);
+    assert.match(ALL_TAB_NOTE, /≈ Printed is a match to a story in print/);
+    assert.match(ALL_TAB_NOTE, /All also counts leads whose story is already published/);
   });
 
   it("THT-21: the Start line says it starts AI drafts for the ticked leads", () => {

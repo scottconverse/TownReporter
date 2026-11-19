@@ -1,5 +1,8 @@
 // guards: the Daily scan panel printed one scan's cap as the priority set and
 // read the read and filed rows from whatever scan ran last (FB19).
+// Walk F15: the panel read "Sources selected 12 / Fetch cap 12" beside
+// "Sources read 255", so the labels now say what each number is and a
+// "Read scope" row says how many sources a daily run may actually read.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { dailyScanCounts } from "./daily-scan-counts.ts";
@@ -15,7 +18,7 @@ const pairs = (rows: { label: string; value: string }[]) =>
   rows.map((row) => [row.label, row.value]);
 
 describe("Daily scan counts (FB19)", () => {
-  it("prints the priority set and the fetch cap as separate rows, and names the daily run it read", () => {
+  it("prints the priority set and the priority set limit as separate rows, and names the daily run it read", () => {
     const rows = dailyScanCounts({
       ...sample,
       lastScan: {
@@ -26,9 +29,10 @@ describe("Daily scan counts (FB19)", () => {
       },
     });
     assert.deepEqual(pairs(rows), [
-      ["Sources selected", "9"],
+      ["Sources you picked", "9"],
       ["Priority set", "3"],
-      ["Fetch cap", "12"],
+      ["Priority set limit", "12"],
+      ["Read scope", "Every accepted source, within the 90-minute budget"],
       ["Sources read (daily scan, Oct 14, 6:00 a.m.)", "58"],
       ["Leads filed (daily scan, Oct 14, 6:00 a.m.)", "3"],
     ]);
@@ -39,7 +43,7 @@ describe("Daily scan counts (FB19)", () => {
       ...sample,
       lastScan: { sources_fetched: 40, leads_created: 1, startedAt: "2026-10-14T12:00:00.000Z", finishedAt: null },
     });
-    assert.deepEqual(pairs(rows).slice(3), [
+    assert.deepEqual(pairs(rows).slice(4), [
       ["Sources read (daily scan, running)", "40"],
       ["Leads filed (daily scan, running)", "1"],
     ]);
@@ -47,7 +51,7 @@ describe("Daily scan counts (FB19)", () => {
 
   it("says no daily run is recorded instead of borrowing another scan's numbers", () => {
     const rows = dailyScanCounts({ ...sample, lastScan: null });
-    assert.deepEqual(pairs(rows).slice(3), [
+    assert.deepEqual(pairs(rows).slice(4), [
       ["Sources read (no daily run recorded)", "Not recorded"],
       ["Leads filed (no daily run recorded)", "Not recorded"],
     ]);
@@ -56,9 +60,10 @@ describe("Daily scan counts (FB19)", () => {
   it("keeps every row, with no value, when there is no policy at all", () => {
     const rows = dailyScanCounts(null);
     assert.deepEqual(pairs(rows), [
-      ["Sources selected", "Not available"],
+      ["Sources you picked", "Not available"],
       ["Priority set", "Not available"],
-      ["Fetch cap", "Not available"],
+      ["Priority set limit", "Not available"],
+      ["Read scope", "Not available"],
       ["Sources read (no daily run recorded)", "Not recorded"],
       ["Leads filed (no daily run recorded)", "Not recorded"],
     ]);
