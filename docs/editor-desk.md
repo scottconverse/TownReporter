@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.92](releases/0.6.92.md). This page is the short version: the desk in one pass, the way an editor uses it. The screen-by-screen tour is [Part 2 of the manual](manual.md#part-2--the-desk-screen-by-screen); the longer working guide is the [editor’s manual](editor.md).
+For [TownReporter 0.7.0](releases/0.7.0.md). This page is the short version: the desk in one pass, the way an editor uses it. The screen-by-screen tour is [Part 2 of the manual](manual.md#part-2--the-desk-screen-by-screen); the longer working guide is the [editor’s manual](editor.md).
 
 ## The desk at a glance
 
@@ -44,6 +44,6 @@ A long to-do the desk wrote for itself is shortened at a word boundary. If the r
 
 ## Models, effort and long documents
 
-The model picker shows only the thinking-effort levels the chosen model supports. DeepSeek v4.1 Flash 1017 always starts at None. The chosen model and effort are saved with the job, so a failover records both the model asked for and the model that ran. In the Queue, a finished batch offers **Redraft**, which creates a new reviewable draft. On **Server → Daily scan** the owner sets the daily time, model, effort, a **Daily priority set** and **Read every day**, and the accepted sources. A scheduled scan files leads and does not publish. **Not yet released (in source after 0.6.92):** after every scan a 14+ auto-draft rule drafts New and Held leads that score 14 or more, the same way the Draft button does. It skips a lead the scan linked as a possible repeat of a published or killed lead. In the Queue, **Start N stories** now drafts every ticked lead, and the bar says how many ticked leads are off screen.
+The model picker shows only the thinking-effort levels the chosen model supports. DeepSeek v4.1 Flash 1017 always starts at None. The chosen model and effort are saved with the job, so a failover records both the model asked for and the model that ran. In the Queue, a finished batch offers **Redraft**, which creates a new reviewable draft. On **Server → Daily scan** the owner sets the daily time, model, effort, a **Daily priority set** and **Read every day**, and the accepted sources. A scheduled scan files leads and does not publish. **Since 0.7.0:** after every scan a 14+ auto-draft rule drafts New and Held leads that score 14 or more, the same way the Draft button does. It skips a lead the scan linked as a possible repeat of a published or killed lead. In the Queue, **Start N stories** now drafts every ticked lead, and the bar says how many ticked leads are off screen.
 
 For uploaded Story and Opinion packets, all readable PDF pages are kept up to the 20-million-character limit. In Dark Desk, **Read entire PDF** reads a retained PDF in batches of up to 12 pages, saves each batch and lists which pages are still unread. Failed or oversized pages stay marked unread. A partial read is never reported as complete.

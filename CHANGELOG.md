@@ -1,8 +1,12 @@
 # Changelog
 
-Current software version: **0.6.92** (released 2026-11-15). Publication state is recorded by GitHub: [release v0.6.92](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92).
+Current software version: **0.7.0** (released 2026-11-19). Publication state is recorded by GitHub: [release v0.7.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.0).
 
 ## Unreleased
+
+## 0.7.0 — 2026-11-19
+
+This release covers 21 changes after 0.6.92 (#398 to #418): 15 code changes (#398 to #412) and 6 documentation changes (#413 to #418). The release guide is [docs/releases/0.7.0.md](docs/releases/0.7.0.md). The number after a change is the pull request that made it.
 
 ### Community resources
 

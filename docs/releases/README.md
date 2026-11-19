@@ -1,10 +1,11 @@
 # Release history
 
 Release notes, newest first. The first entries below are written for this page; the older entries were moved here verbatim out of the README on 2026-09-24.
-Current version: [0.6.92](0.6.92.md) (2026-11-15). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.7.0](0.7.0.md) (2026-11-19). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
 
+- **0.7.0** — 2026-11-19. Community resources reach Phase 4: a public search, a page for each service, a read-only JSON API, a directory file import, an all-details editor, review of proposed changes, recorded verification and a Needs checking list (migrations 0165 and 0166). Leads that score 14 or more are drafted automatically. Drafts has tick boxes with bulk publish and kill, **Publish all drafts** publishes on one press, and **Start N stories** drafts every ticked lead. Guide: [0.7.0](0.7.0.md).
 - **0.6.92** — 2026-11-15. The four score parts show on Today, the Queue and the story page, and Drafts has **Publish all drafts**. Guide: [0.6.92](0.6.92.md).
 - **0.6.91** — 2026-11-14. Lead scores come in four parts (immediacy, impact, conflict, novelty, 1 to 5 each, with reasons) that add up to the 4-20 newsworthiness; the Queue tooltip shows them. Guide: [0.6.91](0.6.91.md).
 - **0.6.90** — 2026-11-13. With Large desk text at 1280 px, Dark Desk keeps all of Decide in the first screen and the Queue filters wrap under the tabs. Guide: [0.6.90](0.6.90.md).
@@ -52,7 +53,7 @@ Current version: [0.6.92](0.6.92.md) (2026-11-15). Full detail: [CHANGELOG](../.
 
 ### Release guides
 
-One file per version that has a guide: [0.6.92](0.6.92.md) · [0.6.91](0.6.91.md) · [0.6.90](0.6.90.md) · [0.6.89](0.6.89.md) · [0.6.88](0.6.88.md) · [0.6.87](0.6.87.md) · [0.6.86](0.6.86.md) · [0.6.85](0.6.85.md) · [0.6.84](0.6.84.md) · [0.6.83](0.6.83.md) · [0.6.82](0.6.82.md) · [0.6.81](0.6.81.md) · [0.6.80](0.6.80.md) · [0.6.79](0.6.79.md) · [0.6.78](0.6.78.md) · [0.6.77](0.6.77.md) · [0.6.76](0.6.76.md) · [0.6.75](0.6.75.md) · [0.6.74](0.6.74.md) · [0.6.73](0.6.73.md) · [0.6.72](0.6.72.md) · [0.6.71](0.6.71.md) · [0.6.70](0.6.70.md) · [0.6.69](0.6.69.md) · [0.6.68](0.6.68.md) · [0.6.67](0.6.67.md) · [0.6.66](0.6.66.md) · [0.6.65](0.6.65.md) · [0.6.64](0.6.64.md) · [0.6.63](0.6.63.md) · [0.6.62](0.6.62.md) · [0.6.61](0.6.61.md) · [0.6.60](0.6.60.md) · [0.6.56](0.6.56.md) · [0.6.55](0.6.55.md) · [0.6.54](0.6.54.md) · [0.6.53](0.6.53.md) · [0.6.52](0.6.52.md) · [0.6.51](0.6.51.md) · [0.6.50](0.6.50.md) · [0.6.49](0.6.49.md) · [0.6.48](0.6.48.md) · [0.6.47](0.6.47.md) · [0.6.46](0.6.46.md) · [0.6.45](0.6.45.md) · [0.6.44](0.6.44.md).
+One file per version that has a guide: [0.7.0](0.7.0.md) · [0.6.92](0.6.92.md) · [0.6.91](0.6.91.md) · [0.6.90](0.6.90.md) · [0.6.89](0.6.89.md) · [0.6.88](0.6.88.md) · [0.6.87](0.6.87.md) · [0.6.86](0.6.86.md) · [0.6.85](0.6.85.md) · [0.6.84](0.6.84.md) · [0.6.83](0.6.83.md) · [0.6.82](0.6.82.md) · [0.6.81](0.6.81.md) · [0.6.80](0.6.80.md) · [0.6.79](0.6.79.md) · [0.6.78](0.6.78.md) · [0.6.77](0.6.77.md) · [0.6.76](0.6.76.md) · [0.6.75](0.6.75.md) · [0.6.74](0.6.74.md) · [0.6.73](0.6.73.md) · [0.6.72](0.6.72.md) · [0.6.71](0.6.71.md) · [0.6.70](0.6.70.md) · [0.6.69](0.6.69.md) · [0.6.68](0.6.68.md) · [0.6.67](0.6.67.md) · [0.6.66](0.6.66.md) · [0.6.65](0.6.65.md) · [0.6.64](0.6.64.md) · [0.6.63](0.6.63.md) · [0.6.62](0.6.62.md) · [0.6.61](0.6.61.md) · [0.6.60](0.6.60.md) · [0.6.56](0.6.56.md) · [0.6.55](0.6.55.md) · [0.6.54](0.6.54.md) · [0.6.53](0.6.53.md) · [0.6.52](0.6.52.md) · [0.6.51](0.6.51.md) · [0.6.50](0.6.50.md) · [0.6.49](0.6.49.md) · [0.6.48](0.6.48.md) · [0.6.47](0.6.47.md) · [0.6.46](0.6.46.md) · [0.6.45](0.6.45.md) · [0.6.44](0.6.44.md).
 Versions between 0.6.56 and 0.6.60, and before 0.6.44, are recorded on this page and in the changelog only.
 
 ### Earlier
