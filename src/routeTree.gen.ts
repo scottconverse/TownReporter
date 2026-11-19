@@ -53,6 +53,7 @@ import { Route as DeskFiledDraftDraftIdRouteImport } from './routes/desk.filed-d
 import { Route as DeskOpsCardRouteImport } from './routes/desk.ops_.$card'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
 import { Route as DeskTranscriptArtifactIdRouteImport } from './routes/desk.transcript.$artifactId'
+import { Route as ApiRegistryV1SplatRouteImport } from './routes/api/registry.v1.$'
 import { Route as DeskStoryDraftDraftIdRouteImport } from './routes/desk.story.draft.$draftId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -276,6 +277,11 @@ const DeskTranscriptArtifactIdRoute =
     path: '/transcript/$artifactId',
     getParentRoute: () => DeskRoute,
   } as any)
+const ApiRegistryV1SplatRoute = ApiRegistryV1SplatRouteImport.update({
+  id: '/api/registry/v1/$',
+  path: '/api/registry/v1/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskStoryDraftDraftIdRoute = DeskStoryDraftDraftIdRouteImport.update({
   id: '/story/draft/$draftId',
   path: '/story/draft/$draftId',
@@ -327,6 +333,7 @@ export interface FileRoutesByFullPath {
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesByTo {
@@ -373,6 +380,7 @@ export interface FileRoutesByTo {
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesById {
@@ -421,6 +429,7 @@ export interface FileRoutesById {
   '/desk/ops_/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRouteTypes {
@@ -470,6 +479,7 @@ export interface FileRouteTypes {
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -516,6 +526,7 @@ export interface FileRouteTypes {
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   id:
     | '__root__'
@@ -563,6 +574,7 @@ export interface FileRouteTypes {
     | '/desk/ops_/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   fileRoutesById: FileRoutesById
 }
@@ -588,6 +600,7 @@ export interface RootRouteChildren {
   EvidenceCompareRoute: typeof EvidenceCompareRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
+  ApiRegistryV1SplatRoute: typeof ApiRegistryV1SplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -900,6 +913,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskTranscriptArtifactIdRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/api/registry/v1/$': {
+      id: '/api/registry/v1/$'
+      path: '/api/registry/v1/$'
+      fullPath: '/api/registry/v1/$'
+      preLoaderRoute: typeof ApiRegistryV1SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/story/draft/$draftId': {
       id: '/desk/story/draft/$draftId'
       path: '/story/draft/$draftId'
@@ -988,6 +1008,7 @@ const rootRouteChildren: RootRouteChildren = {
   EvidenceCompareRoute: EvidenceCompareRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronMonitorsRoute: ApiCronMonitorsRoute,
+  ApiRegistryV1SplatRoute: ApiRegistryV1SplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
