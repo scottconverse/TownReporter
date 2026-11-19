@@ -194,6 +194,22 @@ test("filter counts overlap on purpose, and each one is what the filter shows", 
   }
 });
 
+test("a 'Not ready' draft is in Needs you and carries the reason (F14)", () => {
+  const story_readiness = {
+    version: 1,
+    state: "not-ready",
+    openCount: 2,
+    totalCount: 2,
+    reason: "2 facts need checking.",
+  };
+  const state = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 0 });
+  assert.equal(state.key, "not-ready");
+  assert.equal(state.needsYou, true);
+  assert.equal(deskDraftMatchesFilter(state, "needs-you"), true);
+  assert.equal(state.readiness?.reason, "2 facts need checking.");
+  assert.equal(deskDraftFilterCounts([state])["needs-you"], 1);
+});
+
 test("accepted claims keep the drafts chip Ready with the explicit acceptance reason", () => {
   const story_readiness = { version: 1, state: "not-ready", openCount: 9, totalCount: 9, reason: "9 claims need review." };
   const state = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });

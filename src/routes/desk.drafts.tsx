@@ -207,6 +207,10 @@ function DraftsPage() {
         ? `checked ${formatListDateTime(checked)}`
         : `saved ${formatListDateTime(row.updated_at)}`;
     }
+    if (state.key === "not-ready" && state.readiness?.reason) {
+      // The chip says "✕ Not ready"; this line says why, in the gate's words.
+      return `${state.readiness.reason} · saved ${formatListDateTime(row.updated_at)}`;
+    }
     if (state.key === "imported") return `pasted ${formatShortDate(row.updated_at)}`;
     // The draft row is written with the lead, so its timestamp is the filing
     // time: "filed", not "saved", which would read as an editor's save.
@@ -789,7 +793,17 @@ function PublishAllDrafts({
   listedLeadIds: number[];
 }) {
   const qc = useQueryClient();
+  const { sections } = useEditorSections();
+  const sectionName = (topic: string | null) =>
+    (topic && sections.find((s) => s.key === topic)?.name) || topic || "No section";
   const [running, setRunning] = useState(false);
+  /*
+    F20 (Nov 19 walk): "Publish all drafts" used to send the batch on one
+    press. The confirm now lists every headline it will print and marks the
+    stories that are not checked yet, so a press that skips the story pages is
+    still a press an editor read first. Holds the list being confirmed.
+  */
+  const [confirming, setConfirming] = useState<PublishAllCandidate[] | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [batchError, setBatchError] = useState("");
   const [published, setPublished] = useState<
@@ -1102,7 +1116,7 @@ function PublishAllDrafts({
               disabled={running || killing || selectedCandidates.length === 0}
               aria-label={`Publish ${selectedCandidates.length} selected stories`}
               aria-busy={running}
-              onClick={() => void run(selectedCandidates)}
+              onClick={() => setConfirming(selectedCandidates)}
             >
               {running
                 ? `Publishing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
@@ -1175,7 +1189,7 @@ function PublishAllDrafts({
                 className="btn solid"
                 disabled={running || killing}
                 aria-busy={running}
-                onClick={() => void run(candidates)}
+                onClick={() => setConfirming(candidates)}
               >
                 {running
                   ? `Publishing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
@@ -1324,6 +1338,32 @@ function PublishAllDrafts({
             aria-label="Why these stories are being killed"
           />
         </label>
+      </Dialog>
+
+      <Dialog
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        title="Publish these stories?"
+        subtitle="Each story prints in the section shown beside it."
+        primaryLabel={`Publish ${(confirming ?? []).length} ${
+          (confirming ?? []).length === 1 ? "story" : "stories"
+        }`}
+        primaryDisabled={running || (confirming ?? []).length === 0}
+        onPrimary={() => {
+          const list = confirming ?? [];
+          setConfirming(null);
+          void run(list);
+        }}
+        cancelLabel="Cancel"
+      >
+        <ul>
+          {(confirming ?? []).map((item) => (
+            <li key={item.leadId}>
+              {editorTitle(item.headline)} — {sectionName(item.topic)}
+              {item.warning ? <span className="warn-inline">{item.warning}</span> : null}
+            </li>
+          ))}
+        </ul>
       </Dialog>
     </section>
   );

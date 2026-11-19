@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { Dialog } from "@/components/dialog";
 import { EscapeToCancel } from "@/components/escape-to-cancel";
@@ -52,6 +52,27 @@ function PublishedPage() {
     place -- which keeps the rows already on screen where the reader left them.
   */
   const [pubShown, setPubShown] = useState(PAGE_SIZE);
+  /*
+    Beat memory lives in a closed `<details>` at the foot of the list. The nav's
+    "Beat memory" link and /desk/memory both arrive here with #beat-memory, so
+    the panel opens when that hash is present -- otherwise the anchor pointed at
+    a closed box and the link looked dead.
+  */
+  const locationHash = useLocation({ select: (location) => location.hash });
+  const [beatMemoryOpen, setBeatMemoryOpen] = useState(false);
+  useEffect(() => {
+    if (locationHash === "#beat-memory") setBeatMemoryOpen(true);
+  }, [locationHash]);
+  useEffect(() => {
+    // A direct browser navigation to #beat-memory does not pass through the
+    // router, so the browser's own hash event opens the panel too.
+    const openOnHash = () => {
+      if (window.location.hash === "#beat-memory") setBeatMemoryOpen(true);
+    };
+    openOnHash();
+    window.addEventListener("hashchange", openOnHash);
+    return () => window.removeEventListener("hashchange", openOnHash);
+  }, []);
   /*
     The search box is deferred so a fast typist does not fire a request per
     keystroke: the box keeps up with the typing and the query follows a beat
@@ -1334,7 +1355,11 @@ function PublishedPage() {
         a working feature the drawing does not show, so it stays one press away,
         closed, instead of adding 80 rows (10,000 px) under the list.
       */}
-      <details className="beat-memory">
+      <details
+        className="beat-memory"
+        open={beatMemoryOpen}
+        onToggle={(event) => setBeatMemoryOpen(event.currentTarget.open)}
+      >
         <summary className="astra-note">
           Beat memory ({memory.data?.length ?? 0}) — what the drafting AI is told we already covered
         </summary>

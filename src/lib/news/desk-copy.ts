@@ -87,16 +87,52 @@ export function scanSourceCoverageLine(entries: readonly ScanSourceCoverageEntry
   return `Read ${read} of ${entries.length} · ${skipped} wait their turn · ${blocked} blocked`;
 }
 
+/** The calendar day (as a whole number) a moment falls on, in a time zone. */
+function calendarDayInZone(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return Number.NaN;
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
+}
+
 export function scanSourceCoverageAge(
   lastReadAt: string | null | undefined,
   asOfMs = Date.now(),
+  timeZone: string = PAPER.timezone,
 ): string {
   if (!lastReadAt) return "never read";
   const readAt = Date.parse(lastReadAt);
   if (!Number.isFinite(readAt)) return "read date not recorded";
-  const days = Math.floor(Math.max(0, asOfMs - readAt) / 86_400_000);
+  /*
+    "Today" is the calendar day on the paper's clock, not a count of 24-hour
+    blocks. A 7:06 a.m. read on Nov. 18 is "read today" at 11:30 p.m. but
+    "read 1 day ago" at 12:30 a.m. on Nov. 19, even though only 17 hours have
+    passed.
+  */
+  const readDay = calendarDayInZone(new Date(readAt), timeZone);
+  const today = calendarDayInZone(new Date(asOfMs), timeZone);
+  if (!Number.isFinite(readDay) || !Number.isFinite(today)) return "read date not recorded";
+  const days = Math.max(0, today - readDay);
   if (days === 0) return "read today";
   return `read ${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * Can a browser open this address as a page?
+ *
+ * Registry imports can carry a scheme of their own (`hsds://…`), which no
+ * browser will follow. Those are shown as plain text, not as links.
+ */
+export function isWebAddress(url: string | null | undefined): boolean {
+  return /^https?:\/\//i.test((url ?? "").trim());
 }
 
 export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string {

@@ -24,7 +24,7 @@ import {
   STARTER_ENTRIES,
   checkedOnLabel,
 } from "@/lib/news/registry/starter-list";
-import { evidenceTierLabel } from "@/lib/news/desk-copy";
+import { evidenceTierLabel, isWebAddress } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /**
@@ -751,14 +751,20 @@ function RegistryDeskPage() {
                     </p>
                     {row.sourceUrl ? (
                       <p className="astra-row-meta">
-                        <a
-                          className="inline-link"
-                          href={row.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {row.sourceUrl} ↗
-                        </a>
+                        {isWebAddress(row.sourceUrl) ? (
+                          <a
+                            className="inline-link"
+                            href={row.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {row.sourceUrl} ↗
+                          </a>
+                        ) : (
+                          /* A scheme no browser opens (`hsds://…`) is shown as
+                             the address it is, not as a dead link. */
+                          row.sourceUrl
+                        )}
                       </p>
                     ) : null}
                   </li>

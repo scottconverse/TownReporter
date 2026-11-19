@@ -45,6 +45,14 @@ describe("U24: the desk nav offers the Scan screen", () => {
     assert.equal(navItemIsActive(item("/desk/sources"), "/desk/sources", ""), true);
   });
 
+  it("marks Today only on /desk (F10), including a trailing slash", () => {
+    const today = DESK_NAV.find((item) => item.to === "/desk")!;
+    assert.equal(navItemIsActive(today, "/desk", ""), true);
+    assert.equal(navItemIsActive(today, "/desk/", ""), true);
+    assert.equal(navItemIsActive(today, "/desk/stats", ""), false);
+    assert.equal(navItemIsActive(today, "/desk/stats/", ""), false);
+  });
+
   it("tells Models from Server on their own pages", () => {
     const models = DESK_NAV.find((item) => item.label === "Models")!;
     const server = DESK_NAV.find((item) => item.label === "Server")!;
