@@ -314,7 +314,9 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 **Captured meetings** (bottom of Scan history) lists what meeting capture has saved: the meeting, whether the transcript is from official captions or speech-to-text, whether it was matched to agenda items, and a link **Open the story** when a draft or lead was filed. Setting up capture and **Run meetings now** are on the Server page. A transcript is a map of the tape, not the minutes.
 
-**The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#server-deskops)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads only.
+**The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#server-deskops)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads, and the 14+ drafting rule below then runs on them.
+
+**The paper drafts high-scoring leads by itself.** When a scan finishes, the desk drafts every lead that scores 14 or more (the hot line) and is New or Held. It uses the same Draft path as **Start story**, with the Automatic model pick. Drafting moves a Held lead to Drafted. A Held lead is still never published until you release it. It skips a lead that already has a draft or a draft job, a lead whose draft you stopped, and a lead the scan linked as a possible repeat of a story that was published or killed. A lead linked to a lead that is still open is drafted. A repeat that the scan did not link is not caught. If the draft is refused (for example, no model is set up), the refusal is kept in the lead's notes and the scan still succeeds. This is in the source after 0.6.92 and is not in a release yet.
 
 ---
 
@@ -381,7 +383,7 @@ An AI duplicate never lands in Open. When a linked lead needs your decision, pre
 
 Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
 
-- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away.
+- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in the source after 0.6.92 and is not in a release yet.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
@@ -905,7 +907,7 @@ Nothing is saved until you press **Review changes**, check the summary (names, o
 
 ### Daily scan
 
-Owner only. Turn on **Run once each day**, set the **Local time**, choose the **Writing model** (Automatic by default) and effort, set **Daily priority set** and **Read every day**, and tick the accepted sources you want read first. Every other accepted source is still read by age, never-read first, inside a 90-minute budget. Values outside the usual range warn and offer **Save this schedule anyway**. **Save daily scan**, **Pause daily scan** and **Resume daily scan** control it; the status block shows the next run, the last run, and the model asked for and the model that ran. A usage limit does not pause the schedule; the next day runs and the model call can move on. It pauses itself, with the reason shown, if the timezone is invalid, the owner account changed or the chosen model cannot start. It files leads only. **Open scan history** and **Open the queue** are below.
+Owner only. Turn on **Run once each day**, set the **Local time**, choose the **Writing model** (Automatic by default) and effort, set **Daily priority set** and **Read every day**, and tick the accepted sources you want read first. Every other accepted source is still read by age, never-read first, inside a 90-minute budget. Values outside the usual range warn and offer **Save this schedule anyway**. **Save daily scan**, **Pause daily scan** and **Resume daily scan** control it; the status block shows the next run, the last run, and the model asked for and the model that ran. A usage limit does not pause the schedule; the next day runs and the model call can move on. It pauses itself, with the reason shown, if the timezone is invalid, the owner account changed or the chosen model cannot start. It files leads, and the 14+ drafting rule (see Run a scan) then runs on them. **Open scan history** and **Open the queue** are below.
 
 ### Meeting capture
 
@@ -971,6 +973,8 @@ If the file is wrong, the panel says **The file could not be used:** and names e
 
 An import never overwrites a stored row. When the file says something different, the stored row stays. The difference becomes a pending proposal. The same proposal is not added twice. A status of **unverified**, or no status, is not a change. An import does not bring back a row that an editor removed from an entry.
 
+**Download directory file** is under the import panel, one button for each directory you imported. It saves a JSON file in the same shape the import reads, without the rows an editor removed. It changes nothing in the registry. It is a copy for keeping or for moving a directory to another desk, not a certified HSDS export.
+
 Each past import shows its date, format, and counts: **new**, **unchanged** and **changed for review**. The counts are stored with the import.
 
 ### Review a proposal
@@ -995,7 +999,7 @@ A verification is a check that you made of the entry. Saving or publishing an en
 
 1. Press **All details** on the entry. **Verification** is at the top, above the service fields.
 2. Under **How you checked**, choose **By phone**, **On its website**, **In person**, **By email**, **From a document** or **Confirmed by the organization**.
-3. Under **What you checked**, write what you checked and where you saw it. This is required. It stays on the desk. Readers do not see it.
+3. Under **What you checked**, write what you checked and where you saw it. This is required, up to 2000 characters. It stays on the desk. Readers do not see it.
 4. Under **Source link**, add a web address that starts with `https://` or `http://`. This is optional.
 5. Press **Record verification**. The page says **Verification recorded.** If a line is wrong, the page says **Nothing was recorded.** and marks the line.
 
@@ -1061,7 +1065,7 @@ A removal is a marker. Nothing is deleted. Contacts, places, hours and languages
 
 Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
 
-Not yet: review of the proposals that imports and the scan make, and a public search and feed.
+The public search, the page for each service and the read-only JSON feed at `/api/registry/v1` are in the source after 0.6.92. They are not in a release yet. See [the API reference](navigator/registry-api.md).
 
 ---
 

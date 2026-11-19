@@ -99,8 +99,8 @@ operator.
 ## Google Gemini
 
 Google's Gemini API provides an OpenAI-compatible endpoint. Create the key in
-Google AI Studio, then enter it only in TownReporter's authenticated **Server →
-Add your own AI API** form:
+Google AI Studio, then enter it only in TownReporter's authenticated **Models** →
+**Connections** → **Add your own AI API** form:
 
 | Field           | Value                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------- |
