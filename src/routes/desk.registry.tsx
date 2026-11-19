@@ -624,7 +624,11 @@ function RegistryDeskPage() {
             <SecHead
               title="Detected changes"
               count={changes.length}
-              sub="One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
+              sub={
+                changes.some((c) => c.appliedAt != null)
+                  ? "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
+                  : "One row per change the scan proposed. Nothing here has been applied to the directory."
+              }
             />
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">

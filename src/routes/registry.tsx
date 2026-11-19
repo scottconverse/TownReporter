@@ -163,7 +163,7 @@ function RegistryPage() {
                             }`
                           : entry.lastVerifiedAt
                             ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
-                            : "Not verified yet."}
+                            : "Not verified yet"}
                       </li>
                     </ul>
                   </section>

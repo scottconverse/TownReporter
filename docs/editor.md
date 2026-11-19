@@ -1021,7 +1021,7 @@ Each row names the organization and the service, gives the reason, and shows **L
 
 - A check reads `Verified <date> (by phone)`, with the way it was made. The basis is never shown.
 - An entry whose only date was set by a save or a publish reads `Last updated <date>. Not verified yet.`
-- An entry with no check and no such date reads `Not verified yet.`
+- An entry with no check and no such date reads `Not verified yet`.
 
 ### Legacy dates
 

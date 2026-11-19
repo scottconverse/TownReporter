@@ -56,7 +56,7 @@ export function InkButton({ children, onClick, disabled, pending, pendingLabel, 
     pending && pendingLabel ? pendingLabel : children);
 }
 export function DeskShell({ children }) { return h("div", null, children); }
-export function SecHead({ title }) { return h("h2", null, title); }
+export function SecHead({ title, sub }) { return h("div", { "data-sec": title }, h("h2", null, title), sub ? h("p", null, sub) : null); }
 `);
 const reviewServerUrl = stubUrl(`
 export async function acceptRegistryChange({ data }) {
@@ -529,6 +529,36 @@ test("filtered to waiting, the only row accepted: the list empties and the statu
   assert.ok(status, "the status line is still on the page");
   assert.equal(status.textContent, "Accepted and applied.");
   assert.ok(document.activeElement === status, `focus should be on the status line; it is on ${focusedAs()}`);
+});
+
+test("Detected changes says nothing was applied only when no change in the list has been applied", async (t) => {
+  const detectedSub = (page) => page.container.querySelector('[data-sec="Detected changes"] p')?.textContent;
+  setup();
+  globalThis.__desk.data = desk([change({ id: 5 })]);
+  const none = await mount(React.createElement(DeskPage));
+  t.after(() => none.close());
+  assert.equal(
+    detectedSub(none),
+    "One row per change the scan proposed. Nothing here has been applied to the directory.",
+  );
+
+  setup();
+  globalThis.__desk.data = desk([
+    change({ id: 5 }),
+    change({
+      id: 6,
+      reviewState: "accepted",
+      reviewedBy: "Pat Editor",
+      reviewedAt: "2026-11-18T12:00:00Z",
+      appliedAt: "2026-11-18T12:00:00Z",
+    }),
+  ]);
+  const applied = await mount(React.createElement(DeskPage));
+  t.after(() => applied.close());
+  assert.equal(
+    detectedSub(applied),
+    "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory.",
+  );
 });
 
 /* ---- Verify form and history ---- */

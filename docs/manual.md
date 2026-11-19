@@ -973,7 +973,7 @@ The desk’s review, verification and needs-checking work is set out step by ste
 - **Detected changes:** each waiting change has **Accept and apply**, **Accept without applying** and **Reject**, with an optional note. **Accept and apply** is refused, and nothing changes, when the entry no longer holds the value the proposal was made against, or when the proposal points at no live row.
 - **Verification**, in **All details:** an editor records how an entry was checked, what was checked (desk only) and an optional source link. The check keeps a snapshot of the key facts, and **Changed since verified** lists what has changed since. A save or a publish never records a check.
 - **Needs checking:** published entries that were never checked, were last checked more than 180 days ago, or changed since their last check.
-- **`/registry`:** a check reads `Verified <date> (by phone)`. An entry with only a save or publish date reads `Last updated <date>. Not verified yet.` Otherwise it reads `Not verified yet.`
+- **`/registry`:** a check reads `Verified <date> (by phone)`. An entry with only a save or publish date reads `Last updated <date>. Not verified yet.` Otherwise it reads `Not verified yet`.
 - Each accept, reject, verify, publish and take down writes one audit record. An import does not propose again a change that an editor already accepted or rejected.
 
 ---
