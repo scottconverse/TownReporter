@@ -13,10 +13,23 @@ Current software version: **0.6.92** (released 2026-11-15). Publication state is
 
 ### Desk
 
+- **Leads that score 14 or more are drafted automatically.** After a scan files or re-scores leads, the desk queues a draft for each lead that scores 14 or more, has no draft and has no draft job running. It uses the same path as the **Draft** button, with the model on Automatic. A lead whose draft the editor stopped is not drafted again. A refusal is written on the lead's notes. A failure on one lead does not stop the others or fail the scan (#400). (#405 and #406 changed which leads it takes.)
+- **Select stories to draft, publish or kill in bulk.** The Queue's batch draft takes any number of ticked leads; the limit of five is gone. On Drafts, each row has a tick box, with **Select all shown**, **Publish N selected** and **Kill N selected**. A bulk kill takes one optional reason. After it, one line reads **Killed N stories. Undo**, and **Undo** puts every story back where it was. Running and failed drafts can be killed but are never published in the batch. The kill note is small and shows for 3 seconds (#401).
+- **Publish all drafts also takes drafts that need you.** **Publish all drafts (N)** now shows when the desk holds only **Needs you** drafts with a finished body, for example **Not checked yet**. Running, failed and empty drafts never qualify (#399).
+- **Publish is one press.** **Publish all drafts** and **Publish N selected** publish on one press, with no confirm box. The press accepts each soft warning, and each warning is still recorded on the story. A hard refusal (no headline, no body) still stops that story and names it in **Not published**. The button counts up, for example **Publishing 2 of 5…**. The Queue and Drafts numbers in the desk menu refresh every 15 seconds (every 5 seconds during a scan). The menu no longer loads every lead to count the Queue (#402).
 - **The 14+ auto-draft rule drafts held leads too.** A lead that scores 14 or more is drafted when it is **held**, as well as when it is new. Drafting moves a held lead to drafted. Publish still refuses a lead that an editor has not un-held (#405).
 - **The 14+ auto-draft skips repeats of stories that ran or were killed.** A lead that the scan linked as a possible repeat of a published or killed lead is not drafted. A lead linked to a lead that is still open (new, held or drafted) is still drafted. Known limit: a repeat that the scan did not link is not caught (#406).
 - **Start N stories on the Queue drafts every ticked lead.** Before, **Start** drafted only the ticked leads still on screen, and dropped the others with no message. Now it drafts all of them. When some ticked leads are not on screen, the bar says how many, and that Start still drafts them. **Hold**, **Kill** and **Delete** still act only on the rows on screen (#407).
 - **Drafts no longer lock the job list for a long time.** A draft job used to write its evidence chunks one row at a time while it held its job row locked. On Nov 18 one job held that lock for 24 minutes and slowed the site. Now the chunks are written after the job's lock is released, in batches of 200. A failed chunk write is logged and the draft goes on. The background vector fill now takes 2,000 rows per pass (was 20,000) (#408).
+
+### Speed
+
+- **The Queue loads faster.** The **≈ Printed** check compares every lead with every printed story. It now works out each headline's words and names once, not once for each pair. No rule changed (#398).
+- **The meaning-search fill no longer reads the whole evidence table every minute.** Each pass reads the next window of rows by id, so new rows are still found. This made the desk and the nightly backup slow before (#403). (#408 made the window 2,000 rows.)
+
+### Front page
+
+- **Around the region.** When no area button is pressed, the front page shows a band **Around the region** below **Latest stories**. It holds the 6 newest published stories from outside the home town, each marked **Nearby**, **Boulder County** or **Colorado**. Opinion and routine roundups stay out of it (#404).
 
 ## 0.6.92 — 2026-11-15
 
