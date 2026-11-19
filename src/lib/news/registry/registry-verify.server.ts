@@ -12,8 +12,10 @@
  * required documents. Descriptions, notes, languages and accessibility are not
  * key facts, so a spelling change in a description is not a changed fact. A row
  * an editor removed (`removed_at` set) is not part of the facts. Only what the
- * public page can show counts: a row that is not published, and a place that is
- * not published and active, are not facts until they are.
+ * public page can show counts for phones, places and hours: a row that is not
+ * published, and a place that is not published and active, are not facts until
+ * they are. Eligibility and required documents count while they are not removed,
+ * published or not, because the public page does not show them.
  */
 
 import { withTransaction, type Sql } from "../../db.ts";
@@ -36,10 +38,13 @@ const NOT_IN_NEWSROOM = "That entry is not in this newsroom. Nothing was changed
 /** The one changed-fact name when a stored check cannot be read as a snapshot. */
 const UNREADABLE_CHECK = "saved check could not be read";
 /**
- * Characters a reader cannot see that change how text runs: zero-width and
- * invisible format characters, and the bidi controls. Line breaks are not here.
+ * Characters a reader cannot see that change how text runs: the zero-width
+ * space, the direction marks and bidi controls, invisible operators, the byte
+ * order mark. The zero-width joiner and non-joiner are not here: Persian, Urdu
+ * and Indic scripts need the non-joiner, and emoji sequences need the joiner.
+ * Line breaks are not here either.
  */
-const HIDDEN_CHARACTER = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
+const HIDDEN_CHARACTER = /[\u200B\u200E\u200F\u061C\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
 
 type When = string | Date | null;
 
@@ -202,6 +207,8 @@ export async function readKeyFacts(
     }),
   );
 
+  // A link counts only when its place is shown. A schedule of this service that
+  // is linked only to a hidden place stays service-wide, as on the public page.
   const scheduleRows = await sql.query<{
     location_id: number | null;
     by_appointment: boolean;
@@ -217,11 +224,12 @@ export async function readKeyFacts(
            from service_at_locations
           where newsroom_id = $1 and service_id = $2
             and removed_at is null and published = true and schedule_id is not null
+            and location_id = any($3::int[])
           group by schedule_id
        ) ref on ref.schedule_id = sch.id
       where sch.newsroom_id = $1 and sch.published = true and sch.removed_at is null
         and (sch.service_id = $2 or ref.schedule_id is not null)`,
-    [newsroomId, serviceId],
+    [newsroomId, serviceId, placeIds],
   );
   const hours: KeyHours[] = stableSorted(
     scheduleRows
@@ -232,13 +240,15 @@ export async function readKeyFacts(
         opensAt: clean(row.opens_at),
         closesAt: clean(row.closes_at),
       }))
-      // Hours at a place the entry is no longer linked to are not live.
+      // Hours tied to a place that is not shown here are not live under it.
       .filter((row) => row.placeId == null || placeIds.includes(row.placeId)),
   );
 
+  // Eligibility and required documents are not gated on published: the public
+  // page does not read them, and an imported or added row starts unpublished.
   const eligibilityRows = await sql.query<{ description: string | null; criteria: unknown }>(
     `select description, criteria from eligibilities
-      where newsroom_id = $1 and service_id = $2 and published = true and removed_at is null`,
+      where newsroom_id = $1 and service_id = $2 and removed_at is null`,
     [newsroomId, serviceId],
   );
   const eligibility = stableSorted(
@@ -252,7 +262,7 @@ export async function readKeyFacts(
 
   const documentRows = await sql.query<{ document: string; required: boolean }>(
     `select document, required from required_documents
-      where newsroom_id = $1 and service_id = $2 and published = true and removed_at is null`,
+      where newsroom_id = $1 and service_id = $2 and removed_at is null`,
     [newsroomId, serviceId],
   );
   const requiredDocuments = stableSorted(

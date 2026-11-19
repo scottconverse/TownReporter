@@ -540,7 +540,7 @@ test("key facts leave out unpublished phones: a change to one is listed only onc
   );
 });
 
-test("key facts leave out unpublished places, hours, eligibility and documents", async () => {
+test("key facts leave out unpublished places and hours", async () => {
   const sql = await getSql();
   const s = await seed(9812);
   const back = await one(
@@ -560,29 +560,13 @@ test("key facts leave out unpublished places, hours, eligibility and documents",
      values ($1, 'sch-off', $2, 'Sat', '10:00', '12:00', false) returning id`,
     [s.n, s.svc],
   );
-  const offEligibility = await one(
-    sql,
-    `insert into eligibilities (newsroom_id, hsds_id, service_id, description, published)
-     values ($1, 'el-off', $2, 'Seniors only', false) returning id`,
-    [s.n, s.svc],
-  );
-  const offDocument = await one(
-    sql,
-    `insert into required_documents (newsroom_id, hsds_id, service_id, document, published)
-     values ($1, 'doc-off', $2, 'Lease', false) returning id`,
-    [s.n, s.svc],
-  );
   await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc));
   const facts = await readKeyFacts(sql, s.n, s.svc);
   assert.deepEqual(facts.places.map((p) => p.name), ["Main Street office"]);
   assert.deepEqual(facts.hours.map((h) => h.days), ["Mon-Fri"]);
-  assert.deepEqual(facts.eligibility.map((e) => e.description), ["Longmont residents"]);
-  assert.deepEqual(facts.requiredDocuments, [{ document: "Photo ID", required: true }]);
 
   await sql.query("update locations set name = 'Back room 2' where id = $1", [back]);
   await sql.query("update schedules set days = 'Sun' where id = $1", [offHours]);
-  await sql.query("update eligibilities set description = 'Seniors and kids' where id = $1", [offEligibility]);
-  await sql.query("update required_documents set document = 'Lease copy' where id = $1", [offDocument]);
   assert.deepEqual(
     (await readVerificationIn(sql, s.n, s.svc)).changedFacts,
     [],
@@ -591,14 +575,32 @@ test("key facts leave out unpublished places, hours, eligibility and documents",
 
   await sql.query("update locations set published = true where id = $1", [back]);
   await sql.query("update schedules set published = true where id = $1", [offHours]);
-  await sql.query("update eligibilities set published = true where id = $1", [offEligibility]);
-  await sql.query("update required_documents set published = true where id = $1", [offDocument]);
   assert.deepEqual((await readVerificationIn(sql, s.n, s.svc)).changedFacts, [
     "place Back room 2",
     "hours",
-    "eligibility",
-    "required documents",
   ]);
+});
+
+test("key facts count eligibility and required documents even when not published yet", async () => {
+  const sql = await getSql();
+  const s = await seed(9818);
+  await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc));
+  // A newly imported or added row starts unpublished; the public page does not
+  // show these, but they are key facts while they are not removed.
+  await sql.query(
+    `insert into eligibilities (newsroom_id, hsds_id, service_id, description, published)
+     values ($1, 'el-new', $2, 'Seniors only', false)`,
+    [s.n, s.svc],
+  );
+  await sql.query(
+    `insert into required_documents (newsroom_id, hsds_id, service_id, document, published)
+     values ($1, 'doc-new', $2, 'Lease', false)`,
+    [s.n, s.svc],
+  );
+  assert.deepEqual(
+    (await readVerificationIn(sql, s.n, s.svc)).changedFacts,
+    ["eligibility", "required documents"],
+  );
 });
 
 test("a saved check that is not a version 1 snapshot is listed as changed and does not throw", async () => {
@@ -677,7 +679,8 @@ test("a source address is at most 2000 characters and carries no user name or pa
 test("a basis with a hidden or direction character is refused; a line break is allowed", async () => {
   const sql = await getSql();
   const s = await seed(9817);
-  const hidden = [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0xfeff];
+  // U+200C and U+200D are allowed (see the next test), so they are not listed here.
+  const hidden = [0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0xfeff];
   for (const code of hidden) {
     const basis = `Called the desk${String.fromCharCode(code)} and heard the hours.`;
     const result = await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { basis }));
@@ -689,4 +692,99 @@ test("a basis with a hidden or direction character is refused; a line break is a
     sql, s.n, "ed-1", verifyInput(s.svc, { basis: "Called the desk.\nHeard the hours.\r\nThanks." }),
   );
   assert.equal(line.ok, true, "a line break is allowed");
+});
+
+test("a basis with a joiner, a non-joiner or accented letters is accepted", async () => {
+  const sql = await getSql();
+  const s = await seed(9821);
+  const accepted = [
+    // A zero-width joiner inside an emoji sequence (woman technologist).
+    "Checked the phone line \u{1F469}\u200D\u{1F4BB} at the desk.",
+    // A zero-width non-joiner inside a Persian word (mi-khaham, "I want").
+    "Persian word \u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 in the notes.",
+    "Caf\u00E9 hours, r\u00E9sum\u00E9 desk, na\u00EFve notes.",
+    "Line one.\nLine two.",
+  ];
+  for (const basis of accepted) {
+    const result = await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { basis }));
+    assert.equal(result.ok, true, JSON.stringify(basis));
+  }
+});
+
+test("key facts count hours linked only to a hidden place as service-wide, as the public page does", async () => {
+  const sql = await getSql();
+  const s = await seed(9819);
+  const hiddenPlace = await one(
+    sql,
+    `insert into locations (newsroom_id, hsds_id, organization_id, name, address_1, city, status, published)
+     values ($1, 'loc-hidden', $2, 'Closed annex', '5 Pine St', 'Longmont', 'active', false) returning id`,
+    [s.n, s.org],
+  );
+  const serviceHours = await one(
+    sql,
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-svc', $2, 'Sat', '10:00', '12:00', true) returning id`,
+    [s.n, s.svc],
+  );
+  await sql.query(
+    `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, schedule_id, published)
+     values ($1, 'sal-hidden', $2, $3, $4, true)`,
+    [s.n, s.svc, hiddenPlace, serviceHours],
+  );
+
+  // The public page shows these hours service-wide, because the place is hidden.
+  const entry = (await listPublicRegistry(sql, s.n)).entries.find((e) => e.serviceId === s.svc)!;
+  assert.deepEqual(entry.serviceHours, ["Sat, 10:00\u201312:00"]);
+  const facts = await readKeyFacts(sql, s.n, s.svc);
+  assert.deepEqual(
+    facts.hours.filter((h) => h.days === "Sat").map((h) => h.placeId),
+    [null],
+  );
+
+  await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc));
+  await sql.query("update schedules set closes_at = '13:00' where id = $1", [serviceHours]);
+  assert.deepEqual((await readVerificationIn(sql, s.n, s.svc)).changedFacts, ["hours"]);
+});
+
+test("hours linked to a hidden place and to a shown place sit under the shown place only", async () => {
+  const sql = await getSql();
+  const s = await seed(9820);
+  // The hidden place is created first, so it has the lower id.
+  const hiddenPlace = await one(
+    sql,
+    `insert into locations (newsroom_id, hsds_id, organization_id, name, address_1, city, status, published)
+     values ($1, 'loc-hidden-2', $2, 'Closed annex', '5 Pine St', 'Longmont', 'active', false) returning id`,
+    [s.n, s.org],
+  );
+  const shownPlace = await one(
+    sql,
+    `insert into locations (newsroom_id, hsds_id, organization_id, name, address_1, city, status, published)
+     values ($1, 'loc-shown-2', $2, 'Side door', '7 Oak St', 'Longmont', 'active', true) returning id`,
+    [s.n, s.org],
+  );
+  const schedule = await one(
+    sql,
+    `insert into schedules (newsroom_id, hsds_id, service_id, days, opens_at, closes_at, published)
+     values ($1, 'sch-two', $2, 'Sun', '11:00', '14:00', true) returning id`,
+    [s.n, s.svc],
+  );
+  for (const [hsds, place] of [
+    ["sal-two-hidden", hiddenPlace],
+    ["sal-two-shown", shownPlace],
+  ] as const) {
+    await sql.query(
+      `insert into service_at_locations (newsroom_id, hsds_id, service_id, location_id, schedule_id, published)
+       values ($1, $2, $3, $4, $5, true)`,
+      [s.n, hsds, s.svc, place, schedule],
+    );
+  }
+
+  const facts = await readKeyFacts(sql, s.n, s.svc);
+  assert.deepEqual(
+    facts.hours.filter((h) => h.days === "Sun").map((h) => h.placeId),
+    [shownPlace],
+  );
+  const entry = (await listPublicRegistry(sql, s.n)).entries.find((e) => e.serviceId === s.svc)!;
+  assert.deepEqual(entry.serviceHours, [], "not service-wide");
+  assert.deepEqual(entry.locations.find((l) => l.locationId === shownPlace)!.hours, ["Sun, 11:00\u201314:00"]);
 });
