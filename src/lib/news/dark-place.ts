@@ -5,10 +5,21 @@ export const LONGMONT_PLACE: NewsroomPlace = {
   state: "Colorado",
   county: "Boulder",
 };
-export function isLongmont(place: NewsroomPlace): boolean {
+/**
+ * Whether this place is the shipped Longmont, Colorado paper.
+ *
+ * A caller may hold a paper identity with no geography at all -- a paper that
+ * has not been through first-run setup, or a context whose city/state have not
+ * arrived -- so a missing field reads as the empty string rather than throwing
+ * on `.trim()`.
+ */
+export function isLongmont(place: {
+  city?: string | null;
+  state?: string | null;
+}): boolean {
   return (
-    place.city.trim().toLowerCase() === "longmont" &&
-    ["colorado", "co"].includes(place.state.trim().toLowerCase())
+    String(place?.city ?? "").trim().toLowerCase() === "longmont" &&
+    ["colorado", "co"].includes(String(place?.state ?? "").trim().toLowerCase())
   );
 }
 export function subredditFromSources(urls: string[]): string | null {

@@ -344,6 +344,9 @@ const darkPlaceUrl = await load("src/lib/news/dark-place.ts");
 const routineSourceLimitUrl = await load("src/lib/news/routine-notice-source-limit.ts");
 const storyAreaUrl = await load("src/lib/story-area.ts", {
   "./news/dark-place.ts": darkPlaceUrl,
+  // F01 (live walk 2026-11-19): story-area.ts asks out-of-state.ts whether a
+  // story belongs to another state. It imports nothing, so the real file loads.
+  "./news/out-of-state.ts": await load("src/lib/news/out-of-state.ts"),
 });
 const requestInputUrl = await load("src/lib/news/request-input.ts", {
   "zod": import.meta.resolve("zod"),
