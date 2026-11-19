@@ -226,6 +226,8 @@ test("bad parameters give 400 bad_parameter in the error envelope", async () => 
     "/services?category=0",
     `/services?q=${"a".repeat(201)}`,
     `/services?language=${"a".repeat(101)}`,
+    "/services?q=%00",
+    "/services?language=%00",
     "/services/abc",
     "/services/1.5",
   ];

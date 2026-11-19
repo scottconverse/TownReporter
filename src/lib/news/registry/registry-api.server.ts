@@ -183,6 +183,12 @@ export async function registryApiHandler(
   }
 
   if (rest === "/services") {
+    // A NUL byte cannot be stored in text; reject it here, not as a 503 later.
+    for (const name of ["q", "language"]) {
+      if ((params.get(name) ?? "").includes("\u0000")) {
+        return bad(`${name} must not contain a null character.`);
+      }
+    }
     const q = (params.get("q") ?? "").trim();
     if (q.length > PUBLIC_REGISTRY_MAX_Q) {
       return bad(`q must be at most ${PUBLIC_REGISTRY_MAX_Q} characters.`);

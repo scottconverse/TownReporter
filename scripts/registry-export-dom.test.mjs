@@ -131,7 +131,9 @@ test("a directory file is downloaded and the status says so", async (t) => {
   assert.equal(saved.blobs[0].type, "application/json");
   assert.equal(saved.downloads.length, 1);
   assert.equal(saved.downloads[0].name, "directory-county-211-2026-11-18.json");
-  assert.deepEqual(saved.revoked, ["blob:test/1"], "the object URL is let go");
+  assert.deepEqual(saved.revoked, [], "the object URL is not revoked in the click's own tick");
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.deepEqual(saved.revoked, ["blob:test/1"], "the object URL is let go afterward");
   assert.equal(page.status().textContent, "Downloaded directory-county-211-2026-11-18.json.");
   assert.equal(page.status().getAttribute("role"), "status");
   assert.ok(page.status().className.includes("text-base"));

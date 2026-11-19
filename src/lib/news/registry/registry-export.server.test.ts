@@ -171,6 +171,51 @@ test("an export imported back into the same newsroom and directory adds nothing"
   assert.equal(beforeCounts.resource_changes, 0);
 });
 
+test("an export imported back gives no proposal when a link's schedule was removed", async () => {
+  const sql = await getSql();
+  const newsroomId = 9809;
+  await importInto(newsroomId);
+  // The fixture's links carry no schedule, so link one to a schedule first.
+  const [link] = await sql.query<{ id: number; schedule_id: number }>(
+    `update service_at_locations
+        set schedule_id = (select id from schedules where newsroom_id = $1 order by id limit 1)
+      where id = (select id from service_at_locations where newsroom_id = $1 order by id limit 1)
+      returning id, schedule_id`,
+    [newsroomId],
+  );
+  assert.ok(link?.schedule_id, "a link now has a schedule");
+  const [schedule] = await sql.query<{ hsds_id: string }>(
+    "select hsds_id from schedules where id = $1",
+    [link.schedule_id],
+  );
+  await sql.query("update schedules set removed_at = now() where id = $1", [link.schedule_id]);
+
+  const beforeCounts = await counts(newsroomId);
+  const { json, bundle } = await exportBundle(newsroomId);
+  assert.equal(ids(bundle).has(schedule!.hsds_id), false, "the removed schedule is not in the file");
+
+  const result = await runHsdsImportIn(sql, newsroomId, { json, directoryName: DIRECTORY }, "tester");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.summary.conflicts, []);
+  for (const [table, c] of Object.entries(result.summary.tables)) {
+    assert.equal(c.inserted, 0, `${table} inserted`);
+    assert.equal(c.changed, 0, `${table} changed`);
+  }
+  assert.deepEqual(await counts(newsroomId), beforeCounts);
+  assert.equal(beforeCounts.resource_changes, 0);
+
+  // The link still points at the removed schedule, and restoring it works.
+  const [after] = await sql.query<{ schedule_id: number }>(
+    "select schedule_id from service_at_locations where id = $1",
+    [link.id],
+  );
+  assert.equal(Number(after!.schedule_id), Number(link.schedule_id));
+  await sql.query("update schedules set removed_at = null where id = $1", [link.schedule_id]);
+  const restored = await exportBundle(newsroomId);
+  assert.equal(ids(restored.bundle).has(schedule!.hsds_id), true);
+});
+
 test("an export imported into an empty newsroom keeps every field the importer needs", async () => {
   const source = 9804;
   const target = 9805;

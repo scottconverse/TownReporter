@@ -816,9 +816,16 @@ export async function readPublicRegistrySearch(
   newsroomId: number,
   input: PublicRegistrySearchInput,
 ): Promise<PublicRegistrySearchResult> {
+  // A NUL byte cannot be stored in text, so the database would refuse it and
+  // the page would say "unavailable". Drop it; the rest of the text still searches.
+  const clean = {
+    ...input,
+    q: input.q?.replaceAll("\u0000", ""),
+    language: input.language?.replaceAll("\u0000", ""),
+  };
   try {
     const sql = await getSql();
-    const found = await searchPublicRegistry(sql, newsroomId, input);
+    const found = await searchPublicRegistry(sql, newsroomId, clean);
     const categories = await listPublicRegistryCategories(sql, newsroomId);
     const languages = await listPublicRegistryLanguages(sql, newsroomId);
     return { status: "ok", categories, languages, ...found };

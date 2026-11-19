@@ -51,9 +51,9 @@ export const searchPublicRegistryPage = createServerFn({ method: "GET" })
   .validator((input: unknown) => {
     const raw = (input ?? {}) as Record<string, unknown>;
     return {
-      q: typeof raw.q === "string" ? raw.q.trim().slice(0, MAX_Q) : "",
+      q: typeof raw.q === "string" ? raw.q.replaceAll("\u0000", "").trim().slice(0, MAX_Q) : "",
       category: wholeNumber(raw.category),
-      language: typeof raw.language === "string" ? raw.language.trim().slice(0, 100) : "",
+      language: typeof raw.language === "string" ? raw.language.replaceAll("\u0000", "").trim().slice(0, 100) : "",
       page: wholeNumber(raw.page) ?? 1,
     };
   })

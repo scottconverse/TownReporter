@@ -19,6 +19,9 @@ type Status = { kind: "done" | "failed"; text: string; count: number };
 /** Hand the text to the browser as a file, then let go of the object URL. */
 function saveTextFile(fileName: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  // The revoke waits a moment: some browsers cancel a download whose URL is
+  // revoked in the same tick as the click.
+  const revoke = () => setTimeout(() => URL.revokeObjectURL(url), 1000);
   try {
     const link = document.createElement("a");
     link.href = url;
@@ -27,7 +30,7 @@ function saveTextFile(fileName: string, text: string) {
     link.click();
     link.remove();
   } finally {
-    URL.revokeObjectURL(url);
+    revoke();
   }
 }
 

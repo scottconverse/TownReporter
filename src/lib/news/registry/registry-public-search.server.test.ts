@@ -363,3 +363,12 @@ test("an unpublished service's eligibility is never read, in a search or a detai
   assert.equal(JSON.stringify(page.entries).includes("Secret draft"), false);
   assert.equal(await getPublicRegistryService(sql, room, id), null);
 });
+
+test("a null character in q or language is dropped, not reported as unavailable", async () => {
+  const sql = await getSql();
+  const result = await readPublicRegistrySearch(async () => sql, 9609, {
+    q: "shel\u0000ter",
+    language: "\u0000",
+  });
+  assert.equal(result.status, "ok");
+});
