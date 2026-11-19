@@ -91,7 +91,7 @@ The desk can save one directory as a JSON file. The button is **Download directo
 
 - **Who can use it:** a signed-in owner or editor of the newsroom. Others are refused.
 - **What the file holds:** the directory in the shape the import reads (see "What the file must be"). It holds every row of the directory, published or not, except the rows an editor removed. Removed rows are left out.
-- **The file name:** `directory-<name>-<date>.json`. The name is the directory name in lower case, with only letters, digits and hyphens, up to 80 characters. The date is the day of the download, in UTC. For example: `directory-example-hsds-directory-2026-11-18.json`.
+- **The file name:** `directory-<name>-<date>.json`. The name is the directory name in lower case, with only letters, digits and hyphens, up to 80 characters. The date is the day of the download, by the server's own clock and time zone. For example: `directory-example-hsds-directory-2026-11-18.json`.
 - **Nothing changes.** Downloading writes nothing to the registry and publishes nothing.
 - **If it fails.** A directory with no rows in this newsroom gives **That directory is not in this newsroom. Nothing was changed.** A file that cannot be made gives **The file could not be made. Nothing was changed.**
 

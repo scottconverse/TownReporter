@@ -35,5 +35,8 @@ proposal is not added twice. The desk lists these under **Detected changes**.
 An editor accepts or rejects each one. See [hsds-import.md](hsds-import.md#review-a-proposal).
 
 Phase 1 covers the registry tables and the HSDS import. Change detection here
-is the stored design and the review-lane table; the scan pipeline that fills
-it is Phase 2.
+is the stored design and the review-lane table. The scan step that fills the
+table is in the code (`commitScanResourceChanges` in
+`src/lib/news/registry/scan-changes.server.ts`, called from the daily scan in
+`src/lib/news/desk.ts`). The editor decides each proposal as
+[hsds-import.md](hsds-import.md#review-a-proposal) describes.
