@@ -10,6 +10,7 @@ import { formatAge, parseUrlList } from "@/lib/paper";
 import {
   HOME_OR_LIST_SOURCE_WARNING,
   homeOrListSourceUrls,
+  onlyHomeOrListSourceUrls,
 } from "../lib/news/lead-source-page.ts";
 /* A relative import for the same reason as `lead-source-page.ts` above: the
    render harness resolves only the relative specifiers it maps. */
@@ -922,7 +923,8 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
     row's own stored URLs, so leads filed before this check existed are marked
     too. Warn, never block: no status, no gate, nothing refused.
   */
-  const listPageSources = homeOrListSourceUrls(parseUrlList(lead.source_urls));
+  const leadSourceUrls = parseUrlList(lead.source_urls);
+  const listPageSources = homeOrListSourceUrls(leadSourceUrls);
   return (
     <div className="lead-flags">
       <Chip s={lead.status} />
@@ -940,7 +942,13 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           Section not chosen — pick one
         </span>
       ) : null}
-      {listPageSources.length > 0 ? (
+      {/*
+        G26-HP-2: the chip is about a lead with NO story page to open. Once the
+        row carries the story's own link beside the list page, the editor can
+        check the story, so the chip is not shown -- the list page stays on the
+        row and in the hover list below.
+      */}
+      {onlyHomeOrListSourceUrls(leadSourceUrls) && listPageSources.length > 0 ? (
         <span
           className="chip source-home"
           title={`${HOME_OR_LIST_SOURCE_WARNING}: ${listPageSources.join(" ")} — the link is kept on the lead; open the story's own page before you rely on it.`}

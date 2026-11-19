@@ -1676,6 +1676,21 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.doesNotMatch(prompt, /"newsworthiness": \d/);
   });
 
+  it("G26-HP-2: tells the scan to cite the story's own page, not only a list page", () => {
+    const prompt = buildScanUserMessage({
+      city: "Longmont",
+      state: "CO",
+      reread: false,
+      memory: [],
+      payload: "source text",
+    });
+    assert.match(
+      prompt,
+      /cite the story's own page for it, not only the list page/i,
+      "the model is told to cite the story page",
+    );
+  });
+
   it("keeps a selected section's brief while requiring quoted local evidence", () => {
     const prompt = buildScanUserMessage({
       city: "Longmont",

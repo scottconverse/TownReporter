@@ -592,9 +592,17 @@ export function looksLikeArticlePath(pathname: string): boolean {
   return /[-_]/.test(last) || /\d{4}/.test(path) || last.length >= 24;
 }
 
-/** Same-host article URLs on a listing page — not PDFs, not section indexes. */
-export function discoverStoryLinks(html: string, base: URL): string[] {
-  const out: string[] = [];
+/**
+ * Same-host article links on a listing page, each with the words the page
+ * printed for it (the anchor text, tags stripped). The URL alone is enough to
+ * follow a link; the title is what lets filing recognise which story on a
+ * front page a lead is about (`storyUrlForListSource`, ./lead-source-page.ts).
+ */
+export function discoverStoryLinkEntries(
+  html: string,
+  base: URL,
+): { url: string; title: string }[] {
+  const out: { url: string; title: string }[] = [];
   const seen = new Set<string>();
   const re = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   const searchHtml = stripNavigationBlocks(html);
@@ -611,12 +619,22 @@ export function discoverStoryLinks(html: string, base: URL): string[] {
       const key = `${abs.origin}${abs.pathname}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(abs.toString());
+      const title = m[2]!
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 300);
+      out.push({ url: abs.toString(), title });
     } catch {
       /* skip */
     }
   }
   return out;
+}
+
+/** Same-host article URLs on a listing page — not PDFs, not section indexes. */
+export function discoverStoryLinks(html: string, base: URL): string[] {
+  return discoverStoryLinkEntries(html, base).map((entry) => entry.url);
 }
 
 export type PageExtraCandidates = {
@@ -739,6 +757,13 @@ export type IngestResult = {
   text: string;
   titleHint: string;
   extras: string[];
+  /**
+   * The article links this page carried, with the words the page printed for
+   * each (see discoverStoryLinkEntries). Filing uses them to put a lead's own
+   * story page on `source_urls` when the model cited only the list page it was
+   * on. Taken from the HTML already in hand -- never a second fetch.
+   */
+  storyLinks?: { url: string; title: string }[];
   /**
    * The WHOLE page as text, before article extraction — header, footer and
    * address included. `text` is the article body, which is the right thing to
@@ -1252,6 +1277,7 @@ async function readRefusedPublicPage(
         text: article.text.slice(0, 14000),
         titleHint: article.title || page.title || url.hostname,
         extras: mergePageExtras(page.html, base),
+        storyLinks: discoverStoryLinkEntries(page.html, base),
         notices: extractSiteNotices(page.html),
         method: "playwright",
         outcome: "fetched",
@@ -1424,6 +1450,7 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
     text,
     titleHint: extracted.title || titleHint,
     extras,
+    storyLinks: discoverStoryLinkEntries(body, url),
     // D182: the full page, tag-stripped, from the body already in hand.
     rawText: htmlToPlainText(body).slice(0, RAW_TEXT_CAP),
     notices: extractSiteNotices(body),

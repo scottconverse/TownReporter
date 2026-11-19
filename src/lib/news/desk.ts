@@ -2151,6 +2151,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     url: string;
     text: string;
     extras: { url: string; text: string }[];
+    /** G26-HP-2: the article links this page carried, with their link text;
+     * filing uses them to add the story's own page when the model cited only
+     * the list page. Empty when the read had no HTML in hand. */
+    storyLinks: { url: string; title: string }[];
     changed: boolean;
   }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
@@ -3067,6 +3071,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         url: src.url,
         text: sourceText.slice(0, 4500),
         extras,
+        storyLinks: bundle.storyLinks ?? [],
         changed,
       };
       fetched.push(fetchedSource);
@@ -3182,6 +3187,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           url: doc.url,
           text: postgresText(doc.text).slice(0, 4500),
           extras: doc.extras,
+          storyLinks: [],
           changed: true,
         };
         fetched.push(fetchedSource);
