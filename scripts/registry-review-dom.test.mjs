@@ -89,11 +89,13 @@ export function usePaperDateFormatters() {
 }
 `);
 const methodsUrl = await moduleUrl("src/lib/news/registry/registry-verify-methods.ts");
+const sentenceUrl = await moduleUrl("src/lib/news/registry/registry-sentence.ts");
 const imports = {
   "@/components/desk-chrome": chromeUrl,
   "@/lib/news/registry/registry-review": reviewServerUrl,
   "@/lib/news/registry/registry-verify": verifyServerUrl,
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
+  "@/lib/news/registry/registry-sentence": sentenceUrl,
   "@/lib/paper-context-state": paperUrl,
 };
 const changeReviewUrl = await moduleUrl("src/components/registry-change-review.tsx", imports);
@@ -353,6 +355,43 @@ test("a proposal with no live target says so and offers only Accept without appl
     /does not point at one live row/,
   );
   assert.deepEqual(page.buttons(row), ["Accept without applying", "Reject"]);
+});
+
+test("a date that ends in p.m. and a value that ends in a period each print one period", async (t) => {
+  setup();
+  const page = await mount(
+    React.createElement(RegistryChangeReviewList, {
+      changes: [
+        change({
+          id: 1,
+          reviewState: "accepted",
+          reviewedBy: "Pat Editor",
+          reviewedAt: "2026-11-18T17:04:00Z",
+          appliedAt: "2026-11-18T17:04:00Z",
+        }),
+        change({
+          id: 2,
+          currentValue: "Changed again by hand.",
+          beforeValue: "Free checkups, edited by hand.",
+        }),
+      ],
+      emptyText: "none",
+      formatTime: () => "Nov. 18, 5:04 p.m.",
+      renderSummary: (c) => React.createElement("div", { className: "summary" }, `Change ${c.id}`),
+    }),
+  );
+  t.after(() => page.close());
+  const [decided, stale] = rows(page);
+  const lines = [...decided.querySelectorAll('[data-testid="resolved-details"] p')].map((p) => p.textContent);
+  assert.deepEqual(lines, [
+    "Accepted by Pat Editor on Nov. 18, 5:04 p.m.",
+    "Applied to the entry on Nov. 18, 5:04 p.m.",
+  ]);
+  assert.equal(
+    stale.querySelector('[data-testid="stale-notice"]').textContent.replace(/\s+/g, " "),
+    "This field now says Changed again by hand. The proposal expected Free checkups, edited by hand.",
+  );
+  assert.doesNotMatch(page.text(), /\.\./, "no doubled period anywhere in the list");
 });
 
 test("each button sends the right call, with an empty note sent as null", async (t) => {

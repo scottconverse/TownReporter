@@ -17,6 +17,12 @@ const sample = JSON.parse(
 const DIRECTORY = "example-hsds-directory";
 const EDITOR = "editor-1";
 
+// The desk names the editor from the account, so the editor these tests decide as has one.
+await (await getSql()).query(
+  `insert into "user" (id, email, name, "emailVerified") values ($1, 'pat.editor@example.test', 'Pat Editor', true)`,
+  [EDITOR],
+);
+
 function sampleCopy(): HsdsBundle {
   return structuredClone(sample);
 }
@@ -125,7 +131,8 @@ test("repeating an accept or a reject changes nothing and writes no second audit
   assert.equal(again.ok, false);
   if (!again.ok) {
     assert.equal(again.reason, "resolved");
-    assert.match(again.message, /already accepted by editor-1 on \d{4}-\d{2}-\d{2}\. Nothing was changed\./);
+    assert.match(again.message, /already accepted by Pat Editor on \d{4}-\d{2}-\d{2}\. Nothing was changed\./);
+    assert.doesNotMatch(again.message, /editor-1/, "the message names the person, not the id");
   }
   const rejectAfter = await rejectChange(room, "someone-else", { changeId: id });
   assert.equal(rejectAfter.ok, false);
@@ -285,9 +292,35 @@ test("the desk list carries the review fields and the current value of the targe
   await rejectChange(room, EDITOR, { changeId: id, note: "no" });
   list = await listDeskChanges(sql, room);
   entry = list.find((item) => item.id === id)!;
-  assert.equal(entry.reviewedBy, EDITOR);
+  assert.equal(entry.reviewedBy, "Pat Editor", "a settled proposal names the reviewer");
   assert.ok(entry.reviewedAt);
   assert.equal(entry.reviewNote, "no");
+  const stored = await sql.query<{ reviewed_by: string }>(
+    "select reviewed_by from resource_changes where id = $1",
+    [id],
+  );
+  assert.equal(stored[0]!.reviewed_by, EDITOR, "the stored id is unchanged");
+});
+
+test("the desk names a reviewer by email when the name is empty, and 'an editor' when no account matches", async () => {
+  const sql = await getSql();
+  await sql.query(
+    `insert into "user" (id, email, name, "emailVerified")
+     values ('editor-mail', 'mail-only@example.test', '', true) on conflict (id) do nothing`,
+  );
+  const byEmail = await seedNameProposal(9330, "Emailed Name");
+  assert.equal((await rejectChange(9330, "editor-mail", { changeId: byEmail })).ok, true);
+  const emailed = (await listDeskChanges(sql, 9330)).find((item) => item.id === byEmail)!;
+  assert.equal(emailed.reviewedBy, "mail-only@example.test");
+
+  const unknown = await seedNameProposal(9331, "Unknown Name");
+  assert.equal((await rejectChange(9331, "editor-gone", { changeId: unknown })).ok, true);
+  const gone = (await listDeskChanges(sql, 9331)).find((item) => item.id === unknown)!;
+  assert.equal(gone.reviewedBy, "an editor");
+
+  const again = await acceptChange(9331, EDITOR, { changeId: unknown, apply: true });
+  assert.equal(again.ok, false);
+  if (!again.ok) assert.match(again.message, /already rejected by an editor on \d{4}-\d{2}-\d{2}\./);
 });
 
 test("a rejected proposal is not proposed again on re-import, and the counts stay right", async () => {

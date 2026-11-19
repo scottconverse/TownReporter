@@ -5,6 +5,7 @@ import {
   acceptRegistryChange,
   rejectRegistryChange,
 } from "@/lib/news/registry/registry-review";
+import { endSentence } from "@/lib/news/registry/registry-sentence";
 import type { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 
 /**
@@ -52,14 +53,12 @@ function ResolvedDetails({
   formatTime: (when: string | Date | null | undefined) => string;
 }) {
   const stateWord = change.reviewState === "accepted" ? "Accepted" : "Rejected";
+  const when = change.reviewedAt ? ` on ${formatTime(change.reviewedAt)}` : "";
   return (
     <div data-testid="resolved-details">
+      <p className="text-base">{endSentence(`${stateWord} by ${change.reviewedBy ?? "an editor"}${when}`)}</p>
       <p className="text-base">
-        {stateWord} by {change.reviewedBy ?? "an editor"}
-        {change.reviewedAt ? ` on ${formatTime(change.reviewedAt)}` : ""}.
-      </p>
-      <p className="text-base">
-        {change.appliedAt ? `Applied to the entry on ${formatTime(change.appliedAt)}.` : "Not applied."}
+        {change.appliedAt ? endSentence(`Applied to the entry on ${formatTime(change.appliedAt)}`) : "Not applied."}
       </p>
       {change.reviewNote ? <p className="text-base">Note: {change.reviewNote}</p> : null}
     </div>
@@ -84,8 +83,8 @@ function WaitingControls({
     <div className="mt-2 grid gap-2" data-testid="review-controls">
       {stale ? (
         <p className="text-base font-semibold text-ink" data-testid="stale-notice">
-          This field now says {shown(change.currentValue)}. The proposal expected{" "}
-          {shown(change.beforeValue)}.
+          This field now says {endSentence(shown(change.currentValue))} The proposal expected{" "}
+          {endSentence(shown(change.beforeValue))}
         </p>
       ) : null}
       {noTarget ? (

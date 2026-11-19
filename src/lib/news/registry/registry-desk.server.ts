@@ -18,6 +18,7 @@
 
 import type { Sql } from "../../db.ts";
 import { asText, REMOVABLE_TABLES } from "./hsds-import.server.ts";
+import { editorLabel, editorLabels } from "./registry-editor-names.server.ts";
 import { applyTargetFor } from "./registry-review.server.ts";
 import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
@@ -43,7 +44,10 @@ export interface DeskRegistryChange {
   captureDate: WhenValue;
   scanRunId: number | null;
   createdAt: WhenValue;
-  /** Who accepted or rejected it; null while it waits. */
+  /**
+   * Who accepted or rejected it, by name: the account's name, else its email,
+   * else "an editor" when no account matches. Null while it waits.
+   */
   reviewedBy: string | null;
   reviewedAt: WhenValue;
   reviewNote: string | null;
@@ -176,6 +180,8 @@ export async function listDeskChanges(
     [newsroomId],
   );
 
+  const reviewers = await editorLabels(sql, rows.map((row) => row.reviewed_by));
+
   // The current value of each proposal's target field, one query per
   // table and column. Table and column come from the importer's fixed maps.
   const groups = new Map<string, { table: string; column: string; ids: Set<number> }>();
@@ -225,7 +231,7 @@ export async function listDeskChanges(
     captureDate: row.capture_date,
     scanRunId: row.scan_run_id == null ? null : Number(row.scan_run_id),
     createdAt: row.created_at,
-    reviewedBy: row.reviewed_by,
+    reviewedBy: row.reviewed_by == null ? null : editorLabel(reviewers, row.reviewed_by),
     reviewedAt: row.reviewed_at,
     reviewNote: row.review_note,
     appliedAt: row.applied_at,

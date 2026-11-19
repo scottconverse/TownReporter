@@ -364,19 +364,45 @@ test("the same facts always give an identical snapshot", async () => {
 test("the history lists newest first, and the legacy stamp is read as legacy", async () => {
   const sql = await getSql();
   const s = await seed(9806, { legacy: true });
+  await sql.query(
+    `insert into "user" (id, email, name, "emailVerified") values ('ed-2', 'dana@example.test', 'Dana Checker', true)`,
+  );
   assert.equal((await readVerificationIn(sql, s.n, s.svc)).latest, null);
   await recordVerificationIn(sql, s.n, "ed-1", verifyInput(s.svc, { method: "website" }));
   await sql.query("update resource_verifications set checked_at = now() - interval '10 days' where newsroom_id = $1", [s.n]);
   await recordVerificationIn(sql, s.n, "ed-2", verifyInput(s.svc, { method: "visit", sourceUrl: null }));
   const read = await readVerificationIn(sql, s.n, s.svc);
   assert.equal(read.latest!.method, "visit");
-  assert.equal(read.latest!.checkedBy, "ed-2");
+  assert.equal(read.latest!.checkedBy, "Dana Checker", "a verification names the checker");
   assert.equal(read.latest!.sourceUrl, null);
   assert.deepEqual(read.history.map((h) => h.method), ["visit", "website"]);
   assert.equal(read.legacy!.method, "editor");
   assert.equal(read.legacy!.by, "legacy-editor");
   assert.ok(read.legacy!.at);
   await assert.rejects(() => readVerificationIn(sql, 1, s.svc), /not in this newsroom/);
+});
+
+test("a checker is named by account, else by email when the name is empty, else 'an editor'", async () => {
+  const sql = await getSql();
+  const s = await seed(9822);
+  await sql.query(
+    `insert into "user" (id, email, name, "emailVerified")
+     values ('ed-mail', 'mail-checker@example.test', '', true) on conflict (id) do nothing`,
+  );
+  await recordVerificationIn(sql, s.n, "ed-mail", verifyInput(s.svc, { method: "phone" }));
+  await recordVerificationIn(sql, s.n, "ed-gone", verifyInput(s.svc, { method: "email" }));
+  const read = await readVerificationIn(sql, s.n, s.svc);
+  assert.equal(read.latest!.checkedBy, "an editor", "no account matches the id");
+  assert.deepEqual(
+    read.history.map((h) => h.checkedBy),
+    ["an editor", "mail-checker@example.test"],
+    "the history names each checker the same way",
+  );
+  const stored = await sql.query<{ checked_by: string }>(
+    "select checked_by from resource_verifications where newsroom_id = $1 order by id",
+    [s.n],
+  );
+  assert.deepEqual(stored.map((r) => r.checked_by), ["ed-mail", "ed-gone"], "the stored ids are unchanged");
 });
 
 test("needs checking: never verified, overdue, changed; not fresh or unpublished; oldest first", async () => {

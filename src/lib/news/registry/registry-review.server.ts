@@ -19,6 +19,7 @@ import {
 } from "./hsds-import.server.ts";
 import type { RegistryTableName } from "./hsds-map.ts";
 import { recordRegistryEvent } from "./registry-audit.server.ts";
+import { editorLabel, editorLabels } from "./registry-editor-names.server.ts";
 
 export const REVIEW_NOTE_MAX = 1000;
 
@@ -97,11 +98,12 @@ function dateOf(value: string | Date | null): string {
   return Number.isNaN(d.getTime()) ? "an unknown date" : d.toISOString().slice(0, 10);
 }
 
-function resolvedResult(row: ChangeRow): ReviewResult {
+async function resolvedResult(sql: Sql, row: ChangeRow): Promise<ReviewResult> {
+  const reviewers = await editorLabels(sql, [row.reviewed_by]);
   return {
     ok: false,
     reason: "resolved",
-    message: `This proposal was already ${row.review_state} by ${row.reviewed_by ?? "an editor"} on ${dateOf(row.reviewed_at)}. Nothing was changed.`,
+    message: `This proposal was already ${row.review_state} by ${editorLabel(reviewers, row.reviewed_by)} on ${dateOf(row.reviewed_at)}. Nothing was changed.`,
   };
 }
 
@@ -219,7 +221,7 @@ export async function acceptChange(
   return withTransaction(async (tx): Promise<ReviewResult> => {
     const row = await lockChange(tx, newsroomId, input.changeId);
     if (!row) return { ok: false, reason: "not-found", message: NOT_IN_NEWSROOM };
-    if (row.review_state === "accepted" || row.review_state === "rejected") return resolvedResult(row);
+    if (row.review_state === "accepted" || row.review_state === "rejected") return resolvedResult(tx, row);
 
     if (input.apply) {
       const outcome = await applyToTarget(tx, newsroomId, row);
@@ -260,7 +262,7 @@ export async function rejectChange(
   return withTransaction(async (tx): Promise<ReviewResult> => {
     const row = await lockChange(tx, newsroomId, input.changeId);
     if (!row) return { ok: false, reason: "not-found", message: NOT_IN_NEWSROOM };
-    if (row.review_state === "accepted" || row.review_state === "rejected") return resolvedResult(row);
+    if (row.review_state === "accepted" || row.review_state === "rejected") return resolvedResult(tx, row);
     await tx.query(
       `update resource_changes
           set review_state = 'rejected', reviewed_by = $1, reviewed_at = now(),

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { listRegistryNeedsChecking } from "@/lib/news/registry/registry-verify";
+import { endSentence } from "@/lib/news/registry/registry-sentence";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /**
@@ -49,7 +50,7 @@ export function RegistryNeedsChecking({ onOpen }: { onOpen: (serviceId: number) 
             </p>
           ))}
           {item.lastCheckedAt ? (
-            <p className="text-base">Last checked {formatShortDate(item.lastCheckedAt)}.</p>
+            <p className="text-base">Last checked {endSentence(formatShortDate(item.lastCheckedAt))}</p>
           ) : null}
           <div className="mt-2">
             <InkButton

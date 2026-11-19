@@ -21,6 +21,7 @@
 import { withTransaction, type Sql } from "../../db.ts";
 import { recordRegistryEvent } from "./registry-audit.server.ts";
 import { hasControlCharacter } from "./registry-entry-editor-fields.ts";
+import { editorLabel, editorLabels } from "./registry-editor-names.server.ts";
 import {
   isVerifyMethod,
   VERIFY_AFTER_DAYS,
@@ -477,6 +478,7 @@ export interface VerificationRecord {
   basis: string;
   sourceUrl: string | null;
   checkedAt: When;
+  /** The checker by name: the account's name, else its email, else "an editor". */
   checkedBy: string;
 }
 
@@ -506,14 +508,14 @@ interface VerificationRow {
   facts: unknown;
 }
 
-function toRecord(row: VerificationRow): VerificationRecord {
+function toRecord(row: VerificationRow, checkers: ReadonlyMap<string, string>): VerificationRecord {
   return {
     id: Number(row.id),
     method: row.method,
     basis: row.basis,
     sourceUrl: row.source_url,
     checkedAt: row.checked_at,
-    checkedBy: row.checked_by,
+    checkedBy: editorLabel(checkers, row.checked_by),
   };
 }
 
@@ -605,9 +607,10 @@ export async function readVerificationIn(
   if (rows[0]) {
     changedFacts = await changedSinceSaved(sql, newsroomId, serviceId, rows[0].facts);
   }
+  const checkers = await editorLabels(sql, rows.map((row) => row.checked_by));
   return {
-    latest: rows[0] ? toRecord(rows[0]) : null,
-    history: rows.map(toRecord),
+    latest: rows[0] ? toRecord(rows[0], checkers) : null,
+    history: rows.map((row) => toRecord(row, checkers)),
     legacy,
     changedFacts,
   };
