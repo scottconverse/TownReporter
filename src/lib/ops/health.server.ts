@@ -16,6 +16,7 @@ import {
   formatBytes,
   formatIn,
   formatUptime,
+  failureCountChecks,
   jobQueueCopy,
   jobsState,
   publicState,
@@ -196,7 +197,6 @@ async function checkJobs(): Promise<HealthCheck[]> {
     const historicalFailed = Number(failureCounts?.historical_failed ?? 0);
     const failed24h = Number(failureCounts?.failed_24h ?? 0);
     const followupFailed24h = Number(failureCounts?.followup_failed_24h ?? 0);
-    const errors24h = failed24h + followupFailed24h;
     const fallback24h = Number(failureCounts?.fallback_24h ?? 0);
     const queueCopy = jobQueueCopy(running, queued, latestFailed, historicalFailed);
     const runningRows = rows.filter((r) => r.status === "running");
@@ -239,44 +239,18 @@ async function checkJobs(): Promise<HealthCheck[]> {
         same query as the queue above so the two can never disagree about what
         failed.
 
-        What it counts is failed desk jobs, and the note says so: this app's
-        error LOG is the node process's redirected stderr
-        (ops/start-townreporter.ps1:143), which carries no timestamps and rolls
-        over when the process restarts, so it cannot answer a 24-hour window.
-        The work queue is the desk's own record of work that failed, with the
-        time it failed at.
+        What it counts is failed desk jobs and follow-up checks that could not
+        run, and the note says so: this app's error LOG is the node process's
+        redirected stderr (ops/start-townreporter.ps1:143), which carries no
+        timestamps and rolls over when the process restarts, so it cannot answer
+        a 24-hour window. The work queue and Follow-ups are the desk's own
+        records, with the time each failed at.
+
+        The counts-to-rows decision lives in `failureCountChecks` (health.ts)
+        because that is the part with the rule in it -- and it is tested there
+        without a database.
       */
-      {
-        id: "errors-24h",
-        label: "Errors in 24 h",
-        state: errors24h > 0 ? "warn" : "ok",
-        value: String(errors24h),
-        note:
-          errors24h > 0
-            ? [
-                failed24h > 0
-                  ? `${failed24h} desk job${failed24h === 1 ? "" : "s"} failed in the last 24 hours.`
-                  : "",
-                followupFailed24h > 0
-                  ? `${followupFailed24h} follow-up check${followupFailed24h === 1 ? "" : "s"} could not run in the last 24 hours.`
-                  : "",
-                "Open the work queue or Follow-ups to see which.",
-              ]
-                .filter(Boolean)
-                .join(" ")
-            : "No desk job has failed and no follow-up check has been missed in the last 24 hours.",
-      },
-      ...(fallback24h > 0
-        ? [
-            {
-              id: "fallback-24h",
-              label: "Model switch",
-              state: "ok" as const,
-              value: `fell back to another model: ${fallback24h}`,
-              note: "A job finished on a different model after the chosen one could not run. This is not an error; the work was done.",
-            },
-          ]
-        : []),
+      ...failureCountChecks({ failed24h, followupFailed24h, fallback24h }),
     ];
   } catch {
     return [
