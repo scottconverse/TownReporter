@@ -181,6 +181,8 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
         "escape-to-cancel.ts",
         { react: REACT_URL },
       ),
+      /* F06 of the 2026-11-19 walk: the trash panel's Delete-for-good question. */
+      "@/components/confirm-focus": inlineModule("export function useConfirmFocus() {}"),
       "@/components/JobCard": inlineModule("export const DeskJobCard = () => null;"),
       "@/components/job-card-state": inlineModule("export const useDeskJobs = () => ({data:[]});"),
       "@/components/newsletter-mailbox": inlineModule("export function NewsletterMailbox() { return null; }"),

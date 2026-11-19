@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DESK_NOT_ACCEPTED_REASON,
   DESK_SIGNED_OUT_REASON,
   DESK_TOO_SLOW_REASON,
   DESK_UNREACHABLE_REASON,
@@ -74,9 +75,30 @@ describe("a press the desk did answer", () => {
   });
 
   it("still names a thrown value that is not an Error", () => {
-    assert.equal(deskErrorReason({ message: "the queue is full" }), "the queue is full");
+    assert.equal(deskErrorReason({ message: "The queue is full." }), "The queue is full.");
     assert.equal(deskErrorReason(null), "the desk gave no reason");
     assert.equal(deskErrorReason(new Error("   ")), "the desk gave no reason");
+  });
+
+  /*
+    F05 of the 2026-11-19 walk: a guard's raw reason ("blocked by walker") was
+    printed after "Could not change that lead. " on the Queue and "Could not
+    start the scan. " on Server. It is not a sentence and it is not the desk's,
+    so the editor gets plain words and the raw text goes to the console.
+  */
+  it("turns a raw exception fragment into plain words and logs the raw text", () => {
+    const logged: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    try {
+      assert.equal(deskErrorReason(new Error("blocked by walker")), DESK_NOT_ACCEPTED_REASON);
+      assert.equal(deskErrorReason("blocked by walker"), DESK_NOT_ACCEPTED_REASON);
+      assert.equal(deskErrorReason(new Error("Cannot destructure property 'ok' of undefined")), DESK_NOT_ACCEPTED_REASON);
+    } finally {
+      console.error = original;
+    }
+    assert.equal(logged.length, 3, "the raw text was not kept for the console");
+    assert.match(String(logged[0]?.[1]), /blocked by walker/);
   });
 
   it("keeps a real refusal ahead of the mapped sentence", () => {

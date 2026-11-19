@@ -47,7 +47,7 @@ describe("the sentence a bulk press shows", () => {
   it("carries the reason when one did not", () => {
     assert.equal(
       bulkStatusSummary({ status: "held", done: 11, failures: ["the desk was busy"] }),
-      "Held 11 leads. 1 failed: the desk was busy",
+      "Held 11 leads. 1 lead failed: the desk was busy",
     );
     assert.equal(
       bulkStatusSummary({
@@ -55,7 +55,7 @@ describe("the sentence a bulk press shows", () => {
         done: 10,
         failures: ["the desk was busy", "the desk was busy"],
       }),
-      "Killed 10 leads. 2 failed: the desk was busy",
+      "Killed 10 leads. 2 leads failed: the desk was busy",
     );
   });
 
@@ -67,7 +67,7 @@ describe("the sentence a bulk press shows", () => {
     */
     assert.equal(
       bulkStatusSummary({ status: "held", done: 0, failures: ["nothing was signed in"] }),
-      "Held 0 leads. 1 failed: nothing was signed in",
+      "Held 0 leads. 1 lead failed: nothing was signed in",
     );
   });
 });
@@ -196,30 +196,29 @@ describe("THU-4: the bulk Kill's Undo waits for the batch and puts back every le
 });
 
 /**
- * TMA-2: a bulk Kill of ONE lead opened no confirm, so one press killed it with
- * no question asked. The confirm now opens for every count the strip can kill.
+ * TMA-2, and F04/F22 of the 2026-11-19 walk: a bulk Kill press over the gold bar
+ * killed every ticked lead with no question asked. The confirm now opens for
+ * every count the strip can kill.
  *
- * THE MUTATION THAT MATTERS. A rule of `count > 1` (what the route used) fails
- * "asks first for ONE lead too"; dropping the one-lead words fails "says the
- * one-lead words".
+ * THE MUTATION THAT MATTERS. Returning `false` for any count (what G27-KILL-3
+ * left in the route) fails "asks before killing"; dropping the count fails
+ * "says the count in the question".
  */
-describe("the bulk Kill confirm (TMA-2)", () => {
-  it("kills at once with no Why? question, one lead or many (G27-KILL-3)", () => {
-    assert.equal(bulkKillNeedsConfirm(1), false);
-    assert.equal(bulkKillNeedsConfirm(3), false);
+describe("the bulk Kill confirm (TMA-2, F04/F22 of the 2026-11-19 walk)", () => {
+  it("asks before killing, one lead or many", () => {
+    assert.equal(bulkKillNeedsConfirm(1), true);
+    assert.equal(bulkKillNeedsConfirm(3), true);
   });
   it("asks nothing when no lead is ticked", () => {
     assert.equal(bulkKillNeedsConfirm(0), false);
   });
-  it("says the one-lead words for one lead", () => {
+  it("says the count in the question", () => {
     assert.deepEqual(bulkKillConfirmWords(1), {
-      prompt: "Killing 1 lead. Why? The reason is written on it.",
+      prompt: "Kill 1 lead?",
       confirm: "Yes, kill 1",
     });
-  });
-  it("keeps the same words for two or more", () => {
     assert.deepEqual(bulkKillConfirmWords(2), {
-      prompt: "Killing 2 leads. Why? One reason is written on all of them.",
+      prompt: "Kill 2 leads?",
       confirm: "Yes, kill 2",
     });
   });

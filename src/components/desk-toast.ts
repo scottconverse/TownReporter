@@ -232,6 +232,25 @@ export const DESK_UNREACHABLE_REASON =
 export const DESK_TOO_SLOW_REASON =
   "The desk took too long. It may have finished — reload before pressing again.";
 export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do that. Sign in again.";
+/**
+ * F05 (walk 2026-11-19). The plain words for a failure that carried no sentence
+ * of its own -- a guard, a proxy or a thrown exception whose text was written
+ * for a developer ("blocked by walker"). The raw text goes to the console, the
+ * editor gets this.
+ */
+export const DESK_NOT_ACCEPTED_REASON = "The server did not accept that. Try again.";
+
+/**
+ * Does this message read as a sentence the desk wrote for an editor?
+ *
+ * The desk's own refusals and thrown errors are written as sentences and end
+ * with punctuation. A raw exception, a proxy's reason, or a single technical
+ * fragment does not -- and F05 of the 2026-11-19 walk found exactly those
+ * printed verbatim ("Could not change that lead. blocked by walker").
+ */
+function readsAsEditorSentence(raw: string): boolean {
+  return /[.!?]["')\]]*$/.test(raw.trim());
+}
 
 /**
  * The real reason a press failed, in words.
@@ -244,9 +263,10 @@ export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do t
  * What is NOT carried through is a message that only names the transport. A
  * browser's `TypeError: Failed to fetch` and a Zod dump are both true and both
  * useless to an editor, and the second one also prints the schema's own field
- * paths at them (see `editorActionError`, desk-copy.ts). A thrown non-Error is
- * still named rather than swallowed, and an empty message falls back to a
- * sentence that at least says which half of the exchange broke.
+ * paths at them (see `editorActionError`, desk-copy.ts). A non-sentence is not
+ * the desk's words either (F05, walk 2026-11-19), so it is replaced below and
+ * kept in the console; an empty message falls back to a sentence that at least
+ * says which half of the exchange broke.
  */
 export function deskErrorReason(error: unknown, what = "do that"): string {
   const raw = deskErrorMessage(error);
@@ -274,6 +294,17 @@ export function deskErrorReason(error: unknown, what = "do that"): string {
     /unexpected server error|internal server error|status code 500/i.test(raw)
   )
     return editorActionError(raw, what) ?? raw;
+  /*
+    F05 (walk 2026-11-19): a message that is not a sentence was written for a
+    developer, not an editor -- "blocked by walker" reached two screens as
+    "Could not change that lead. blocked by walker". The desk cannot make that
+    text true or useful, so it says the plain thing instead and keeps the raw
+    words in the console for whoever is debugging.
+  */
+  if (!readsAsEditorSentence(raw)) {
+    console.error("Desk press failed with:", error);
+    return DESK_NOT_ACCEPTED_REASON;
+  }
   return raw;
 }
 

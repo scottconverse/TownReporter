@@ -1,6 +1,7 @@
 import { NativeDialog, DialogScrim } from "@/components/dialog";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { EscapeToCancel } from "@/components/escape-to-cancel";
+import { useConfirmFocus } from "@/components/confirm-focus";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -965,10 +966,21 @@ export function LeaveEditorControl({ email }: { email: string }) {
     setAsk(false);
     setTyped("");
   };
+  /*
+    F06 of the 2026-11-19 walk: the door is replaced by its question, so focus
+    fell to the top of the page on open and on No. The safe choice takes the
+    keyboard when it opens; the door gets it back when the question closes.
+  */
+  useConfirmFocus(ask, { trigger: "leave-desk", safe: "leave-desk-keep" });
 
   if (!ask) {
     return (
-      <button type="button" className="leave-editor" onClick={() => setAsk(true)}>
+      <button
+        type="button"
+        className="leave-editor"
+        data-focus-key="leave-desk"
+        onClick={() => setAsk(true)}
+      >
         {copy.leave}
       </button>
     );
@@ -1004,6 +1016,7 @@ export function LeaveEditorControl({ email }: { email: string }) {
       <button
         type="button"
         className="leave-no"
+        data-focus-key="leave-desk-keep"
         disabled={leave.isPending}
         onClick={keep}
       >
@@ -1059,6 +1072,7 @@ export function InkButton({
   pendingLabel,
   ariaLabel,
   ref,
+  focusKey,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -1094,6 +1108,8 @@ export function InkButton({
   ariaLabel?: string;
   /** The button element, so a caller can move keyboard focus to it. */
   ref?: React.Ref<HTMLButtonElement>;
+  /** A stable name for keyboard focus; see `useConfirmFocus` (confirm-focus.ts). */
+  focusKey?: string;
 }) {
   const cls =
     "btn" +
@@ -1109,6 +1125,7 @@ export function InkButton({
       disabled={disabled || pending}
       className={cls}
       aria-label={ariaLabel}
+      data-focus-key={focusKey}
       aria-busy={pending || undefined}
     >
       {pending && pendingLabel != null ? pendingLabel : children}

@@ -4574,6 +4574,7 @@ function StoryPage() {
                     tone="primary"
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
+                    focusKey="publish-confirm-trigger"
                     disabled={publish.isPending || !publishConfirm.enabled}
                     onAct={() => {
                       if (!sectionReady) {

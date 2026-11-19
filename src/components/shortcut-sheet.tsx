@@ -2,9 +2,14 @@ import { saveShortcutLabel } from "../lib/save-shortcut-label.ts";
 import { Dialog } from "./dialog";
 const SHORTCUTS: { keys: string; what: string }[] = [
   { keys: "J / K", what: "Next / previous lead" },
-  { keys: "S", what: "Start a story from the selected lead" },
+  /*
+    F22 of the 2026-11-19 walk: S asks before it spends the writing model, and X
+    leaves an Undo strip behind. The sheet says both, so the keys are not
+    described as more or less than they are.
+  */
+  { keys: "S", what: "Start a story from the selected lead (asks first)" },
   { keys: "H", what: "Hold the selected lead" },
-  { keys: "X", what: "Kill the selected lead" },
+  { keys: "X", what: "Kill the selected lead (Undo offered)" },
   { keys: "U", what: "Put the selected lead back to new" },
   { keys: "Enter", what: "Open the selected lead" },
   { keys: "N", what: "Start a new story" },

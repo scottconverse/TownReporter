@@ -3,6 +3,7 @@ import { ModelAssignmentsPanel } from "@/routes/desk.models";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { useDeskJobs } from "@/components/job-card-state";
 import { EscapeToCancel } from "@/components/escape-to-cancel";
+import { useConfirmFocus } from "@/components/confirm-focus";
 /*
   The editors behind the Server screen's cards (unit CX2).
 
@@ -859,6 +860,16 @@ export function RecentlyDeletedPanel() {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [confirmPurge, setConfirmPurge] = useState<number | null>(null);
+  /*
+    F06 of the 2026-11-19 walk: "Delete for good" is replaced by its own question,
+    so the keyboard went back to the top of the page on open and again on Keep.
+  */
+  useConfirmFocus(
+    confirmPurge !== null,
+    confirmPurge === null
+      ? null
+      : { trigger: `trash-purge-${confirmPurge}`, safe: `trash-purge-${confirmPurge}-keep` },
+  );
 
   const list = useQuery({ queryKey: ["trash"], queryFn: () => listTrash() });
 
@@ -936,12 +947,20 @@ export function RecentlyDeletedPanel() {
                       >
                         Yes, for good
                       </InkButton>
-                      <InkButton tone="quiet" onClick={() => setConfirmPurge(null)}>
+                      <InkButton
+                        tone="quiet"
+                        focusKey={`trash-purge-${r.id}-keep`}
+                        onClick={() => setConfirmPurge(null)}
+                      >
                         Keep
                       </InkButton>
                     </>
                   ) : (
-                    <InkButton tone="quiet" onClick={() => setConfirmPurge(r.id)}>
+                    <InkButton
+                      tone="quiet"
+                      focusKey={`trash-purge-${r.id}`}
+                      onClick={() => setConfirmPurge(r.id)}
+                    >
                       Delete for good
                     </InkButton>
                   )}
