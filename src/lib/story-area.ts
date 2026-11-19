@@ -14,6 +14,7 @@
  */
 
 import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./news/dark-place.ts";
+import { looksOutOfState } from "./news/out-of-state.ts";
 
 /** The stored value on `articles.area`. Stable keys; the labels are display. */
 export const STORY_AREAS = ["longmont", "nearby", "county", "colorado"] as const;
@@ -165,6 +166,26 @@ function namesPlace(text: string, place: string): boolean {
 }
 
 /**
+ * A court or a body named after a town is not the town (F01, live walk
+ * 2026-11-19): "Plymouth Superior Court" is a Massachusetts courthouse, not
+ * Superior, Colorado. The town still counts everywhere else -- "Superior Town
+ * Board", "in Superior" -- so only a COURT word directly after it is refused.
+ */
+const COURT_AFTER_TOWN = /^\s+(?:Court|Courthouse|Court House)\b/;
+
+function nearbyTownNamed(text: string, town: string): boolean {
+  const name = town.trim();
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\b${escaped}\\b`, "g");
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const after = text.slice(match.index + match[0].length);
+    if (!COURT_AFTER_TOWN.test(after)) return true;
+  }
+  return false;
+}
+
+/**
  * Whether the text names this paper's county. The configured county, when Paper
  * setup has one, is "<County> County". The shipped Longmont paper also keeps
  * its literal "Boulder County" (`isLongmont`), so no other paper ever matches it.
@@ -175,10 +196,17 @@ function namesCounty(text: string, place: NewsroomPlace): boolean {
   return isLongmont(place) && namesPlace(text, "Boulder County");
 }
 
-function groundNamedIn(text: string, place: NewsroomPlace): StoryArea | null {
+function groundNamedIn(text: string, place: NewsroomPlace, outOfState: boolean): StoryArea | null {
+  // Naming the paper's own town is home whatever else the text says.
   if (namesPlace(text, place.city)) return HOME_AREA;
+  /*
+    F01 (live walk 2026-11-19): a story that clearly belongs to another state
+    is given neither the county nor Nearby by default -- the Plymouth Superior
+    Court story was filed under Nearby only because "Superior" is a town here.
+  */
+  if (outOfState) return null;
   if (namesCounty(text, place)) return "county";
-  if (isLongmont(place) && NEARBY_TOWNS.some((town) => namesPlace(text, town))) return "nearby";
+  if (isLongmont(place) && NEARBY_TOWNS.some((town) => nearbyTownNamed(text, town))) return "nearby";
   return null;
 }
 
@@ -206,5 +234,10 @@ export function defaultStoryArea(
     state: paper.state ?? "",
     county: paper.county ?? null,
   };
-  return groundNamedIn(story.headline, place) ?? groundNamedIn(story.body, place);
+  const nearbyTowns = isLongmont(place) ? NEARBY_TOWNS : [];
+  const outOfState = looksOutOfState(story, place, nearbyTowns);
+  return (
+    groundNamedIn(story.headline, place, outOfState) ??
+    groundNamedIn(story.body, place, outOfState)
+  );
 }
