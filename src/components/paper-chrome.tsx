@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { usePaper } from "@/lib/paper-context-state";
@@ -46,12 +46,28 @@ export function Masthead({
   const paper = usePaper();
   const { sections } = usePublicSections();
   const [open, setOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const r = useReader();
   const { formatDayStamp } = usePaperDateFormatters();
   const location = useRouterState({ select: (s) => s.location });
   const current = location.search as { topic?: string; q?: string; view?: string };
   const frontPage = location.pathname === "/" && !current.topic && !current.q && !current.view;
   useEffect(() => setOpen(false), [location.href]);
+  /*
+    Escape closes the reader menu wherever focus is, including the toggle that
+    opened it, and leaves focus on that toggle (F12). Without this the menu
+    stayed open when a keyboard reader pressed Esc on the button.
+  */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
   const sectionNav = (
     <SectionNav
       sections={sections.filter((s) => s.visible)}
@@ -96,6 +112,7 @@ export function Masthead({
         <button
           className="mobilemenu"
           type="button"
+          ref={menuButtonRef}
           aria-expanded={open}
           aria-controls={NAV_ID}
           onClick={() => setOpen(!open)}

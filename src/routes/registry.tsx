@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
+import { CrisisLine, PhoneLink } from "@/components/registry-phone";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import {
@@ -228,6 +229,12 @@ function RegistryPage() {
                 them.
               </p>
             ) : null}
+            {/*
+              A reader who finds nothing here still needs somewhere to turn.
+              The two numbers the paper promises (spec 15.1) are always shown
+              on an empty result, with real tel: links (F19).
+            */}
+            <CrisisLine />
           </div>
         ) : (
           <section aria-labelledby="registry-entries-title">
@@ -257,7 +264,9 @@ function RegistryPage() {
                       <ul className="needlist">
                         {location.address ? <li>{location.address}</li> : null}
                         {location.phones.map((phone) => (
-                          <li key={phone}>Phone at this location: {phone}</li>
+                          <li key={phone}>
+                            Phone at this location: <PhoneLink phone={phone} />
+                          </li>
                         ))}
                         {location.hours.map((hours) => (
                           <li key={hours}>Hours at this location: {hours}</li>
@@ -271,14 +280,16 @@ function RegistryPage() {
                     </p>
                     <ul className="needlist">
                       {entry.servicePhones.map((phone) => (
-                        <li key={`service-${phone}`}>Phone for this service: {phone}</li>
+                        <li key={`service-${phone}`}>
+                          Phone for this service: <PhoneLink phone={phone} />
+                        </li>
                       ))}
                       {entry.serviceHours.map((hours) => (
                         <li key={`service-${hours}`}>Hours for this service: {hours}</li>
                       ))}
                       {entry.organizationPhones.map((phone) => (
                         <li key={`org-${phone}`}>
-                          Main phone of {entry.organizationName}: {phone}
+                          Main phone of {entry.organizationName}: <PhoneLink phone={phone} />
                         </li>
                       ))}
                       {entry.languages.length ? (

@@ -53,11 +53,19 @@ export function GeoPills({
       {areaPills(labels).map((pill) => {
         const on = pill.key === pressed;
         const home = pill.key === HOME_AREA;
+        /*
+          The router marks a link current when its path matches and its search
+          is a SUBSET of the page's (TanStack's default partial match). The home
+          pill's search is empty, so on `/?area=nearby` it matched too and both
+          pills claimed `aria-current="page"`. An exact search match leaves the
+          current mark to the one pill this component pressed.
+        */
         return (
           <Link
             key={pill.key}
             to="/"
             search={{ ...search, area: home ? undefined : pill.key, page: undefined }}
+            activeOptions={{ exact: true }}
             aria-current={on ? "page" : undefined}
             className={on ? "geopill on" : "geopill"}
           >

@@ -1,5 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
+import { PhoneLink } from "@/components/registry-phone";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import {
@@ -242,7 +243,9 @@ function RegistryServicePage() {
                   <ul className="needlist">
                     {location.address ? <li>{location.address}</li> : null}
                     {location.phones.map((phone) => (
-                      <li key={phone}>Phone at this location: {phone}</li>
+                      <li key={phone}>
+                        Phone at this location: <PhoneLink phone={phone} />
+                      </li>
                     ))}
                     {location.hours.map((hours) => (
                       <li key={hours}>Hours at this location: {hours}</li>
@@ -261,7 +264,9 @@ function RegistryServicePage() {
               <h2 id="registry-service-wide">For the whole service</h2>
               <ul className="needlist">
                 {entry.servicePhones.map((phone) => (
-                  <li key={`service-${phone}`}>Phone for this service: {phone}</li>
+                  <li key={`service-${phone}`}>
+                    Phone for this service: <PhoneLink phone={phone} />
+                  </li>
                 ))}
                 {entry.serviceHours.map((hours) => (
                   <li key={`service-${hours}`}>Hours for this service: {hours}</li>
@@ -279,7 +284,7 @@ function RegistryServicePage() {
               <ul className="needlist">
                 {entry.organizationPhones.map((phone) => (
                   <li key={`org-${phone}`}>
-                    Main phone of {entry.organizationName}: {phone}
+                    Main phone of {entry.organizationName}: <PhoneLink phone={phone} />
                   </li>
                 ))}
               </ul>
