@@ -1,6 +1,6 @@
 # Reading TownReporter
 
-For TownReporter 0.6.92. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
+For TownReporter 0.7.0. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
 ![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
@@ -67,7 +67,7 @@ The **Save** button beside any story adds it to **Saved**. It reads **Saved** on
 
 **Community resources** is in the top menu on desktop and mobile, and in one line on the front page. The footer link stays. It opens `/registry`.
 
-The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are not in a release yet. They come after 0.6.92.
+The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are in 0.7.0.
 
 The page is titled **Where to get help**. It lists only published entries. Each entry shows the organization and service and a description. Each place where the service is offered is listed under its own name, with its own address, **Phone at this location:** and **Hours at this location:**. Below the places, under **About this service**, come **Phone for this service:** and **Hours for this service:** (not tied to one place), **Main phone of** the organization (labeled as the organization’s, not a place’s), **Languages:**, **Category:**, the check line, an editor’s note, and a **Source:** link.
 

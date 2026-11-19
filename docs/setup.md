@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.92](releases/README.md)** (released 2026-11-15, tag `v0.6.92`; the release assets are `TownReporter-0.6.92-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.7.0](releases/README.md)** (released 2026-11-19, tag `v0.7.0`; the release assets are `TownReporter-0.7.0-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -861,6 +861,6 @@ Opinion and Write a story share large-document upload, OCR, long pasted text and
 
 0.6.52 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
 
-In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads. Leads that score 14 or more are then drafted by the same rule as any scan (not yet released after 0.6.92). A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. Automatic is resolved to one named runtime before the job is queued, and the run record says which one ran.
+In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads. Leads that score 14 or more are then drafted by the same rule as any scan (in 0.7.0). A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. Automatic is resolved to one named runtime before the job is queued, and the run record says which one ran.
 
 The Windows lifecycle repair prevents shutdown from terminating protected system descendants by validating process identities and killing only through a verified handle. It cannot safely clean provider/browser descendants after the root process has already crashed; use the remaining process record and warning as an investigation signal, not proof of a clean stop. A fresh Windows packaged-install result is not recorded by this release guide.

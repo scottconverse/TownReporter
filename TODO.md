@@ -1,6 +1,6 @@
 # TownReporter — TODO (canonical, in-repo)
 
-**Status note, 2026-11-18.** The current released version is 0.6.92 (tag `v0.6.92`, peeled commit `84b6efe4`). Everything below this note is the dated 2026-09-30 baseline, kept as written. It is not the current release state. For what shipped, read the [changelog](CHANGELOG.md) and the [release guides](docs/releases/README.md). Changes on `main` after 0.6.92 are in the changelog's **Unreleased** section and are not released. The acceptance items in the paragraph that begins "The following acceptance work remains EXPLICITLY OPEN" is the open list as that baseline recorded it. This file does not record later closures.
+**Status note, 2026-11-18.** The current released version is 0.7.0 (tag `v0.7.0`). Everything below this note is the dated 2026-09-30 baseline, kept as written. It is not the current release state. For what shipped, read the [changelog](CHANGELOG.md) and the [release guides](docs/releases/README.md). Changes on `main` after 0.7.0 are in the changelog's **Unreleased** section and are not released. The acceptance items in the paragraph that begins "The following acceptance work remains EXPLICITLY OPEN" is the open list as that baseline recorded it. This file does not record later closures.
 
 ## Reviewed source baseline — 2026-09-30
 

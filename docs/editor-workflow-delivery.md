@@ -26,8 +26,8 @@ normal picker behavior.
 For several eligible leads, tick them in the Queue. The bar shows **Start N stories**
 and a **Model for these stories** picker. Press **Start N stories**, check the
 model in the **Draft the selected leads** box and press **Start N stories** there.
-As of 0.6.92 the box says a usual batch has one to five leads and a larger batch
-asks for your approval. **Not yet released (in source after 0.6.92):** the box says any number of leads can be
+Before 0.7.0 the box said a usual batch has one to five leads and a larger batch
+asks for your approval. **Since 0.7.0:** the box says any number of leads can be
 drafted in one batch, and **Start N stories** drafts every ticked lead, also
 those off screen. A batch queues drafts
 for editor review; it does not publish anything. The results identify each

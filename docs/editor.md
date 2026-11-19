@@ -1,8 +1,8 @@
 # TownReporter — editor’s manual
 
-**Current software version: [0.6.92](releases/0.6.92.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
+**Current software version: [0.7.0](releases/0.7.0.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
-The screenshots in this guide were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are on main and not yet in a release. If a label ever differs from a picture, the words in the text and on screen are right.
+The screenshots in this guide were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are new in 0.7.0. If a label ever differs from a picture, the words in the text and on screen are right.
 
 **Three rules that run through the whole desk.**
 
@@ -316,7 +316,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 **The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#server-deskops)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads, and the 14+ drafting rule below then runs on them.
 
-**The paper drafts high-scoring leads by itself.** When a scan finishes, the desk drafts every lead that scores 14 or more (the hot line) and is New or Held. It uses the same Draft path as **Start story**, with the Automatic model pick. Drafting moves a Held lead to Drafted. A Held lead is still never published until you release it. It skips a lead that already has a draft or a draft job, a lead whose draft you stopped, and a lead the scan linked as a possible repeat of a story that was published or killed. A lead linked to a lead that is still open is drafted. A repeat that the scan did not link is not caught. If the draft is refused (for example, no model is set up), the refusal is kept in the lead's notes and the scan still succeeds. This is in the source after 0.6.92 and is not in a release yet.
+**The paper drafts high-scoring leads by itself.** When a scan finishes, the desk drafts every lead that scores 14 or more (the hot line) and is New or Held. It uses the same Draft path as **Start story**, with the Automatic model pick. Drafting moves a Held lead to Drafted. A Held lead is still never published until you release it. It skips a lead that already has a draft or a draft job, a lead whose draft you stopped, and a lead the scan linked as a possible repeat of a story that was published or killed. A lead linked to a lead that is still open is drafted. A repeat that the scan did not link is not caught. If the draft is refused (for example, no model is set up), the refusal is kept in the lead's notes and the scan still succeeds. This is in 0.7.0.
 
 ---
 
@@ -385,7 +385,7 @@ Tick rows to open the bulk bar: “N selected”, **Model for these stories**, *
 
 ![The Queue with four leads ticked: the bulk bar shows 4 selected, the model and thinking effort pickers, Start 4 stories, Hold, Kill, Delete selected (4) and Clear](images/26-queue-start-n.png)
 
-- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in the source after 0.6.92 and is not in a release yet.)
+- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in 0.7.0.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
@@ -406,7 +406,7 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 ![The Drafts list: Opinion pieces waiting, Select all shown, Publish all drafts (5), filter pills, and rows with a tick box, a status chip, a headline and Review and More buttons](images/17-drafts.png)
 
-Each row has a tick box. Tick rows, or press **Select all shown**, to show **Publish N selected** and **Kill N selected**. One **Undo** puts them all back. (This is on main after 0.6.92 and is not in a release yet.)
+Each row has a tick box. Tick rows, or press **Select all shown**, to show **Publish N selected** and **Kill N selected**. One **Undo** puts them all back. (This is in 0.7.0.)
 
 ![The Drafts list with three rows ticked: Select all shown, 3 selected, Publish 3 selected and Kill 3 selected above Publish all drafts (5)](images/27-drafts-bulk.png)
 
@@ -1081,7 +1081,7 @@ A removal is a marker. Nothing is deleted. Contacts, places, hours and languages
 
 Hours at a place the entry is no longer linked to are not published. The editor shows them, read-only, under the note **These hours belong to a place that is no longer linked; they come back if the place is restored.** They come back when the link is restored.
 
-The public search, the page for each service and the read-only JSON feed at `/api/registry/v1` are in the source after 0.6.92. They are not in a release yet. See [the API reference](navigator/registry-api.md).
+The public search, the page for each service and the read-only JSON feed at `/api/registry/v1` are in 0.7.0. See [the API reference](navigator/registry-api.md).
 
 ---
 
