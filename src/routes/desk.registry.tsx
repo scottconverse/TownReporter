@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
 import { RegistryImportPanel } from "@/components/registry-import-panel";
+import { RegistryExportPanel } from "@/components/registry-export-panel";
 import { RegistryEntryEditor } from "@/components/registry-entry-editor";
 import { RegistryChangeReviewList } from "@/components/registry-change-review";
 import { RegistryNeedsChecking } from "@/components/registry-needs-checking";
@@ -718,6 +719,7 @@ function RegistryDeskPage() {
               sub="Directories the desk read into the registry. Every imported row starts unpublished."
             />
             <RegistryImportPanel directoryNames={query.data?.directoryNames ?? []} />
+            <RegistryExportPanel directoryNames={query.data?.directoryNames ?? []} />
             {!query.data?.imports.length ? (
               <p className="wire-sum">No directory has been imported yet.</p>
             ) : (

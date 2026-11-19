@@ -123,6 +123,7 @@ export function ScreenError() { return null; }
 export function ListSkeleton() { return null; }
 `),
   "@/components/registry-import-panel": stubUrl("export function RegistryImportPanel() { return null; }\n"),
+  "@/components/registry-export-panel": stubUrl("export function RegistryExportPanel() { return null; }\n"),
   "@/components/registry-entry-editor": stubUrl("export function RegistryEntryEditor() { return null; }\n"),
   "@/components/registry-needs-checking": stubUrl("export function RegistryNeedsChecking() { return null; }\n"),
   "@/lib/news/registry/registry-desk": stubUrl(`

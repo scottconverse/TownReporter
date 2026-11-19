@@ -16,6 +16,8 @@ import {
   addRegistryEntryIn,
   previewHsdsImportIn,
   runHsdsImportIn,
+  exportDirectoryFileIn,
+  type ExportDirectoryFileResult,
   type HsdsImportInput,
   type HsdsImportPreviewResult,
   type HsdsImportRunResult,
@@ -123,4 +125,16 @@ export const runHsdsImport = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<HsdsImportRunResult> => {
     const sql = await getSql();
     return runHsdsImportIn(sql, context.newsroomId, data, context.userId);
+  });
+
+/** One directory as a JSON file the import reads back. Editors only. Writes nothing. */
+export const exportRegistryDirectory = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown): { directoryName: string } => {
+    const value = (input as { directoryName?: unknown } | null)?.directoryName;
+    return { directoryName: typeof value === "string" ? value : "" };
+  })
+  .handler(async ({ data, context }): Promise<ExportDirectoryFileResult> => {
+    const sql = await getSql();
+    return exportDirectoryFileIn(sql, context.newsroomId, data.directoryName);
   });

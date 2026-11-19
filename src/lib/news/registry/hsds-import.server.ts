@@ -875,7 +875,9 @@ interface StoredRow {
 
 /**
  * Read one directory's rows back into the mapped shape, for the compatibility
- * round-trip. Internal only: there is no route in front of this.
+ * round-trip and the desk's directory file. A row an editor removed
+ * (`removed_at` set, migration 0165) is not read: the file holds what is live.
+ * Places, organizations, services and categories carry no removal marker.
  */
 export async function readRegistryRows(
   sql: Sql,
@@ -884,7 +886,9 @@ export async function readRegistryRows(
 ): Promise<RegistryRows> {
   const read = async (table: RegistryTableName): Promise<StoredRow[]> =>
     sql.query<StoredRow>(
-      `select * from ${table} where newsroom_id = $1 and directory_name = $2 order by id`,
+      `select * from ${table} where newsroom_id = $1 and directory_name = $2${
+        REMOVABLE_TABLES.has(table) ? " and removed_at is null" : ""
+      } order by id`,
       [newsroomId, directoryName],
     );
 
@@ -1024,7 +1028,7 @@ export async function readRegistryRows(
   };
 }
 
-/** Read one directory back out as the bundle it came in as. Internal only. */
+/** Read one directory back out as the bundle it came in as, without removed rows. */
 export async function readRegistryBundle(
   sql: Sql,
   newsroomId: number,
