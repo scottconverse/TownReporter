@@ -75,3 +75,29 @@ export const getPublicRegistryServicePage = createServerFn({ method: "GET" })
     if (data.id == null || data.id > 2147483647) return { status: "ok", entry: null };
     return readPublicRegistryService(getSql, DEFAULT_NEWSROOM_ID, data.id);
   });
+
+/**
+ * The site's own origin, for the full service URL in a correction request.
+ * Same rule as `src/routes/feed.ts`: `PUBLIC_SITE_URL` when set, otherwise the
+ * host the request came in on. An empty string means "not known"; the caller
+ * then uses the path alone.
+ */
+export const getPublicRegistryOrigin = createServerFn({ method: "GET" }).handler(
+  async (): Promise<string> => {
+    const configured = process.env.PUBLIC_SITE_URL?.trim();
+    if (configured) return configured.replace(/\/+$/, "");
+    try {
+      const { getRequest } = await import("@tanstack/react-start/server");
+      const request = getRequest();
+      const url = new URL(request.url);
+      const host =
+        request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || url.host;
+      const proto =
+        request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ||
+        url.protocol.replace(":", "");
+      return `${proto}://${host}`;
+    } catch {
+      return "";
+    }
+  },
+);

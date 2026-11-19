@@ -2,7 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
-import { listPublicRegistryPage } from "@/lib/news/registry/registry-public";
+import {
+  getPublicRegistryOrigin,
+  searchPublicRegistryPage,
+} from "@/lib/news/registry/registry-public";
+import {
+  registryCorrectionArticle,
+  registryCorrectionHref,
+  registryServicePath,
+} from "@/lib/news/registry/registry-correction";
 import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
 
 /**
@@ -25,31 +33,79 @@ function categoryFromSearch(search: Record<string, unknown>): number | null {
   return Number.isInteger(value) && value > 0 ? value : null;
 }
 
+const PAGE_SIZE = 25;
+
+type RegistrySearch = { q?: string; category?: number; language?: string; page?: number };
+
 export const Route = createFileRoute("/registry")({
-  validateSearch: (search: Record<string, unknown>): { category?: number } => {
+  validateSearch: (search: Record<string, unknown>): RegistrySearch => {
+    const out: RegistrySearch = {};
+    const q = typeof search.q === "string" ? search.q.trim().slice(0, 200) : "";
+    if (q) out.q = q;
     const category = categoryFromSearch(search);
-    return category ? { category } : {};
+    if (category) out.category = category;
+    const language = typeof search.language === "string" ? search.language.trim().slice(0, 100) : "";
+    if (language) out.language = language;
+    const page = Number(search.page);
+    if (Number.isInteger(page) && page > 1) out.page = page;
+    return out;
   },
-  loaderDeps: ({ search }) => ({ category: search.category ?? null }),
-  loader: async ({ deps }) =>
-    listPublicRegistryPage({ data: { category: deps.category ?? null } }),
+  loaderDeps: ({ search }) => ({
+    q: search.q ?? "",
+    category: search.category ?? null,
+    language: search.language ?? "",
+    page: search.page ?? 1,
+  }),
+  loader: async ({ deps }) => {
+    const [result, origin] = await Promise.all([
+      searchPublicRegistryPage({ data: deps }),
+      getPublicRegistryOrigin().catch(() => ""),
+    ]);
+    return { result, origin };
+  },
   head: ({ match }) => ({
     meta: [
       { title: `Community resources — ${(match.context.paper ?? DEFAULT_PAPER_IDENTITY).name}` },
+      {
+        name: "description",
+        content:
+          "Search organizations and services in our area, with the source each entry came from and the date an editor last verified it.",
+      },
     ],
   }),
   component: RegistryPage,
 });
 
+/** A link to the list with these filters; empty filters are left out. */
+function listHref(search: RegistrySearch): string {
+  const params = new URLSearchParams();
+  if (search.q) params.set("q", search.q);
+  if (search.category) params.set("category", String(search.category));
+  if (search.language) params.set("language", search.language);
+  if (search.page && search.page > 1) params.set("page", String(search.page));
+  const text = params.toString();
+  return text ? `/registry?${text}` : "/registry";
+}
+
 function RegistryPage() {
-  const result = Route.useLoaderData();
-  const { category } = Route.useSearch();
+  const { result, origin } = Route.useLoaderData();
+  const { q, category, language, page } = Route.useSearch();
   const { formatShortDate } = usePaperDateFormatters();
   const unavailable = result.status === "unavailable";
   const entries = result.status === "ok" ? result.entries : [];
   const categories = result.status === "ok" ? result.categories : [];
-  const anyPublished = result.status === "ok" ? result.anyPublished : false;
+  const languages = result.status === "ok" ? result.languages : [];
+  const total = result.status === "ok" ? result.total : 0;
   const current = categories.find((c) => c.id === category) ?? null;
+  const filtered = Boolean(q || category || language);
+  const pageNumber = page ?? 1;
+  const hasPrevious = pageNumber > 1;
+  const hasNext = pageNumber * PAGE_SIZE < total;
+  const languageChoices =
+    language && !languages.some((l) => l.toLowerCase() === language.toLowerCase())
+      ? [...languages, language]
+      : languages;
+  const withoutFilters = { q, category, language };
 
   return (
     <PaperShell compact>
@@ -62,6 +118,64 @@ function RegistryPage() {
             date an editor last verified it.
           </p>
         </div>
+
+        <form
+          method="get"
+          action="/registry"
+          role="search"
+          aria-label="Search community resources"
+          className="registry-search"
+        >
+          <div className="correction-field">
+            <label htmlFor="registry-q">Search</label>
+            <input
+              className="field text-base"
+              id="registry-q"
+              name="q"
+              type="search"
+              maxLength={200}
+              defaultValue={q ?? ""}
+              key={`q-${q ?? ""}`}
+            />
+          </div>
+          <div className="correction-field">
+            <label htmlFor="registry-category">Category</label>
+            <select
+              className="field text-base"
+              id="registry-category"
+              name="category"
+              defaultValue={category ? String(category) : ""}
+              key={`c-${category ?? ""}`}
+            >
+              <option value="">All categories</option>
+              {categories.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="correction-field">
+            <label htmlFor="registry-language">Language</label>
+            <select
+              className="field text-base"
+              id="registry-language"
+              name="language"
+              defaultValue={language ?? ""}
+              key={`l-${language ?? ""}`}
+            >
+              <option value="">All languages</option>
+              {languageChoices.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="btn text-base" type="submit">
+            Search
+          </button>
+        </form>
 
         {categories.length ? (
           <nav aria-label="Browse resources by category">
@@ -90,33 +204,52 @@ function RegistryPage() {
             <p>
               The list of community resources could not be loaded just now. Nothing was lost; the
               page could not read it.{" "}
-              <a href={category ? `/registry?category=${category}` : "/registry"}>Try again</a>.
+              <a href={listHref({ ...withoutFilters, page })}>Try again</a>.
             </p>
           </div>
         ) : entries.length === 0 ? (
           <div className="empty">
-            {category && anyPublished ? (
+            {total > 0 ? (
+              <p>
+                There are no services on this page. <a href={listHref(withoutFilters)}>Go to the first page</a>.
+              </p>
+            ) : null}
+            {total === 0 && filtered ? (
+              <p>
+                No services match your search. <a href="/registry">Clear the search</a>.
+              </p>
+            ) : null}
+            {total === 0 && category && !q && !language ? (
               <p>
                 No published entries are filed under {current ? current.name : "this category"}{" "}
                 yet. <a href="/registry">See all entries</a>.
               </p>
-            ) : (
+            ) : total === 0 && !filtered ? (
               <p>
                 No entries are published yet. TownReporter adds entries after an editor checks
                 them.
               </p>
-            )}
+            ) : null}
           </div>
         ) : (
           <section aria-labelledby="registry-entries-title">
             <h2 id="registry-entries-title">
-              {current ? current.name : "All entries"} ({entries.length})
+              {current ? current.name : "All entries"} ({total})
             </h2>
+            <p role="status">
+              {total} {total === 1 ? "service" : "services"}
+              {filtered ? (total === 1 ? " matches your search" : " match your search") : ""}
+              {total > PAGE_SIZE ? `. Page ${pageNumber}` : ""}
+            </p>
             {entries.map((entry) => {
               const heading = `${entry.organizationName} — ${entry.serviceName}`;
               return (
                 <article className="correction-entry" key={entry.serviceId}>
-                  <h3>{heading}</h3>
+                  <h3>
+                    <a className="textlink" href={registryServicePath(entry.serviceId)}>
+                      {heading}
+                    </a>
+                  </h3>
                   {entry.description ? <p>{entry.description}</p> : null}
                   {entry.locations.map((location) => (
                     <section key={location.locationId} aria-label="Location">
@@ -183,7 +316,14 @@ function RegistryPage() {
                   <p>
                     <a
                       className="textlink"
-                      href={`/corrections?article=${encodeURIComponent(heading)}`}
+                      href={registryCorrectionHref(
+                        registryCorrectionArticle({
+                          id: entry.serviceId,
+                          organizationName: entry.organizationName,
+                          serviceName: entry.serviceName,
+                          url: `${origin}${registryServicePath(entry.serviceId)}`,
+                        }),
+                      )}
                     >
                       Something wrong here?
                     </a>
@@ -191,6 +331,28 @@ function RegistryPage() {
                 </article>
               );
             })}
+            {hasPrevious || hasNext ? (
+              <nav aria-label="More results" className="registry-paging">
+                {hasPrevious ? (
+                  <a
+                    className="textlink text-base"
+                    rel="prev"
+                    href={listHref({ ...withoutFilters, page: pageNumber - 1 })}
+                  >
+                    Previous page
+                  </a>
+                ) : null}{" "}
+                {hasNext ? (
+                  <a
+                    className="textlink text-base"
+                    rel="next"
+                    href={listHref({ ...withoutFilters, page: pageNumber + 1 })}
+                  >
+                    Next page
+                  </a>
+                ) : null}
+              </nav>
+            ) : null}
           </section>
         )}
       </div>

@@ -167,6 +167,31 @@ export async function listPublicRegistryCategories(
   return rows.map((row) => ({ id: Number(row.id), name: row.name }));
 }
 
+/**
+ * The languages a reader can filter by: those on published, active services of
+ * published, active organizations. One spelling per language (case-folded).
+ */
+export async function listPublicRegistryLanguages(sql: Sql, newsroomId: number): Promise<string[]> {
+  const rows = await sql.query<{ language: string }>(
+    `select distinct lg.language
+       from languages lg
+       join services s on s.id = lg.service_id and s.newsroom_id = lg.newsroom_id
+       join organizations o on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+      where lg.newsroom_id = $1
+        and lg.published = true and lg.removed_at is null
+        and s.published = true and s.status = 'active'
+        and o.published = true and o.status = 'active'
+      order by lg.language`,
+    [newsroomId],
+  );
+  const seen = new Map<string, string>();
+  for (const row of rows) {
+    const name = (row.language ?? "").trim();
+    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  }
+  return [...seen.values()];
+}
+
 /** What a read narrows to. Every field is optional; null means "no filter". */
 interface RegistryFilter {
   categoryId?: number | null;
@@ -225,6 +250,24 @@ function filterParams(newsroomId: number, filter: RegistryFilter) {
   ];
 }
 
+/**
+ * The ids of the published services, for the sitemap. Same public rule as every
+ * other read (`PUBLIC_FROM`): an unpublished, inactive or removed service is
+ * never listed. Ascending, so the list is stable between reads.
+ */
+export async function listPublicRegistryServiceIds(
+  sql: Sql,
+  newsroomId: number,
+  limit = 5000,
+): Promise<number[]> {
+  const rows = await sql.query<{ id: number | string }>(
+    `select s.id as id ${PUBLIC_FROM}
+      order by s.id
+      limit $6::int`,
+    [...filterParams(newsroomId, {}), limit],
+  );
+  return rows.map((row) => Number(row.id));
+}
 interface BaseRow {
   service_id: number;
   hsds_id: string;
@@ -759,7 +802,12 @@ export async function readPublicRegistry(
 }
 
 export type PublicRegistrySearchResult =
-  | ({ status: "ok"; categories: PublicRegistryCategory[] } & PublicRegistrySearchPage)
+  | ({
+      status: "ok";
+      categories: PublicRegistryCategory[];
+      /** The languages that can be chosen in the language filter. */
+      languages: string[];
+    } & PublicRegistrySearchPage)
   | { status: "unavailable" };
 
 /** The search read, with the same "unavailable, never empty" rule as the page. */
@@ -772,7 +820,8 @@ export async function readPublicRegistrySearch(
     const sql = await getSql();
     const found = await searchPublicRegistry(sql, newsroomId, input);
     const categories = await listPublicRegistryCategories(sql, newsroomId);
-    return { status: "ok", categories, ...found };
+    const languages = await listPublicRegistryLanguages(sql, newsroomId);
+    return { status: "ok", categories, languages, ...found };
   } catch (err) {
     console.error("[registry] searchPublicRegistry failed", err);
     return { status: "unavailable" };

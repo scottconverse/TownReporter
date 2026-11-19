@@ -47,6 +47,7 @@ import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as DeskStatsRouteImport } from './routes/desk.stats'
 import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
+import { Route as RegistryIdRouteImport } from './routes/registry_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
 import { Route as DeskFiledDraftDraftIdRouteImport } from './routes/desk.filed-draft.$draftId'
@@ -246,6 +247,11 @@ const EvidenceCompareRoute = EvidenceCompareRouteImport.update({
   path: '/evidence/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RegistryIdRoute = RegistryIdRouteImport.update({
+  id: '/registry_/$id',
+  path: '/registry/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -326,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry/$id': typeof RegistryIdRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -373,6 +380,7 @@ export interface FileRoutesByTo {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry/$id': typeof RegistryIdRoute
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -422,6 +430,7 @@ export interface FileRoutesById {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry_/$id': typeof RegistryIdRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -472,6 +481,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry/$id'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -519,6 +529,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry/$id'
     | '/desk'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -567,6 +578,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry_/$id'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -598,6 +610,7 @@ export interface RootRouteChildren {
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
   EvidenceCompareRoute: typeof EvidenceCompareRoute
+  RegistryIdRoute: typeof RegistryIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
   ApiRegistryV1SplatRoute: typeof ApiRegistryV1SplatRoute
@@ -871,6 +884,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvidenceCompareRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/registry_/$id': {
+      id: '/registry_/$id'
+      path: '/registry/$id'
+      fullPath: '/registry/$id'
+      preLoaderRoute: typeof RegistryIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -1006,6 +1026,7 @@ const rootRouteChildren: RootRouteChildren = {
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
   EvidenceCompareRoute: EvidenceCompareRoute,
+  RegistryIdRoute: RegistryIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronMonitorsRoute: ApiCronMonitorsRoute,
   ApiRegistryV1SplatRoute: ApiRegistryV1SplatRoute,
