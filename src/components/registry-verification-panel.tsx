@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import {
@@ -34,6 +34,7 @@ const methodLabel = (key: string): string => {
 };
 
 const box = "w-full border border-rule bg-paper p-2 text-base";
+const REFRESH_FAILED = "The list could not be refreshed. Reload the page.";
 
 function CheckLine({
   record,
@@ -82,9 +83,27 @@ export function RegistryVerificationPanel({ serviceId }: { serviceId: number }) 
   useEffect(() => {
     if (status) statusRef.current?.focus();
   }, [status]);
+  // Each control's error line is linked to it (aria-describedby), and each label to its control.
+  const ids = useId();
+  const methodId = `${ids}-method`;
+  const basisId = `${ids}-basis`;
+  const sourceUrlId = `${ids}-source`;
 
   const say = (kind: "ok" | "refused", text: string) =>
     setStatus((previous) => ({ kind, text, count: (previous?.count ?? 0) + 1 }));
+
+  /** Refreshes what a saved check changes. Never throws; false when a refresh failed. */
+  const refreshAfterRecord = async (): Promise<boolean> => {
+    try {
+      const results = await Promise.allSettled([
+        qc.invalidateQueries({ queryKey: VERIFY_KEY(serviceId) }),
+        qc.invalidateQueries({ queryKey: ["registry-needs-checking"] }),
+      ]);
+      return results.every((result) => result.status === "fulfilled");
+    } catch {
+      return false;
+    }
+  };
 
   const submit = async () => {
     if (running.current) return;
@@ -113,9 +132,9 @@ export function RegistryVerificationPanel({ serviceId }: { serviceId: number }) 
         setMethod("");
         setBasis("");
         setSourceUrl("");
-        await qc.invalidateQueries({ queryKey: VERIFY_KEY(serviceId) });
-        await qc.invalidateQueries({ queryKey: ["registry-needs-checking"] });
+        // The recorded check is said first. A refresh that fails is said after it, never in place of it.
         say("ok", result.message);
+        if (!(await refreshAfterRecord())) say("ok", `${result.message} ${REFRESH_FAILED}`);
       } else {
         setProblems(result.problems);
         say("refused", "Nothing was recorded. Fix the lines marked below.");
@@ -193,12 +212,16 @@ export function RegistryVerificationPanel({ serviceId }: { serviceId: number }) 
           Record that you checked this entry. The basis stays on the desk; readers see only the
           date and how it was checked.
         </p>
-        <label className="block text-base">
-          How you checked
+        <div className="block text-base">
+          <label className="block" htmlFor={methodId}>
+            How you checked
+          </label>
           <select
+            id={methodId}
             name="method"
             className={box}
             value={method}
+            aria-describedby={problems.method ? `${methodId}-error` : undefined}
             onChange={(event) => setMethod(event.target.value)}
           >
             <option value="">Choose one…</option>
@@ -209,42 +232,50 @@ export function RegistryVerificationPanel({ serviceId }: { serviceId: number }) 
             ))}
           </select>
           {problems.method ? (
-            <span className="mt-1 block text-base text-rust" role="alert">
+            <span id={`${methodId}-error`} className="mt-1 block text-base text-rust" role="alert">
               {problems.method}
             </span>
           ) : null}
-        </label>
-        <label className="block text-base">
-          What you checked (required, up to {BASIS_MAX} characters)
+        </div>
+        <div className="block text-base">
+          <label className="block" htmlFor={basisId}>
+            What you checked (required, up to {BASIS_MAX} characters)
+          </label>
           <textarea
+            id={basisId}
             name="basis"
             className={box}
             rows={3}
             maxLength={BASIS_MAX}
             value={basis}
+            aria-describedby={problems.basis ? `${basisId}-error` : undefined}
             onChange={(event) => setBasis(event.target.value)}
           />
           {problems.basis ? (
-            <span className="mt-1 block text-base text-rust" role="alert">
+            <span id={`${basisId}-error`} className="mt-1 block text-base text-rust" role="alert">
               {problems.basis}
             </span>
           ) : null}
-        </label>
-        <label className="block text-base">
-          Source link (optional)
+        </div>
+        <div className="block text-base">
+          <label className="block" htmlFor={sourceUrlId}>
+            Source link (optional)
+          </label>
           <input
+            id={sourceUrlId}
             name="sourceUrl"
             type="url"
             className={box}
             value={sourceUrl}
+            aria-describedby={problems.sourceUrl ? `${sourceUrlId}-error` : undefined}
             onChange={(event) => setSourceUrl(event.target.value)}
           />
           {problems.sourceUrl ? (
-            <span className="mt-1 block text-base text-rust" role="alert">
+            <span id={`${sourceUrlId}-error`} className="mt-1 block text-base text-rust" role="alert">
               {problems.sourceUrl}
             </span>
           ) : null}
-        </label>
+        </div>
         {status ? (
           <p
             ref={statusRef}

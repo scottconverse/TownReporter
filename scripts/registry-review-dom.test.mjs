@@ -16,6 +16,11 @@
   ones newest first, the legacy date with its label, "Changed since verified"
   and "Not verified yet.".
   Needs checking: rows with reasons and an open button; the empty state.
+  Desk page: the route (desk.registry.tsx) is rendered with its own imports
+  stubbed, so the filter that can empty the list is the page's own code. A
+  refresh that fails after an answer never replaces the answer; a thrown call
+  still refreshes the list; a field's error sits outside its label and is linked
+  to its control; two quick clicks send one call.
 
   The server functions are stubs that record their calls (what the page ASKED
   the server to do is measured here; what the server does is in
@@ -50,6 +55,8 @@ export function InkButton({ children, onClick, disabled, pending, pendingLabel, 
   return h("button", { type: type || "button", disabled: Boolean(disabled || pending), onClick, "aria-label": ariaLabel },
     pending && pendingLabel ? pendingLabel : children);
 }
+export function DeskShell({ children }) { return h("div", null, children); }
+export function SecHead({ title }) { return h("h2", null, title); }
 `);
 const reviewServerUrl = stubUrl(`
 export async function acceptRegistryChange({ data }) {
@@ -89,15 +96,55 @@ const imports = {
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
   "@/lib/paper-context-state": paperUrl,
 };
-const { RegistryChangeReviewList } = await import(
-  await moduleUrl("src/components/registry-change-review.tsx", imports)
-);
+const changeReviewUrl = await moduleUrl("src/components/registry-change-review.tsx", imports);
+const { RegistryChangeReviewList } = await import(changeReviewUrl);
 const { RegistryVerificationPanel } = await import(
   await moduleUrl("src/components/registry-verification-panel.tsx", imports)
 );
 const { RegistryNeedsChecking } = await import(
   await moduleUrl("src/components/registry-needs-checking.tsx", imports)
 );
+
+/* The desk page (desk.registry.tsx): its own imports are stubbed, its own code is real. */
+const deskStubs = {
+  "@tanstack/react-router": stubUrl(`
+import { createElement as h } from ${JSON.stringify(import.meta.resolve("react"))};
+export function createFileRoute() {
+  return (options) => ({ ...options, useSearch: () => globalThis.__desk.search });
+}
+export function Link({ to, className, children }) {
+  return h("a", { href: to, className }, children);
+}
+`),
+  "@/components/states": stubUrl(`
+export function ScreenError() { return null; }
+export function ListSkeleton() { return null; }
+`),
+  "@/components/registry-import-panel": stubUrl("export function RegistryImportPanel() { return null; }\n"),
+  "@/components/registry-entry-editor": stubUrl("export function RegistryEntryEditor() { return null; }\n"),
+  "@/components/registry-needs-checking": stubUrl("export function RegistryNeedsChecking() { return null; }\n"),
+  "@/lib/news/registry/registry-desk": stubUrl(`
+export async function listRegistryDesk() { return globalThis.__desk.data; }
+`),
+  "@/lib/news/registry/registry-desk-write": stubUrl(`
+const refuse = async () => { throw new Error("dom fixture: the desk writes are not used here"); };
+export const addRegistryEntry = refuse;
+export const loadStarterList = refuse;
+export const publishRegistryEntry = refuse;
+export const takeDownRegistryEntry = refuse;
+export const updateRegistryEntry = refuse;
+`),
+  "@/lib/news/registry/registry-entry-fields": stubUrl("export {};\n"),
+  "@/lib/news/desk-copy": stubUrl("export function evidenceTierLabel(tier) { return String(tier ?? \"\"); }\n"),
+};
+const deskPageUrl = await moduleUrl("src/routes/desk.registry.tsx", {
+  ...imports,
+  ...deskStubs,
+  "@/components/registry-change-review": changeReviewUrl,
+  "@/lib/news/registry/starter-list": await moduleUrl("src/lib/news/registry/starter-list.ts"),
+});
+const { Route } = await import(deskPageUrl);
+const DeskPage = Route.component;
 
 const change = (over = {}) => ({
   id: 1,
@@ -134,7 +181,20 @@ const check = (id, over = {}) => ({
   ...over,
 });
 
+const desk = (changes = []) => ({
+  changes,
+  waiting: [],
+  published: [],
+  categories: [],
+  publishedCount: 0,
+  starterLoaded: true,
+  imports: [],
+  directoryNames: [],
+  sources: [],
+});
+
 function setup() {
+  globalThis.__desk = { search: {}, data: desk([]) };
   globalThis.__rv = {
     calls: [],
     review: async () => ({ ok: true, state: "accepted", applied: true, message: "Accepted and applied." }),
@@ -365,6 +425,73 @@ test("a thrown error says nothing was changed and the buttons work again", async
   assert.equal(page.button(rows(page)[0], "Reject").disabled, false);
 });
 
+test("a thrown error still invalidates the desk list, once", async (t) => {
+  setup();
+  globalThis.__rv.review = async () => {
+    throw new Error("The server is not reachable. Nothing was changed.");
+  };
+  const page = await mount(list([change()]));
+  t.after(() => page.close());
+  await page.press(page.button(rows(page)[0], "Reject"));
+  assert.equal(page.invalidated.filter((key) => key === '["registry-desk"]').length, 1);
+});
+
+test("a refresh that fails after an answer leaves the answer in the status line", async (t) => {
+  setup();
+  const page = await mount(list([change()]));
+  t.after(() => page.close());
+  page.client.invalidateQueries = async () => {
+    throw new Error("refetch failed");
+  };
+  await page.press(page.button(rows(page)[0], "Accept and apply"));
+  const status = page.container.querySelector('[data-testid="review-status"]');
+  assert.match(status.textContent, /^Accepted and applied\. /);
+  assert.match(status.textContent, /The list could not be refreshed\. Reload the page\./);
+  assert.equal(status.getAttribute("role"), "status");
+});
+
+test("two clicks on one review button before the first answer send one call", async (t) => {
+  setup();
+  const page = await mount(list([change({ id: 6 })]));
+  t.after(() => page.close());
+  const button = page.button(rows(page)[0], "Reject");
+  await React.act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await page.settle();
+  assert.deepEqual(globalThis.__rv.calls, [["reject", { changeId: 6, note: null }]]);
+});
+
+test("filtered to waiting, the only row accepted: the list empties and the status line stays, with focus", async (t) => {
+  setup();
+  globalThis.__desk.search = { state: "pending" };
+  globalThis.__desk.data = desk([change({ id: 4 })]);
+  globalThis.__rv.review = async () => {
+    // What the server now holds: the row is accepted, so the Waiting filter hides it.
+    globalThis.__desk.data = desk([
+      change({
+        id: 4,
+        reviewState: "accepted",
+        reviewedBy: "Pat Editor",
+        reviewedAt: "2026-11-18T12:00:00Z",
+        appliedAt: "2026-11-18T12:00:00Z",
+      }),
+    ]);
+    return { ok: true, state: "accepted", applied: true, message: "Accepted and applied." };
+  };
+  const page = await mount(React.createElement(DeskPage));
+  t.after(() => page.close());
+  assert.equal(rows(page).length, 1);
+  await page.press(page.button(rows(page)[0], "Accept and apply"));
+  assert.equal(rows(page).length, 0, "the refreshed list is empty");
+  assert.match(page.text(), /No change is/);
+  const status = page.container.querySelector('[data-testid="review-status"]');
+  assert.ok(status, "the status line is still on the page");
+  assert.equal(status.textContent, "Accepted and applied.");
+  assert.ok(document.activeElement === status, `focus should be on the status line; it is on ${focusedAs()}`);
+});
+
 /* ---- Verify form and history ---- */
 
 const panel = () => React.createElement(RegistryVerificationPanel, { serviceId: 7 });
@@ -571,6 +698,56 @@ test("a thrown error says nothing was changed", async (t) => {
   await page.type(page.container, "basis", "Called");
   await page.submit();
   assert.equal(statusLine(page).textContent, "That entry could not be found. Nothing was changed.");
+});
+
+test("a refresh that fails after a recorded check leaves the success in the status line", async (t) => {
+  setup();
+  const page = await mount(panel());
+  t.after(() => page.close());
+  page.client.invalidateQueries = async () => {
+    throw new Error("refetch failed");
+  };
+  await page.type(page.container, "method", "phone");
+  await page.type(page.container, "basis", "Called");
+  await page.submit();
+  const status = statusLine(page);
+  assert.match(status.textContent, /^Verification recorded\. /);
+  assert.match(status.textContent, /The list could not be refreshed\. Reload the page\./);
+  assert.equal(status.getAttribute("role"), "status");
+  assert.doesNotMatch(page.text(), /refetch failed/);
+});
+
+test("each field's error sits outside its label and is linked to its control", async (t) => {
+  setup();
+  const page = await mount(panel());
+  t.after(() => page.close());
+  await page.type(page.container, "basis", "   ");
+  await page.type(page.container, "sourceUrl", "ftp://example.org/x");
+  await page.submit();
+  const labelOf = (control) =>
+    [...page.container.querySelectorAll("label")].find(
+      (l) =>
+        l.getAttribute("for") === control.id ||
+        [...l.querySelectorAll("select, textarea, input")].includes(control),
+    );
+  for (const [name, message] of [
+    ["method", "Choose how you checked this entry."],
+    ["basis", "Say what you checked. This is required."],
+    ["sourceUrl", "The link must start with http:// or https://."],
+  ]) {
+    const control = field(page, name);
+    const label = labelOf(control);
+    assert.ok(label, `${name} has a label`);
+    // A boolean, not the element: a failing assert would try to print the DOM node.
+    assert.equal(label.querySelector('[role="alert"]') !== null, false, `${name}: the error is not inside its label`);
+    assert.doesNotMatch(label.textContent, /Choose how|Say what|The link must/);
+    const describedBy = control.getAttribute("aria-describedby");
+    assert.ok(describedBy, `${name}: the control points at its error`);
+    const error = document.getElementById(describedBy);
+    assert.ok(error, `${name}: aria-describedby names an element that exists`);
+    assert.equal(error.textContent, message);
+    assert.equal(error.getAttribute("role"), "alert");
+  }
 });
 
 /* ---- Needs checking ---- */

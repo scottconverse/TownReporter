@@ -16,9 +16,11 @@ import type { listRegistryDesk } from "@/lib/news/registry/registry-desk";
  * made (then Accept and apply is not offered, because the server would refuse
  * it) or when the proposal points at no live row (then only Accept without
  * applying and Reject are offered). Whatever the server answers is shown as it
- * came, in one status line above the list, and focus moves to that line: the
- * row may leave the filtered list once it is resolved, so the line lives above
- * the rows, not in one. Accepting never verifies an entry.
+ * came, in one status line above the list, and focus moves to that line. The
+ * row may leave the filtered list once it is resolved, and the filter may leave
+ * the list empty: the line lives above the rows, not in one, and this component
+ * stays mounted (it shows its own empty text) so the line stays too. Accepting
+ * never verifies an entry.
  *
  * An accepted or rejected change shows who decided, when, whether it was
  * applied, and the note. It has no buttons.
@@ -30,6 +32,7 @@ type DeskChange = Awaited<ReturnType<typeof listRegistryDesk>>["changes"][number
 
 const NOTE_MAX = 1000;
 const WAITING = new Set(["pending", "needs-editor"]);
+const REFRESH_FAILED = "The list could not be refreshed. Reload the page.";
 
 type Status = { kind: "ok" | "refused"; text: string; count: number };
 
@@ -138,14 +141,17 @@ function WaitingControls({
 /**
  * The list of changes with their review controls. `renderSummary` draws the
  * row's existing content (what the scan found); this adds the status line and,
- * under each row, the controls or the resolved details.
+ * under each row, the controls or the resolved details. With no rows it shows
+ * `emptyText` in place of the list, and the status line stays above it.
  */
 export function RegistryChangeReviewList({
   changes,
+  emptyText,
   formatTime,
   renderSummary,
 }: {
   changes: readonly DeskChange[];
+  emptyText: ReactNode;
   formatTime: (when: string | Date | null | undefined) => string;
   renderSummary: (change: DeskChange) => ReactNode;
 }) {
@@ -173,8 +179,6 @@ export function RegistryChangeReviewList({
               data: { changeId: change.id, apply: action === "apply", note: trimmed },
             });
       next = { kind: result.ok ? "ok" : "refused", text: result.message };
-      // Refused or not, the server may know something the list does not.
-      await qc.invalidateQueries({ queryKey: ["registry-desk"] });
     } catch (error) {
       next = {
         kind: "refused",
@@ -182,11 +186,23 @@ export function RegistryChangeReviewList({
           (error instanceof Error ? error.message : "") ||
           "That change could not be reviewed. Nothing was changed.",
       };
+    }
+    // The server's answer is said first, whatever it was.
+    setStatus((previous) => ({ ...next, count: (previous?.count ?? 0) + 1 }));
+    try {
+      // Refused, thrown or not, the server may know something the list does not.
+      await qc.invalidateQueries({ queryKey: ["registry-desk"] });
+    } catch {
+      // A failed refresh is said after the answer and never replaces it.
+      setStatus((previous) => ({
+        ...next,
+        text: `${next.text} ${REFRESH_FAILED}`,
+        count: (previous?.count ?? 0) + 1,
+      }));
     } finally {
       running.current = false;
       setBusy(false);
     }
-    setStatus((previous) => ({ ...next, count: (previous?.count ?? 0) + 1 }));
   };
 
   return (
@@ -203,18 +219,22 @@ export function RegistryChangeReviewList({
           {status.text}
         </p>
       ) : null}
-      <ul className="astra-plain registry-changes">
-        {changes.map((change) => (
-          <li key={change.id}>
-            {renderSummary(change)}
-            {WAITING.has(change.reviewState) ? (
-              <WaitingControls change={change} busy={busy} onAct={act} />
-            ) : (
-              <ResolvedDetails change={change} formatTime={formatTime} />
-            )}
-          </li>
-        ))}
-      </ul>
+      {changes.length === 0 ? (
+        <p className="wire-sum">{emptyText}</p>
+      ) : (
+        <ul className="astra-plain registry-changes">
+          {changes.map((change) => (
+            <li key={change.id}>
+              {renderSummary(change)}
+              {WAITING.has(change.reviewState) ? (
+                <WaitingControls change={change} busy={busy} onAct={act} />
+              ) : (
+                <ResolvedDetails change={change} formatTime={formatTime} />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }

@@ -646,67 +646,65 @@ function RegistryDeskPage() {
                 })}
               </div>
             </div>
-            {visible.length === 0 ? (
-              <p className="wire-sum">
-                {changes.length === 0
+            {/* Always mounted, so the review status line survives the last row leaving the filter. */}
+            <RegistryChangeReviewList
+              changes={visible}
+              emptyText={
+                changes.length === 0
                   ? "The scan has not found a change in a registry source yet."
-                  : `No change is ${REVIEW_STATE_LABELS[state]?.toLowerCase() ?? "in this group"}.`}
-              </p>
-            ) : (
-              <RegistryChangeReviewList
-                changes={visible}
-                formatTime={formatListDateTime}
-                renderSummary={(change) => {
-                  const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
-                  const entity =
-                    change.entityId === null
-                      ? "New entry proposal"
-                      : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
-                  return (
-                    <>
-                      <div className="astra-row-t">{entity}</div>
-                      <p className="astra-row-meta">
-                        {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
-                        {" · "}
-                        {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind}
-                        {" · "}
-                        {evidenceTierLabel(change.evidenceTier)}
-                      </p>
-                      <p className="astra-row-meta">
-                        <b>{change.fieldName}</b>
-                        {" — before: "}
-                        {change.beforeValue ?? "nothing recorded"}
-                        {" · after: "}
-                        {change.afterValue ?? "nothing recorded"}
-                      </p>
-                      {change.summary ? <p className="astra-row-meta">{change.summary}</p> : null}
-                      <p className="astra-row-meta">
-                        Source:{" "}
-                        {change.sourceUrl ? (
-                          <a
-                            className="inline-link"
-                            href={change.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {change.sourceTitle || change.sourceUrl} ↗
-                          </a>
-                        ) : (
-                          (change.sourceTitle ?? "not recorded")
-                        )}
-                        {change.captureDate
-                          ? ` · Capture: ${formatListDateTime(change.captureDate)}`
-                          : " · No capture date recorded"}
-                      </p>
-                      <p className="astra-row-meta">
-                        Scan run {change.scanRunId ?? "not recorded"} ·{" "}
-                        {change.createdAt ? formatListDateTime(change.createdAt) : "date not recorded"}
-                      </p>
-                    </>
-                  );
-                }}
-              />
-            )}
+                  : `No change is ${REVIEW_STATE_LABELS[state]?.toLowerCase() ?? "in this group"}.`
+              }
+              formatTime={formatListDateTime}
+              renderSummary={(change) => {
+                const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
+                const entity =
+                  change.entityId === null
+                    ? "New entry proposal"
+                    : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
+                return (
+                  <>
+                    <div className="astra-row-t">{entity}</div>
+                    <p className="astra-row-meta">
+                      {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
+                      {" · "}
+                      {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind}
+                      {" · "}
+                      {evidenceTierLabel(change.evidenceTier)}
+                    </p>
+                    <p className="astra-row-meta">
+                      <b>{change.fieldName}</b>
+                      {" — before: "}
+                      {change.beforeValue ?? "nothing recorded"}
+                      {" · after: "}
+                      {change.afterValue ?? "nothing recorded"}
+                    </p>
+                    {change.summary ? <p className="astra-row-meta">{change.summary}</p> : null}
+                    <p className="astra-row-meta">
+                      Source:{" "}
+                      {change.sourceUrl ? (
+                        <a
+                          className="inline-link"
+                          href={change.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {change.sourceTitle || change.sourceUrl} ↗
+                        </a>
+                      ) : (
+                        (change.sourceTitle ?? "not recorded")
+                      )}
+                      {change.captureDate
+                        ? ` · Capture: ${formatListDateTime(change.captureDate)}`
+                        : " · No capture date recorded"}
+                    </p>
+                    <p className="astra-row-meta">
+                      Scan run {change.scanRunId ?? "not recorded"} ·{" "}
+                      {change.createdAt ? formatListDateTime(change.createdAt) : "date not recorded"}
+                    </p>
+                  </>
+                );
+              }}
+            />
           </section>
 
           <section className="src-sec">
