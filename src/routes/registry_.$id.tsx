@@ -7,6 +7,7 @@ import {
   getPublicRegistryServicePage,
 } from "@/lib/news/registry/registry-public";
 import {
+  safeWebUrl,
   registryCorrectionArticle,
   registryCorrectionHref,
   registryServicePath,
@@ -179,9 +180,13 @@ function RegistryServicePage() {
               {entry.serviceUrl ? (
                 <li>
                   <b>Website:</b>{" "}
-                  <a className="textlink break-words" href={entry.serviceUrl} rel="noreferrer">
-                    {entry.serviceUrl}
-                  </a>
+                  {safeWebUrl(entry.serviceUrl) ? (
+                    <a className="textlink break-words" href={entry.serviceUrl} rel="noreferrer">
+                      {entry.serviceUrl}
+                    </a>
+                  ) : (
+                    <span className="break-words">{entry.serviceUrl}</span>
+                  )}
                 </li>
               ) : null}
               {entry.serviceEmails.map((email) => (
@@ -289,9 +294,13 @@ function RegistryServicePage() {
                   <li key={`${source.appliesTo}-${source.url}`}>
                     {source.appliesTo === "organization" ? "Source for the organization" : "Source"}
                     :{" "}
-                    <a className="textlink break-words" href={source.url} rel="noreferrer">
-                      {source.title || source.url}
-                    </a>
+                    {safeWebUrl(source.url) ? (
+                      <a className="textlink break-words" href={source.url} rel="noreferrer">
+                        {source.title || source.url}
+                      </a>
+                    ) : (
+                      <span className="break-words">{source.title || source.url}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -308,7 +317,7 @@ function RegistryServicePage() {
           <section aria-labelledby="registry-correction">
             <h2 id="registry-correction">Correct this entry</h2>
             <p>
-              <a className="textlink" href={registryCorrectionHref(article)}>
+              <a className="textlink registry-text" href={registryCorrectionHref(article)}>
                 Something wrong here?
               </a>
             </p>

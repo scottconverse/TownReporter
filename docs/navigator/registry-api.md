@@ -26,7 +26,7 @@ Put the paper's own address in front of these paths, for example `https://<your-
 | `page` | Which page, counting from 1. | A whole number from 1 to 100000. Default 1. An empty value gives 400. |
 | `limit` | Services per page. | A whole number from 1 to 100. Default 25. An empty value gives 400. |
 
-Services come in this order: category name, then organization name, then service name, then id.
+Services come in this order: category name (services with no category come last), then organization name, then service name, then id.
 
 ### `/services/<id>`
 

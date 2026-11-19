@@ -731,6 +731,13 @@ function fileNamePart(name: string): string {
   return part || "directory";
 }
 
+/** The server's own calendar date as YYYY-MM-DD, not the UTC date. */
+function localDate(now: Date): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 /**
  * One directory of this newsroom as the HSDS bundle the importer reads, as JSON
  * text, without the rows an editor removed. Read-only. A directory this newsroom
@@ -750,7 +757,7 @@ export async function exportDirectoryFileIn(
   return {
     ok: true,
     directoryName: name,
-    fileName: `directory-${fileNamePart(name)}-${now.toISOString().slice(0, 10)}.json`,
+    fileName: `directory-${fileNamePart(name)}-${localDate(now)}.json`,
     json: `${JSON.stringify(bundle, null, 2)}
 `,
   };

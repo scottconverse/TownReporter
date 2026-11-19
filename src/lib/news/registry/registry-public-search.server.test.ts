@@ -193,6 +193,24 @@ test("a search that cannot read the database is 'unavailable', not an empty resu
   assert.equal(good.status, "ok");
 });
 
+test("a page or category number past the database's range is clamped or dropped, never 'unavailable'", async () => {
+  const sql = await getSql();
+  const room = 9612;
+  await addService(sql, room, { name: "Range shelter", category: await addCategory(sql, room, "Range") });
+  const farPage = await readPublicRegistrySearch(getSql, room, { page: 100000000 });
+  assert.equal(farPage.status, "ok");
+  if (farPage.status === "ok") {
+    assert.equal(farPage.page, 100000);
+    assert.equal(farPage.entries.length, 0);
+    assert.equal(farPage.total, 1, "the total still counts every match");
+  }
+  const farCategory = await readPublicRegistrySearch(getSql, room, { categoryId: 99999999999 });
+  assert.equal(farCategory.status, "ok");
+  if (farCategory.status === "ok") assert.equal(farCategory.total, 1, "an out-of-range category is dropped");
+  const both = await readPublicRegistrySearch(getSql, room, { page: 1e12, categoryId: 1e12 });
+  assert.equal(both.status, "ok");
+});
+
 test("detail returns every public field, and keeps a place's hours, phones and accessibility with that place", async () => {
   const sql = await getSql();
   const room = 9609;

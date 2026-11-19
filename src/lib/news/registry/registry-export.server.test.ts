@@ -216,6 +216,68 @@ test("an export imported back gives no proposal when a link's schedule was remov
   assert.equal(ids(restored.bundle).has(schedule!.hsds_id), true);
 });
 
+test("a file with no schedule on a link whose stored schedule is still live is not ignored", async () => {
+  const sql = await getSql();
+  const newsroomId = 9810;
+  await importInto(newsroomId);
+  const [link] = await sql.query<{ id: number; hsds_id: string; schedule_id: number }>(
+    `update service_at_locations
+        set schedule_id = (select id from schedules where newsroom_id = $1 order by id limit 1)
+      where id = (select id from service_at_locations where newsroom_id = $1 order by id limit 1)
+      returning id, hsds_id, schedule_id`,
+    [newsroomId],
+  );
+  assert.ok(link?.schedule_id, "a link now has a live schedule");
+  const { bundle } = await exportBundle(newsroomId);
+
+  // The same file, but the link has no schedule_id (null). Same path as the removed-schedule test.
+  let edited = 0;
+  const strip = (value: unknown) => {
+    if (Array.isArray(value)) value.forEach(strip);
+    else if (value && typeof value === "object") {
+      const row = value as Record<string, unknown>;
+      if (row.id === link.hsds_id) {
+        row.schedule_id = null;
+        edited += 1;
+      }
+      Object.values(row).forEach(strip);
+    }
+  };
+  strip(bundle);
+  assert.ok(edited >= 1, "the link was found in the file");
+
+  const beforeCounts = await counts(newsroomId);
+  const result = await runHsdsImportIn(
+    sql,
+    newsroomId,
+    { json: JSON.stringify(bundle), directoryName: DIRECTORY },
+    "tester",
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const changed = Object.values(result.summary.tables).reduce((n, c) => n + c.changed, 0);
+  const afterCounts = await counts(newsroomId);
+  assert.ok(
+    result.summary.conflicts.length > 0 ||
+      changed > 0 ||
+      afterCounts.resource_changes > beforeCounts.resource_changes,
+    "a live schedule dropped from the file makes a conflict or a proposal",
+  );
+});
+
+test("the file name uses the server's own calendar date, not the UTC date", async () => {
+  await importInto(9811);
+  const sql = await getSql();
+  // Built from local parts, so the test holds in any time zone: 19:00 local on Nov 18.
+  const evening = new Date(2026, 10, 18, 19, 0, 0);
+  const result = await exportDirectoryFileIn(sql, 9811, DIRECTORY, evening);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.fileName, "directory-example-hsds-directory-2026-11-18.json");
+  const early = await exportDirectoryFileIn(sql, 9811, DIRECTORY, new Date(2026, 0, 5, 0, 30, 0));
+  assert.ok(early.ok && early.fileName.endsWith("-2026-01-05.json"));
+});
+
 test("an export imported into an empty newsroom keeps every field the importer needs", async () => {
   const source = 9804;
   const target = 9805;

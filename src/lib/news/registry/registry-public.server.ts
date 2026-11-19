@@ -26,6 +26,7 @@
 
 import type { Sql } from "../../db.ts";
 import type { WhenValue } from "./registry-desk.server.ts";
+import { REGISTRY_MAX_PAGE, registryCategoryNumber } from "./registry-correction.ts";
 
 /** One published, active place a service is offered, with what belongs to it. */
 export interface PublicRegistryLocation {
@@ -385,10 +386,11 @@ export async function searchPublicRegistry(
   newsroomId: number,
   input: PublicRegistrySearchInput,
 ): Promise<PublicRegistrySearchPage> {
-  const page = Math.max(1, Math.floor(input.page ?? 1));
+  const page = Math.min(Math.max(1, Math.floor(input.page ?? 1)), REGISTRY_MAX_PAGE);
   const pageSize = Math.max(1, Math.floor(input.pageSize ?? PUBLIC_REGISTRY_PAGE_SIZE));
   const filter: RegistryFilter = {
-    categoryId: input.categoryId ?? null,
+    // A category id past the database's integer range matches nothing; drop it.
+    categoryId: registryCategoryNumber(input.categoryId),
     q: (input.q ?? "").slice(0, PUBLIC_REGISTRY_MAX_Q),
     language: input.language ?? null,
   };

@@ -7,6 +7,9 @@ import {
   searchPublicRegistryPage,
 } from "@/lib/news/registry/registry-public";
 import {
+  registryCategoryNumber,
+  registryPageNumber,
+  safeWebUrl,
   registryCorrectionArticle,
   registryCorrectionHref,
   registryServicePath,
@@ -28,11 +31,6 @@ import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
  * Not verified yet." It never says a program is confirmed open.
  */
 
-function categoryFromSearch(search: Record<string, unknown>): number | null {
-  const value = Number(search.category);
-  return Number.isInteger(value) && value > 0 ? value : null;
-}
-
 const PAGE_SIZE = 25;
 
 type RegistrySearch = { q?: string; category?: number; language?: string; page?: number };
@@ -42,12 +40,12 @@ export const Route = createFileRoute("/registry")({
     const out: RegistrySearch = {};
     const q = typeof search.q === "string" ? search.q.trim().slice(0, 200) : "";
     if (q) out.q = q;
-    const category = categoryFromSearch(search);
+    const category = registryCategoryNumber(search.category);
     if (category) out.category = category;
     const language = typeof search.language === "string" ? search.language.trim().slice(0, 100) : "";
     if (language) out.language = language;
-    const page = Number(search.page);
-    if (Number.isInteger(page) && page > 1) out.page = page;
+    const page = registryPageNumber(search.page);
+    if (page > 1) out.page = page;
     return out;
   },
   loaderDeps: ({ search }) => ({
@@ -129,7 +127,7 @@ function RegistryPage() {
           <div className="correction-field">
             <label htmlFor="registry-q">Search</label>
             <input
-              className="field text-base"
+              className="field text-base registry-text"
               id="registry-q"
               name="q"
               type="search"
@@ -172,7 +170,7 @@ function RegistryPage() {
               ))}
             </select>
           </div>
-          <button className="btn text-base" type="submit">
+          <button className="btn text-base registry-text" type="submit">
             Search
           </button>
         </form>
@@ -214,7 +212,7 @@ function RegistryPage() {
                 There are no services on this page. <a href={listHref(withoutFilters)}>Go to the first page</a>.
               </p>
             ) : null}
-            {total === 0 && filtered ? (
+            {total === 0 && (q || language) ? (
               <p>
                 No services match your search. <a href="/registry">Clear the search</a>.
               </p>
@@ -246,7 +244,7 @@ function RegistryPage() {
               return (
                 <article className="correction-entry" key={entry.serviceId}>
                   <h3>
-                    <a className="textlink" href={registryServicePath(entry.serviceId)}>
+                    <a className="textlink registry-text" href={registryServicePath(entry.serviceId)}>
                       {heading}
                     </a>
                   </h3>
@@ -308,14 +306,18 @@ function RegistryPage() {
                   {entry.sourceUrl ? (
                     <p>
                       Source:{" "}
-                      <a className="textlink break-words" href={entry.sourceUrl} rel="noreferrer">
-                        {entry.sourceTitle || entry.sourceUrl}
-                      </a>
+                      {safeWebUrl(entry.sourceUrl) ? (
+                        <a className="textlink break-words" href={entry.sourceUrl} rel="noreferrer">
+                          {entry.sourceTitle || entry.sourceUrl}
+                        </a>
+                      ) : (
+                        <span className="break-words">{entry.sourceTitle || entry.sourceUrl}</span>
+                      )}
                     </p>
                   ) : null}
                   <p>
                     <a
-                      className="textlink"
+                      className="textlink registry-text"
                       href={registryCorrectionHref(
                         registryCorrectionArticle({
                           id: entry.serviceId,

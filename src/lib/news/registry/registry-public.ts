@@ -9,6 +9,7 @@
 
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../../db.ts";
+import { registryCategoryNumber, registryPageNumber, registryServiceId } from "./registry-correction.ts";
 import { DEFAULT_NEWSROOM_ID } from "../membership.ts";
 import {
   readPublicRegistry,
@@ -38,11 +39,6 @@ export const listPublicRegistryPage = createServerFn({ method: "GET" })
 /** Same cap as `PUBLIC_REGISTRY_MAX_Q` on the server; kept here so the validator pulls in no server module. */
 const MAX_Q = 200;
 
-function wholeNumber(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
 /**
  * The search page's read: q, category, language and page. Added for the
  * public list; the older `listPublicRegistryPage` stays as it was.
@@ -52,9 +48,9 @@ export const searchPublicRegistryPage = createServerFn({ method: "GET" })
     const raw = (input ?? {}) as Record<string, unknown>;
     return {
       q: typeof raw.q === "string" ? raw.q.replaceAll("\u0000", "").trim().slice(0, MAX_Q) : "",
-      category: wholeNumber(raw.category),
+      category: registryCategoryNumber(raw.category),
       language: typeof raw.language === "string" ? raw.language.replaceAll("\u0000", "").trim().slice(0, 100) : "",
-      page: wholeNumber(raw.page) ?? 1,
+      page: registryPageNumber(raw.page),
     };
   })
   .handler(async ({ data }): Promise<PublicRegistrySearchResult> =>
@@ -69,10 +65,10 @@ export const searchPublicRegistryPage = createServerFn({ method: "GET" })
 /** One service by id for `/registry/<id>`. A null `entry` is "not listed". */
 export const getPublicRegistryServicePage = createServerFn({ method: "GET" })
   .validator((input: unknown) => ({
-    id: wholeNumber((input as { id?: unknown } | null)?.id),
+    id: registryServiceId((input as { id?: unknown } | null)?.id),
   }))
   .handler(async ({ data }): Promise<PublicRegistryServiceResult> => {
-    if (data.id == null || data.id > 2147483647) return { status: "ok", entry: null };
+    if (data.id == null) return { status: "ok", entry: null };
     return readPublicRegistryService(getSql, DEFAULT_NEWSROOM_ID, data.id);
   });
 

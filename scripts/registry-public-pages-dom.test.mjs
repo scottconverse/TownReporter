@@ -399,3 +399,116 @@ test("the detail page's title and description", () => {
   const none = detailRoute.options.head({ loaderData: undefined, match: { context: {} } });
   assert.equal(none.meta[0].title, "Community resources — The Paper");
 });
+
+// ---- Fix 2 audit: input limits, long names, empty states, unsafe links, old eyes ----
+
+const helpers = await import(correctionUrl);
+
+test("an out-of-range page is clamped and an out-of-range category is dropped, in the route validator", () => {
+  const v = listRoute.options.validateSearch;
+  assert.deepEqual(v({ page: "100000000" }), { page: 100000 });
+  assert.deepEqual(v({ page: 100000000 }), { page: 100000 });
+  assert.deepEqual(v({ page: "9".repeat(400) }), { page: 100000 });
+  assert.deepEqual(v({ category: "99999999999" }), {});
+  assert.deepEqual(v({ category: 99999999999 }), {});
+  assert.deepEqual(v({ category: "999999999" }), { category: 999999999 });
+  assert.equal(helpers.registryPageNumber("100000"), 100000);
+  assert.equal(helpers.registryPageNumber("2.5"), 1);
+});
+
+test("a service id must be in plain form, at most 2147483647", () => {
+  for (const bad of ["1e3", "1.0", "01", "2147483648", "0", "-1", " ", "", "abc", "99999999999", null, undefined, 1e21])
+    assert.equal(helpers.registryServiceId(bad), null, `${String(bad)} is not listed`);
+  assert.equal(helpers.registryServiceId("1000"), 1000);
+  assert.equal(helpers.registryServiceId("2147483647"), 2147483647);
+  assert.equal(helpers.registryServiceId(7), 7);
+});
+
+test("a very long name never breaks the correction link", () => {
+  const service = "a".repeat(1942) + "😀😀😀";
+  const article = helpers.registryCorrectionArticle({
+    id: 7,
+    organizationName: "O",
+    serviceName: service,
+    url: `${ORIGIN}/registry/7`,
+  });
+  assert.ok(article.length <= 2000, `article is ${article.length} characters`);
+  assert.ok(article.endsWith(` (${ORIGIN}/registry/7)`));
+  assert.doesNotThrow(() => helpers.registryCorrectionHref(article));
+  // Every cut point near the end of a run of emoji builds a link.
+  for (let n = 1900; n < 1990; n++) {
+    const text = helpers.registryCorrectionArticle({
+      id: 7,
+      organizationName: "O",
+      serviceName: "a".repeat(n) + "😀".repeat(10),
+      url: `${ORIGIN}/registry/7`,
+    });
+    assert.ok(text.length <= 2000);
+    assert.doesNotThrow(() => helpers.registryCorrectionHref(text), `n=${n}`);
+  }
+  // A lone surrogate that is already stored does not break the link either.
+  assert.doesNotThrow(() =>
+    helpers.registryCorrectionHref(
+      helpers.registryCorrectionArticle({ id: 7, organizationName: "O\ud83d", serviceName: "x", url: "/registry/7" }),
+    ),
+  );
+  const html = renderList(okResult({ entries: [entry({ serviceName: service })] }));
+  assert.match(html, /href="\/corrections\?article=/);
+});
+
+test("a category-only empty result shows the category sentence alone", () => {
+  const html = renderList(okResult({ entries: [], total: 0 }), { category: 3 });
+  assert.match(html, /No published entries are filed under Housing yet\./);
+  assert.doesNotMatch(html, /No services match your search/);
+  const unknown = renderList(okResult({ entries: [], total: 0 }), { category: 99 });
+  assert.match(unknown, /filed under this category yet/);
+  assert.doesNotMatch(unknown, /No services match your search/);
+});
+
+test("an empty result with a search word or a language shows the search sentence", () => {
+  for (const search of [{ category: 3, q: "zzz" }, { category: 3, language: "Spanish" }, { language: "Spanish" }]) {
+    const html = renderList(okResult({ entries: [], total: 0 }), search);
+    assert.match(html, /No services match your search\./);
+    assert.doesNotMatch(html, /No published entries are filed under/);
+  }
+});
+
+test("only http and https values become links; the stored value is still shown as text", () => {
+  const bad = renderDetail({
+    status: "ok",
+    entry: entry({
+      serviceUrl: "javascript:alert(1)",
+      sources: [
+        { url: "hsds://p4-verify", title: "Odd source", appliesTo: "service" },
+        { url: "https://ok.example/s", title: "Good source", appliesTo: "service" },
+      ],
+    }),
+  });
+  assert.doesNotMatch(bad, /href="javascript:/i);
+  assert.doesNotMatch(bad, /href="hsds:/i);
+  assert.ok(bad.includes("javascript:alert(1)"), "the value is shown as plain text");
+  assert.ok(bad.includes("Odd source"));
+  assert.match(bad, /href="https:\/\/ok\.example\/s"/);
+  const list = renderList(
+    okResult({ entries: [entry({ sourceUrl: "hsds://p4-verify", sourceTitle: "Odd source" })] }),
+  );
+  assert.doesNotMatch(list, /href="hsds:/i);
+  assert.ok(list.includes("Odd source"));
+  const good = renderList(
+    okResult({ entries: [entry({ sourceUrl: "http://county.example/a", sourceTitle: "County" })] }),
+  );
+  assert.match(good, /href="http:\/\/county\.example\/a"/);
+  for (const value of ["javascript:alert(1)", " JaVaScRiPt:x", "data:text/html,x", "hsds://x", "example.com", "//x.example", ""])
+    assert.equal(helpers.safeWebUrl(value), null, value);
+  assert.equal(helpers.safeWebUrl("https://a.example"), "https://a.example");
+});
+
+test("the service link, the correction links, the search box and the Search button are 16px (text-base and the registry rule)", () => {
+  const html = renderList(okResult());
+  assert.match(html, /<input[^>]*class="[^"]*\btext-base\b[^"]*\bregistry-text\b[^"]*"[^>]*id="registry-q"|<input[^>]*id="registry-q"[^>]*class="[^"]*\bregistry-text\b/);
+  assert.match(html, /<button[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*type="submit"/);
+  assert.match(html, /<h3><a[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*href="\/registry\/7"/);
+  assert.match(html, /<a[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*href="\/corrections\?article=/);
+  const detail = renderDetail({ status: "ok", entry: fullEntry() });
+  assert.match(detail, /<a[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*href="\/corrections\?article=/);
+});
