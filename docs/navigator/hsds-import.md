@@ -85,6 +85,21 @@ A proposal that is already accepted or rejected cannot be decided again. The pag
 - An import does not propose again a change that an editor already accepted or rejected. The match covers the field, the row, the value the file gives and the value the entry holds now. If the entry changed after the decision, the change can be proposed again.
 - Each import takes a lock for one newsroom and one directory name. A second import of the same directory waits until the first one finishes. It then sees the first import's proposals, so it does not repeat them. A preview takes the same lock.
 
+## Back up and restore the community directory
+
+The directory is part of the whole-database backup. There is no separate directory backup. The nightly backup (`ops/backup.ps1`) is one `pg_dump` of the whole database, and one restore brings the directory back with everything else.
+
+These tables hold the directory and its review record:
+
+- `organizations`, `services`, `locations`, `service_at_locations`, `schedules`, `contacts` (phones and emails), `eligibilities`, `required_documents`, `languages`, `accessibilities`
+- `resource_sources` (which source backs which entry), `resource_imports`
+- `resource_changes` (proposals, with review state, note and applied time)
+- `resource_verifications` (the verification snapshots)
+- `audit_events`
+
+To restore, follow the restore steps in `docs/staging.md` (`ops/stage.ps1` restores a backup into a fresh database with `psql`). Then check the restore log for SQL errors, as `docs/HALO-UPDATE-0.6.35.md` says.
+
+What was shown: on 2026-11-18 a small directory was dumped with the same command the backup uses (`pg_dump -p <port> -U postgres -d <db> -f <file>`) and restored with `psql -f` into a fresh database, on a throwaway Postgres 18.6 that held no live data. The restore log had no errors. The two databases matched on row counts for every table above, published flags, removed markers, sources, the links from service to organization and place, review state, note and applied time, the verification snapshot, and the audit rows. The directory was seeded by SQL on a database migrated to 0166, not imported from a file. The nightly job itself, `pg_restore`, and the size and timing of a real backup were not checked.
 ## Not yet
 
 Sending a proposal back for another look is not built. A public search and a public JSON feed are not built either.
