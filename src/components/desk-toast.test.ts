@@ -5,6 +5,7 @@ import {
   DESK_SIGNED_OUT_REASON,
   DESK_TOO_SLOW_REASON,
   DESK_UNREACHABLE_REASON,
+  deskErrorHasMessage,
   deskErrorReason,
 } from "./desk-toast.ts";
 
@@ -109,5 +110,19 @@ describe("a press the desk did answer", () => {
       "keeps the caller's lead in front of the mapped sentence".
     */
     assert.match(DESK_UNREACHABLE_REASON, /could not be reached/);
+  });
+});
+
+describe("an error that carries no message", () => {
+  it("is reported as carrying none, so the caller can show its own sentence", () => {
+    for (const empty of [undefined, null, "", "   ", new Error(""), new Error("  "), {}]) {
+      assert.equal(deskErrorHasMessage(empty), false, String(empty));
+    }
+  });
+
+  it("is reported as carrying one when there is text to read", () => {
+    for (const carrying of [new Error("That row is gone."), "That row is gone.", "blocked by walker"]) {
+      assert.equal(deskErrorHasMessage(carrying), true, String(carrying));
+    }
   });
 });

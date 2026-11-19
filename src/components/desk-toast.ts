@@ -212,6 +212,18 @@ function deskErrorMessage(error: unknown): string {
   return String(error).trim();
 }
 
+/**
+ * Does this error carry a message of its own?
+ *
+ * A caller that has its own sentence for "the press failed and nobody said
+ * why" asks this first, so an error that carries nothing still reads as that
+ * sentence rather than as `deskErrorReason`'s generic "the desk gave no
+ * reason".
+ */
+export function deskErrorHasMessage(error: unknown): boolean {
+  return deskErrorMessage(error) !== "";
+}
+
 /*
   The three shapes the desk's own sentences do not cover.
 

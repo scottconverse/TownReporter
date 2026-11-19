@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { useConfirmFocus } from "@/components/confirm-focus";
-import { deskErrorReason } from "@/components/desk-toast";
+import { deskErrorHasMessage, deskErrorReason } from "@/components/desk-toast";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { DeskJobCard } from "@/components/JobCard";
@@ -990,9 +990,13 @@ function OpinionPage() {
                               (discard.isPending && discard.variables === r.id),
                             problem:
                               remove.isError && remove.variables === r.draft_id
-                                ? deskErrorReason(remove.error, "delete that editorial")
+                                ? deskErrorHasMessage(remove.error)
+                                  ? deskErrorReason(remove.error, "delete that editorial")
+                                  : "That did not delete."
                                 : discard.isError && discard.variables === r.id
-                                  ? deskErrorReason(discard.error, "clear that editorial")
+                                  ? deskErrorHasMessage(discard.error)
+                                    ? deskErrorReason(discard.error, "clear that editorial")
+                                    : "That did not clear."
                                   : /* Unit UI1a3, finding 1: both of these server
                                        functions answer `{ ok: false, error }`
                                        for their ordinary refusal ("That

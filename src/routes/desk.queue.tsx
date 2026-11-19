@@ -71,7 +71,12 @@ import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { useConfirmFocus } from "@/components/confirm-focus";
-import { deskErrorReason, deskToast, dismissDeskToast } from "@/components/desk-toast";
+import {
+  deskErrorHasMessage,
+  deskErrorReason,
+  deskToast,
+  dismissDeskToast,
+} from "@/components/desk-toast";
 import {
   KILL_TOAST_MS,
   killPress,
@@ -1457,6 +1462,7 @@ function QueuePage() {
     if (bulkStatus.isError) {
       // F05 of the 2026-11-19 walk: the words beside the bar are the desk's, not
       // a raw exception's ("blocked by walker").
+      if (!deskErrorHasMessage(bulkStatus.error)) return "That change did not reach the desk.";
       return deskErrorReason(
         bulkStatus.error,
         status === "held" ? "hold those leads" : "kill those leads",
@@ -1884,7 +1890,9 @@ function QueuePage() {
                       phase={rowActionPhase({
                         isPending: bulkRemove.isPending,
                         problem: bulkRemove.isError
-                          ? deskErrorReason(bulkRemove.error, "delete those leads")
+                          ? deskErrorHasMessage(bulkRemove.error)
+                            ? deskErrorReason(bulkRemove.error, "delete those leads")
+                            : "Could not delete those leads."
                           : null,
                       })}
                       workingLabel="Deleting…"
