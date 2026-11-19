@@ -14,6 +14,17 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
+## On main, not released yet
+
+These changes are on `main` after 0.6.92. No release or tag carries them. The line-by-line list is the **Unreleased** section of the [changelog](CHANGELOG.md#unreleased).
+
+- **Community resources, phases 1 to 4.** `/registry` has a **Search** box, **Category** and **Language** filters and 25 services to a page. Each service has its own page at `/registry/<id>`, with a **Something wrong here?** link that opens **Corrections**. A read-only JSON API, version 1, is at `/api/registry/v1`. On `/desk/registry` an editor can **Import a directory file** with a **Preview**, open **All details** for an entry, **Remove** and **Restore** rows, review each waiting change (**Accept and apply**, **Accept without applying**, **Reject**), record a check in **Verification**, see the **Needs checking** list, and press **Download directory file**. Saving or publishing an entry no longer marks it verified; only a recorded check does. Migrations 0165 and 0166. See [docs/navigator/hsds-import.md](docs/navigator/hsds-import.md) and [docs/navigator/registry-api.md](docs/navigator/registry-api.md) (#409 to #412).
+- **Auto-draft at 14+.** After a scan, a lead that scores 14 or more is drafted on its own, whether it is new or held. A lead the scan linked as a possible repeat of a published or killed lead is skipped (#400, #405, #406).
+- **Queue.** **Start N stories** drafts every ticked lead, including ticked leads that are not on screen, and the batch has no five-lead limit (#407).
+- **Drafts.** Each row has a tick box, with **Select all shown**, **Publish N selected** and **Kill N selected** (one **Undo** puts them all back). **Publish all drafts** now publishes on one press, with no confirm box. The Queue and Drafts counts in the left nav refresh every 15 seconds (5 seconds during a scan) (#401, #402).
+- **Drafts no longer lock the job list.** Evidence chunks are written after the job's lock is released, in batches of 200 (#408).
+- **Front page.** With no geography pill pressed, **Around the region** shows the six newest published stories from outside the home area (#404).
+
 ## What is new in 0.6.92
 
 1 pull request since 0.6.91. The long list is in the [changelog](CHANGELOG.md#0692--2026-11-15) and the [release guide](docs/releases/0.6.92.md).
@@ -47,7 +58,7 @@ MIT licensed. Clone it. Point it at your city.
 37 pull requests since 0.6.87. The short list; the long list is in the [changelog](CHANGELOG.md#0688--2026-11-12) and the [release guide](docs/releases/0.6.88.md).
 
 - **Reader pages and events.** New ICS and site event readers, the `routine_events` table, a front-page events week box and 37 event feeds. The Bulletin redesign changes every reader page, and the events box meets 14px text and 44px tap targets on a phone.
-- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries. Phase 2 adds a JSON file import with a preview, an editor for every detail of an entry, and remove and restore for the rows of an entry. See [docs/navigator/hsds-import.md](docs/navigator/hsds-import.md).
+- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries. The JSON file import, the all-details editor, review, verification and the public search came after 0.6.92 (see **On main, not released yet** above).
 - **Phone app install.** Readers can add TownReporter to the Android or iPhone home screen. New icons, manifest and a service worker show **You are offline.** when the phone is offline.
 - **Desk and Drafts.** Same-day routine updates post one short note. The scan model picker moves below the header. Waiting roundups have **Open / Close** and **Kill**. Opinion drafts show on Drafts. Desk text and buttons reach 16px.
 - **Scan, models and Ollama.** The scan reads news first and files leads during a hand-started scan. Repeats and distinct finder refs are fixed. The scan warns when speech-to-text is missing. TownReporter looks after Ollama. Claude Fable uses **Claude Fable 5.2** and `claude-fable-5-2`.
@@ -96,7 +107,7 @@ TownReporter is two rooms:
 |                        | What it is                                                         | Who sees it       |
 | ---------------------- | ------------------------------------------------------------------ | ----------------- |
 | **The paper** (`/`)    | Stories and editorials, plus eligible owner-approved routine notices, with sources shown | Anyone            |
-| **The desk** (`/desk`) | Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Models, Server, Stats | Signed-in editors |
+| **The desk** (`/desk`) | Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Registry, Models, Server, Stats | Signed-in editors |
 
 There is no fully automated path to the masthead for ordinary reporting. Approved sources can produce the bounded notice roundups described below.
 
@@ -142,7 +153,7 @@ Every item here is in the code of this release. The full manual covers each one 
 
 **Report and write**
 
-- Queue, Drafts and the story workbench: story direction, Draft with AI, Redraft, **Draft selected** (a batch of up to five leads on one named model), Hold, Kill, and Undo.
+- Queue, Drafts and the story workbench: story direction, Draft with AI, Redraft, **Start N stories** (drafts every ticked lead as one batch on one named model), Hold, Kill, and Undo.
 - Assignment-based reporting packages: a coverage ledger, source-linked claims, readiness, and a run receipt beside every draft. Whole-meeting coverage with an editor-visible action ledger and vote counts that are never guessed.
 - **Add documents** reads PDF, Word, text and pictures (OCR), and now Excel, PowerPoint and LibreOffice files through headless LibreOffice. Install [LibreOffice](https://www.libreoffice.org/download/) on the computer to use that last part; the Server page shows whether it was found.
 - **Find evidence** and search by meaning (desk only), described below.
@@ -153,6 +164,7 @@ Every item here is in the code of this release. The full manual covers each one 
 
 **Publish**
 
+- Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are on `main` but not yet released (see [above](#on-main-not-released-yet)).
 - The Publish bar lists every warning and reads **Publish anyway in <section>**. A person presses it. Every override is audited.
 - Public corrections, RSS, an evidence page for every cited record, and a side-by-side comparison when a cited record has moved.
 - Routine editions (**Today in town**, **This weekend**, **Deadlines approaching**) publish from approved sources through fixed templates.
@@ -256,7 +268,7 @@ flowchart LR
 - **Evidence.** Captured records are content-hashed; transcripts are immutable revisions; the meaning index is a table of vectors with no text.
 - **Operations.** PowerShell scripts in `ops/` for backup, promote, staging, the watchdog and the control page; a Cloudflare Tunnel can front the app.
 
-The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The twelve diagrams are listed [below](#architecture-diagrams).
+The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The fifteen diagrams are listed [below](#architecture-diagrams).
 
 ### All documents and manuals
 
@@ -278,6 +290,8 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Operators: the nightly proof                               | [docs/nightly-proof.md](docs/nightly-proof.md)                                                  |
 | Local models, measured on real prompts                     | [docs/local-models.md](docs/local-models.md)                                                    |
 | Add and use a named AI API connection                      | [docs/custom-ai-connections.md](docs/custom-ai-connections.md)                                  |
+| Community resources: import a directory file, review changes, verify | [docs/navigator/hsds-import.md](docs/navigator/hsds-import.md) · [change detection](docs/navigator/change-detection.md) |
+| Community resources: the read-only JSON API | [docs/navigator/registry-api.md](docs/navigator/registry-api.md)                                |
 | Developers: PostgreSQL integration tests                   | [docs/postgres-integration-testing.md](docs/postgres-integration-testing.md)                    |
 | Developers: contributing changes                           | [CONTRIBUTING.md](CONTRIBUTING.md)                                                              |
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
@@ -299,7 +313,7 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 The release at [github.com/scottconverse/TownReporter/releases/tag/v0.6.92](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.92) carries three files: `TownReporter-0.6.92-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
-CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.87, and no fresh-machine human acceptance of it is claimed here.
+CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.6.92, and no fresh-machine human acceptance of it is claimed here.
 
 Follow the [Windows installation guide](docs/windows-install.md) for setup, start and stop, private data and troubleshooting. Public hosting and AI provider setup are separate from local installation.
 
@@ -366,7 +380,7 @@ If `LLM_BASE_URL`, or the `LLM_API_KEY` + `LLM_MODEL` pair, names a gateway, Aut
 
 A named pick is the recorded first choice. The Story page names the model while a draft runs ("Writer: <model> · picked: <pick>"), afterward shows **Last draft: <model>, <time>**, and shows every hop of a failover in order. An explicit pick that is unavailable is refused before it is queued, with how to restore it. **Draft anyway** is offered where a warning allows it.
 
-- **Queue → Draft selected** runs one editor-chosen batch of up to five eligible leads on one named model, never Automatic. It retains each lead's saved research scope, shows each lead's durable result, and never publishes a story.
+- **Queue → Start N stories** opens **Draft the selected leads**. It runs one editor-chosen batch of the eligible ticked leads, any number, on one named model, never Automatic. It retains each lead's saved research scope, shows each lead's durable result, and never publishes a story.
 - **Daily Scan** uses the same named choices. It stores the requested model with the schedule and the runtime actually used on each job. A usage limit no longer pauses the daily scan.
 - **Local model** supports individual models discovered on LM Studio, Ollama and llama.cpp, or a configured `LLM_BASE_URL` with `LLM_MODEL` and optional `LLM_API_KEY`. The owner can set it under **Models → Connections → Local & self-hosted**. A DeepSeek pick never follows the Local model setting to another server. See [docs/local-models.md](docs/local-models.md).
 - **Supplied-only scope** tells the writer to use only the material you supplied, with no web search or fetch.
@@ -374,11 +388,11 @@ A named pick is the recorded first choice. The Story page names the model while 
 
 ### How the CLI models are held
 
-Codex and Claude use the operator's existing signed-in CLI sessions; no API key is required. `CODEX_CLI_PATH`, `CODEX_HOME` and `CLAUDE_CLI_PATH` are available when normal discovery cannot find the binary or Codex state directory. TownReporter uses the signed-in account only to authenticate its Codex CLI requests; a newsroom call does not inherit the operator's full Codex setup. Each call ignores Codex user configuration, starts from the system temporary directory, runs ephemerally with a read-only sandbox, and disables shell, computer, browser, apps, plugins, multi-agent and hook features. Built-in web search is added only when the trusted caller requests research. This is an application-level tool boundary, not an operating-system security sandbox: the reporting process still runs as the Windows account, and the read-only setting does not by itself restrict which files that account can read. Untrusted source material must therefore remain data, never an instruction to expand the task.
+Codex and Claude use the operator's existing signed-in CLI sessions; no API key is required. `CODEX_CLI_PATH`, `CODEX_HOME` and `CLAUDE_CLI_PATH` are available when normal discovery cannot find the binary or Codex state directory. The signed-in account is used only to authenticate the call.
 
-Claude Code is separately constrained. TownReporter omits the operator's `CLAUDE.md`, skills, plugins and MCP configuration, starts the CLI outside the application tree in restricted safe mode, and allows only `WebSearch` and `WebFetch` for a caller-authorized research request. Planning calls hide all tools; OCR has a narrow exception that reads one generated temporary page. The reporting job does not receive shell, arbitrary file, browser or agent tools.
+The CLIs run with their full tool sets and with permission prompts off (decision D149, Oct 18 2026). Codex starts with `--dangerously-bypass-approvals-and-sandbox`, `--search` and `--ephemeral`, with hooks, memories and project docs turned off per call. Claude Code starts with `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` and no session persistence. It leaves out the operator's `CLAUDE.md` files, hooks and automatic memory per call, but its built-in tools and configured MCP servers stay loaded. The Gemini CLI also runs with `--dangerously-skip-permissions`. The tool surface is therefore not a security boundary. The boundary is the Windows account that runs the server, which can reach whatever that account can reach. Run the server under an account that holds only what the newsroom needs. Untrusted source material must remain data, never an instruction to expand the task. See [SECURITY.md](SECURITY.md#reporting-agents-and-untrusted-records).
 
-DeepSeek runs through that same restricted Claude Code CLI against a small relay on `127.0.0.1` that sets the thinking budget from the run's effort (off at the default, effort none); setting `TOWNREPORTER_CLAUDE_CODE=0` sends it by plain HTTP instead.
+DeepSeek runs through that same Claude Code CLI, with no MCP servers loaded, against a small relay on `127.0.0.1` that sets the thinking budget from the run's effort (off at the default, effort none); setting `TOWNREPORTER_CLAUDE_CODE=0` sends it by plain HTTP instead.
 
 The CLI is slower than an API: it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own, and each writing model has its own **Time per call** on the Server page.
 
@@ -460,6 +474,7 @@ The server refuses to serve a database that is behind its migrations (HTTP 503) 
 | `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                                                   |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                                                |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                                                       |
+| `/get-the-app`                               | How to add the paper to a phone home screen                                                                               |
 | `/desk`                                      | Today: the editor home (sign-in)                                                                                          |
 | `/desk/queue`                                | Draft / hold / kill / publish                                                                                             |
 | `/desk/drafts`                               | Drafts in progress and finished, with readiness                                                                           |
@@ -470,11 +485,14 @@ The server refuses to serve a database that is behind its migrations (HTTP 503) 
 | `/desk/dark`                                 | Dark Desk. Investigates. Never prints. Two dials.                                                                         |
 | `/desk/sources` · `/desk/scan`               | Watch list + bulk paste · Scan history (the expensive button, not a loop)                                                 |
 | `/desk/models`                               | Models: who does what, connections, the Local model                                                                       |
+| `/desk/registry`                             | Registry: the community directory. Import, edit, review changes, verify, publish.                                         |
 | `/desk/ops`                                  | Server. Health, backups, paper setup, and the few buttons worth having.                                                   |
 | `/desk/stats`                                | Stats without naming a reader                                                                                             |
 | `/desk/import` · `/desk/memory` · `/desk/legal-removals` | Import · Beat memory · Legal removals                                                                         |
 | `/feed`                                      | RSS                                                                                                                       |
 | `/login`                                     | Create account / sign in                                                                                                  |
+
+`/registry/:id` and `/api/registry/v1` are on `main` and not yet in a release.
 
 The dated `HANDOFF-*.md` session records at the repo root are not TownReporter documentation. They are personal handoff notes from the App Builder sandbox this repo was originally scaffolded with. They stay in this repository as history and are excluded from every release archive (`.gitattributes` marks them `export-ignore`), so an installed copy never carries them. (`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from `SELF-HOSTING.md` and the release guides, and does ship.) The sandbox's own material, its agent contract (`AGENTS.md`, `AGENTS.project.md`), the `.grok/` skill trees, its `startup.sh` and its preview host bridge, has been deleted outright, and `scripts/no-grok-scaffold.test.mjs` fails if any of it comes back. If you are here to understand the newspaper, start at the top of this file, not in the handoffs.
 
@@ -553,7 +571,7 @@ Dark Desk walks the same Automatic ladder as stories and scans (DeepSeek v4.1 Fl
 
 ## Architecture diagrams
 
-Twelve rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
+Fifteen rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
 
 | Diagram | Rendered | Source | What it shows |
 | --- | --- | --- | --- |
@@ -566,6 +584,9 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 | Choosing a provider at call time | [provider-at-call-time.svg](docs/diagrams/provider-at-call-time.svg) | [.mmd](docs/diagrams/provider-at-call-time.mmd) | First choice, technical failover, terminal refusal |
 | Dark Desk, one round | [dark-desk-one-round.svg](docs/diagrams/dark-desk-one-round.svg) | [.mmd](docs/diagrams/dark-desk-one-round.mmd) | Competing hypotheses, the whole tape, trails that reopen |
 | The Opinion desk and its voice handoff | [opinion-voice-handoff.svg](docs/diagrams/opinion-voice-handoff.svg) | [.mmd](docs/diagrams/opinion-voice-handoff.mmd) | How the publication voice reaches the writer |
+| Routine editions | [routine-edition-flow.svg](docs/diagrams/routine-edition-flow.svg) | [.mmd](docs/diagrams/routine-edition-flow.mmd) | Owner-approved sources to fixed templates to the three routine editions, with the editor-review exits |
+| Search by meaning: the index | [meaning-search-index.svg](docs/diagrams/meaning-search-index.svg) | [.mmd](docs/diagrams/meaning-search-index.mmd) | The background fill, the two vector tables, and the desk-only query |
+| Promote and rollback | [promote-and-rollback.svg](docs/diagrams/promote-and-rollback.svg) | [.mmd](docs/diagrams/promote-and-rollback.mmd) | `ops/promote.ps1`: backup, database copy, build, verify, and the rollbacks |
 | Scan overview | [scan-overview.svg](docs/diagrams/scan-overview.svg) | [.mmd](docs/diagrams/scan-overview.mmd) | Scope, run snapshot, fetch, bounded batch analysis, coverage accounting |
 | How a run reports itself | [scan-run-reporting.svg](docs/diagrams/scan-run-reporting.svg) | [.mmd](docs/diagrams/scan-run-reporting.mmd) | Partial vs failure vs success-with-leads vs success-with-zero-leads |
 | Scan history paging | [scan-history-paging.svg](docs/diagrams/scan-history-paging.svg) | [.mmd](docs/diagrams/scan-history-paging.mmd) | Real offset paging and when Show more disappears |

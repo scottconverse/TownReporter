@@ -926,7 +926,7 @@
               <h3>Today, Queue, Drafts, Published</h3>
               <p>
                 Watch list and scan, a Queue of leads, a story workbench, Drafts, Opinion,
-                Follow-ups, Dark Desk, Models, Server and Stats. The first account is the owner;
+                Follow-ups, Dark Desk, Registry, Models, Server and Stats. The first account is the owner;
                 others are invited by one-time link.
               </p>
               <figure class="shot" style="margin-top: auto">
@@ -1068,8 +1068,8 @@
               <h3>A Queue of leads, and a Drafts list</h3>
               <p>
                 Every lead arrives with the page or transcript that produced it. Open one, give it a
-                story direction, choose a model, and draft. <b>Draft selected</b> runs up to five
-                leads on one named model. The Drafts list shows each draft’s state and readiness, and
+                story direction, choose a model, and draft. Tick leads and press <b>Start N stories</b>
+                to draft them all as one batch on one named model. The Drafts list shows each draft’s state and readiness, and
                 the model behind it. <b>Publish all drafts</b> prints every finished draft in one step.
               </p>
               <p>
@@ -1303,7 +1303,7 @@
             <h2>What is new</h2>
             <p>
               New in 0.6.92: <b>Publish all drafts</b> prints every finished draft from one button on Drafts, after one confirm that lists each story's section. The four score parts (immediacy, impact, conflict, novelty, 1 to 5 each) now show on Today, the Queue and the story page, with one reason per part.
-              The cards below describe the current release's main capabilities; the
+              On main, not yet released: leads that score 14 or more are drafted after a scan, Drafts gains tick boxes with <b>Publish N selected</b> and <b>Kill N selected</b>, and <b>Publish all drafts</b> publishes on one press with no confirm. The cards below describe the current release's main capabilities; the
               <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md">changelog</a> has every change.
             </p>
           </div>
@@ -1314,7 +1314,7 @@
             </div>
             <div class="card">
               <h3>Community resources</h3>
-              <p>A public list of local help: food, housing, health and crisis services, each with a source and a last-verified date. The editor loads, publishes, edits and takes down entries.</p>
+              <p>A public list of local help: food, housing, health and crisis services, each with a source. The editor loads or imports entries, publishes, edits and takes them down. A recorded check, not a save, marks an entry verified. Search, filters, a page for each service and a read-only JSON API are on main and not yet released.</p>
             </div>
             <div class="card">
               <h3>Get the app on your phone</h3>
@@ -1399,9 +1399,10 @@
               <h3>Local or cloud models</h3>
               <p>
                 Use a model on your own hardware (LM Studio, Ollama, llama.cpp), a signed-in Codex or
-                Claude subscription, or any OpenAI-compatible endpoint. The AI CLIs run with shell,
-                browser and plug-in tools switched off, and fetched pages are treated as evidence,
-                never as instructions.
+                Claude subscription, or any OpenAI-compatible endpoint. The Codex and Claude command-line
+                programs run with their full tool sets and permission prompts off, so the machine
+                account that runs the server is the security boundary. Fetched pages are treated
+                as evidence, never as instructions.
               </p>
             </div>
           </div>
