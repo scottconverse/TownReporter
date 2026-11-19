@@ -98,27 +98,54 @@ function namesWholeWord(text: string, name: string): boolean {
 }
 
 /*
-  The same two guards `story-area.ts` applies to a Nearby town name: a court
+  The two guards a Nearby town name passes here and in `story-area.ts`: a court
   named after a town is not the town ("Plymouth Superior Court"), and a town
-  written into another state is not this one ("Boulder City, Nev."). Kept
-  here, without an import, so this check stays self-contained.
+  written into ANOTHER state is not this one ("Boulder City, Nev."). A town
+  written into this paper's own state is still local ("Louisville, Colo."), so
+  the own state is left out of the state tokens. Kept here, without an import,
+  and exported as `nearbyTownKeepsItLocal` so both callers read one rule.
 */
 const COURT_AFTER_TOWN = /^\s+(?:Court|Courthouse|Court House)\b/;
-const STATE_TOKENS = [...new Set(STATES.flatMap((state) => [state.name, ...state.abbrs]))]
-  .sort((a, b) => b.length - a.length)
-  .map(escapeRegExp)
-  .join("|");
-const STATE_AFTER_TOWN = new RegExp(`^[^.;]{0,30},\\s*(?:${STATE_TOKENS})(?=\\s|,|;|:|$|\\))`);
 
-/** Does one occurrence of a Nearby town read as this paper's own town? */
-function nearbyTownKeepsItLocal(text: string, town: string): boolean {
+const stateAfterTownPatterns = new Map<string, RegExp>();
+
+/** The dateline state pattern, with `ownState`'s own name and abbreviation left out. */
+function stateAfterTown(ownState: string): RegExp {
+  const own = stateFor(ownState) ?? stateFor(DEFAULT_STATE);
+  const key = own?.name ?? DEFAULT_STATE;
+  const cached = stateAfterTownPatterns.get(key);
+  if (cached) return cached;
+  const tokens = [...new Set(
+    STATES.filter((state) => state !== own).flatMap((state) => [state.name, ...state.abbrs]),
+  )]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+  const pattern = new RegExp(`^[^.;]{0,30},\\s*(?:${tokens})(?=\\s|,|;|:|$|\\))`);
+  stateAfterTownPatterns.set(key, pattern);
+  return pattern;
+}
+
+/**
+ * Does one occurrence of a Nearby town read as this paper's own town?
+ *
+ * Shared by `looksOutOfState` above and by `story-area.ts`, which files a story
+ * under Nearby. `ownState` is the paper's state (a blank reads as the shipped
+ * Colorado); a town followed by a comma and that same state is still local.
+ */
+export function nearbyTownKeepsItLocal(
+  text: string,
+  town: string,
+  ownState: string = DEFAULT_STATE,
+): boolean {
   const name = town.trim();
   if (!name) return false;
+  const states = stateAfterTown(ownState);
   const pattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "g");
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     const after = text.slice(match.index + match[0].length);
     if (COURT_AFTER_TOWN.test(after)) continue;
-    if (STATE_AFTER_TOWN.test(after)) continue;
+    if (states.test(after)) continue;
     return true;
   }
   return false;
@@ -196,6 +223,6 @@ export function looksOutOfState(
   if (city && namesWholeWord(text, city)) return false;
   const county = (place.county ?? "").trim();
   if (county && namesWholeWord(text, `${county} County`)) return false;
-  if (nearbyTowns.some((town) => nearbyTownKeepsItLocal(text, town))) return false;
+  if (nearbyTowns.some((town) => nearbyTownKeepsItLocal(text, town, ownState))) return false;
   return true;
 }

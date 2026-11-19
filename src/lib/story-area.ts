@@ -14,7 +14,7 @@
  */
 
 import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./news/dark-place.ts";
-import { looksOutOfState } from "./news/out-of-state.ts";
+import { looksOutOfState, nearbyTownKeepsItLocal } from "./news/out-of-state.ts";
 
 /** The stored value on `articles.area`. Stable keys; the labels are display. */
 export const STORY_AREAS = ["longmont", "nearby", "county", "colorado"] as const;
@@ -166,23 +166,15 @@ function namesPlace(text: string, place: string): boolean {
 }
 
 /**
- * A court or a body named after a town is not the town (F01, live walk
- * 2026-11-19): "Plymouth Superior Court" is a Massachusetts courthouse, not
- * Superior, Colorado. The town still counts everywhere else -- "Superior Town
- * Board", "in Superior" -- so only a COURT word directly after it is refused.
+ * A Nearby town counts only when its own occurrence reads as this paper's town
+ * (F01, live walk 2026-11-19). The two guards live in `news/out-of-state.ts`,
+ * which the desk's out-of-state warning already reads: a court named after a
+ * town is not the town ("Plymouth Superior Court"), and a town followed by a
+ * comma and ANOTHER state is not this one ("Louisville, Ky."). A town in this
+ * paper's own state ("Louisville, Colo.") is still Nearby.
  */
-const COURT_AFTER_TOWN = /^\s+(?:Court|Courthouse|Court House)\b/;
-
-function nearbyTownNamed(text: string, town: string): boolean {
-  const name = town.trim();
-  if (!name) return false;
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\b${escaped}\\b`, "g");
-  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
-    const after = text.slice(match.index + match[0].length);
-    if (!COURT_AFTER_TOWN.test(after)) return true;
-  }
-  return false;
+function nearbyTownNamed(text: string, town: string, state: string): boolean {
+  return nearbyTownKeepsItLocal(text, town, state);
 }
 
 /**
@@ -206,7 +198,12 @@ function groundNamedIn(text: string, place: NewsroomPlace, outOfState: boolean):
   */
   if (outOfState) return null;
   if (namesCounty(text, place)) return "county";
-  if (isLongmont(place) && NEARBY_TOWNS.some((town) => nearbyTownNamed(text, town))) return "nearby";
+  if (
+    isLongmont(place) &&
+    NEARBY_TOWNS.some((town) => nearbyTownNamed(text, town, place.state))
+  ) {
+    return "nearby";
+  }
   return null;
 }
 

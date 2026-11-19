@@ -244,6 +244,35 @@ describe("F01: a court name or another state is not a Nearby town", () => {
     }
   });
 
+  it("a Nearby town written into another state is not Nearby, even when the text names Colorado", () => {
+    // The F01 gap: the out-of-state flag is off because "Colorado" is named, so
+    // the Nearby match itself has to refuse a town in another state.
+    const stories = [
+      {
+        headline: "Colorado man held in Louisville, Ky.",
+        body: "He was arrested there on Friday.",
+      },
+      {
+        headline: "Erie, Pennsylvania officials met Colorado leaders",
+        body: "The two delegations compared notes.",
+      },
+      {
+        headline: "A Lafayette, La. festival returns",
+        body: "Colorado bands are on the bill.",
+      },
+    ];
+    for (const story of stories) {
+      assert.notEqual(defaultStoryArea(story, PLACE), "nearby", story.headline);
+      assert.equal(defaultStoryArea(story, PLACE), null, story.headline);
+    }
+  });
+
+  it("a Nearby town written into this paper's own state is still Nearby", () => {
+    for (const headline of ["Louisville, Colo. council votes", "Louisville, Colorado council votes"]) {
+      assert.equal(defaultStoryArea({ headline, body: "The vote was 5-2." }, PLACE), "nearby", headline);
+    }
+  });
+
   it("a Longmont story is untouched by the out-of-state rule", () => {
     const story = { headline: "Longmont council approves budget", body: "The vote was 5-2." };
     assert.equal(defaultStoryArea(story, PLACE), "longmont");
