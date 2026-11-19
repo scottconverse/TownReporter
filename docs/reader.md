@@ -2,7 +2,7 @@
 
 For TownReporter 0.6.92. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
-![The front page: the lead story, the events week box, the story rows and the Opinion panel](images/01-front-page.png)
+![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
 ## The top of every page
 
@@ -32,6 +32,8 @@ The lead story has its section, headline, a line of summary, the date and a read
 The events week box shows **TODAY** plus the next six days, each with an event count. Today is picked when the box opens. Select a day to see four columns: **MORNING**, **AFTERNOON** and **EVENING** for the home town, then **NEARBY** with the town on each line. Each column shows two lines, then a count of more. The **All** link with the event count opens the **Today in town** story for today when there is one. For other days it opens the full list inside the box. An empty day says **No events listed for** that weekday. A week with no events shows no box. On a phone the day strip scrolls sideways and the columns stack.
 
 Event titles link only to a real event page. Broken characters are fixed, and repeated or junk titles are removed. Each event shows its feed description when the feed has one.
+
+![Lower on the front page: the Community resources banner, an Opinion card, and the Around the region band with a County story and a Nearby story](images/28-front-around-region.png)
 
 The front page does not scroll on forever. **More top stories** is the way to more stories.
 
@@ -69,15 +71,21 @@ The search and filters, the page for each service, the **Something wrong here?**
 
 The page is titled **Where to get help**. It lists only published entries. Each entry shows the organization and service and a description. Each place where the service is offered is listed under its own name, with its own address, **Phone at this location:** and **Hours at this location:**. Below the places, under **About this service**, come **Phone for this service:** and **Hours for this service:** (not tied to one place), **Main phone of** the organization (labeled as the organization’s, not a place’s), **Languages:**, **Category:**, the check line, an editor’s note, and a **Source:** link.
 
+![The Community resources page, Where to get help, after a search for help: the Search box, the Category and Language lists, and two matching services, each with its place, the check line and Something wrong here?](images/18-registry-search.png)
+
 **Search and filters.** Type a name, a place or a word in **Search** and press **Search**. The search looks at the service name, the organization name, the description and the category name, in any capitals. It takes up to 200 characters. **Category** and **Language** narrow the list. The **Language** list shows the languages that published services offer. The page says how many services there are, or how many match your search. It shows 25 services to a page. When there is more than one page, it says which page you are on, and **Next page** and **Previous page** move you through them. The list is in order by category (services with no category come last), then by organization and service name. If nothing matches, the page says **No services match your search.** and offers **Clear the search**.
 
 **Each service has its own page.** Select a service’s name to open it. Its address is `/registry/` followed by the service’s number, so you can keep or share it. The page shows the public details the entry has, and leaves out the ones it does not have. Contact people’s names are not shown. If the address is not a published service, the page says **This service is not listed.** It may have been removed, or the address may be wrong. A link takes you back to the list.
+
+![A service page: the organization, status, fees and how to apply, who can use it, what to bring, languages, places, phone and hours, the source, the verified date and Something wrong here?](images/19-registry-service.png)
 
 **Something wrong here?** is on the list and on each service’s page. It opens **Corrections** with the entry’s name, its number and its web address already in the form. Press **Open correction email →** to prepare a message to the editor. Review it and press Send in your own email app. The website sends nothing itself. If the paper has not set an editor address, the page says so, and no message is prepared.
 
 Use **All entries** and the category links to browse. If nothing is published, the page says **No entries are published yet.** and explains that TownReporter adds entries after an editor checks them. If a category has no entries but others do, the page says so and links to **See all entries**. If the page cannot read the list, it says the list could not be loaded, and gives a **Try again** link that keeps your search, category and language; it does not say nothing is published.
 
 The page says **Verified** with a date and how the check was made, such as by phone, only when an editor recorded a check. A date that only a save or publish set reads **Last updated** with that date, then **Not verified yet.** An entry with neither reads **Not verified yet**. Change detection is not verification. It never says a program is confirmed open.
+
+![Community resources on a phone: the filters stack above the first service entry](images/20-registry-phone.png)
 
 ## Get the paper on your phone
 

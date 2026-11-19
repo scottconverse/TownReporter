@@ -34,6 +34,7 @@ bash docs/diagrams/render.sh
 | Routine editions | [routine-edition-flow.svg](routine-edition-flow.svg) | [.mmd](routine-edition-flow.mmd) | Owner-approved sources to fixed templates to Today in town, This weekend and Deadlines approaching, with the editor-review exits |
 | Search by meaning: the index | [meaning-search-index.svg](meaning-search-index.svg) | [.mmd](meaning-search-index.mmd) | The background fill, the two vector tables (no text, no URL), and the desk-only query |
 | Promote and rollback | [promote-and-rollback.svg](promote-and-rollback.svg) | [.mmd](promote-and-rollback.mmd) | `ops/promote.ps1`: backup, pre-rollout database copy, build, verify, and the automatic and by-hand rollbacks |
+| Community resources flow | [community-resources-flow.svg](community-resources-flow.svg) | [.mmd](community-resources-flow.mmd) | An import preview, each proposed change reviewed, an explicit check, publish, and the public pages and JSON feed |
 
 ## Scan (v0.6.54, coverage updated for v0.6.84)
 
@@ -47,11 +48,12 @@ Full write-up: [scan-architecture.md](scan-architecture.md)
 
 ## Rendering notes
 
-`render.sh` expects exactly **twelve** Mermaid blocks in `docs/manual.md`, in
+`render.sh` expects exactly **thirteen** Mermaid blocks in `docs/manual.md`, in
 this order: system-context, pipeline-source-to-page, job-end-to-end,
 dark-desk-one-round, opinion-voice-handoff, keeping-it-online, data-model,
 provider-at-call-time, meeting-to-story, routine-edition-flow,
-meaning-search-index, promote-and-rollback; and exactly three in
+meaning-search-index, promote-and-rollback,
+community-resources-flow; and exactly three in
 `scan-architecture.md`: scan-overview, scan-run-reporting, scan-history-paging.
 If you add or reorder a block, update the `names` lists in `render.sh` to match,
 or it stops with a count error. Rendering needs Node and, through

@@ -4,7 +4,7 @@
 
 [Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.92 release guide and evidence boundaries](releases/0.6.92.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
-**Screenshots:** The screenshots in Parts 1 and 2 were taken from the running 0.6.84 desk and public paper. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
+**Screenshots:** The screenshots in Parts 1 and 2 were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are on main and not yet in a release. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
@@ -76,7 +76,7 @@ The owner manages sections on **Server → Sections** (the **Newspaper sections*
 
 There is no automated path to the masthead for ordinary reporting. A machine can find a lead, fetch the document, write a draft and tell you what it thinks; a person reads it and presses Publish. Approved routine sources use a separate fixed-template path.
 
-![The front page of the public paper with the lead story, the Latest stories list and the Opinion panel](images/01-front-page.png)
+![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
 ## The six moves
 
@@ -97,7 +97,7 @@ Corrections are public. A correction runs as a dated note above the story, with 
 
 **Ordinary delete keeps a recoverable copy for 30 days** under **Server → Recently deleted**, and an **Undo** appears where the delete happened. Restoring puts the row back with its original id, so an article’s corrections and an editorial’s fact sheet come back with it. The separate [owner legal-removal workflow](editor.md#legal-removal-owner-workflow) follows its selected retention or destruction policy and has no Undo.
 
-![A published story with its headline, text, Sources band and Corrections section](images/02-article.png)
+![The top of a published story: headline, summary, byline, Save, Share and Text size buttons, the In this article list, the story text, the Dates in this story box and the start of Sources & public records](images/02-article.png)
 
 ## What it will not do
 
@@ -128,7 +128,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.6.92, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken from the running 0.6.84 desk. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.6.92, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken on November 18, 2026 from a test copy of the app with made-up data. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -159,7 +159,7 @@ If the setup code is wrong, the account is still made and you stay signed in. Fi
 
 `/desk/setup` — the first screen after the owner creates a new desk. Only the owner sees it.
 
-![Set up the paper form with fields for the paper's name, city, state, timezone, meeting video channels and a starting watch list](images/13-paper-setup.png)
+![The Paper setup form with the paper's name, tagline, council votes site, editor contact email, city, state and timezone, and the start of the meeting video channels](images/13-paper-setup.png)
 
 **To set up the paper:**
 
@@ -177,7 +177,7 @@ If a local model program (LM Studio or Ollama) is running with nothing loaded wh
 
 Every desk screen has the same frame: a navigation column on the left and the work area on the right.
 
-![The desk: navigation on the left, Today in the middle with the step strip, Tonight's edition and New leads](images/04-desk.png)
+![The desk: navigation on the left, Today with the four-step strip and the buttons above it, and Tonight's edition with its first drafts](images/04-desk.png)
 
 ### The navigation
 
@@ -342,7 +342,7 @@ When a site refuses a plain read, the desk tries once through a real browser, th
 
 ### Run a scan
 
-![The Scan history screen: previous scans with their status and a Show all button, and the Run a scan panel below](images/05-scan.png)
+![The Scan history screen: a table of three previous scans with their status and an Open button, and the start of the Run a scan panel below](images/05-scan.png)
 
 Three ways to start one:
 
@@ -376,7 +376,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 `/desk/queue` — every lead the paper holds, scored and sorted. The scanner files here, Dark Desk files here, imports land here, and so do you. Nothing prints from this list; you open a lead and publish from its story page.
 
-![The Queue: filter tabs, search, sort, and lead rows with score, chips and Start story, Kill and More buttons](images/06-queue.png)
+![The Queue: filter tabs, search, sort and section filters, and lead rows with a tick box, score, chips and Start story, Kill and More buttons](images/06-queue.png)
 
 ### The top of the page
 
@@ -435,6 +435,8 @@ An AI duplicate never lands in Open. When a linked lead needs your decision, pre
 
 Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
 
+![The Queue with four leads ticked: the bulk bar shows 4 selected, the model and thinking effort pickers, Start 4 stories, Hold, Kill, Delete selected (4) and Clear](images/26-queue-start-n.png)
+
 - **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in the source after 0.6.92 and is not in a release yet.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
@@ -452,7 +454,7 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 `/desk/drafts` — everything not yet printed, one row per story.
 
-![The Drafts list with filter pills and rows showing a status chip, headline and one button](images/17-drafts.png)
+![The Drafts list: Opinion pieces waiting, Select all shown, Publish all drafts (5), filter pills, and rows with a tick box, a status chip, a headline and Review and More buttons](images/17-drafts.png)
 
 - **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
 - **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
@@ -609,7 +611,7 @@ Only the owner sees **Take down this capture** inside an opened captured record.
 
 ### Find evidence
 
-![The Find evidence panel on the Sources tab: a search for Oligarchy Ditch with 12 exact-word matches and zero close-in-meaning results, because the meaning index is not built yet](images/15-find-evidence.png)
+![The Find evidence panel on the Sources tab: a search for Riverside pool with three exact-word matches and none close in meaning, because search by meaning is not available in this copy](images/15-find-evidence.png)
 
 `Sources` tab. A box labelled **Find evidence** takes up to 200 characters (placeholder “Words from the story or its sources”). Press **Search**. Up to three lists appear:
 
@@ -660,7 +662,7 @@ Before you publish: every material number, name, date and quote has a document y
 
 `/desk/dark` — investigations that never print on their own. Its header reads “Investigations · nothing here prints on its own”.
 
-![Dark Desk: files in the left rail, the open file on the right with its activity, case file and Decide buttons](images/08-dark-desk.png)
+![Dark Desk: open files, signals to review and a set-aside file on the left, and the open file's question with the Decide buttons and the digging model on the right](images/08-dark-desk.png)
 
 A Dark Desk **file** starts with a question and a tip: a link, a document, a rumour, a name, a contract number. The desk searches, fetches, keeps copies of what it reads, follows names and writes down what it thinks connects, always labelled and always with what would disprove it. For each odd thing it keeps two explanations alive: a concrete theory of what may be happening underneath, and the strongest ordinary explanation. Missing names, recipients, filings and permits become follow-up work, not reasons to drop the lead. “Not found in the material opened so far” never becomes “does not exist”. Any editor can use every control here. Dark Desk has no Publish button by design; the only way out is **Send to the queue**, which files a lead for a person to review.
 
@@ -722,7 +724,7 @@ Warnings arrive as **Before you continue** with an “anyway” button: the pape
 
 ### Dark Desk settings (how hard to dig)
 
-![Dark Desk settings: the Digging model, thinking effort and default depth](images/09-dark-dials.png)
+![Dark Desk settings under How hard to dig: the Digging model, Thinking effort and the Quick, Standard and Deep depths](images/09-dark-dials.png)
 
 **Settings** (top right) opens **Dark Desk settings**. **How hard to dig** now has three parts: the **Digging model**, **Thinking effort**, and a default depth of **Quick** (10 records · 20 minutes), **Standard** (30 records · 2 hours) or **Deep** (100 records · 8 hours), saved with **Save default** (or **Reset**). Each new file opens on that depth. The older Dig, Nerve and Map sliders, presets and search-window controls are no longer on the screen.
 
@@ -787,7 +789,7 @@ The only refusals are a missing headline or body. On the draft workbench the but
 
 Behind every AI button on the desk is the same **model picker**. It is labelled **Writing model** (**Digging model** on Dark Desk), with a **Thinking effort** control under it. The list is the same everywhere:
 
-![The model picker with Automatic expanded to show its ladder](images/16-model-picker.png)
+![The Redraft settings panel on a story: the Writing model picker set to Automatic with the order of models it tries, and the Thinking effort picker](images/16-model-picker.png)
 
 | Choice | What it is |
 |---|---|
@@ -846,7 +848,7 @@ When a draft fails because a login lapsed, the error carries a **Sign in to Clau
 
 `/desk/ops` — this machine’s health and the owner’s settings.
 
-![The Server page: twelve cards for Writing models, Health, Paper setup, Recently deleted, Sections, Daily scan, Meeting capture, YouTube, Routine notices, Named outlets, Editors & access and Time budgets](images/11-server.png)
+![The Server page: the Writing models list with each model marked Not ready or Not installed, the Health card, and the start of the Paper setup and Recently deleted cards](images/11-server.png)
 
 The page is a grid of twelve cards. Each shows a few numbers and has a button that opens that card’s own screen (with a **← Server** link back). Most cards are for the owner only; an editor sees the title and one sentence saying so. A line at the top says whether LibreOffice is found (Excel and PowerPoint files are skipped without it). At the bottom, **Dark Desk run history** lists recent runs with their model and usage.
 
@@ -941,7 +943,7 @@ These are page loads, not unique people or completed reads. A view is counted by
 
 `/desk/published` — what is live, and its corrections.
 
-![Published: filters, search and a row for each printed story with Views, Corrections and the More menu](images/12-published.png)
+![Published: filter tabs, a search box and a row for each printed story with Views, Corrections, View, Edit headline and More](images/12-published.png)
 
 Filter with **All**, **This week**, **With corrections** and **Opinion**, or search headlines and sections. Each row shows the date printed, section, headline, any corrections as “Correction, <date>: …”, Views and a **Review needed** chip if a transcript review is open. Rows show 25 at a time (**Show 25 more**). **Beat memory** at the bottom lists the people, places and organizations the drafting AI is told the paper has already covered.
 
@@ -973,6 +975,8 @@ A published meeting story shows **Transcript changed — evidence review require
 ## Community resources (`/desk/registry`)
 
 Review, verification, needs checking, the import and the directory download are in the source after 0.6.92 and are not in a release yet. The desk’s review, verification and needs-checking work is set out step by step in [the editor guide](editor.md#community-resources-deskregistry). In short:
+
+![Detected changes: filter tabs, then each change with its before and after text, a Note box and the buttons Accept and apply, Accept without applying and Reject](images/23-desk-registry-changes.png)
 
 - **Detected changes:** each waiting change has **Accept and apply**, **Accept without applying** and **Reject**, with an optional note. **Accept and apply** is refused, and nothing changes, when the entry no longer holds the value the proposal was made against, or when the proposal points at no live row.
 - **Verification**, in **All details:** an editor records how an entry was checked, what was checked (desk only) and an optional source link. The check keeps a snapshot of the key facts, and **Changed since verified** lists what has changed since. A save or a publish never records a check.
@@ -2062,7 +2066,7 @@ checks. A manual run can instead install a published release tag.
 
 # Part 5 — Architecture
 
-Twelve diagrams. Each is a Mermaid block in this file; the rendered copy beside
+Fourteen diagrams. Each is a Mermaid block in this file; the rendered copy beside
 it is generated by `docs/diagrams/render.sh` (see
 [diagrams/README.md](diagrams/README.md)). If a diagram and the text disagree,
 the code is the authority.
@@ -2607,6 +2611,64 @@ close and refuses rather than ending one. A swap-back keeps the failed database
 under its `_failed_` name; nothing is ever deleted automatically except pruned
 older `prerollout` copies after a good promote. Details are in
 [SELF-HOSTING.md](../SELF-HOSTING.md#updating-this-installation).
+
+## Community resources: from a file to the public page
+
+A directory file is not published when it arrives. It is previewed, each proposed change is reviewed on its own, an editor can record a check, and then an editor publishes the entry. The public pages and the JSON feed show only what was published, and never the verification basis, the reviewer or the review notes.
+
+```mermaid
+flowchart TB
+    subgraph importing["Import"]
+        FILE["HSDS JSON file"] --> PREV["Preview: a dry run<br/>rolled back, saves nothing"]
+        PREV -->|"good preview of this file and name"| IMP["Import"]
+        IMP --> NEW["New rows<br/>unpublished, unverified"]
+        IMP --> PROP["Changed rows<br/>a proposal waits;<br/>the stored row is not changed"]
+    end
+
+    subgraph reviewing["Review: one proposal at a time"]
+        REV{"Editor decides"}
+        APPLY["The entry takes<br/>the proposed value"]
+        KEEP["The entry is not changed"]
+        REJ["The entry is not changed"]
+        REV -->|"Accept and apply"| APPLY
+        REV -->|"Accept without applying"| KEEP
+        REV -->|"Reject"| REJ
+    end
+
+    subgraph desk["On the desk"]
+        ENTRY["The entry"]
+        VER["Verify: the editor records<br/>how the entry was checked<br/>and the basis"]
+        PUB["Publish, on the entry<br/>does not record a check"]
+    end
+
+    SECRET["Never public:<br/>verification basis, reviewer,<br/>review notes, audit data"]
+
+    subgraph outside["Public, no sign-in"]
+        LIST["/registry<br/>search and filters"]
+        DET["/registry/#lt;id#gt;<br/>one service, with its last check"]
+        API["/api/registry/v1<br/>read-only JSON, GET only"]
+    end
+
+    DL["Download directory file<br/>the same JSON the import reads<br/>changes nothing"]
+
+    NEW --> ENTRY
+    PROP --> REV
+    APPLY --> ENTRY
+    KEEP --> ENTRY
+    ENTRY --> VER
+    ENTRY --> PUB
+    VER -.-> SECRET
+    REV -.-> SECRET
+    PUB --> LIST
+    PUB --> DET
+    PUB --> API
+    ENTRY -.-> DL
+    DL -.->|"imports back the same way"| FILE
+
+    style SECRET fill:#2a2320,color:#fff
+```
+
+![Community resources flow](diagrams/community-resources-flow.svg)
 
 ---
 

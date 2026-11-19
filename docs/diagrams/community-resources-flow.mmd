@@ -1,0 +1,49 @@
+flowchart TB
+    subgraph importing["Import"]
+        FILE["HSDS JSON file"] --> PREV["Preview: a dry run<br/>rolled back, saves nothing"]
+        PREV -->|"good preview of this file and name"| IMP["Import"]
+        IMP --> NEW["New rows<br/>unpublished, unverified"]
+        IMP --> PROP["Changed rows<br/>a proposal waits;<br/>the stored row is not changed"]
+    end
+
+    subgraph reviewing["Review: one proposal at a time"]
+        REV{"Editor decides"}
+        APPLY["The entry takes<br/>the proposed value"]
+        KEEP["The entry is not changed"]
+        REJ["The entry is not changed"]
+        REV -->|"Accept and apply"| APPLY
+        REV -->|"Accept without applying"| KEEP
+        REV -->|"Reject"| REJ
+    end
+
+    subgraph desk["On the desk"]
+        ENTRY["The entry"]
+        VER["Verify: the editor records<br/>how the entry was checked<br/>and the basis"]
+        PUB["Publish, on the entry<br/>does not record a check"]
+    end
+
+    SECRET["Never public:<br/>verification basis, reviewer,<br/>review notes, audit data"]
+
+    subgraph outside["Public, no sign-in"]
+        LIST["/registry<br/>search and filters"]
+        DET["/registry/#lt;id#gt;<br/>one service, with its last check"]
+        API["/api/registry/v1<br/>read-only JSON, GET only"]
+    end
+
+    DL["Download directory file<br/>the same JSON the import reads<br/>changes nothing"]
+
+    NEW --> ENTRY
+    PROP --> REV
+    APPLY --> ENTRY
+    KEEP --> ENTRY
+    ENTRY --> VER
+    ENTRY --> PUB
+    VER -.-> SECRET
+    REV -.-> SECRET
+    PUB --> LIST
+    PUB --> DET
+    PUB --> API
+    ENTRY -.-> DL
+    DL -.->|"imports back the same way"| FILE
+
+    style SECRET fill:#2a2320,color:#fff

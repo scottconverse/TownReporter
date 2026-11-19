@@ -22,6 +22,9 @@ These changes are on `main` after 0.6.92. No release or tag carries them. The li
 - **Auto-draft at 14+.** After a scan, a lead that scores 14 or more is drafted on its own, whether it is new or held. A lead the scan linked as a possible repeat of a published or killed lead is skipped (#400, #405, #406).
 - **Queue.** **Start N stories** drafts every ticked lead, including ticked leads that are not on screen, and the batch has no five-lead limit (#407).
 - **Drafts.** Each row has a tick box, with **Select all shown**, **Publish N selected** and **Kill N selected** (one **Undo** puts them all back). **Publish all drafts** now publishes on one press, with no confirm box. The Queue and Drafts counts in the left nav refresh every 15 seconds (5 seconds during a scan) (#401, #402).
+
+  ![The Drafts list with three rows ticked: Select all shown, 3 selected, Publish 3 selected and Kill 3 selected](docs/images/27-drafts-bulk.png)
+
 - **Drafts no longer lock the job list.** Evidence chunks are written after the job's lock is released, in batches of 200 (#408).
 - **Front page.** With no geography pill pressed, **Around the region** shows the six newest published stories from outside the home area (#404).
 
@@ -165,6 +168,9 @@ Every item here is in the code of this release. The full manual covers each one 
 **Publish**
 
 - Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are on `main` but not yet released (see [above](#on-main-not-released-yet)).
+
+  ![The public Community resources page after a search: the Search box, the Category and Language lists, and two matching services](docs/images/18-registry-search.png)
+
 - The Publish bar lists every warning and reads **Publish anyway in <section>**. A person presses it. Every override is audited.
 - Public corrections, RSS, an evidence page for every cited record, and a side-by-side comparison when a cited record has moved.
 - Routine editions (**Today in town**, **This weekend**, **Deadlines approaching**) publish from approved sources through fixed templates.
@@ -571,7 +577,7 @@ Dark Desk walks the same Automatic ladder as stories and scans (DeepSeek v4.1 Fl
 
 ## Architecture diagrams
 
-Fifteen rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
+Sixteen rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
 
 | Diagram | Rendered | Source | What it shows |
 | --- | --- | --- | --- |
@@ -587,6 +593,7 @@ Fifteen rendered diagrams, each with its Mermaid source beside it. The index is 
 | Routine editions | [routine-edition-flow.svg](docs/diagrams/routine-edition-flow.svg) | [.mmd](docs/diagrams/routine-edition-flow.mmd) | Owner-approved sources to fixed templates to the three routine editions, with the editor-review exits |
 | Search by meaning: the index | [meaning-search-index.svg](docs/diagrams/meaning-search-index.svg) | [.mmd](docs/diagrams/meaning-search-index.mmd) | The background fill, the two vector tables, and the desk-only query |
 | Promote and rollback | [promote-and-rollback.svg](docs/diagrams/promote-and-rollback.svg) | [.mmd](docs/diagrams/promote-and-rollback.mmd) | `ops/promote.ps1`: backup, database copy, build, verify, and the rollbacks |
+| Community resources flow | [community-resources-flow.svg](docs/diagrams/community-resources-flow.svg) | [.mmd](docs/diagrams/community-resources-flow.mmd) | An import preview, each change reviewed, a check, publish, and the public pages and JSON feed |
 | Scan overview | [scan-overview.svg](docs/diagrams/scan-overview.svg) | [.mmd](docs/diagrams/scan-overview.mmd) | Scope, run snapshot, fetch, bounded batch analysis, coverage accounting |
 | How a run reports itself | [scan-run-reporting.svg](docs/diagrams/scan-run-reporting.svg) | [.mmd](docs/diagrams/scan-run-reporting.mmd) | Partial vs failure vs success-with-leads vs success-with-zero-leads |
 | Scan history paging | [scan-history-paging.svg](docs/diagrams/scan-history-paging.svg) | [.mmd](docs/diagrams/scan-history-paging.mmd) | Real offset paging and when Show more disappears |
