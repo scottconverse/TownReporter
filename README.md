@@ -454,6 +454,8 @@ The server refuses to serve a database that is behind its migrations (HTTP 503) 
 | `/`                                          | Public paper                                                                                                              |
 | `/?topic=opinion`                            | Editorials: unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered.  |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                                                            |
+| `/registry` · `/registry/:id`                | Community resources: search, filters, paging, and a page for each service. Published entries only.                      |
+| `/api/registry/v1/...`                       | Community resources JSON API, version 1. Read only, no sign-in. See [docs/navigator/registry-api.md](docs/navigator/registry-api.md). |
 | `/sitemap.xml` · `/robots.txt`               | For search engines                                                                                                        |
 | `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                                                   |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                                                |
