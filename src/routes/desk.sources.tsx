@@ -634,10 +634,10 @@ function SourcesPage() {
                     Walk F15: this pill counts suggested source ROWS -- one per
                     suggested link -- while the Inventory screen's "suggested
                     sites" counts the websites those links point at. Same word,
-                    two units (3095 links on 616 sites on the live desk), so
-                    the pill says "links".
+                    two units (3095 links on 616 sites on the live desk), so a
+                    note under the filters says which unit this count is in.
                   */}
-                  {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested links" : "Rejected"}
+                  {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested" : "Rejected"}
                   {" · "}
                   {g.k === "accepted"
                     ? (counts?.accepted ?? 0)
@@ -664,6 +664,8 @@ function SourcesPage() {
               </button>
             </div>
           </div>
+          {/* Walk F15: the pill above counts links; the Inventory counts sites. */}
+          <p className="astra-note">Suggested counts links, one per suggested source row. The sites they point at are counted on the Inventory screen.</p>
           <div className="astra-toolbar">
             <input
               type="search"

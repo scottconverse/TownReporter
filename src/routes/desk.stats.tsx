@@ -839,9 +839,10 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
             Walk F15: this panel read "right now" beside "0 readers on the
             site". It is not the same window -- arrivals are page loads over
             the last half hour, while "Reading right now" counts beats in the
-            last minute -- so the heading names its window.
+            last minute -- so the note under the heading names its window.
           */}
-          <h2 className="st-h3">Arriving from, last 30 minutes</h2>
+          <h2 className="st-h3">Arriving from, right now</h2>
+          <p className="st-note">Page loads in the last 30 minutes.</p>
           {live.arrivals.length === 0 ? (
             <p className="st-empty">No arrivals in the last half hour.</p>
           ) : (

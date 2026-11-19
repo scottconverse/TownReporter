@@ -2708,11 +2708,12 @@ export function killRecordLine(input: {
 
 /**
  * THT-11: the Queue's "≈ Printed" count is the leads the duplicate check matched
- * to a story already in print. It is not the number of published stories, so
- * the tab (as a tooltip and as visible text) says what it counts.
+ * to a story already in print. It is not every published story, so the tab (as a
+ * tooltip and as visible text) says what it counts, and where the published
+ * count lives instead.
  */
 export const PRINTED_TAB_NOTE =
-  "≈ Printed counts leads that match a story already in print; one story can match more than one lead. It is not the number of published stories — that is the Published screen.";
+  "≈ Printed counts leads that match a story already in print; one story can match more than one lead. It is not every published story — the number of published stories is on the Published screen.";
 
 /**
  * Walk F15: the Queue's tabs are not a partition. Open, Held and Killed are the

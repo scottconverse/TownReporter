@@ -23,8 +23,9 @@ function dailyRunName(run: DailyScanRun | null | undefined, timeZone: string): s
   own limit. It did not: the saved picks and the priority-set cap order which
   sources the rotation tries first, and every scheduled daily run reads every
   accepted source within the 90-minute reading budget
-  (`dailyScanPlan(..., allAccepted = true)`). So the labels say what each number
-  is, and a "Read scope" row says how many the run may actually read.
+  (`dailyScanPlan(..., allAccepted = true)`). The labels stay as the desk has
+  always drawn them; each row's hover text says what its number counts, and a
+  "Read scope" row says how many the run may actually read.
 */
 export function dailyScanCounts(
   policy?: (Pick<DailyScanPolicy, "selectedSourceIds" | "sourceCap" | "lastScan"> &
@@ -33,16 +34,22 @@ export function dailyScanCounts(
   const run = dailyRunName(policy?.lastScan, policy?.timezone || PAPER.timezone);
   return [
     {
-      label: "Sources you picked",
+      label: "Sources selected",
       value: policy ? String(policy.selectedSourceIds?.length ?? 0) : "Not available",
+      help: "The sources you picked by hand. They order which sources the rotation tries first; they do not limit how many a daily run may read.",
     },
     {
       label: "Priority set",
       value: Number.isInteger(policy?.everyDaySourceCount)
         ? String(policy?.everyDaySourceCount)
         : "Not available",
+      help: "How many picked sources the rotation gives priority to.",
     },
-    { label: "Priority set limit", value: policy ? String(policy.sourceCap) : "Not available" },
+    {
+      label: "Fetch cap",
+      value: policy ? String(policy.sourceCap) : "Not available",
+      help: "The ceiling on the priority set, not a limit on the daily run.",
+    },
     {
       label: "Read scope",
       value: policy ? "Every accepted source, within the 90-minute budget" : "Not available",

@@ -2131,7 +2131,7 @@ describe("Unit AK: duplicate and kill wording", () => {
 
   it("THT-11: the Printed count says it is a duplicate-match count, not every published story", () => {
     assert.match(PRINTED_TAB_NOTE, /counts leads that match a story already in print/);
-    assert.match(PRINTED_TAB_NOTE, /not the number of published stories/);
+    assert.match(PRINTED_TAB_NOTE, /not every published story/);
   });
 
   it("Walk F15: the tab strip says the tabs overlap and that All is the whole ledger", () => {
