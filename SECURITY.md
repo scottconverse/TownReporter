@@ -95,7 +95,10 @@ not be named. There is no bug bounty.
   line. Anything that gets file contents, a relative path, or a path inside
   the repository onto that command line is a report.
 - Injection of any kind into the public paper — a published story, the feed,
-  the sitemap, or the evidence routes.
+  the sitemap, the evidence routes, the Community resources pages (`/registry`,
+  `/registry/<id>`) or the read-only JSON API (`/api/registry/v1`, no sign-in).
+  The API and the service pages show only published entries; a way to read an
+  unpublished or removed row through them is a report.
 - Anything that puts a third-party asset onto a reader's page. The paper is
   self-contained — fonts self-hosted, no third-party script — and a cold load
   of it makes zero requests to an outside host
@@ -187,9 +190,10 @@ in application code before sending the prompt.
   performs source search and fetching itself through its guarded application
   paths.
 
-These controls prevent a source instruction from granting shell, file-write,
-browser, MCP, plugin or agent access. They do not make generated reporting
-factually correct; editors must still review evidence and claims. Research
+The tool surface is not limited for the command-line models (see above), so
+nothing here stops a source instruction from reaching the tools the model
+already holds. API-only calls get no tools at all, and the DeepSeek road loads
+no MCP servers. None of this makes generated reporting factually correct; editors must still review evidence and claims. Research
 paths that explicitly enable provider web search or fetch can make those
 research requests and consume the selected provider's usage allowance.
 
