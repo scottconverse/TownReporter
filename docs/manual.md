@@ -117,6 +117,8 @@ You are responsible for everything that appears on the paper.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
 - A public **Community resources** page at `/registry`. It shows only published entries, with a source link, the check (**Verified** with its date and how it was made, or **Last updated** with its date and **Not verified yet.**), and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
+- On `/registry` a reader can **Search** by name, organization, description or category, and filter by category and language. Results come 25 to a page, with **Previous page** and **Next page**. Each service name opens its own page at `/registry/<id>`, with every public detail. An unknown or unlisted id shows “This service is not listed.” Published services are in `sitemap.xml`.
+- A public JSON feed of the directory at `/api/registry/v1/...`. No sign-in, read-only. See [the API reference](navigator/registry-api.md).
 - A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
 - The reader pages use the Bulletin design with self-hosted fonts.
 - No account, no cookie banner, and a visit count that is never tied to a person.
@@ -974,6 +976,7 @@ The desk’s review, verification and needs-checking work is set out step by ste
 - **Verification**, in **All details:** an editor records how an entry was checked, what was checked (desk only) and an optional source link. The check keeps a snapshot of the key facts, and **Changed since verified** lists what has changed since. A save or a publish never records a check.
 - **Needs checking:** published entries that were never checked, were last checked more than 180 days ago, or changed since their last check.
 - **`/registry`:** a check reads `Verified <date> (by phone)`. An entry with only a save or publish date reads `Last updated <date>. Not verified yet.` Otherwise it reads `Not verified yet`.
+- **Download directory file** (editors): saves one directory as the JSON file the import reads, without removed rows. See [hsds-import.md](navigator/hsds-import.md).
 - Each accept, reject, verify, publish and take down writes one audit record. An import does not propose again a change that an editor already accepted or rejected.
 
 ---
