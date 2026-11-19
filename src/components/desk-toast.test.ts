@@ -102,6 +102,43 @@ describe("a press the desk did answer", () => {
     assert.match(String(logged[0]?.[1]), /blocked by walker/);
   });
 
+  /*
+    The other half of F05: the first cut of the fix hid every message without a
+    final period, which is most of what the server says to an editor. A real
+    refusal keeps its own words, with a full stop or without.
+  */
+  it("carries a real refusal through, with or without a full stop", () => {
+    for (const own of [
+      "Lead not found",
+      "Investigation not found",
+      "Codex usage limit reached",
+      "Empty model response",
+      "No voice file",
+      "Links to look at must start with http:// or https://",
+      "The queue is full.",
+    ]) {
+      assert.equal(deskErrorReason(new Error(own)), own, own);
+      assert.equal(deskErrorReason(own), own, own);
+    }
+  });
+
+  it("turns code and runtime errors into plain words", () => {
+    const original = console.error;
+    console.error = () => {};
+    try {
+      for (const raw of [
+        "blocked by walker",
+        "Cannot destructure property 'ok' of undefined",
+        "SEARCH_BLOCKED",
+        "x is not a function",
+      ]) {
+        assert.equal(deskErrorReason(new Error(raw)), DESK_NOT_ACCEPTED_REASON, raw);
+      }
+    } finally {
+      console.error = original;
+    }
+  });
+
   it("keeps a real refusal ahead of the mapped sentence", () => {
     /*
       `deskActionFailure` composes the caller's lead with this sentence, and the

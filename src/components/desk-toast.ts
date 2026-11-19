@@ -253,15 +253,41 @@ export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do t
 export const DESK_NOT_ACCEPTED_REASON = "The server did not accept that. Try again.";
 
 /**
- * Does this message read as a sentence the desk wrote for an editor?
+ * Was this message written for a developer rather than for an editor?
  *
- * The desk's own refusals and thrown errors are written as sentences and end
- * with punctuation. A raw exception, a proxy's reason, or a single technical
- * fragment does not -- and F05 of the 2026-11-19 walk found exactly those
- * printed verbatim ("Could not change that lead. blocked by walker").
+ * F05 of the 2026-11-19 walk found raw exception text printed after the desk's
+ * lead ("Could not change that lead. blocked by walker"). The first cut of the
+ * fix asked whether the text ended in punctuation, which also hid real refusals
+ * the desk writes for editors without a final period ("Lead not found",
+ * "Codex usage limit reached", "No voice file"). So the test is now on the shape
+ * of developer text, not on punctuation:
+ *
+ *  - a lowercase start ("blocked by walker", "request timed out" is caught
+ *    earlier, but a bare fragment is still this shape);
+ *  - a runtime error: "undefined"/"null" as words, "is not a function",
+ *    "Cannot read propert…", "Cannot destructure", a quoted identifier
+ *    ('ok'), an ALL_CAPS_WITH_UNDERSCORE token (SEARCH_BLOCKED), a named
+ *    exception ("TypeError:", "ReferenceError:", "Error:"), a stack line, or a
+ *    bare "HTTP 500".
+ *
+ * A capitalized plain-words message passes through with or without a full stop.
  */
-function readsAsEditorSentence(raw: string): boolean {
-  return /[.!?]["')\]]*$/.test(raw.trim());
+const DEVELOPER_TEXT = [
+  /^[a-z]/,
+  /\b(?:undefined|null)\b/,
+  /\bis not a function\b/,
+  /Cannot read propert/,
+  /Cannot destructure/,
+  /'[A-Za-z_$][\w$]*'/,
+  /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/,
+  /\b(?:TypeError|ReferenceError|Error):/,
+  /(?:^|\n)\s+at /,
+  /^HTTP \d{3}$/,
+];
+
+function readsAsDeveloperText(raw: string): boolean {
+  const text = raw.trim();
+  return DEVELOPER_TEXT.some(shape => shape.test(text));
 }
 
 /**
@@ -307,13 +333,14 @@ export function deskErrorReason(error: unknown, what = "do that"): string {
   )
     return editorActionError(raw, what) ?? raw;
   /*
-    F05 (walk 2026-11-19): a message that is not a sentence was written for a
-    developer, not an editor -- "blocked by walker" reached two screens as
-    "Could not change that lead. blocked by walker". The desk cannot make that
-    text true or useful, so it says the plain thing instead and keeps the raw
-    words in the console for whoever is debugging.
+    F05 (walk 2026-11-19): a message shaped like developer text was not written
+    for an editor -- "blocked by walker" reached two screens as "Could not
+    change that lead. blocked by walker". The desk cannot make that text true or
+    useful, so it says the plain thing instead and keeps the raw words in the
+    console for whoever is debugging. A real refusal, with or without a final
+    period, is left alone.
   */
-  if (!readsAsEditorSentence(raw)) {
+  if (readsAsDeveloperText(raw)) {
     console.error("Desk press failed with:", error);
     return DESK_NOT_ACCEPTED_REASON;
   }
