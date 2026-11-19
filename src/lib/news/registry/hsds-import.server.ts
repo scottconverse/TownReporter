@@ -528,6 +528,19 @@ async function writeTable(
   );
   const byHsdsId = new Map(existing.map((row) => [String(row.hsds_id), row]));
 
+  // A directory file leaves out a removed schedule, so a link that still points
+  // at one is written in the file with no schedule. Reading that as "the link
+  // lost its schedule" would make a proposal from every round trip.
+  const removedScheduleIds = new Set<number>();
+  if (table === "service_at_locations") {
+    const removed = await sql.query<{ id: number }>(
+      `select id from schedules
+        where newsroom_id = $1 and directory_name = $2 and removed_at is not null`,
+      [context.newsroomId, context.directoryName],
+    );
+    for (const schedule of removed) removedScheduleIds.add(Number(schedule.id));
+  }
+
   for (const row of rows) {
     const hsdsId = row.hsds_id as string;
     const prior = byHsdsId.get(hsdsId);
@@ -575,6 +588,13 @@ async function writeTable(
     for (const column of columns) {
       if (column === "status" && !statusIsClaim(row.status)) continue;
       if (sameValue(prior[column], row[column])) continue;
+      if (
+        column === "schedule_id" &&
+        (row[column] === null || row[column] === undefined) &&
+        removedScheduleIds.has(Number(prior[column]))
+      ) {
+        continue;
+      }
       differs = true;
       // A proposal already waiting, or one an editor already rejected, is not
       // made again. Both count as "already waiting" so the report's shape stays
@@ -875,7 +895,9 @@ interface StoredRow {
 
 /**
  * Read one directory's rows back into the mapped shape, for the compatibility
- * round-trip. Internal only: there is no route in front of this.
+ * round-trip and the desk's directory file. A row an editor removed
+ * (`removed_at` set, migration 0165) is not read: the file holds what is live.
+ * Places, organizations, services and categories carry no removal marker.
  */
 export async function readRegistryRows(
   sql: Sql,
@@ -884,7 +906,9 @@ export async function readRegistryRows(
 ): Promise<RegistryRows> {
   const read = async (table: RegistryTableName): Promise<StoredRow[]> =>
     sql.query<StoredRow>(
-      `select * from ${table} where newsroom_id = $1 and directory_name = $2 order by id`,
+      `select * from ${table} where newsroom_id = $1 and directory_name = $2${
+        REMOVABLE_TABLES.has(table) ? " and removed_at is null" : ""
+      } order by id`,
       [newsroomId, directoryName],
     );
 
@@ -1024,7 +1048,7 @@ export async function readRegistryRows(
   };
 }
 
-/** Read one directory back out as the bundle it came in as. Internal only. */
+/** Read one directory back out as the bundle it came in as, without removed rows. */
 export async function readRegistryBundle(
   sql: Sql,
   newsroomId: number,

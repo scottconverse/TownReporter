@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
+import { registrySitemapLocations } from "@/lib/news/registry/registry-sitemap.server";
 
 /**
  * A sitemap for the paper.
@@ -65,8 +66,14 @@ export const Route = createFileRoute("/sitemap.xml")({
           rows = [];
         }
 
+        const registryLocations = await registrySitemapLocations(
+          getSql,
+          DEFAULT_NEWSROOM_ID,
+          origin,
+        );
         const entries = [
           ...STATIC_PATHS.map((p) => ({ loc: `${origin}${p}`, lastmod: "" })),
+          ...registryLocations.map((loc) => ({ loc, lastmod: "" })),
           ...rows.map((r) => ({
             loc: `${origin}/articles/${encodeURIComponent(r.slug)}`,
             lastmod: new Date(r.published_at).toISOString().slice(0, 10),

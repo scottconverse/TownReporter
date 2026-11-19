@@ -85,6 +85,36 @@ A proposal that is already accepted or rejected cannot be decided again. The pag
 - An import does not propose again a change that an editor already accepted or rejected. The match covers the field, the row, the value the file gives and the value the entry holds now. If the entry changed after the decision, the change can be proposed again.
 - Each import takes a lock for one newsroom and one directory name. A second import of the same directory waits until the first one finishes. It then sees the first import's proposals, so it does not repeat them. A preview takes the same lock.
 
+## Download a directory file
+
+The desk can save one directory as a JSON file. The button is **Download directory file**. It is in the **Imports** section of `/desk/registry`, under the import panel, with one button for each directory that has been imported.
+
+- **Who can use it:** a signed-in owner or editor of the newsroom. Others are refused.
+- **What the file holds:** the directory in the shape the import reads (see "What the file must be"). It holds every row of the directory, published or not, except the rows an editor removed. Removed rows are left out.
+- **The file name:** `directory-<name>-<date>.json`. The name is the directory name in lower case, with only letters, digits and hyphens, up to 80 characters. The date is the day of the download, in UTC. For example: `directory-example-hsds-directory-2026-11-18.json`.
+- **Nothing changes.** Downloading writes nothing to the registry and publishes nothing.
+- **If it fails.** A directory with no rows in this newsroom gives **That directory is not in this newsroom. Nothing was changed.** A file that cannot be made gives **The file could not be made. Nothing was changed.**
+
+The file is a copy for keeping, or for moving a directory to another desk. It is not a certified HSDS export. Imported back into the same newsroom and directory, it adds no rows and no proposals. Imported into an empty newsroom, it brings back the rows with the fields the import needs.
+
+## Back up and restore the community directory
+
+The directory is part of the whole-database backup. There is no separate directory backup. The nightly backup (`ops/backup.ps1`) is one `pg_dump` of the whole database, and one restore brings the directory back with everything else.
+
+These tables hold the directory and its review record:
+
+- `organizations`, `services`, `locations`, `service_at_locations`, `schedules`, `contacts` (phones and emails), `eligibilities`, `required_documents`, `languages`, `accessibilities`
+- `resource_sources` (which source backs which entry), `resource_imports`
+- `taxonomies` (the categories)
+- `sources` (the source links that entries point to; the newsroom's own source table, shared with its other sources)
+- `resource_changes` (proposals, with review state, note and applied time)
+- `resource_verifications` (the verification snapshots)
+- `audit_events`
+
+To restore, follow the restore steps in `docs/staging.md` (`ops/stage.ps1` restores a backup into a fresh database with `psql`). Then check the restore log for SQL errors, as `docs/HALO-UPDATE-0.6.35.md` says.
+
+What was shown: on 2026-11-18 a small directory was dumped with the same command the backup uses (`pg_dump -p <port> -U postgres -d <db> -f <file>`) and restored with `psql -f` into a fresh database, on a throwaway Postgres 18.6 that held no live data. The restore log had no errors. The two databases matched on row counts for every table in the list as it stood that day, published flags, removed markers, sources, the links from service to organization and place, review state, note and applied time, the verification snapshot, and the audit rows. `taxonomies` and `sources` were added to the list after that check. Not checked: whether that check covered them. The directory was seeded by SQL on a database migrated to 0166, not imported from a file. The nightly job itself, `pg_restore`, and the size and timing of a real backup were not checked.
+
 ## Not yet
 
-Sending a proposal back for another look is not built. A public search and a public JSON feed are not built either.
+Sending a proposal back for another look is not built. A public search and a public JSON feed were added in Phase 4; see [registry-api.md](registry-api.md).

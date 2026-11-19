@@ -47,12 +47,14 @@ import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as DeskStatsRouteImport } from './routes/desk.stats'
 import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
+import { Route as RegistryIdRouteImport } from './routes/registry_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
 import { Route as DeskFiledDraftDraftIdRouteImport } from './routes/desk.filed-draft.$draftId'
 import { Route as DeskOpsCardRouteImport } from './routes/desk.ops_.$card'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
 import { Route as DeskTranscriptArtifactIdRouteImport } from './routes/desk.transcript.$artifactId'
+import { Route as ApiRegistryV1SplatRouteImport } from './routes/api/registry.v1.$'
 import { Route as DeskStoryDraftDraftIdRouteImport } from './routes/desk.story.draft.$draftId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -245,6 +247,11 @@ const EvidenceCompareRoute = EvidenceCompareRouteImport.update({
   path: '/evidence/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RegistryIdRoute = RegistryIdRouteImport.update({
+  id: '/registry_/$id',
+  path: '/registry/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -276,6 +283,11 @@ const DeskTranscriptArtifactIdRoute =
     path: '/transcript/$artifactId',
     getParentRoute: () => DeskRoute,
   } as any)
+const ApiRegistryV1SplatRoute = ApiRegistryV1SplatRouteImport.update({
+  id: '/api/registry/v1/$',
+  path: '/api/registry/v1/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskStoryDraftDraftIdRoute = DeskStoryDraftDraftIdRouteImport.update({
   id: '/story/draft/$draftId',
   path: '/story/draft/$draftId',
@@ -320,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry/$id': typeof RegistryIdRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -327,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesByTo {
@@ -366,6 +380,7 @@ export interface FileRoutesByTo {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry/$id': typeof RegistryIdRoute
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -373,6 +388,7 @@ export interface FileRoutesByTo {
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesById {
@@ -414,6 +430,7 @@ export interface FileRoutesById {
   '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
+  '/registry_/$id': typeof RegistryIdRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -421,6 +438,7 @@ export interface FileRoutesById {
   '/desk/ops_/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
+  '/api/registry/v1/$': typeof ApiRegistryV1SplatRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRouteTypes {
@@ -463,6 +481,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry/$id'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -470,6 +489,7 @@ export interface FileRouteTypes {
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -509,6 +529,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry/$id'
     | '/desk'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -516,6 +537,7 @@ export interface FileRouteTypes {
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   id:
     | '__root__'
@@ -556,6 +578,7 @@ export interface FileRouteTypes {
     | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
+    | '/registry_/$id'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -563,6 +586,7 @@ export interface FileRouteTypes {
     | '/desk/ops_/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
+    | '/api/registry/v1/$'
     | '/desk/story/draft/$draftId'
   fileRoutesById: FileRoutesById
 }
@@ -586,8 +610,10 @@ export interface RootRouteChildren {
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
   EvidenceCompareRoute: typeof EvidenceCompareRoute
+  RegistryIdRoute: typeof RegistryIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
+  ApiRegistryV1SplatRoute: typeof ApiRegistryV1SplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -858,6 +884,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvidenceCompareRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/registry_/$id': {
+      id: '/registry_/$id'
+      path: '/registry/$id'
+      fullPath: '/registry/$id'
+      preLoaderRoute: typeof RegistryIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -899,6 +932,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/desk/transcript/$artifactId'
       preLoaderRoute: typeof DeskTranscriptArtifactIdRouteImport
       parentRoute: typeof DeskRoute
+    }
+    '/api/registry/v1/$': {
+      id: '/api/registry/v1/$'
+      path: '/api/registry/v1/$'
+      fullPath: '/api/registry/v1/$'
+      preLoaderRoute: typeof ApiRegistryV1SplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/desk/story/draft/$draftId': {
       id: '/desk/story/draft/$draftId'
@@ -986,8 +1026,10 @@ const rootRouteChildren: RootRouteChildren = {
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
   EvidenceCompareRoute: EvidenceCompareRoute,
+  RegistryIdRoute: RegistryIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronMonitorsRoute: ApiCronMonitorsRoute,
+  ApiRegistryV1SplatRoute: ApiRegistryV1SplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

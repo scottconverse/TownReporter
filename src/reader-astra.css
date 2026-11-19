@@ -7114,3 +7114,11 @@
   font-weight: 700;
   color: var(--ok);
 }
+
+/* Community resources: the service link, the correction link, the search box and
+   the Search button read at 16px like the body. The general .reader .field,
+   .reader .btn and .reader .textlink rules set 14px or 15px, and they come
+   from an unlayered sheet, so the text-base utility cannot win against them. */
+.reader .registry-page .registry-text {
+  font-size: 1rem;
+}

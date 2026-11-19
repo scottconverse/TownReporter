@@ -505,15 +505,19 @@ test("removing a row of a published entry takes it off the public page at once; 
   await removeEntryRowIn(sql, 9712, s.s1, { kind: "location", rowId: s.link1 }, "ed-1");
   assert.deepEqual((await publicEntry(sql, 9712, s.s1))!.locations, []);
   assert.equal((await publicEntry(sql, 9712, s.s2))!.locations.length, 1);
-  // Eligibility, documents and accessibility are not on the public page; they are removed all the same.
+  // Eligibility, documents and accessibility are on the public detail since Phase 4: removed, they are gone from it.
+  assert.deepEqual((await publicEntry(sql, 9712, s.s1))!.eligibility, ["Residents of the county"]);
   for (const [kind, rowId] of [["eligibility", s.elig], ["requiredDocument", s.doc], ["accessibility", s.access]] as const) {
     assert.equal((await removeEntryRowIn(sql, 9712, s.s1, { kind, rowId }, "ed-1")).ok, true);
   }
+  const bare = (await publicEntry(sql, 9712, s.s1))!;
+  assert.deepEqual([bare.eligibility, bare.requiredDocuments, bare.accessibility], [[], [], []]);
 
   // The place's own contact is listed under the place, so the link comes back first.
   for (const [kind, rowId] of [
     ["location", s.link1], ["contact", s.ownContact], ["contact", s.orgContact], ["contact", s.locContact],
     ["language", s.lang], ["schedule", s.sc1], ["schedule", s.sc2], ["schedule", s.sc3],
+    ["eligibility", s.elig], ["requiredDocument", s.doc], ["accessibility", s.access],
   ] as const) {
     await restoreEntryRowIn(sql, 9712, s.s1, { kind, rowId }, "ed-1");
   }

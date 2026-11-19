@@ -15,6 +15,7 @@
 import { withTransaction, type Sql } from "../../db.ts";
 import {
   importHsdsBundle,
+  readRegistryBundle,
   type ImportConflict,
   type TableCounts,
 } from "./hsds-import.server.ts";
@@ -713,5 +714,51 @@ export async function runHsdsImportIn(
     directoryName: checked.directoryName,
     importId: result.importId,
     summary: { tables: result.tables, conflicts: result.conflicts },
+  };
+}
+
+export type ExportDirectoryFileResult =
+  | { ok: true; fileName: string; json: string; directoryName: string }
+  | { ok: false; message: string };
+
+/** A directory name as a file-name part: lower case letters, digits and hyphens. */
+function fileNamePart(name: string): string {
+  const part = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return part || "directory";
+}
+
+/** The server's own calendar date as YYYY-MM-DD, not the UTC date. */
+function localDate(now: Date): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * One directory of this newsroom as the HSDS bundle the importer reads, as JSON
+ * text, without the rows an editor removed. Read-only. A directory this newsroom
+ * has no rows in is refused: nothing from another newsroom is ever read.
+ */
+export async function exportDirectoryFileIn(
+  sql: Sql,
+  newsroomId: number,
+  directoryName: string,
+  now: Date = new Date(),
+): Promise<ExportDirectoryFileResult> {
+  const name = directoryName.trim();
+  if (!name || (await countDirectoryRows(sql, newsroomId, name)) === 0) {
+    return { ok: false, message: "That directory is not in this newsroom. Nothing was changed." };
+  }
+  const bundle = await readRegistryBundle(sql, newsroomId, name);
+  return {
+    ok: true,
+    directoryName: name,
+    fileName: `directory-${fileNamePart(name)}-${localDate(now)}.json`,
+    json: `${JSON.stringify(bundle, null, 2)}
+`,
   };
 }
