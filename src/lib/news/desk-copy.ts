@@ -2723,7 +2723,7 @@ export const PRINTED_TAB_NOTE =
  * rather than leaving an editor to think one of them is wrong.
  */
 export const ALL_TAB_NOTE =
-  "The tabs overlap. Open, Held and Killed are a lead's status, ≈ Printed is a match to a story in print, and All also counts leads whose story is already published.";
+  "The tabs overlap. Open, Held and Killed come from a lead's status, ≈ Printed is a match to a story in print (a lead can also be in one of those three), and All also counts leads whose story is already published.";
 
 /**
  * THT-21: the line under the bulk Start button. Start runs AI drafts for every
