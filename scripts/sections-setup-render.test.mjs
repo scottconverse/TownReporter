@@ -297,6 +297,17 @@ const DESK_CHROME_IMPORTS = {
     { react: import.meta.resolve("react") },
   ),
   /*
+    F06 (2026-11-19 walk) made desk-chrome.tsx import useConfirmFocus for the
+    Queue's inline confirm. Its only import is react, so the REAL file is
+    loaded; the shell never reads it, but the specifier has to resolve for
+    desk-chrome.tsx to load.
+  */
+  "@/components/confirm-focus": moduleUrl(
+    await readFile(new URL("../src/components/confirm-focus.ts", import.meta.url), "utf8"),
+    "confirm-focus.ts",
+    { react: import.meta.resolve("react") },
+  ),
+  /*
     FB1 units 3-4: the shell's Running box draws the real card from the one job
     query, so both specifiers have to resolve for desk-chrome.tsx to load.
     Nothing here starts or renders a job.

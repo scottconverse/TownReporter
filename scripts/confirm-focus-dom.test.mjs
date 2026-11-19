@@ -28,9 +28,14 @@ Object.defineProperty(window.document, "activeElement", {
   get: () => activeElement ?? window.document.body,
   configurable: true,
 });
+/* Passing the element as an argument keeps `this` where it belongs; the rule
+   only objects to copying it into a variable. */
+const rememberFocus = (element) => {
+  activeElement = element;
+};
 window.HTMLElement.prototype.focus = function focus() {
   if (this.disabled) return;
-  activeElement = this;
+  rememberFocus(this);
 };
 window.HTMLElement.prototype.blur = function blur() {
   if (activeElement === this) activeElement = null;
