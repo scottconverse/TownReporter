@@ -305,7 +305,7 @@ The entry itself, in `PROVIDER_REGISTRY`:
   enabled: () =>
     notSwitchedOff("TOWNREPORTER_LOCAL") && (Boolean(env("LLM_BASE_URL")) || localDiscoveryReachable),
   offSwitchEnv: "TOWNREPORTER_LOCAL",
-  offeredFor: { story: true, scan: true, opinion: true, dark: true },
+  offeredFor: EVERY_SURFACE,            // story, scan, follow-up, opinion, dark, ocr, forced
   // no ladderRank: Automatic does not reach for it on its own -- when
   // LLM_BASE_URL is set, the `configured` entry above already pins Automatic
   // to the same server, so no ladder change was needed.
@@ -421,9 +421,10 @@ a saved pick is never overridden by what happens to be loaded.
 that a server reports as **not** loaded stops the run before any call is made,
 with the model and server named — *"gemma4:12b is not loaded in Ollama. Load it
 there, or pick Use whatever is loaded."* Choosing **Use whatever is loaded**
-with an empty memory stops with *"Local model: nothing is loaded in LM Studio or
-Ollama. Load a model there, or pick a model."* Both sentences appear as they are
-written here, in the picker's own help line and in the run's error.
+with an empty memory stops with *"No model is loaded on this computer."* The
+desk adds *"Next: load a model in LM Studio or Ollama, or pick one on the Models
+page."* after it. The first sentence is the run's error as written here; the
+picker's help line words it a little differently.
 
 Two cases are deliberately not blocked:
 

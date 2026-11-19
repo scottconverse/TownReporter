@@ -117,7 +117,7 @@ You are responsible for everything that appears on the paper.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
 - A public **Community resources** page at `/registry`. It shows only published entries, with a source link, the check (**Verified** with its date and how it was made, or **Last updated** with its date and **Not verified yet.**), and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
-- On `/registry` a reader can **Search** by name, organization, description or category, and filter by category and language. Results come 25 to a page, with **Previous page** and **Next page**. Each service name opens its own page at `/registry/<id>`, with every public detail. An unknown or unlisted id shows “This service is not listed.” Published services are in `sitemap.xml`.
+- On `/registry` a reader can **Search** by name, organization, description or category, and filter by category and language. Results come 25 to a page, with **Previous page** and **Next page**. Each service name opens its own page at `/registry/<id>`, with every public detail. An unknown or unlisted id shows “This service is not listed.” Published services are in `sitemap.xml`. (Search, the service page, the JSON feed and the **Verified** check are in the source after 0.6.92 and are not in a release yet.)
 - A public JSON feed of the directory at `/api/registry/v1/...`. No sign-in, read-only. See [the API reference](navigator/registry-api.md).
 - A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
 - The reader pages use the Bulletin design with self-hosted fonts.
@@ -368,7 +368,9 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 **Captured meetings** (bottom of Scan history) lists what meeting capture has saved: the meeting, whether the transcript is from official captions or speech-to-text, whether it was matched to agenda items, and a link **Open the story** when a draft or lead was filed. Setting up capture and **Run meetings now** are on the Server page. A transcript is a map of the tape, not the minutes.
 
-**The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#the-server-page)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads only.
+**The daily scan.** The owner sets it up on **Server → Daily scan** (see [The Server page](#the-server-page)). When it is on, the desk reads the owner’s fixed picks first, then every other accepted source oldest-read first, inside the 90-minute budget, once a day at the chosen local time. If the app was off at that time, the next check that same day runs it once; missed days are not replayed. It files leads, and the 14+ drafting rule below then runs on them.
+
+**The paper drafts high-scoring leads by itself.** When a scan finishes, the desk drafts every lead that scores 14 or more (the hot line) and is New or Held. It uses the same Draft path as **Start story**, with the Automatic model pick. Drafting moves a Held lead to Drafted. A Held lead is still never published until you release it. It skips a lead that already has a draft or a draft job, a lead whose draft you stopped, and a lead the scan linked as a possible repeat of a story that was published or killed. A lead linked to a lead that is still open is drafted. A repeat that the scan did not link is not caught. If the draft is refused (for example, no model is set up), the refusal is kept in the lead's notes and the scan still succeeds. This is in the source after 0.6.92 and is not in a release yet.
 
 ## The queue
 
@@ -433,7 +435,7 @@ An AI duplicate never lands in Open. When a linked lead needs your decision, pre
 
 Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
 
-- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away.
+- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in the source after 0.6.92 and is not in a release yet.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
@@ -883,7 +885,7 @@ Nothing is saved until you press **Review changes**, check the summary (names, o
 
 ### Daily scan
 
-Owner only. Turn on **Run once each day**, set the **Local time**, choose the **Writing model** (Automatic by default) and effort, set **Daily priority set** and **Read every day**, and tick the accepted sources you want read first. Every other accepted source is still read by age, never-read first, inside a 90-minute budget. Values outside the usual range warn and offer **Save this schedule anyway**. **Save daily scan**, **Pause daily scan** and **Resume daily scan** control it; the status block shows the next run, the last run, and the model asked for and the model that ran. A usage limit does not pause the schedule; the next day runs and the model call can move on. It pauses itself, with the reason shown, if the timezone is invalid, the owner account changed or the chosen model cannot start. It files leads only. **Open scan history** and **Open the queue** are below.
+Owner only. Turn on **Run once each day**, set the **Local time**, choose the **Writing model** (Automatic by default) and effort, set **Daily priority set** and **Read every day**, and tick the accepted sources you want read first. Every other accepted source is still read by age, never-read first, inside a 90-minute budget. Values outside the usual range warn and offer **Save this schedule anyway**. **Save daily scan**, **Pause daily scan** and **Resume daily scan** control it; the status block shows the next run, the last run, and the model asked for and the model that ran. A usage limit does not pause the schedule; the next day runs and the model call can move on. It pauses itself, with the reason shown, if the timezone is invalid, the owner account changed or the chosen model cannot start. It files leads, and the 14+ drafting rule (see Run a scan) then runs on them. **Open scan history** and **Open the queue** are below.
 
 ### Meeting capture
 
@@ -970,7 +972,7 @@ A published meeting story shows **Transcript changed — evidence review require
 
 ## Community resources (`/desk/registry`)
 
-The desk’s review, verification and needs-checking work is set out step by step in [the editor guide](editor.md#community-resources-deskregistry). In short:
+Review, verification, needs checking, the import and the directory download are in the source after 0.6.92 and are not in a release yet. The desk’s review, verification and needs-checking work is set out step by step in [the editor guide](editor.md#community-resources-deskregistry). In short:
 
 - **Detected changes:** each waiting change has **Accept and apply**, **Accept without applying** and **Reject**, with an optional note. **Accept and apply** is refused, and nothing changes, when the entry no longer holds the value the proposal was made against, or when the proposal points at no live row.
 - **Verification**, in **All details:** an editor records how an entry was checked, what was checked (desk only) and an optional source link. The check keeps a snapshot of the key facts, and **Changed since verified** lists what has changed since. A save or a publish never records a check.
@@ -2618,6 +2620,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/?topic=opinion`                            | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
 | `/articles/:slug`                            | A story                                                                                    |
 | `/registry`                                  | The public **Community resources** page; only published entries                            |
+| `/registry/:id`                              | One published service, with every public detail; an unknown or unlisted id says “This service is not listed.” |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
 | `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
 | `/get-the-app`                               | Install steps for **iPhone or iPad** and **Android**                                       |
@@ -2631,6 +2634,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/desk/sources`                              | Watch list, and bulk paste                                                                 |
 | `/desk/inventory`                            | The ranked source table: status, news score, reads, last lead, and the move buttons (read-only suggestions; nothing is culled) |
 | `/desk/scan`                                 | Fetch and file leads. The expensive button.                                                |
+| `/desk/scans`                                | Redirects to `/desk/scan`, keeping the query string                                        |
 | `/desk/queue`                                | Leads: draft, hold, kill                                                                   |
 | `/desk/drafts`                               | Everything not yet printed, one row per story, with its state in words                     |
 | `/desk/story/:leadId`                        | The workbench, opened by lead                                                              |
@@ -2651,6 +2655,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/api/auth/*`                                | better-auth                                                                                |
 | `/api/view` · `/api/read`                    | Anonymous reader beacons for view and reading counts; a failure can never reach the reader |
 | `/api/transcript-file`                       | The retained meeting transcript byte for byte, scoped to the signed-in newsroom            |
+| `/api/registry/v1/*`                         | Read-only JSON feed of the directory: `/services`, `/services/<id>`, `/categories`; no sign-in |
 | `/api/cron/monitors`                         | Lets an external monitor ping the job runner; disabled unless `CRON_SECRET` is set         |
 
 ### The Server page's cards
@@ -2830,8 +2835,10 @@ For the shape of the whole database see the
 | 0156-0158 | `evidence_vectors`; trigram indexes on `artifact_chunks` (`pg_trgm`); `story_meaning_vectors`                              |
 | 0159      | `routine_events` (one row per source, event and day; additive)                                                             |
 | 0160      | Resource registry tables: HSDS 3.0 core tables plus `resource_sources`, `resource_changes`, `resource_queries`, `resource_imports`; every registry row starts `published = false` |
-| 0165      | Registry removal markers: nullable `removed_at` and `removed_by` on `contacts`, `service_at_locations`, `schedules`, `eligibilities`, `required_documents`, `languages`, `accessibilities`; additive, nothing filled or dropped |
-| 0166      | Community resources review and verification: new table `resource_verifications` (explicit checks with a key-facts snapshot); nullable `review_note` and `applied_at` on `resource_changes`; additive |
+| 0163      | `townrecord_handoffs` (TownRecord meeting exports imported as leads; additive)                                            |
+| 0164      | Nullable `leads.score_parts` (the four score parts); fills nothing                                                         |
+| 0165      | Registry removal markers: nullable `removed_at` and `removed_by` on `contacts`, `service_at_locations`, `schedules`, `eligibilities`, `required_documents`, `languages`, `accessibilities`; additive, nothing filled or dropped. In the source after 0.6.92, not in a release yet |
+| 0166      | Community resources review and verification: new table `resource_verifications` (explicit checks with a key-facts snapshot); nullable `review_note` and `applied_at` on `resource_changes`; additive. In the source after 0.6.92, not in a release yet |
 
 ## Manual investigative page watches
 

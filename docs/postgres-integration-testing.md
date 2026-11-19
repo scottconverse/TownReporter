@@ -4,7 +4,7 @@ Run database-dependent tests only through `node scripts/run-postgres-integration
 
 ## Four parallel CI parts
 
-The PR workflow runs `Real Postgres, part 1 of 4`, `Real Postgres, part 2 of 4`, `Real Postgres, part 3 of 4`, and `Real Postgres, part 4 of 4` independently. Each has its own PostgreSQL service, runs its files serially, and has a ten-minute job timeout. The existing workflow concurrency rule cancels superseded PR runs. `fail-fast: false` lets the other parts finish if one fails. Each part applies the migrations; part 1 also runs the search-index benchmark.
+The PR workflow runs `Real Postgres, part 1 of 4`, `Real Postgres, part 2 of 4`, `Real Postgres, part 3 of 4`, and `Real Postgres, part 4 of 4` independently. Each has its own PostgreSQL service, runs its files serially, and has a 25-minute job timeout. The existing workflow concurrency rule cancels superseded PR runs. `fail-fast: false` lets the other parts finish if one fails. Each part applies the migrations; part 1 also runs the search-index benchmark.
 
 The runner discovers the same complete set as the former single lane, then assigns files by longest measured time first to the lightest part. `scripts/postgres-integration-weights.json` records seconds, not a test allowlist. A newly discovered file absent from the weights receives their median time and is assigned to exactly one part automatically. Neither a file's name nor its position in discovery determines whether it runs. Both part variables must be set together; positional subsets cannot be combined with part selection.
 

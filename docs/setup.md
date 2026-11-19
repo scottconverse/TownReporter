@@ -91,7 +91,7 @@ npm run dev
 
 Open the paper. Top right: **Create editor**. Email + password. On an unclaimed desk, the first account must also enter its one-time setup code. The sign-in form points to `logs/SETUP-CODE.txt` in the server data folder, and the server prints the code once in its log. In a source checkout, the data folder is `TOWNREPORTER_DATA_ROOT` when set, otherwise `.townreporter-data` under the project directory. The code is generated in development as well as by the built server. That account is stored in **your** database and becomes the newsroom **owner**. Sign-in has two limits: ten attempts every five minutes from any one address (`src/lib/auth/server.ts`), and an account lockout of ten failed attempts in fifteen minutes (`src/lib/auth/account-lockout.server.ts`). The lockout applies to the real owner too, not only an attacker, and a correct sign-in clears it immediately. There is no email password-reset service.
 
-While signed in, generate and securely save recovery codes from **Server → Recovery codes**. Each code works once; use **Lost your password? Use a recovery code** on the sign-in screen if you lose access. A valid code provides a one-time temporary password; sign in with it, then change your password. Generating a replacement set retires the previous set. **Give up the desk** unclaims the newsroom; the next owner must enter the setup code required for an unclaimed desk. It is not account recovery.
+While signed in, generate and securely save recovery codes from **Server → Editors & access → Recovery codes**. Each code works once; use **Lost your password? Use a recovery code** on the sign-in screen if you lose access. A valid code provides a one-time temporary password; sign in with it, then change your password. Generating a replacement set retires the previous set. **Give up the desk** unclaims the newsroom; the next owner must enter the setup code required for an unclaimed desk. It is not account recovery.
 
 The next screen is **Set up the paper**. Enter:
 
@@ -103,7 +103,7 @@ The next screen is **Set up the paper**. Enter:
 
 Save once and the desk opens. Before that moment, the public site shows a
 neutral “Not yet set up” page and no articles. The same form remains under
-**Server → Paper identity** (**Paper setup** panel), so a typo or a changed source never requires a code
+**Server → Paper setup**, so a typo or a changed source never requires a code
 edit or rebuild.
 
 To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
@@ -667,7 +667,7 @@ Nearly every CI browser walk builds the app and drives it through `npm start` (`
 ## Point it at another city
 
 The city setup is database-backed and owner-operated. Use **Set up the paper**
-on first run, or **Server → Paper identity** (**Paper setup** panel) later.
+on first run, or **Server → Paper setup** later.
 
 ### 1. Masthead, locality and contact
 
@@ -861,6 +861,6 @@ Opinion and Write a story share large-document upload, OCR, long pasted text and
 
 0.6.52 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
 
-In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads only. A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. Automatic is resolved to one named runtime before the job is queued, and the run record says which one ran.
+In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads. Leads that score 14 or more are then drafted by the same rule as any scan (not yet released after 0.6.92). A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. Automatic is resolved to one named runtime before the job is queued, and the run record says which one ran.
 
 The Windows lifecycle repair prevents shutdown from terminating protected system descendants by validating process identities and killing only through a verified handle. It cannot safely clean provider/browser descendants after the root process has already crashed; use the remaining process record and warning as an investigation signal, not proof of a clean stop. A fresh Windows packaged-install result is not recorded by this release guide.

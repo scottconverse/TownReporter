@@ -23,8 +23,13 @@ queue confirms **Draft queued with …**; open the lead to watch the workbench.
 The selected model remains the model for that explicit run according to its
 normal picker behavior.
 
-For several eligible leads, use **Draft selected leads**. Select up to five,
-choose a **Batch runtime**, and select **Draft selected**. A batch queues drafts
+For several eligible leads, tick them in the Queue. The bar shows **Start N stories**
+and a **Model for these stories** picker. Press **Start N stories**, check the
+model in the **Draft the selected leads** box and press **Start N stories** there.
+As of 0.6.92 the box says a usual batch has one to five leads and a larger batch
+asks for your approval. **Not yet released (in source after 0.6.92):** the box says any number of leads can be
+drafted in one batch, and **Start N stories** drafts every ticked lead, also
+those off screen. A batch queues drafts
 for editor review; it does not publish anything. The results identify each
 lead, show its status, and provide **Open current story workbench: …**. A
 completed item reports **Batch saved draft #N**. If its evidence check was
@@ -56,7 +61,7 @@ If no matching saved web or document evidence is available, the workbench says t
 incomplete and keeps the draft marked for review. Reconciliation can edit or
 remove unsupported assertions only from the supplied saved evidence; it does
 not silently invent evidence. Publication remains separate: the editor must
-review the draft and use the existing **Publish to the paper** confirmation.
+review the draft and use the **Publish in <Section>** button and its confirmation.
 
 The feature is intentionally conservative about concurrent edits. Save the
 current draft before checking, and review any stale-version message before
