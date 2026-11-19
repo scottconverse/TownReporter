@@ -14,8 +14,8 @@ that carries a registry role, the scan is asked for proposed registry changes
 as well as story leads, and each proposal lands in `resource_changes` with the
 capture it rests on.
 
-Nothing is published from a change proposal by itself. An editor accepts,
-rejects, or sends it back for another look.
+Nothing is published from a change proposal by itself. An editor accepts or rejects it.
+**Accept and apply** also puts the proposed value on the entry.
 
 ## Why not Wigolo
 
@@ -32,7 +32,7 @@ An HSDS file import (Phase 2) makes proposals in the same table. When the file
 says something different from a stored row, the stored row stays and the
 difference becomes one pending row in `resource_changes`. The same pending
 proposal is not added twice. The desk lists these under **Detected changes**.
-Review of these proposals is not built yet. See [hsds-import.md](hsds-import.md).
+An editor accepts or rejects each one. See [hsds-import.md](hsds-import.md#review-a-proposal).
 
 Phase 1 covers the registry tables and the HSDS import. Change detection here
 is the stored design and the review-lane table; the scan pipeline that fills

@@ -116,7 +116,7 @@ You are responsible for everything that appears on the paper.
 - An RSS feed at `/feed` (the newest 40 stories), a `sitemap.xml`, and a `robots.txt` that points at it.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
-- A public **Community resources** page at `/registry`. It shows only published entries, with a source link, a **Last verified:** date, and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
+- A public **Community resources** page at `/registry`. It shows only published entries, with a source link, the check (**Verified** with its date and how it was made, or **Last updated** with its date and **Not verified yet.**), and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
 - A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
 - The reader pages use the Bulletin design with self-hosted fonts.
 - No account, no cookie banner, and a visit count that is never tied to a person.
@@ -963,6 +963,18 @@ A published meeting story shows **Transcript changed — evidence review require
 
 `/desk/legal-removals` and **More ▾ → Legal removal**. A separate process for a legal removal: it skips the trash and has no Undo. Choose the stories and press **Review connected copies**; review the counts and the independent evidence it lists (known copies are listed, not automatically deleted); choose **Keep an owner-only copy for 12 months** or **Keep nothing: a court order requires destruction**; enter a **Reason (required)** that contains no story text, type **REMOVE**, and press **Remove permanently**. The case page then lets the owner open the retained text (audited) and record backup identifiers and operator attestations. An attestation records what an operator reports; it is not proof of erasure. Browser caches, search-engine copies, provider history and old backups are outside the application’s reach, and restoring an older database can bring removed content back. Do not treat this as proof that no copy exists anywhere.
 
+
+---
+
+## Community resources (`/desk/registry`)
+
+The desk’s review, verification and needs-checking work is set out step by step in [the editor guide](editor.md#community-resources-deskregistry). In short:
+
+- **Detected changes:** each waiting change has **Accept and apply**, **Accept without applying** and **Reject**, with an optional note. **Accept and apply** is refused, and nothing changes, when the entry no longer holds the value the proposal was made against, or when the proposal points at no live row.
+- **Verification**, in **All details:** an editor records how an entry was checked, what was checked (desk only) and an optional source link. The check keeps a snapshot of the key facts, and **Changed since verified** lists what has changed since. A save or a publish never records a check.
+- **Needs checking:** published entries that were never checked, were last checked more than 180 days ago, or changed since their last check.
+- **`/registry`:** a check reads `Verified <date> (by phone)`. An entry with only a save or publish date reads `Last updated <date>. Not verified yet.` Otherwise it reads `Not verified yet`.
+- Each accept, reject, verify, publish and take down writes one audit record. An import does not propose again a change that an editor already accepted or rejected.
 
 ---
 
@@ -2623,7 +2635,7 @@ older `prerollout` copies after a good promote. Details are in
 | `/desk/filed-draft/:draftId`                 | The version of a draft that a reporting run filed, kept as filed                           |
 | `/desk/import`                               | Import finished stories                                                                    |
 | `/desk/published`                            | Live stories and corrections; beat memory (`/desk/memory` redirects here)                  |
-| `/desk/registry`                             | Community resources desk: starter list, publish, edit, add and take down, import, all details, remove and restore |
+| `/desk/registry`                             | Community resources desk: starter list, publish, edit, add and take down, import, all details, remove and restore, review of proposals, verification and needs checking |
 | `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
 | `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
 | `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
@@ -2816,6 +2828,7 @@ For the shape of the whole database see the
 | 0159      | `routine_events` (one row per source, event and day; additive)                                                             |
 | 0160      | Resource registry tables: HSDS 3.0 core tables plus `resource_sources`, `resource_changes`, `resource_queries`, `resource_imports`; every registry row starts `published = false` |
 | 0165      | Registry removal markers: nullable `removed_at` and `removed_by` on `contacts`, `service_at_locations`, `schedules`, `eligibilities`, `required_documents`, `languages`, `accessibilities`; additive, nothing filled or dropped |
+| 0166      | Community resources review and verification: new table `resource_verifications` (explicit checks with a key-facts snapshot); nullable `review_note` and `applied_at` on `resource_changes`; additive |
 
 ## Manual investigative page watches
 

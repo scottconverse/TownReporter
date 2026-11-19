@@ -3,6 +3,7 @@ import { PaperShell } from "@/components/paper-chrome";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { listPublicRegistryPage } from "@/lib/news/registry/registry-public";
+import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
 
 /**
  * The public Registry (spec 15.1, 18.2 and 24, Phase 1).
@@ -14,8 +15,9 @@ import { listPublicRegistryPage } from "@/lib/news/registry/registry-public";
  * entries. It never says "nothing is published" when it could not read.
  *
  * Public copy rule (spec 11, point 6): change detection is not verification.
- * This page says "Last verified" and a date. It never says a phone was called,
- * and it never says a program is confirmed open.
+ * This page says "Verified" with a date and how only when an editor recorded a
+ * check. An older date that only a save or publish set reads "Last updated ...
+ * Not verified yet." It never says a program is confirmed open.
  */
 
 function categoryFromSearch(search: Record<string, unknown>): number | null {
@@ -153,10 +155,15 @@ function RegistryPage() {
                       ) : null}
                       {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
                       <li>
-                        Last verified:{" "}
-                        {entry.lastVerifiedAt
-                          ? formatShortDate(entry.lastVerifiedAt)
-                          : "Not verified yet"}
+                        {entry.verifiedAt
+                          ? `Verified ${formatShortDate(entry.verifiedAt)}${
+                              verifyMethodWords(entry.verifiedMethod)
+                                ? ` (${verifyMethodWords(entry.verifiedMethod)})`
+                                : ""
+                            }`
+                          : entry.lastVerifiedAt
+                            ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
+                            : "Not verified yet"}
                       </li>
                     </ul>
                   </section>

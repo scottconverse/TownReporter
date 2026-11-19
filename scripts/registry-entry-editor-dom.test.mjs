@@ -84,9 +84,17 @@ export async function restoreRegistryRow({ data }) {
   return globalThis.__editor.remove(data);
 }
 `);
+/* The Verify form and history have their own DOM test (registry-review-dom.test.mjs). */
+const panelUrl = stubUrl(`
+import { createElement as h } from ${JSON.stringify(import.meta.resolve("react"))};
+export function RegistryVerificationPanel({ serviceId }) {
+  return h("section", { "aria-label": "Verification", "data-service-id": String(serviceId) });
+}
+`);
 const fieldsUrl = await moduleUrl("src/lib/news/registry/registry-entry-editor-fields.ts");
 const editorUrl = await moduleUrl("src/components/registry-entry-editor.tsx", {
   "@/components/desk-chrome": chromeUrl,
+  "@/components/registry-verification-panel": panelUrl,
   "@/lib/news/registry/registry-entry-editor": serverUrl,
   "@/lib/news/registry/registry-entry-editor-fields": fieldsUrl,
 });
@@ -533,6 +541,7 @@ export const restoreRegistryRow = readRegistryEntryDetail;
 `);
   const failUrl = await moduleUrl("src/components/registry-entry-editor.tsx", {
     "@/components/desk-chrome": chromeUrl,
+    "@/components/registry-verification-panel": panelUrl,
     "@/lib/news/registry/registry-entry-editor": failing,
     "@/lib/news/registry/registry-entry-editor-fields": fieldsUrl,
   });
@@ -938,4 +947,13 @@ test("after a restore goes through, focus moves to the message, since the restor
   const status = page.group("Removed from this entry").querySelector('[role="status"]');
   assert.equal(status.textContent, "Restored. It is back in the entry as it was before it was removed.");
   assert.ok(document.activeElement === status, `focus should be on the message; it is on ${focusedAs()}`);
+});
+
+test("the editor shows the verification panel for this entry", async (t) => {
+  setup();
+  const page = await mount();
+  t.after(() => page.close());
+  const panel = page.group("Verification");
+  assert.ok(panel, "the verification panel is in the editor");
+  assert.equal(panel.getAttribute("data-service-id"), "7");
 });

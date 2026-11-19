@@ -106,6 +106,14 @@ test("publishing one entry shows exactly that entry in public, with its phone, p
   );
   assert.ok(target, "the entry loaded");
 
+  const stampOf = async () =>
+    (await sql.query<Record<string, unknown>>(
+      `select last_verified_at::text as at, verification_method, last_verified_by
+         from services where id = $1`,
+      [Number(target!.id)],
+    ))[0];
+  const stampBefore = await stampOf();
+
   await publishRegistryEntryIn(sql, newsroomId, Number(target!.id), "starter-editor");
 
   const page = await listPublicRegistry(sql, newsroomId);
@@ -118,17 +126,20 @@ test("publishing one entry shows exactly that entry in public, with its phone, p
   assert.equal(entry.sourceTitle, "OUR Center referral program");
   assert.deepEqual(entry.languages, ["English", "Spanish"]);
   assert.equal(entry.categoryName, "Basic needs");
-  assert.ok(entry.lastVerifiedAt, "publishing records when the editor verified it");
+  // Phase 3: publishing is not a check. It writes no verification stamp and no
+  // verification record, so the page says "Not verified yet".
+  assert.equal(entry.verifiedAt, null);
+  assert.equal(entry.lastVerifiedAt, null);
 
   const waiting = await listUnpublishedRegistryEntries(sql, newsroomId);
   assert.equal(waiting.length, 10, "the published entry left the waiting list");
 
-  const [stored] = await sql.query<{ verification_method: string; last_verified_by: string }>(
-    "select verification_method, last_verified_by from services where id = $1",
-    [Number(target!.id)],
+  assert.deepEqual({ ...(await stampOf()) }, { ...stampBefore }, "publishing leaves the stamp as it was");
+  const [records] = await sql.query<{ n: number }>(
+    "select count(*)::int as n from resource_verifications where newsroom_id = $1",
+    [newsroomId],
   );
-  assert.equal(stored!.verification_method, "editor");
-  assert.equal(stored!.last_verified_by, "starter-editor");
+  assert.equal(records!.n, 0);
 });
 
 test("a service id from another newsroom is refused and changes nothing", async () => {

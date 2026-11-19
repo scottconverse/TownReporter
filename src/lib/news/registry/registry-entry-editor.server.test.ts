@@ -145,7 +145,7 @@ test("the detail reader refuses another newsroom's service and never leaks its r
   assert.equal(detail!.organization.sharedWith.length, 1);
 });
 
-test("saving the service writes its fields, stamps it, and leaves published alone", async () => {
+test("saving the service writes its fields, leaves published alone, and does not stamp it", async () => {
   const sql = await getSql();
   for (const published of [false, true]) {
     const seeded = await seed(published ? 9605 : 9604, published);
@@ -160,9 +160,10 @@ test("saving the service writes its fields, stamps it, and leaves published alon
     assert.equal(row!.application_process, "Walk in");
     assert.equal(row!.crisis, true);
     assert.equal(row!.published, published, "published is untouched");
-    assert.equal(row!.verification_method, "editor");
-    assert.equal(row!.last_verified_by, "ed-1");
-    assert.ok(row!.last_verified_at);
+    // Phase 3: a save is not a check, so no stamp is written.
+    assert.equal(row!.verification_method, null);
+    assert.equal(row!.last_verified_by, null);
+    assert.equal(row!.last_verified_at, null);
     const [sibling] = await sql.query<Record<string, unknown>>(
       "select name, last_verified_by from services where id = $1",
       [seeded.s2],
@@ -198,8 +199,13 @@ test("a service save with bad fields returns problems by field and writes nothin
 test("saving the organization changes the shared row and no other organization", async () => {
   const sql = await getSql();
   const seeded = await seed(9607);
-  // An earlier editor verifies the service; later organization and contact saves
-  // must leave that stamp exactly as it is (only the service save stamps).
+  // A legacy stamp (set before Phase 3) is on the service; no later save may
+  // change it.
+  await sql.query(
+    `update services set last_verified_at = '2026-01-02T03:04:05Z',
+            last_verified_by = 'legacy', verification_method = 'editor' where id = $1`,
+    [seeded.s1],
+  );
   await saveServiceDetailsIn(sql, 9607, seeded.s1, goodService, "ed-1");
   const stampOf = async () => {
     const [row] = await sql.query<Record<string, unknown>>(
@@ -210,7 +216,7 @@ test("saving the organization changes the shared row and no other organization",
     return { ...row };
   };
   const stampBefore = await stampOf();
-  assert.equal(stampBefore.last_verified_by, "ed-1");
+  assert.equal(stampBefore.last_verified_by, "legacy");
   const result = await saveOrganizationDetailsIn(
     sql,
     9607,
@@ -234,7 +240,7 @@ test("saving the organization changes the shared row and no other organization",
     seeded.orgB,
   ]);
   assert.equal(other!.name, "Other Org");
-  assert.deepEqual(await stampOf(), stampBefore, "an organization save does not restamp the service");
+  assert.deepEqual(await stampOf(), stampBefore, "an organization save does not touch the legacy stamp");
 
   const contact = await saveContactIn(
     sql,
@@ -244,7 +250,7 @@ test("saving the organization changes the shared row and no other organization",
     "ed-3",
   );
   assert.equal(contact.ok, true);
-  assert.deepEqual(await stampOf(), stampBefore, "a contact save does not restamp the service");
+  assert.deepEqual(await stampOf(), stampBefore, "a contact save does not touch the legacy stamp");
 });
 
 test("an organization save with a bad email or website returns problems and writes nothing", async () => {
@@ -298,7 +304,8 @@ test("adding a contact to a service takes the service's published state", async 
       added.id,
     ]);
     assert.equal(row!.published, published);
-    assert.equal(row!.verification_method, "editor");
+    assert.equal(row!.verification_method, null, "a new contact is not stamped");
+    assert.equal(row!.last_verified_at, null);
     assert.equal(row!.service_id, seeded.s1);
   }
 });
@@ -443,7 +450,7 @@ test("a save that fails part-way writes nothing", async () => {
   await sql.query(
     `create or replace function test_fail_stamp() returns trigger as $$
      begin
-       if new.last_verified_by = 'fail-user' then raise exception 'stamp failed'; end if;
+       if old.name = 'Food Pantry (renamed)' and new.name = old.name then raise exception 'touch failed'; end if;
        return new;
      end $$ language plpgsql`,
     [],
@@ -491,11 +498,11 @@ test("a save that fails part-way writes nothing", async () => {
       ),
       /write failed/,
     );
-    // The service save writes its fields and then its stamp; a failed stamp
-    // must undo the fields too.
+    // The service save writes its fields and then touches the row; a failed
+    // touch must undo the fields too.
     await assert.rejects(
       saveServiceDetailsIn(sql, 9618, seeded.s1, goodService, "fail-user"),
-      /stamp failed/,
+      /touch failed/,
     );
   } finally {
     await sql.query("drop trigger fail_stamp on services", []);

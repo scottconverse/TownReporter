@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getSql, withTransaction } from "../../db.ts";
+import { getSql, withTransaction, type Sql } from "../../db.ts";
 import { applyMigrationsToTestPglite } from "../../test-support/pglite-migrations.ts";
 import { bundleToRows, REGISTRY_TABLE_NAMES, rowsToBundle } from "./hsds-map.ts";
 import type { HsdsBundle } from "./hsds-types.ts";
@@ -628,4 +628,82 @@ test("a value that differs from a pending proposal is a new proposal, and the ol
     [newsroomId],
   );
   assert.deepEqual(pending.map((row) => row.after_value), ["Proposed name A", "Proposed name B"]);
+});
+
+test("an import does not repeat a proposal the change scan already holds as needs-editor", async () => {
+  const sql = await getSql();
+  const newsroomId = 9713;
+  const first = await importHsdsBundle(sampleCopy(), { newsroomId, directoryName: DIRECTORY });
+
+  // The scan holds this change for an editor (a crisis-flagged service): same
+  // row, same column, same proposed value that the import below would propose.
+  const orgRows = await sql.query<{ id: number }>(
+    "select id from organizations where newsroom_id = $1 and hsds_id = $2",
+    [newsroomId, "org-st-vrain-pantry"],
+  );
+  await sql.query(
+    `insert into resource_changes
+       (newsroom_id, evidence_capture_id, evidence_tier, entity_type, entity_id, field_name,
+        before_value, after_value, change_kind, review_state)
+     values ($1, $2, 'B', 'organization', $3, 'name', $4, $5, 'field_change', 'needs-editor')`,
+    [newsroomId, first.snapshotId, orgRows[0]!.id, "St. Vrain Community Pantry", "Scanned Name"],
+  );
+  const countChanges = async (): Promise<number> => {
+    const rows = await sql.query<{ count: string }>(
+      "select count(*)::text as count from resource_changes where newsroom_id = $1",
+      [newsroomId],
+    );
+    return Number(rows[0]!.count);
+  };
+  const before = await countChanges();
+
+  const changed = sampleCopy();
+  changed.organizations[0]!.name = "Scanned Name";
+  const result = await importHsdsBundle(changed, { newsroomId, directoryName: DIRECTORY });
+
+  assert.deepEqual(result.conflicts, [], "a proposal already waiting as needs-editor is not proposed again");
+  assert.equal(result.tables.organizations.alreadyPending, 1, "the waiting count includes the needs-editor proposal");
+  assert.equal(result.tables.organizations.changed, 0);
+  assert.equal(await countChanges(), before, "the import inserts no new resource_changes row");
+});
+
+/** Thrown by the probe below to stop an import right after its lock statement. */
+class StopAfterLock extends Error {}
+
+/**
+ * How many advisory locks this session holds right after the importer's lock
+ * statement, for one directory name. That statement is the importer's first
+ * query, so the probe counts there and stops the import.
+ */
+async function advisoryLocksHeldFor(directoryName: string): Promise<number> {
+  let held = -1;
+  await withTransaction(async (tx) => {
+    const probe = {
+      query: async (text: string, params?: unknown[]) => {
+        const rows = await tx.query(text, params);
+        if (text.includes("pg_advisory_xact_lock")) {
+          const counted = await tx.query<{ n: number }>(
+            "select count(*)::int as n from pg_locks where locktype = 'advisory'",
+            [],
+          );
+          held = Number(counted[0]!.n);
+          throw new StopAfterLock("stop after the lock");
+        }
+        return rows;
+      },
+    } as unknown as Sql;
+    await importHsdsBundle(sampleCopy(), { newsroomId: 9801, directoryName, tx: probe }).catch((error) => {
+      if (!(error instanceof StopAfterLock)) throw error;
+    });
+  });
+  return held;
+}
+
+test("the importer takes its lock even when the directory name is null", async () => {
+  assert.equal(await advisoryLocksHeldFor(DIRECTORY), 1, "control: a named directory takes the lock");
+  assert.equal(
+    await advisoryLocksHeldFor(null as unknown as string),
+    1,
+    "a null directory name must still take the lock",
+  );
 });

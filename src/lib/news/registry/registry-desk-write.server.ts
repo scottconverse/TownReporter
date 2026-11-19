@@ -20,6 +20,7 @@ import {
 } from "./hsds-import.server.ts";
 import { REGISTRY_TABLE_NAMES, type RegistryTableName } from "./hsds-map.ts";
 import { parseHsdsJson } from "./hsds-validate.ts";
+import { recordRegistryEvent } from "./registry-audit.server.ts";
 import {
   DESK_DIRECTORY,
   deskSlug,
@@ -164,8 +165,8 @@ export async function publishRegistryEntryIn(
   userId: string,
 ): Promise<PublishRegistryEntryResult> {
   return withTransaction(async (tx) => {
-    const found = await tx.query<{ id: number; organization_id: number }>(
-      `select id, organization_id from services
+    const found = await tx.query<{ id: number; organization_id: number; name: string }>(
+      `select id, organization_id, name from services
         where id = $1 and newsroom_id = $2`,
       [serviceId, newsroomId],
     );
@@ -181,12 +182,9 @@ export async function publishRegistryEntryIn(
       `update services
           set published = true,
               status = case when status = 'unverified' then 'active' else status end,
-              last_verified_at = now(),
-              verification_method = 'editor',
-              last_verified_by = $1,
               updated_at = now()
-        where id = $2 and newsroom_id = $3`,
-      [userId, id, newsroomId],
+        where id = $1 and newsroom_id = $2`,
+      [id, newsroomId],
     );
 
     // An organization that is already published is left exactly as it is.
@@ -266,6 +264,15 @@ export async function publishRegistryEntryIn(
       [newsroomId, id],
     );
 
+    await recordRegistryEvent(tx, {
+      newsroomId,
+      userId,
+      action: "registry.service.publish",
+      subjectKind: "registry-service",
+      subjectId: id,
+      detail: `Published "${found[0].name}".`,
+    });
+
     return { serviceId: id };
   });
 }
@@ -322,7 +329,6 @@ async function saveServicePhone(
   serviceId: number,
   phone: string,
   published: boolean,
-  userId: string,
 ): Promise<void> {
   const existing = await sql.query<{ id: number }>(
     `select id from contacts
@@ -352,10 +358,9 @@ async function saveServicePhone(
   if (taken.length > 0) hsdsId = `${hsdsId}-${Math.random().toString(36).slice(2, 10)}`;
   await sql.query(
     `insert into contacts
-       (newsroom_id, hsds_id, directory_name, service_id, phone, published,
-        last_verified_at, verification_method, last_verified_by)
-     values ($1, $2, $3, $4, $5, $6, now(), 'editor', $7)`,
-    [newsroomId, hsdsId, DESK_DIRECTORY, serviceId, phone, published, userId],
+       (newsroom_id, hsds_id, directory_name, service_id, phone, published)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [newsroomId, hsdsId, DESK_DIRECTORY, serviceId, phone, published],
   );
 }
 
@@ -369,9 +374,9 @@ export interface UpdateRegistryEntryResult {
  * The service's name, description, category and source are written, and the
  * name of the organization it belongs to. `published` is not touched: a
  * published entry stays published, and a waiting one stays waiting until the
- * editor presses Publish. The service is stamped as verified by this editor at
- * this moment, because an editor who read the page and saved is the source of
- * the values now stored.
+ * editor presses Publish. Saving is not a check: the old
+ * verification columns are not written (Phase 3), and an explicit verification
+ * is its own record.
  *
  * A service id from another newsroom, or one that does not exist, throws and
  * the transaction rolls back: nothing is changed.
@@ -422,17 +427,13 @@ export async function updateRegistryEntryIn(
               description = $2,
               taxonomy_id = $3,
               source_id = $4,
-              last_verified_at = now(),
-              verification_method = 'editor',
-              last_verified_by = $5,
               updated_at = now()
-        where id = $6 and newsroom_id = $7`,
+        where id = $5 and newsroom_id = $6`,
       [
         fields.serviceName,
         fields.description || null,
         taxonomyId,
         sourceId,
-        userId,
         id,
         newsroomId,
       ],
@@ -445,7 +446,7 @@ export async function updateRegistryEntryIn(
       [fields.organizationName, organizationId, newsroomId],
     );
 
-    await saveServicePhone(tx, newsroomId, id, fields.phone, published, userId);
+    await saveServicePhone(tx, newsroomId, id, fields.phone, published);
 
     return { serviceId: id };
   });
@@ -461,8 +462,7 @@ export interface AddRegistryEntryResult {
  * The organization is the newsroom's row with that name when one exists --
  * trimmed and matched without case, so "our center" joins "OUR Center" rather
  * than making a second one -- and otherwise a new unpublished row. The service
- * is always new and starts unpublished, unverified and stamped as the editor's
- * own reading, so it lands in the waiting list and nowhere a reader can see it
+ * is always new and starts unpublished and unverified, so it lands in the waiting list and nowhere a reader can see it
  * until the editor presses Publish.
  */
 export async function addRegistryEntryIn(
@@ -515,9 +515,8 @@ export async function addRegistryEntryIn(
     const service = await tx.query<{ id: number }>(
       `insert into services
          (newsroom_id, hsds_id, directory_name, organization_id, name, description,
-          status, taxonomy_id, published, source_id, last_verified_at,
-          verification_method, last_verified_by)
-       values ($1, $2, $3, $4, $5, $6, 'unverified', $7, false, $8, now(), 'editor', $9)
+          status, taxonomy_id, published, source_id)
+       values ($1, $2, $3, $4, $5, $6, 'unverified', $7, false, $8)
        returning id`,
       [
         newsroomId,
@@ -528,12 +527,11 @@ export async function addRegistryEntryIn(
         fields.description || null,
         taxonomyId,
         sourceId,
-        userId,
       ],
     );
     const serviceId = Number(service[0]!.id);
 
-    await saveServicePhone(tx, newsroomId, serviceId, fields.phone, false, userId);
+    await saveServicePhone(tx, newsroomId, serviceId, fields.phone, false);
 
     return { serviceId };
   });
@@ -551,19 +549,19 @@ export interface TakeDownRegistryEntryResult {
  * the entry returns to the waiting list, where the existing Publish button
  * brings it back.
  *
- * The editor's id is accepted for the same shape as the desk's other writes,
- * but it is not recorded: taking an entry down asserts nothing about the facts
- * in it, so it must not look like a verification.
+ * The editor's id is recorded in one audit event (`registry.service.withdraw`).
+ * It is not a verification: taking an entry down asserts nothing about the
+ * facts in it.
  */
 export async function takeDownRegistryEntryIn(
   sql: Sql,
   newsroomId: number,
   serviceId: number,
-  _userId: string,
+  userId: string,
 ): Promise<TakeDownRegistryEntryResult> {
   return withTransaction(async (tx) => {
-    const found = await tx.query<{ id: number }>(
-      "select id from services where id = $1 and newsroom_id = $2",
+    const found = await tx.query<{ id: number; name: string }>(
+      "select id, name from services where id = $1 and newsroom_id = $2",
       [serviceId, newsroomId],
     );
     if (!found[0]) {
@@ -577,6 +575,15 @@ export async function takeDownRegistryEntryIn(
         where id = $1 and newsroom_id = $2`,
       [id, newsroomId],
     );
+
+    await recordRegistryEvent(tx, {
+      newsroomId,
+      userId,
+      action: "registry.service.withdraw",
+      subjectKind: "registry-service",
+      subjectId: id,
+      detail: `Withdrew "${found[0].name}" from the public page.`,
+    });
 
     return { serviceId: id };
   });

@@ -58,6 +58,13 @@ test("editing a published entry changes what readers see and keeps it published"
   const newsroomId = 9601;
   const serviceId = await loadAndPublish(sql, newsroomId, "starter-svc-our-center");
 
+  const stampOf = async () =>
+    (await sql.query<Record<string, unknown>>(
+      `select last_verified_at::text as at, verification_method, last_verified_by
+         from services where id = $1`,
+      [serviceId],
+    ))[0];
+  const stampBefore = await stampOf();
   await updateRegistryEntryIn(
     sql,
     newsroomId,
@@ -85,17 +92,17 @@ test("editing a published entry changes what readers see and keeps it published"
 
   const [stored] = await sql.query<{
     published: boolean;
-    verification_method: string;
-    last_verified_by: string;
+    verification_method: string | null;
+    last_verified_by: string | null;
     last_verified_at: string | null;
   }>(
     "select published, verification_method, last_verified_by, last_verified_at from services where id = $1",
     [serviceId],
   );
   assert.equal(stored!.published, true, "editing does not unpublish");
-  assert.equal(stored!.verification_method, "editor");
-  assert.equal(stored!.last_verified_by, "desk-editor");
-  assert.ok(stored!.last_verified_at, "the save records when the editor verified it");
+  // Phase 3: a save is not a check, so the stamp is exactly what it was.
+  assert.deepEqual({ ...(await stampOf()) }, { ...stampBefore });
+  assert.notEqual(stored!.verification_method, "editor");
 });
 
 test("editing an organization's name follows only the service's own organization", async () => {
@@ -241,13 +248,13 @@ test("adding an entry lands it in the waiting list, and publishing it shows its 
   const publicBefore = await listPublicRegistry(sql, newsroomId);
   assert.equal(publicBefore.entries.length, 0, "adding publishes nothing");
 
-  const [stored] = await sql.query<{ published: boolean; status: string; verification_method: string }>(
+  const [stored] = await sql.query<{ published: boolean; status: string; verification_method: string | null }>(
     "select published, status, verification_method from services where id = $1",
     [added.serviceId],
   );
   assert.equal(stored!.published, false);
   assert.equal(stored!.status, "unverified");
-  assert.equal(stored!.verification_method, "editor");
+  assert.equal(stored!.verification_method, null, "a new entry is not stamped");
 
   await publishRegistryEntryIn(sql, newsroomId, added.serviceId, "desk-editor");
 

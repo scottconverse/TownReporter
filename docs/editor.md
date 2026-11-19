@@ -950,13 +950,13 @@ Owner only. **Time per call** is how long the desk waits for one answer from a m
 `/desk/registry` — the desk’s view of the community resource registry. Load the starter list, publish entries, and keep the public list current.
 
 - **Entries waiting to be published:** each row shows the organization, service, category, phone, description and source. **Load the starter list** loads 11 entries. Loading publishes nothing. A second load adds no rows.
-- **Publish** sets the service and its organization to published, with its own contacts, languages, schedules and locations, and marks the editor’s verification. It also publishes the schedules that the service’s location links point to, the organization’s own phone (a contact tied to the organization alone), and the phones of the locations the service is linked to. It does not publish another service’s phone or schedule, a phone of a location the service is not linked to, or a schedule that none of the service’s location links uses. **Published entries** lists every published entry and has **See the public page**.
-- **Edit** opens the same seven fields: organization name, service name, category, phone, description, source title and source URL. **Save** keeps a published entry published and stamps it as checked by the editor. **Cancel** closes the form.
+- **Publish** sets the service and its organization to published, with its own contacts, languages, schedules and locations. It does not record a check (see **Verification** under **All details**). It also publishes the schedules that the service’s location links point to, the organization’s own phone (a contact tied to the organization alone), and the phones of the locations the service is linked to. It does not publish another service’s phone or schedule, a phone of a location the service is not linked to, or a schedule that none of the service’s location links uses. **Published entries** lists every published entry and has **See the public page**.
+- **Edit** opens the same seven fields: organization name, service name, category, phone, description, source title and source URL. **Save** keeps a published entry published. A save does not record a check. **Cancel** closes the form.
 - **Add an entry** uses the same form. The new entry goes to the waiting list. Readers see it only after you press **Publish**.
 - **Take down** removes a published entry from `/registry` and puts it back in the waiting list. Nothing is deleted. **Publish** brings it back.
 - **All details** opens **All details for this entry**. It edits more than **Edit** does. See [All details: the entry editor](#all-details-the-entry-editor) below.
 - **Import a directory file** is in the **Imports** section. It reads a JSON file in the HSDS bundle shape. See [Import a directory file](#import-a-directory-file) below, and the step-by-step guide in [navigator/hsds-import.md](navigator/hsds-import.md).
-- The page also shows **Detected changes**, **Imports** and **Registry sources**. The change list has no review buttons yet; it applies no change to the directory. Every imported row starts unpublished.
+- The page also shows **Needs checking**, **Detected changes**, **Imports** and **Registry sources**. Each waiting change in **Detected changes** has review buttons, described below. A change reaches the directory only when you press **Accept and apply**. Every imported row starts unpublished.
 
 ### Import a directory file
 
@@ -972,6 +972,60 @@ If the file is wrong, the panel says **The file could not be used:** and names e
 An import never overwrites a stored row. When the file says something different, the stored row stays. The difference becomes a pending proposal. The same proposal is not added twice. A status of **unverified**, or no status, is not a change. An import does not bring back a row that an editor removed from an entry.
 
 Each past import shows its date, format, and counts: **new**, **unchanged** and **changed for review**. The counts are stored with the import.
+
+### Review a proposal
+
+Each change that waits in **Detected changes** has a **Note** box (optional, up to 1000 characters) and three buttons. The filters **Waiting for an editor** and **Needs the editor** show the changes that wait.
+
+- **Accept and apply** puts the proposed value on the entry and marks the change accepted.
+- **Accept without applying** marks the change accepted. The entry does not change. Use it when you will edit the entry yourself.
+- **Reject** marks the change rejected. The entry does not change.
+
+Some changes cannot be applied:
+
+- **Stale.** The entry no longer holds the value the proposal was made against. The row says **This field now says** and **The proposal expected**. **Accept and apply** is not shown, and the server refuses it. **Accept without applying** and **Reject** still work.
+- **No target.** The change does not point at one live row. It may be a new entry, or a row that was removed. The row says it cannot be applied. Only **Accept without applying** and **Reject** are shown.
+- **Value refused.** The field cannot hold the proposed value. The page says **The proposed value cannot be stored in that field.** Nothing changes.
+
+A change that was already accepted or rejected cannot be decided again. The page says who decided it and when. Nothing changes. Accepting never verifies an entry. Each accept and each reject writes one audit record.
+
+### Record a verification
+
+A verification is a check that you made of the entry. Saving or publishing an entry does not count as a check.
+
+1. Press **All details** on the entry. **Verification** is at the top, above the service fields.
+2. Under **How you checked**, choose **By phone**, **On its website**, **In person**, **By email**, **From a document** or **Confirmed by the organization**.
+3. Under **What you checked**, write what you checked and where you saw it. This is required. It stays on the desk. Readers do not see it.
+4. Under **Source link**, add a web address that starts with `https://` or `http://`. This is optional.
+5. Press **Record verification**. The page says **Verification recorded.** If a line is wrong, the page says **Nothing was recorded.** and marks the line.
+
+The check keeps a snapshot of the entry’s key facts: the status, fees and application process, the organization’s name, each linked place’s name and address, the phones, the hours, the eligibility and the required documents. Descriptions, notes, languages and accessibility are not key facts. Recording a check does not change the entry.
+
+**Latest verification** shows the date, how it was checked, the editor and the basis. **Older verifications** lists earlier checks, newest first.
+
+**Changed since verified** lists each key fact that differs from the latest check, for example **fees** or **address of** a place. Recording a new check clears the list when nothing differs.
+
+### Needs checking
+
+The **Needs checking** section on `/desk/registry` lists published entries that:
+
+- have never been checked,
+- were last checked more than 180 days ago, or
+- have key facts that changed since the last check.
+
+Each row names the organization and the service, gives the reason, and shows **Last checked** with its date when there is one. **Open in the editor** opens **All details** for that entry, where the **Verification** section is. Entries never checked come first, then the oldest check. When nothing is listed, the section says **Every published entry has a current verification.**
+
+### Public page wording
+
+`/registry` shows the latest check, whatever its age. Use the **Needs checking** list to find old checks.
+
+- A check reads `Verified <date> (by phone)`, with the way it was made. The basis is never shown.
+- An entry whose only date was set by a save or a publish reads `Last updated <date>. Not verified yet.`
+- An entry with no check and no such date reads `Not verified yet`.
+
+### Legacy dates
+
+Before Phase 3, a save or a publish also set the entry’s verification date. Those dates are kept. The **Verification** section shows one as **Legacy date (set by saves, not a check)**, and the public page shows it as `Last updated`. A legacy date is not a check. An entry with only a legacy date is listed under **Needs checking** until you record a check. An import does not record a check either.
 
 ### All details: the entry editor
 

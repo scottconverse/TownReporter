@@ -1,10 +1,12 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ScreenError, ListSkeleton } from "@/components/states";
 import { RegistryImportPanel } from "@/components/registry-import-panel";
 import { RegistryEntryEditor } from "@/components/registry-entry-editor";
+import { RegistryChangeReviewList } from "@/components/registry-change-review";
+import { RegistryNeedsChecking } from "@/components/registry-needs-checking";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import {
   addRegistryEntry,
@@ -27,10 +29,11 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 /**
  * The desk's view of the community resource registry (spec 24, Phase 1).
  *
- * Spec 24 puts accept / reject / needs-editor / redraft for the scan's
- * *changes* in Phase 2, so the change list still has no buttons. What the page
- * does have is the two writes Phase 1 approved: load the approved starter list,
- * and publish one loaded entry at a time.
+ * Phase 3 adds review to the scan's *changes*: a waiting change has Accept and
+ * apply, Accept without applying and Reject, with an optional note; a decided
+ * change shows who decided it and when. The page also has the two writes
+ * Phase 1 approved (load the approved starter list, publish one entry at a
+ * time) and a "Needs checking" list of published entries to verify.
  *
  * Four blocks, each with its own honest empty state:
  *   1. entries waiting to be published, with the starter list's load button
@@ -267,6 +270,14 @@ function RegistryDeskPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   // Which row's full details editor (organization, service and contacts) is open.
   const [detailId, setDetailId] = useState<number | null>(null);
+  // Set by Needs checking's "Open in the editor": the row to bring into view.
+  const [openedFromList, setOpenedFromList] = useState<number | null>(null);
+  useEffect(() => {
+    if (openedFromList === null) return;
+    const row = document.getElementById(`registry-entry-${openedFromList}`);
+    row?.scrollIntoView?.({ block: "start" });
+    row?.focus();
+  }, [openedFromList, published.length]);
   // Bumped after an add so the add form remounts empty.
   const [addVersion, setAddVersion] = useState(0);
   // The last write's word to the editor. Held here rather than read off a
@@ -339,8 +350,10 @@ function RegistryDeskPage() {
       lede="Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches."
     >
       <p className="note">
-        The scan&rsquo;s change list below has no buttons yet: accepting or rejecting a change comes
-        in a later phase. Above, you can load the starter list and publish each entry one at a time.
+        Each change the scan detected, in the Detected changes list, can be accepted or rejected.
+        Accept and apply puts the proposed value on the entry; Accept without applying only records
+        your decision; Reject leaves the entry as it is. You can also load the starter list, publish
+        each entry one at a time, and check the entries that need checking.
       </p>
 
       {query.isError ? (
@@ -520,7 +533,7 @@ function RegistryDeskPage() {
             ) : (
               <ul className="astra-plain">
                 {published.map((row) => (
-                  <li key={row.serviceId}>
+                  <li key={row.serviceId} id={`registry-entry-${row.serviceId}`} tabIndex={-1}>
                     <div className="astra-row-t">
                       {row.organizationName} — {row.serviceName}
                     </div>
@@ -596,9 +609,26 @@ function RegistryDeskPage() {
 
           <section className="src-sec">
             <SecHead
+              title="Needs checking"
+              sub="Published entries with no verification, an old one, or facts that changed since the last one."
+            />
+            <RegistryNeedsChecking
+              onOpen={(serviceId) => {
+                setDetailId(serviceId);
+                setOpenedFromList(serviceId);
+              }}
+            />
+          </section>
+
+          <section className="src-sec">
+            <SecHead
               title="Detected changes"
               count={changes.length}
-              sub="One row per change the scan proposed. Nothing here has been applied to the directory."
+              sub={
+                changes.some((c) => c.appliedAt != null)
+                  ? "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
+                  : "One row per change the scan proposed. Nothing here has been applied to the directory."
+              }
             />
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">
@@ -620,65 +650,65 @@ function RegistryDeskPage() {
                 })}
               </div>
             </div>
-            {visible.length === 0 ? (
-              <p className="wire-sum">
-                {changes.length === 0
+            {/* Always mounted, so the review status line survives the last row leaving the filter. */}
+            <RegistryChangeReviewList
+              changes={visible}
+              emptyText={
+                changes.length === 0
                   ? "The scan has not found a change in a registry source yet."
-                  : `No change is ${REVIEW_STATE_LABELS[state]?.toLowerCase() ?? "in this group"}.`}
-              </p>
-            ) : (
-              <ul className="astra-plain registry-changes">
-                {visible.map((change) => {
-                  const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
-                  const entity =
-                    change.entityId === null
-                      ? "New entry proposal"
-                      : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
-                  return (
-                    <li key={change.id}>
-                      <div className="astra-row-t">{entity}</div>
-                      <p className="astra-row-meta">
-                        {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
-                        {" · "}
-                        {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind}
-                        {" · "}
-                        {evidenceTierLabel(change.evidenceTier)}
-                      </p>
-                      <p className="astra-row-meta">
-                        <b>{change.fieldName}</b>
-                        {" — before: "}
-                        {change.beforeValue ?? "nothing recorded"}
-                        {" · after: "}
-                        {change.afterValue ?? "nothing recorded"}
-                      </p>
-                      {change.summary ? <p className="astra-row-meta">{change.summary}</p> : null}
-                      <p className="astra-row-meta">
-                        Source:{" "}
-                        {change.sourceUrl ? (
-                          <a
-                            className="inline-link"
-                            href={change.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {change.sourceTitle || change.sourceUrl} ↗
-                          </a>
-                        ) : (
-                          (change.sourceTitle ?? "not recorded")
-                        )}
-                        {change.captureDate
-                          ? ` · Capture: ${formatListDateTime(change.captureDate)}`
-                          : " · No capture date recorded"}
-                      </p>
-                      <p className="astra-row-meta">
-                        Scan run {change.scanRunId ?? "not recorded"} ·{" "}
-                        {change.createdAt ? formatListDateTime(change.createdAt) : "date not recorded"}
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                  : `No change is ${REVIEW_STATE_LABELS[state]?.toLowerCase() ?? "in this group"}.`
+              }
+              formatTime={formatListDateTime}
+              renderSummary={(change) => {
+                const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
+                const entity =
+                  change.entityId === null
+                    ? "New entry proposal"
+                    : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
+                return (
+                  <>
+                    <div className="astra-row-t">{entity}</div>
+                    <p className="astra-row-meta">
+                      {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
+                      {" · "}
+                      {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind}
+                      {" · "}
+                      {evidenceTierLabel(change.evidenceTier)}
+                    </p>
+                    <p className="astra-row-meta">
+                      <b>{change.fieldName}</b>
+                      {" — before: "}
+                      {change.beforeValue ?? "nothing recorded"}
+                      {" · after: "}
+                      {change.afterValue ?? "nothing recorded"}
+                    </p>
+                    {change.summary ? <p className="astra-row-meta">{change.summary}</p> : null}
+                    <p className="astra-row-meta">
+                      Source:{" "}
+                      {change.sourceUrl ? (
+                        <a
+                          className="inline-link"
+                          href={change.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {change.sourceTitle || change.sourceUrl} ↗
+                        </a>
+                      ) : (
+                        (change.sourceTitle ?? "not recorded")
+                      )}
+                      {change.captureDate
+                        ? ` · Capture: ${formatListDateTime(change.captureDate)}`
+                        : " · No capture date recorded"}
+                    </p>
+                    <p className="astra-row-meta">
+                      Scan run {change.scanRunId ?? "not recorded"} ·{" "}
+                      {change.createdAt ? formatListDateTime(change.createdAt) : "date not recorded"}
+                    </p>
+                  </>
+                );
+              }}
+            />
           </section>
 
           <section className="src-sec">

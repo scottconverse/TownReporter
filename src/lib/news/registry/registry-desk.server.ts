@@ -17,6 +17,9 @@
  */
 
 import type { Sql } from "../../db.ts";
+import { asText, REMOVABLE_TABLES } from "./hsds-import.server.ts";
+import { editorLabel, editorLabels } from "./registry-editor-names.server.ts";
+import { applyTargetFor } from "./registry-review.server.ts";
 import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
 
@@ -41,6 +44,23 @@ export interface DeskRegistryChange {
   captureDate: WhenValue;
   scanRunId: number | null;
   createdAt: WhenValue;
+  /**
+   * Who accepted or rejected it, by name: the account's name, else its email,
+   * else "an editor" when no account matches. Null while it waits.
+   */
+  reviewedBy: string | null;
+  reviewedAt: WhenValue;
+  reviewNote: string | null;
+  /** When the value was applied to the entry; null if it was not. */
+  appliedAt: WhenValue;
+  /**
+   * The value the target field holds now, as text, so the desk can show a
+   * stale proposal before the editor acts. Null when the proposal does not
+   * point at one live applicable field (see `targetLive`) or the field is empty.
+   */
+  currentValue: string | null;
+  /** True when the proposal points at one live row and an applicable field. */
+  targetLive: boolean;
 }
 
 /** Row outcomes of one import, summed over every table. */
@@ -106,6 +126,10 @@ export async function listDeskChanges(
     capture_date: WhenValue;
     scan_run_id: number | null;
     created_at: WhenValue;
+    reviewed_by: string | null;
+    reviewed_at: WhenValue;
+    review_note: string | null;
+    applied_at: WhenValue;
   }>(
     `select rc.id, rc.review_state, rc.entity_type, rc.entity_id,
             case rc.entity_type
@@ -144,7 +168,8 @@ export async function listDeskChanges(
             rc.field_name, rc.before_value, rc.after_value, rc.change_kind, rc.summary,
             rc.evidence_tier, rc.created_at, rc.scan_run_id,
             src.title as source_title, src.url as source_url,
-            snap.created_at as capture_date
+            snap.created_at as capture_date,
+            rc.reviewed_by, rc.reviewed_at, rc.review_note, rc.applied_at
        from resource_changes rc
        left join sources src
          on src.id = rc.source_id and src.newsroom_id = rc.newsroom_id
@@ -155,7 +180,39 @@ export async function listDeskChanges(
     [newsroomId],
   );
 
-  return rows.map((row) => ({
+  const reviewers = await editorLabels(sql, rows.map((row) => row.reviewed_by));
+
+  // The current value of each proposal's target field, one query per
+  // table and column. Table and column come from the importer's fixed maps.
+  const groups = new Map<string, { table: string; column: string; ids: Set<number> }>();
+  for (const row of rows) {
+    if (row.entity_id == null) continue;
+    const target = applyTargetFor(row.entity_type, row.field_name);
+    if (!target) continue;
+    const key = `${target.table}.${target.column}`;
+    const group = groups.get(key) ?? { table: target.table, column: target.column, ids: new Set<number>() };
+    group.ids.add(Number(row.entity_id));
+    groups.set(key, group);
+  }
+  const current = new Map<string, string | null>();
+  for (const { table, column, ids } of groups.values()) {
+    const removable = REMOVABLE_TABLES.has(table as Parameters<typeof REMOVABLE_TABLES.has>[0]);
+    const live = await sql.query<Record<string, unknown>>(
+      `select id, ${column} as current_value${removable ? ", removed_at" : ""}
+         from ${table} where newsroom_id = $1 and id = any($2::int[])`,
+      [newsroomId, [...ids]],
+    );
+    for (const found of live) {
+      if (removable && found.removed_at !== null && found.removed_at !== undefined) continue;
+      current.set(`${table}.${column}.${Number(found.id)}`, asText(found.current_value));
+    }
+  }
+
+  return rows.map((row) => {
+    const target = row.entity_id == null ? null : applyTargetFor(row.entity_type, row.field_name);
+    const key = target && row.entity_id != null ? `${target.table}.${target.column}.${Number(row.entity_id)}` : null;
+    const targetLive = key !== null && current.has(key);
+    return {
     id: Number(row.id),
     reviewState: row.review_state,
     entityType: row.entity_type,
@@ -174,7 +231,14 @@ export async function listDeskChanges(
     captureDate: row.capture_date,
     scanRunId: row.scan_run_id == null ? null : Number(row.scan_run_id),
     createdAt: row.created_at,
-  }));
+    reviewedBy: row.reviewed_by == null ? null : editorLabel(reviewers, row.reviewed_by),
+    reviewedAt: row.reviewed_at,
+    reviewNote: row.review_note,
+    appliedAt: row.applied_at,
+    currentValue: targetLive && key !== null ? (current.get(key) ?? null) : null,
+    targetLive,
+    };
+  });
 }
 
 /** One jsonb value that may arrive as an object, a string, or null. */
