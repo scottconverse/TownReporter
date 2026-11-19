@@ -4,6 +4,10 @@ The community resources directory has a public, read-only JSON API. It answers f
 
 The API returns what `/registry` shows: published, active services under published, active organizations. It never returns drafts, unpublished or inactive entries, rows an editor removed, or another newsroom's entries. It never sends the verification basis, who made a check, review notes, audit data or a contact person's name. It does not read cookies or authorization headers, so signing in changes nothing.
 
+![Community resources flow: a directory file is previewed, each change is reviewed, entries are checked and published, then read by the public pages and this feed](../diagrams/community-resources-flow.svg)
+
+*How a directory entry gets from an import file to the public pages and this feed.*
+
 ## Routes
 
 | Route | Returns |

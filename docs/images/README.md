@@ -1,39 +1,65 @@
 # Screenshot provenance
 
-The 16 PNGs in this folder were captured on 2026-10-27 for release 0.6.84, from the throwaway Test server (a copy of the production paper with its own database) running commit d5a9ca04. They were not captured from the live paper.
+The 27 PNGs in this folder were captured on 2026-11-18 from commit 9d6a5c7e (origin/main). They were captured on a throwaway headless instance with an in-memory PGlite database and made-up test data. Nothing came from the live paper or the Test server.
 
-- Viewport: 1440 px wide.
-- Captured with headless Chromium via Playwright scripts kept outside the repo at `C:\Users\scott\Desktop\Code\townreporter-test\walks\docs-shots\`.
-- Signed in as the Test copy's editor account through the normal sign-in page. The Test server's orange "test copy" bar was hidden in the shots so they show the app as an operator sees it.
+- The town is "Testerville, Wyoming", the paper is the "Testerville Ledger", and the editor is "Dana Whitaker". All made up. Web addresses and email addresses use example.invalid.
+- No model was called. The test environment has no keys and no logins.
+- Viewport: 1440 px wide. 20-registry-phone.png is 375 px wide (top 1591 px). Taller viewports: 07 at 1100 px, 14 at 1700 px, 15 at 1400 px, and 21 to 25 at 1000 px. 18 and 19 are full-page. 28 is a crop of the front page.
+- Desk shots use the dark desk theme. Public shots use the paper's default reader theme.
+- There is no 03 file. The numbering skips it.
+
+## Hidden on purpose
+
+These items come from the test environment and were hidden for the capture:
+
+- The orange "Ollama is not running" box on the desk shots.
+- The red "This desk cannot write yet" box on 10-opinion.png.
+- The red detail line under "Close in meaning" on 15-find-evidence.png (a blocked download of the meaning model). The line above it, "Search by meaning is not available now. The exact-words list still works.", is real and stays.
+
+11-server.png and 16-model-picker.png show models as "Not ready" because the throwaway copy has no keys.
+
+## Repaired
+
+06-queue.png, 26-queue-start-n.png and 24-desk-registry-verification.png had a half-cut line at the top of the page. It was replaced with blank page background. The top of the sidebar in 06 and 26 was restored from 04-desk.png, and in 24 from 21-desk-registry-import.png. The pixels are identical to the originals.
+
+## Images
 
 | File | Route | What it shows |
 | --- | --- | --- |
-| 01-front-page.png | / | Public front page, lead story is the "Today in town" edition |
-| 02-article.png | /articles/longmont-water-meets-all-federal-and-state-standards-in-2025-city-report | Top of a published story |
-| 04-desk.png | /desk | Editor desk, Today, with 3 drafts in Tonight's edition |
-| 05-scan.png | /desk/scan | Scan history table and Run a scan |
-| 06-queue.png | /desk/queue (scrolled 440px) | Queue filters and lead rows |
-| 07-story-editor.png | /desk/story/441 | Story workbench: checks warnings, writer picker (DeepSeek), headline, publish bar |
-| 08-dark-desk.png | /desk/dark | Dark Desk open files and a selected file (Pizza Festival) |
-| 09-dark-dials.png | /desk/dark, Settings open | "How hard to dig": digging model, effort, Quick/Standard/Deep |
-| 10-opinion.png | /desk/opinion (scrolled) | Opinion: AI editorial, file one you wrote, Requests & editorials |
-| 11-server.png | /desk/ops | Server: Writing models ladder (no Gemini in Automatic order) and Health |
-| 12-published.png | /desk/published | Published list, newest is Today in town |
+| 01-front-page.png | / | Public front page: the lead council story, two more stories, the top-stories list and the Community resources banner |
+| 02-article.png | /articles/water-rates-rise-4-percent-for-east-side-customers-in-january | Top of a published story with the contents list and the dates box |
+| 04-desk.png | /desk | Editor desk, Today, with 15 new leads and 5 drafts in Tonight's edition |
+| 05-scan.png | /desk/scan | Scan history table (3 runs) and the start of Run a scan |
+| 06-queue.png | /desk/queue (scrolled 440 px) | Queue model and effort pickers, filters and the first lead rows |
+| 07-story-editor.png | /desk/story/44 | Story workbench: checks tab, writer picker, headline, publish bar |
+| 08-dark-desk.png | /desk/dark | Dark Desk open files, signals to review, a set-aside file, and the Decide panel for the selected file |
+| 09-dark-dials.png | /desk/dark, Settings open | "How hard to dig": digging model, thinking effort, Quick, Standard and Deep |
+| 10-opinion.png | /desk/opinion (scrolled) | Opinion: AI editorial and file-one-you-wrote cards, and Requests & editorials |
+| 11-server.png | /desk/ops | Server: Writing models list and Health |
+| 12-published.png | /desk/published | Published list with views and corrections, newest first |
 | 13-paper-setup.png | /desk/ops/paper-setup | Paper setup form |
-| 14-today-in-town.png | /articles/routine-today-2026-10-27-1 | "Today in town" routine edition, cropped above the footer |
-| 15-find-evidence.png | /desk/story/441, Sources tab | Find evidence panel, search "Oligarchy Ditch" |
-| 16-model-picker.png | /desk/story/468, Model & research open | Shared picker, Automatic selected, ladder text shown |
-| 17-drafts.png | /desk/drafts | Drafts list, 3 AI drafts |
+| 14-today-in-town.png | /articles/routine-today-2026-11-18-1 | "Today in town" routine edition with the sources panel and corrections |
+| 15-find-evidence.png | /desk/story/44, Sources tab, search "Riverside pool" | Find evidence with 3 exact-word hits and 0 close in meaning |
+| 16-model-picker.png | /desk/story/45, Model & research open | Redraft settings: model picker on Automatic with the ladder text, thinking effort |
+| 17-drafts.png | /desk/drafts | Drafts list: 5 AI drafts, an opinion piece waiting, Publish all drafts |
+| 18-registry-search.png | /registry?q=help (signed out) | Public Community resources search with 2 results |
+| 19-registry-service.png | /registry/8 (signed out) | Public service page: details, eligibility, hours, places, sources, verified date |
+| 20-registry-phone.png | /registry (signed out, 375 px wide) | Community resources at phone width: stacked filters and the first service |
+| 21-desk-registry-import.png | /desk/registry (scrolled to Import a directory file) | Import preview: counts for new, unchanged, changed and already waiting, and the list of differences. Nothing imported |
+| 22-desk-registry-editor.png | /desk/registry, All details for Weekly grocery pickup | The entry editor: service details and the start of the organization details |
+| 23-desk-registry-changes.png | /desk/registry (scrolled to Detected changes) | Detected changes with filter tabs and the Accept and apply, Accept without applying and Reject buttons |
+| 24-desk-registry-verification.png | /desk/registry, All details open (scrolled to Verification) | Verification section with the latest and older checks and the Record verification form |
+| 25-desk-registry-needs-checking.png | /desk/registry (scrolled to Needs checking) | Needs checking: never verified, older than 180 days, changed since verified |
+| 26-queue-start-n.png | /desk/queue, 4 leads ticked (scrolled 440 px) | Queue bulk bar: 4 selected, model pickers, Start 4 stories, Hold, Kill, Delete selected, Clear |
+| 27-drafts-bulk.png | /desk/drafts, 3 drafts ticked | Drafts with ticked boxes, Publish 3 selected and Kill 3 selected |
+| 28-front-around-region.png | / (signed out), crop of the page from y 740 to 1440 | Front page Community resources banner, an Opinion card and the Around the region band |
 
 ## Notes
 
-- **08-dark-desk.png**: one Dark Desk file title was pixelated because it named a real local candidate.
-- **14-today-in-town.png**: the Test copy had no Today in town edition, so routine editions were switched on for the Library source on `/desk/ops/routine-notices` and one queued run was inserted (the Test server's scheduler is off); the normal job runner then built the edition. Test database only. The events are real library events for Oct 27.
-- The AI drafts in 04, 07 and 17 were written by DeepSeek v4.1 Flash (1017) on the Test copy.
-- **15-find-evidence.png** shows "Close in meaning (0)" because the Test copy's background clock was off, so no meaning vectors had been built. On a running paper that column fills once the meaning index is built.
-- **16-model-picker.png** shows the shared picker set to Automatic, with the ladder text.
-- **11-server.png** shows rank numbers 1, 2, 3, 5 in the Writing models list; the gap at 4 is a known cosmetic bug (findings row G27-DOC-4).
+- **Test data in the database:** one imported directory, "Testerville services" (4 organizations, 7 services, 4 places), published. A second import with changed rows left 6 detected changes (2 accepted, 4 waiting). Three checks were recorded, one backdated 200 days, so Needs checking has entries to show. The queue holds 16 leads, with 5 AI drafts.
+- **23-desk-registry-changes.png:** the field name "application_process" is the app's own wording.
+- **Rows were inserted** through the control SQL or the app's own desk actions.
 
 ## Refresh
 
-Re-capture when a released UI change makes an image misleading. Run the scripts against a Test server refreshed to the release commit. Never capture from the live paper.
+Re-capture when a released UI change makes an image misleading. Use a throwaway instance on the release commit with made-up data. Never capture from the live paper.

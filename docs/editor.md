@@ -2,7 +2,7 @@
 
 **Current software version: [0.6.92](releases/0.6.92.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
-The screenshots in this guide were taken from the running 0.6.84 desk and public paper. If a label ever differs from a picture, the words in the text and on screen are right.
+The screenshots in this guide were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are on main and not yet in a release. If a label ever differs from a picture, the words in the text and on screen are right.
 
 **Three rules that run through the whole desk.**
 
@@ -18,7 +18,7 @@ The **paper** (`/`) is what the public reads: published stories, About, How we r
 
 The **desk** (`/desk`) is the newsroom: Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Models, Server and Stats. Sign-in required.
 
-![The public paper's front page](images/01-front-page.png)
+![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
 A draft, a reporting note, a research memo, a Dark Desk file: none of that is the paper. If you see notebook language on the paper (“What is solid,” “Next checks are…”), something went wrong; it is supposed to be stripped. Tell the operator.
 
@@ -69,7 +69,7 @@ If the setup code is wrong, the account is still made and you stay signed in. Fi
 
 `/desk/setup` — the first screen after the owner creates a new desk. Only the owner sees it.
 
-![Set up the paper form with fields for the paper's name, city, state, timezone, meeting video channels and a starting watch list](images/13-paper-setup.png)
+![The Paper setup form with the paper's name, tagline, council votes site, editor contact email, city, state and timezone, and the start of the meeting video channels](images/13-paper-setup.png)
 
 **To set up the paper:**
 
@@ -89,7 +89,7 @@ If a local model program (LM Studio or Ollama) is running with nothing loaded wh
 
 Every desk screen has the same frame: a navigation column on the left and the work area on the right.
 
-![The desk: navigation on the left, Today in the middle with the step strip, Tonight's edition and New leads](images/04-desk.png)
+![The desk: navigation on the left, Today with the four-step strip and the buttons above it, and Tonight's edition with its first drafts](images/04-desk.png)
 
 ### The navigation
 
@@ -288,7 +288,7 @@ When a site refuses a plain read, the desk tries once through a real browser, th
 
 ### Run a scan
 
-![The Scan history screen: previous scans with their status and a Show all button, and the Run a scan panel below](images/05-scan.png)
+![The Scan history screen: a table of three previous scans with their status and an Open button, and the start of the Run a scan panel below](images/05-scan.png)
 
 Three ways to start one:
 
@@ -324,7 +324,7 @@ The picker on the scan panel is for that press only. If a scan is already runnin
 
 `/desk/queue` — every lead the paper holds, scored and sorted. The scanner files here, Dark Desk files here, imports land here, and so do you. Nothing prints from this list; you open a lead and publish from its story page.
 
-![The Queue: filter tabs, search, sort, and lead rows with score, chips and Start story, Kill and More buttons](images/06-queue.png)
+![The Queue: filter tabs, search, sort and section filters, and lead rows with a tick box, score, chips and Start story, Kill and More buttons](images/06-queue.png)
 
 ### The top of the page
 
@@ -383,6 +383,8 @@ An AI duplicate never lands in Open. When a linked lead needs your decision, pre
 
 Tick rows to open the bulk bar: “N selected”, **Model for these stories**, **Start N stories**, **Hold**, **Kill**, **Delete selected (N)** and **Clear**.
 
+![The Queue with four leads ticked: the bulk bar shows 4 selected, the model and thinking effort pickers, Start 4 stories, Hold, Kill, Delete selected (4) and Clear](images/26-queue-start-n.png)
+
 - **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in the source after 0.6.92 and is not in a release yet.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
@@ -402,7 +404,11 @@ An empty Queue says “Queue is empty — run the first scan or file a lead” (
 
 `/desk/drafts` — everything not yet printed, one row per story.
 
-![The Drafts list with filter pills and rows showing a status chip, headline and one button](images/17-drafts.png)
+![The Drafts list: Opinion pieces waiting, Select all shown, Publish all drafts (5), filter pills, and rows with a tick box, a status chip, a headline and Review and More buttons](images/17-drafts.png)
+
+Each row has a tick box. Tick rows, or press **Select all shown**, to show **Publish N selected** and **Kill N selected**. One **Undo** puts them all back. (This is on main after 0.6.92 and is not in a release yet.)
+
+![The Drafts list with three rows ticked: Select all shown, 3 selected, Publish 3 selected and Kill 3 selected above Publish all drafts (5)](images/27-drafts-bulk.png)
 
 - **Roundups waiting:** daily roundups such as **Today in town**, **This weekend** and deadlines. **Open** shows the roundup’s dek, body and sources under its row. **Close** hides them. **Kill** asks “Kill this roundup? It will not print.”, then **Yes, kill it** sets the article to killed and writes an audit line. Nothing is deleted. The row leaves the list and **Killed:** with the headline shows. **Publish** prints the roundup. After Publish, the **Published. Open the story** line stays in view.
 - **Opinion pieces waiting:** finished, unpublished opinion drafts filed as drafts. These pieces print only when you press Publish on the Opinion page. Each row has **Open in Opinion**.
@@ -523,7 +529,7 @@ Only the owner sees **Take down this capture** inside an opened captured record.
 
 ### Find evidence
 
-![The Find evidence panel on the Sources tab: a search for Oligarchy Ditch with 12 exact-word matches and zero close-in-meaning results, because the meaning index is not built yet](images/15-find-evidence.png)
+![The Find evidence panel on the Sources tab: a search for Riverside pool with three exact-word matches and none close in meaning, because search by meaning is not available in this copy](images/15-find-evidence.png)
 
 `Sources` tab. A box labelled **Find evidence** takes up to 200 characters (placeholder “Words from the story or its sources”). Press **Search**. Up to three lists appear:
 
@@ -641,7 +647,7 @@ If a transcript changes after publication, open **Published**. The story shows *
 
 `/desk/dark` — investigations that never print on their own. Its header reads “Investigations · nothing here prints on its own”.
 
-![Dark Desk: files in the left rail, the open file on the right with its activity, case file and Decide buttons](images/08-dark-desk.png)
+![Dark Desk: open files, signals to review and a set-aside file on the left, and the open file's question with the Decide buttons and the digging model on the right](images/08-dark-desk.png)
 
 A Dark Desk **file** starts with a question and a tip: a link, a document, a rumour, a name, a contract number. The desk searches, fetches, keeps copies of what it reads, follows names and writes down what it thinks connects, always labelled and always with what would disprove it. For each odd thing it keeps two explanations alive: a concrete theory of what may be happening underneath, and the strongest ordinary explanation. Missing names, recipients, filings and permits become follow-up work, not reasons to drop the lead. “Not found in the material opened so far” never becomes “does not exist”. Any editor can use every control here. Dark Desk has no Publish button by design; the only way out is **Send to the queue**, which files a lead for a person to review.
 
@@ -703,7 +709,7 @@ Warnings arrive as **Before you continue** with an “anyway” button: the pape
 
 ### Dark Desk settings (how hard to dig)
 
-![Dark Desk settings: the Digging model, thinking effort and default depth](images/09-dark-dials.png)
+![Dark Desk settings under How hard to dig: the Digging model, Thinking effort and the Quick, Standard and Deep depths](images/09-dark-dials.png)
 
 **Settings** (top right) opens **Dark Desk settings**. **How hard to dig** now has three parts: the **Digging model**, **Thinking effort**, and a default depth of **Quick** (10 records · 20 minutes), **Standard** (30 records · 2 hours) or **Deep** (100 records · 8 hours), saved with **Save default** (or **Reset**). Each new file opens on that depth. The older Dig, Nerve and Map sliders, presets and search-window controls are no longer on the screen.
 
@@ -783,7 +789,7 @@ The only refusals are a missing headline or body. On the draft workbench the but
 
 Behind every AI button on the desk is the same **model picker**. It is labelled **Writing model** (**Digging model** on Dark Desk), with a **Thinking effort** control under it. The list is the same everywhere:
 
-![The model picker with Automatic expanded to show its ladder](images/16-model-picker.png)
+![The Redraft settings panel on a story: the Writing model picker set to Automatic with the order of models it tries, and the Thinking effort picker](images/16-model-picker.png)
 
 | Choice | What it is |
 |---|---|
@@ -868,7 +874,7 @@ Owner only. On **Models → Connections**, under **Frontier · API key**, press 
 
 `/desk/ops` — this machine’s health and the owner’s settings.
 
-![The Server page: twelve cards for Writing models, Health, Paper setup, Recently deleted, Sections, Daily scan, Meeting capture, YouTube, Routine notices, Named outlets, Editors & access and Time budgets](images/11-server.png)
+![The Server page: the Writing models list with each model marked Not ready or Not installed, the Health card, and the start of the Paper setup and Recently deleted cards](images/11-server.png)
 
 The page is a grid of twelve cards. Each shows a few numbers and has a button that opens that card’s own screen (with a **← Server** link back). Most cards are for the owner only; an editor sees the title and one sentence saying so. A line at the top says whether LibreOffice is found (Excel and PowerPoint files are skipped without it). At the bottom, **Dark Desk run history** lists recent runs with their model and usage.
 
@@ -969,6 +975,8 @@ Owner only. **Time per call** is how long the desk waits for one answer from a m
 5. If the panel says **This looks like a new directory.**, check the spelling of the name. Press **Import** only when the preview is what you expect. **Import** stays off until a good preview of this exact file and name is on screen. If you change the file or the name, the preview is cleared.
 6. After **Import**, the panel says **Imported** and the directory name, then **Nothing was published.** The new rows are in the waiting list. They are not on `/registry`.
 
+![The import preview for Testerville services: a count of new, unchanged, changed and already waiting rows for each kind, and the list of differences. Nothing is saved yet.](images/21-desk-registry-import.png)
+
 If the file is wrong, the panel says **The file could not be used:** and names each bad record. Nothing is imported. If the connection fails while you press **Import**, the panel says the import may or may not have finished. Look at the list of imports below the panel before you try again.
 
 An import never overwrites a stored row. When the file says something different, the stored row stays. The difference becomes a pending proposal. The same proposal is not added twice. A status of **unverified**, or no status, is not a change. An import does not bring back a row that an editor removed from an entry.
@@ -980,6 +988,8 @@ Each past import shows its date, format, and counts: **new**, **unchanged** and 
 ### Review a proposal
 
 Each change that waits in **Detected changes** has a **Note** box (optional, up to 1000 characters) and three buttons. The filters **Waiting for an editor** and **Needs the editor** show the changes that wait.
+
+![Detected changes: filter tabs, then each change with its before and after text, a Note box and the buttons Accept and apply, Accept without applying and Reject](images/23-desk-registry-changes.png)
 
 - **Accept and apply** puts the proposed value on the entry and marks the change accepted.
 - **Accept without applying** marks the change accepted. The entry does not change. Use it when you will edit the entry yourself.
@@ -1003,6 +1013,8 @@ A verification is a check that you made of the entry. Saving or publishing an en
 4. Under **Source link**, add a web address that starts with `https://` or `http://`. This is optional.
 5. Press **Record verification**. The page says **Verification recorded.** If a line is wrong, the page says **Nothing was recorded.** and marks the line.
 
+![The Verification section of All details: the latest check, older checks, and the Record verification form](images/24-desk-registry-verification.png)
+
 The check keeps a snapshot of the entry’s key facts: the status, fees and application process, the organization’s name, each linked place’s name and address, the phones, the hours, the eligibility and the required documents. Descriptions, notes, languages and accessibility are not key facts. Recording a check does not change the entry.
 
 **Latest verification** shows the date, how it was checked, the editor and the basis. **Older verifications** lists earlier checks, newest first.
@@ -1019,6 +1031,8 @@ The **Needs checking** section on `/desk/registry` lists published entries that:
 
 Each row names the organization and the service, gives the reason, and shows **Last checked** with its date when there is one. **Open in the editor** opens **All details** for that entry, where the **Verification** section is. Entries never checked come first, then the oldest check. When nothing is listed, the section says **Every published entry has a current verification.**
 
+![The Needs checking list: four entries never verified, and one last verified more than 180 days ago with a changed address, each with an Open in the editor button](images/25-desk-registry-needs-checking.png)
+
 ### Public page wording
 
 `/registry` shows the latest check, whatever its age. Use the **Needs checking** list to find old checks.
@@ -1034,6 +1048,8 @@ Before Phase 3, a save or a publish also set the entry’s verification date. Th
 ### All details: the entry editor
 
 Press **All details** on a waiting or published entry. The editor opens under the entry. Press **Close the details editor** to close it. Each group has its own save button. A save in one group does not save the others. A save writes only the fields you changed.
+
+![The All details editor for Weekly grocery pickup: the service fields, then the organization details with a note that the organization is shared with one other entry](images/22-desk-registry-editor.png)
 
 - **Service details:** **Service name**, **Description**, **Web address**, **Fees**, **How to apply**, and **This is a crisis service**. Press **Save service details**.
 - **Organization details:** **Organization name**, **Other name**, **Description**, **Email address**, **Website**, **Legal status**. Press **Save organization details**.
@@ -1089,7 +1105,7 @@ These are page loads, not unique people or completed reads. A view is counted by
 
 `/desk/published` — what is live, and its corrections.
 
-![Published: filters, search and a row for each printed story with Views, Corrections and the More menu](images/12-published.png)
+![Published: filter tabs, a search box and a row for each printed story with Views, Corrections, View, Edit headline and More](images/12-published.png)
 
 Filter with **All**, **This week**, **With corrections** and **Opinion**, or search headlines and sections. Each row shows the date printed, section, headline, any corrections as “Correction, <date>: …”, Views and a **Review needed** chip if a transcript review is open. Rows show 25 at a time (**Show 25 more**). **Beat memory** at the bottom lists the people, places and organizations the drafting AI is told the paper has already covered.
 

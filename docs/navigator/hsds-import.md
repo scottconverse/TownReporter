@@ -43,6 +43,8 @@ Under the table, the panel lists each difference: the kind of record, its id in 
 
 Each import is saved in the list of imports with its date, format and these counts.
 
+![The import preview for Testerville services: a count of new, unchanged, changed and already waiting rows for each kind, and the list of differences. Nothing is saved yet.](../images/21-desk-registry-import.png)
+
 ## What never happens
 
 - **Nothing is published.** Every imported row starts unpublished and unverified. A reader sees a row only after an editor presses **Publish** on its entry.
@@ -69,6 +71,8 @@ Open `/desk/registry` and find **Detected changes**. Use the filters **Waiting f
 - **Accept and apply** puts the proposed value on the entry, and marks the proposal accepted.
 - **Accept without applying** marks the proposal accepted. The entry does not change. Use it when you will edit the entry yourself.
 - **Reject** marks the proposal rejected. The entry does not change.
+
+![Detected changes: filter tabs, then each change with its before and after text, a Note box and the buttons Accept and apply, Accept without applying and Reject](../images/23-desk-registry-changes.png)
 
 A proposal that the scan marked **Needs the editor** (a crisis resource) has the same three buttons.
 
