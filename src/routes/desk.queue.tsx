@@ -49,7 +49,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { queueDropTicks, queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   bulkKillConfirmWords,
@@ -430,6 +430,9 @@ function QueuePage() {
       statusOptimistic.rollback(context, input);
     },
     after: async (_result, input) => {
+      // A killed or held lead leaves the Queue; it must not stay ticked for Start.
+      if (input.status === "killed" || (input.status === "held" && !input.release))
+        setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [input.id]));
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (input.release) setReleasedId(input.id);
     },
@@ -516,7 +519,10 @@ function QueuePage() {
     mutationFn: (input: { id: number; killReason: string; override?: string[]; restore?: RestoreStatus }) =>
       setLeadStatus({ data: { ...input, status: "killed" } }),
     warningAction: "Kill",
-    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: (_result, input) => {
+      setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [input.id]));
+      return qc.invalidateQueries({ queryKey: ["leads"] });
+    },
     pending: "Killing…",
     done: () => "The lead moved to Killed.",
     undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore)); } }),
@@ -524,7 +530,7 @@ function QueuePage() {
   });
   const remove = useMutation({
     mutationFn: (id: number) => deleteLead({ data: id }),
-    onSuccess: (res) => {
+    onSuccess: (res, id) => {
       if (!res?.ok) {
         setDeleteError(res?.error ?? "That did not delete.");
         setUndo(null);
@@ -533,6 +539,7 @@ function QueuePage() {
         // durable net; this is the one an editor will actually reach for.
         setDeleteError("");
         setUndo(res.trashId);
+        setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [id]));
       }
       void qc.invalidateQueries({ queryKey: ["leads"] });
     },

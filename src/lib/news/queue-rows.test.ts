@@ -23,6 +23,7 @@ import {
   queueMatchesSearch,
   queueKeepsRowsWhileLoading,
   queueNeedle,
+  queueDropTicks,
   queueRowTick,
   queueSelect,
   queueSelectAllShown,
@@ -335,6 +336,17 @@ test("ticking one row picks that row and no other, and unticking drops only it",
   assert.deepEqual(queueRowTick([3, 7], 9, true), [3, 7, 9]);
   assert.deepEqual(queueRowTick([3, 7, 9], 7, false), [3, 9]);
   assert.deepEqual(queueRowTick([3, 9], 7, false), [3, 9], "unticking a row that was never picked changes nothing");
+});
+
+// Scott, Nov 19 2026: 12 ticked, Kill, 5 ticked, and Start said 17.
+test("a killed, held or deleted lead is unticked, so Start counts only the leads still picked", () => {
+  const killed = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  let picked = queueDropTicks(killed, killed);
+  assert.deepEqual(picked, []);
+  for (const id of [21, 22, 23, 24, 25]) picked = queueRowTick(picked, id, true);
+  assert.deepEqual(picked, [21, 22, 23, 24, 25]);
+  assert.deepEqual(queueDropTicks([21, 22, 23], [22]), [21, 23]);
+  assert.deepEqual(queueDropTicks([21, 23], [99]), [21, 23], "dropping a lead that was never ticked changes nothing");
 });
 
 test("the header box picks exactly the leads on screen, and clears them all", () => {
