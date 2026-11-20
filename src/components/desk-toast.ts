@@ -212,6 +212,18 @@ function deskErrorMessage(error: unknown): string {
   return String(error).trim();
 }
 
+/**
+ * Does this error carry a message of its own?
+ *
+ * A caller that has its own sentence for "the press failed and nobody said
+ * why" asks this first, so an error that carries nothing still reads as that
+ * sentence rather than as `deskErrorReason`'s generic "the desk gave no
+ * reason".
+ */
+export function deskErrorHasMessage(error: unknown): boolean {
+  return deskErrorMessage(error) !== "";
+}
+
 /*
   The three shapes the desk's own sentences do not cover.
 
@@ -232,6 +244,51 @@ export const DESK_UNREACHABLE_REASON =
 export const DESK_TOO_SLOW_REASON =
   "The desk took too long. It may have finished — reload before pressing again.";
 export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do that. Sign in again.";
+/**
+ * F05 (walk 2026-11-19). The plain words for a failure that carried no sentence
+ * of its own -- a guard, a proxy or a thrown exception whose text was written
+ * for a developer ("blocked by walker"). The raw text goes to the console, the
+ * editor gets this.
+ */
+export const DESK_NOT_ACCEPTED_REASON = "The server did not accept that. Try again.";
+
+/**
+ * Was this message written for a developer rather than for an editor?
+ *
+ * F05 of the 2026-11-19 walk found raw exception text printed after the desk's
+ * lead ("Could not change that lead. blocked by walker"). The first cut of the
+ * fix asked whether the text ended in punctuation, which also hid real refusals
+ * the desk writes for editors without a final period ("Lead not found",
+ * "Codex usage limit reached", "No voice file"). So the test is now on the shape
+ * of developer text, not on punctuation:
+ *
+ *  - a lowercase start ("blocked by walker", "request timed out" is caught
+ *    earlier, but a bare fragment is still this shape);
+ *  - a runtime error: "undefined"/"null" as words, "is not a function",
+ *    "Cannot read propert…", "Cannot destructure", a quoted identifier
+ *    ('ok'), an ALL_CAPS_WITH_UNDERSCORE token (SEARCH_BLOCKED), a named
+ *    exception ("TypeError:", "ReferenceError:", "Error:"), a stack line, or a
+ *    bare "HTTP 500".
+ *
+ * A capitalized plain-words message passes through with or without a full stop.
+ */
+const DEVELOPER_TEXT = [
+  /^[a-z]/,
+  /\b(?:undefined|null)\b/,
+  /\bis not a function\b/,
+  /Cannot read propert/,
+  /Cannot destructure/,
+  /'[A-Za-z_$][\w$]*'/,
+  /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/,
+  /\b(?:TypeError|ReferenceError|Error):/,
+  /(?:^|\n)\s+at /,
+  /^HTTP \d{3}$/,
+];
+
+function readsAsDeveloperText(raw: string): boolean {
+  const text = raw.trim();
+  return DEVELOPER_TEXT.some(shape => shape.test(text));
+}
 
 /**
  * The real reason a press failed, in words.
@@ -244,9 +301,10 @@ export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do t
  * What is NOT carried through is a message that only names the transport. A
  * browser's `TypeError: Failed to fetch` and a Zod dump are both true and both
  * useless to an editor, and the second one also prints the schema's own field
- * paths at them (see `editorActionError`, desk-copy.ts). A thrown non-Error is
- * still named rather than swallowed, and an empty message falls back to a
- * sentence that at least says which half of the exchange broke.
+ * paths at them (see `editorActionError`, desk-copy.ts). A non-sentence is not
+ * the desk's words either (F05, walk 2026-11-19), so it is replaced below and
+ * kept in the console; an empty message falls back to a sentence that at least
+ * says which half of the exchange broke.
  */
 export function deskErrorReason(error: unknown, what = "do that"): string {
   const raw = deskErrorMessage(error);
@@ -274,6 +332,18 @@ export function deskErrorReason(error: unknown, what = "do that"): string {
     /unexpected server error|internal server error|status code 500/i.test(raw)
   )
     return editorActionError(raw, what) ?? raw;
+  /*
+    F05 (walk 2026-11-19): a message shaped like developer text was not written
+    for an editor -- "blocked by walker" reached two screens as "Could not
+    change that lead. blocked by walker". The desk cannot make that text true or
+    useful, so it says the plain thing instead and keeps the raw words in the
+    console for whoever is debugging. A real refusal, with or without a final
+    period, is left alone.
+  */
+  if (readsAsDeveloperText(raw)) {
+    console.error("Desk press failed with:", error);
+    return DESK_NOT_ACCEPTED_REASON;
+  }
   return raw;
 }
 

@@ -1,7 +1,8 @@
-import { createElement, Fragment, type ReactNode } from "react";
+import { createElement, Fragment, useEffect, type ReactNode } from "react";
 import type { PublishBlocker } from "../lib/news/publish-blockers.ts";
 import { publishConfirmation } from "../lib/news/publish-blockers.ts";
 import { ActionButton, type ActionPhase } from "./action-button.ts";
+import { confirmFocusTarget } from "./confirm-focus.ts";
 
 /**
  * The words the desk announces after "Publish anyway -- I accept these claims
@@ -78,6 +79,20 @@ export function PublishConfirmation(props: {
     server warning gets the warning LABEL and stays enabled -- the label is not
     computed from the client's list alone.
   */
+  /*
+    F06 of the 2026-11-19 walk: the Publish confirm replaces the Publish press
+    bar, so focus fell to the top of the page when the question opened (and
+    again on "Not yet"). This panel is mounted only while the question is open,
+    so a mount/unmount pair is the whole rule: the safe press takes the keyboard,
+    and the press that opened the question gets it back.
+  */
+  useEffect(() => {
+    confirmFocusTarget("publish-confirm-safe")?.focus();
+    return () => {
+      confirmFocusTarget("publish-confirm-trigger")?.focus();
+    };
+  }, []);
+
   const byKey = new Map<string, PublishBlocker>();
   for (const blocker of props.blockers) byKey.set(blocker.key, blocker);
   for (const warning of props.refusedWarnings ?? []) {
@@ -194,6 +209,7 @@ export function PublishConfirmation(props: {
       createElement(ActionButton, {
         tone: "secondary",
         phase: "idle",
+        focusKey: "publish-confirm-safe",
         onAct: props.onCancel,
         children: "Not yet",
       }),

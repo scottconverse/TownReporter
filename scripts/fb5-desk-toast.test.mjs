@@ -234,9 +234,9 @@ test("announceOnly speaks without drawing, for announcements that are not outcom
 });
 
 test("deskErrorReason never swallows a failure, however it arrives", () => {
-  assert.equal(deskErrorReason(new Error("the server said no")), "the server said no");
-  assert.equal(deskErrorReason("a bare string"), "a bare string");
-  assert.equal(deskErrorReason({ message: "an object with a message" }), "an object with a message");
+  assert.equal(deskErrorReason(new Error("The server said no.")), "The server said no.");
+  assert.equal(deskErrorReason("A bare sentence."), "A bare sentence.");
+  assert.equal(deskErrorReason({ message: "An object with a message." }), "An object with a message.");
   assert.equal(deskErrorReason(new Error("   ")), "the desk gave no reason");
   assert.equal(deskErrorReason(null), "the desk gave no reason");
   assert.equal(deskErrorReason(undefined), "the desk gave no reason");

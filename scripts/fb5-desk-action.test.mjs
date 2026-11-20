@@ -333,14 +333,14 @@ test("deskActionDone reads the outcome from the result and the way back from the
 
 test("deskActionFailure always ends with the real reason, whatever leads it", () => {
   assert.equal(
-    deskAction.deskActionFailure(new Error("the desk said no"), {
+    deskAction.deskActionFailure(new Error("The desk said no."), {
       failedLead: "Could not hold that lead. ",
     }),
-    "Could not hold that lead. the desk said no",
+    "Could not hold that lead. The desk said no.",
   );
   assert.equal(
-    deskAction.deskActionFailure(new Error("the desk said no"), {}),
-    "the desk said no",
+    deskAction.deskActionFailure(new Error("The desk said no."), {}),
+    "The desk said no.",
     "with no lead the sentence is the reason alone, and never an apology",
   );
   assert.equal(
