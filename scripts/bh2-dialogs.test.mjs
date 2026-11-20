@@ -981,7 +981,10 @@ test("the redraft dialog starts from the saved direction and sends what is typed
   );
   assert.match(document.body.textContent, /Redraft/);
   assert.equal(text(field("textarea")), "cut the second paragraph", "the saved direction seeds the box");
-  assert.match(document.body.textContent, /My headline and my edits/);
+  assert.match(document.body.textContent, /My headline/);
+  // F57: the box must not promise to keep the old draft or the editor's edits.
+  assert.doesNotMatch(document.body.textContent, /and my edits|compare the two|current draft is kept/);
+  assert.match(document.body.textContent, /The new version replaces the story text/);
   assert.equal(document.querySelector("#stub-model-picker").value, "auto", "the desk's own picker");
   await page.typeInto(field("textarea"), "lead with the cancellation");
   await page.click(button("Start redraft"));
