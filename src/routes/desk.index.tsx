@@ -120,7 +120,11 @@ import {
   ReportingAssignmentDialog,
   type ReportingDirectAction,
 } from "@/components/reporting-assignment";
-import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import {
+  modelChoiceLabel,
+  modelChoicesFor,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -459,6 +463,12 @@ function DeskHome() {
     what: "change that source",
   });
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
+  /*
+    F21 (Nov 19 walk): one press used to start a full scan with no confirm.
+    The dialog below names how many accepted sources it will read and which
+    model choice it will run, both of which this page already has.
+  */
+  const [scanConfirming, setScanConfirming] = useState(false);
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   const scanModelTouched = useRef(false);
   useJobModelAssignment<StoryModelChoice>({
@@ -713,6 +723,9 @@ function DeskHome() {
   );
   const publishedCount = allLeads.filter((l) => l.status === "published").length;
   const accepted = src.filter((s) => s.status === "accepted");
+  // The scan picker's own ladder detail, so the confirm names the rungs the
+  // page already offers rather than only saying "Automatic".
+  const autoLadderDetail = modelChoicesFor("scan").find((choice) => choice.value === "auto")?.detail;
   const proposed = src.filter((s) => s.status === "proposed");
   const officialFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "official");
   const flakyFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "flaky");
@@ -2646,7 +2659,7 @@ function DeskHome() {
               */}
               <InkButton
                 tone="ghost"
-                onClick={() => scan.mutate()}
+                onClick={() => setScanConfirming(true)}
                 disabled={scanning || paperGate.blocked}
                 pending={scan.isPending}
                 pendingLabel="Starting the scan…"
@@ -2657,6 +2670,32 @@ function DeskHome() {
                 All sources
               </Link>
             </div>
+            <Dialog
+              open={scanConfirming}
+              onClose={() => setScanConfirming(false)}
+              title="Run a full scan?"
+              subtitle={`It will read ${accepted.length} ${
+                accepted.length === 1 ? "source" : "sources"
+              }.`}
+              primaryLabel="Run the scan"
+              onPrimary={() => {
+                setScanConfirming(false);
+                scan.mutate();
+              }}
+              primaryDisabled={scanning || paperGate.blocked}
+              cancelLabel="Cancel"
+            >
+              <p>
+                {scanModel === "auto"
+                  ? `The model is chosen from the Automatic ladder. ${autoLadderDetail ?? ""}`
+                  : `The scan will use ${modelChoiceLabel(scanModel)}.`}
+              </p>
+              {accepted.length === 0 ? (
+                <p role="alert">
+                  No accepted source yet, so this scan will have nothing to read.
+                </p>
+              ) : null}
+            </Dialog>
             {/* SG1 / Option A: the reason, in text, beside the disabled press. */}
             <PaperSetupGateNote gate={paperGate} />
             {/*

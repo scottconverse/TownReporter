@@ -92,6 +92,8 @@ import {
   redditPostStateLabel,
   buildScanUserMessage,
   editorTitle,
+  isWebAddress,
+  scanSourceCoverageAge,
   mergeFocusSelection,
   suggestFocusLeads,
   validationFieldLabel,
@@ -2452,5 +2454,44 @@ describe("editorTitle", () => {
       editorTitle("Historic Preservation Commission - Sept 3, 2026 (2026-09-04T12:19:51Z)"),
       "Historic Preservation Commission - Sept 3, 2026",
     );
+  });
+});
+
+describe("scanSourceCoverageAge (F07: today is a calendar day, not 24 hours)", () => {
+  it("calls a Nov. 18 read 'yesterday' just after midnight on Nov. 19", () => {
+    // 7:06 a.m. Nov 18 in Denver is 14:06 UTC. 12:30 a.m. Nov 19 is 07:30 UTC.
+    assert.equal(
+      scanSourceCoverageAge("2026-11-18T14:06:00.000Z", Date.parse("2026-11-19T07:30:00.000Z")),
+      "read 1 day ago",
+    );
+  });
+
+  it("still says 'read today' before midnight on the same Denver day", () => {
+    assert.equal(
+      scanSourceCoverageAge("2026-11-18T14:06:00.000Z", Date.parse("2026-11-19T06:30:00.000Z")),
+      "read today",
+    );
+  });
+
+  it("counts whole calendar days in the paper's zone", () => {
+    assert.equal(
+      scanSourceCoverageAge("2026-11-16T14:06:00.000Z", Date.parse("2026-11-19T07:30:00.000Z")),
+      "read 3 days ago",
+    );
+  });
+});
+
+describe("isWebAddress (F09: a non-web scheme is plain text)", () => {
+  it("accepts http and https", () => {
+    assert.equal(isWebAddress("https://example.org/list"), true);
+    assert.equal(isWebAddress("http://example.org/list"), true);
+    assert.equal(isWebAddress("  HTTPS://example.org "), true);
+  });
+
+  it("rejects a scheme a browser cannot open", () => {
+    assert.equal(isWebAddress("hsds://townreporter-starter-list"), false);
+    assert.equal(isWebAddress("mailto:editor@example.org"), false);
+    assert.equal(isWebAddress(""), false);
+    assert.equal(isWebAddress(null), false);
   });
 });

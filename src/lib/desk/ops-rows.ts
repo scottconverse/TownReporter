@@ -149,6 +149,12 @@ export function healthRows(health: OpsHealth): OpsRow[] {
   */
   const backup = check("backup");
   const errors = check("errors-24h");
+  /*
+    F25 (Nov 19 walk): a job that fell back to another model and still
+    finished is not an error. The health read reports it as its own check, and
+    this draws it as its own line only when it happened.
+  */
+  const fallback = check("fallback-24h");
   return [
     {
       label: "Database",
@@ -174,6 +180,16 @@ export function healthRows(health: OpsHealth): OpsRow[] {
       tone: tone(errors?.state),
       help: errors?.note || undefined,
     },
+    ...(fallback
+      ? [
+          {
+            label: "Model switch",
+            value: fallback.value,
+            tone: tone(fallback.state),
+            help: fallback.note || undefined,
+          },
+        ]
+      : []),
   ];
 }
 

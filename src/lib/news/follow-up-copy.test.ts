@@ -363,14 +363,28 @@ describe("the chip, the sentences and the buttons", () => {
     // sentence is composed at the moment it is drawn.
     const failed = parseFinding(packFinding({ reason: "The page timed out." }));
     assert.equal(
-      cardResultLine("could-not-check", failed, { nextRunAt: at(2026, 9, 26, 14, 0).toISOString() }),
+      cardResultLine("could-not-check", failed, {
+        nextRunAt: at(2026, 9, 26, 14, 0).toISOString(),
+        from: at(2026, 9, 26, 10, 0),
+      }),
       // No full stop after the clock: it already ends in "p.m.".
       "The page timed out. The agent will try again at 2:00 p.m.",
     );
-    assert.equal(cardResultLine("could-not-check", failed, {}), "The page timed out.");
+    // F13: a stored retry time in the past is not a promise of a retry.
+    assert.equal(
+      cardResultLine("could-not-check", failed, {
+        nextRunAt: at(2026, 9, 26, 14, 0).toISOString(),
+        from: at(2026, 9, 26, 17, 18),
+      }),
+      "The page timed out. No retry scheduled.",
+    );
+    assert.equal(
+      cardResultLine("could-not-check", failed, {}),
+      "The page timed out. No retry scheduled.",
+    );
     assert.equal(
       cardResultLine("could-not-check", parseFinding("{}"), {}),
-      "The check could not be completed.",
+      "The check could not be completed. No retry scheduled.",
     );
   });
 

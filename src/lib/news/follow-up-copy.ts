@@ -583,10 +583,18 @@ export function cardResultLine(
       return finding.summary || "The pages were the same as the last check.";
     case "could-not-check": {
       const reason = finding.reason || "The check could not be completed.";
-      const retry = clockLabel(times.nextRunAt);
+      /*
+        A stored `next_run_at` can be in the past: the check failed at that
+        time and the scheduler has not written a new one. Promising a retry at
+        a time that has already passed tells the editor the agent is about to
+        try when nothing is scheduled, so a past time reads as no retry.
+      */
+      const nextAt = times.nextRunAt ? Date.parse(times.nextRunAt) : Number.NaN;
+      const now = (times.from ?? new Date()).getTime();
+      const retry = Number.isFinite(nextAt) && nextAt > now ? clockLabel(times.nextRunAt) : "";
       // No full stop after the clock: the clock already ends in "p.m." or
       // "a.m.", and the composed sentence read "…at 2:00 p.m..".
-      return retry ? `${reason} The agent will try again at ${retry}` : reason;
+      return retry ? `${reason} The agent will try again at ${retry}` : `${reason} No retry scheduled.`;
     }
     case "waiting":
       return finding.summary || "Nothing yet. The agent checks on its schedule and reports here.";

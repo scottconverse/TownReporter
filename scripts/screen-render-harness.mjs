@@ -105,6 +105,10 @@ export async function screenModuleUrl(path, overrides = {}, real = [], fixture =
             useDeskJobs: `() => ({jobs:[], activeJobs:[]})`,
             darkKeepControl: `() => ({running:false,disabled:false,pendingLabel:null})`,
             resolveJobModel: `() => ({providerId:"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
+            // model-choice.ts: the picker list. F21 (Nov 19 2026) made Today
+            // read it with `.find`, so a null-returning stub would crash the
+            // screen; an empty list is the honest "no options drawn here".
+            modelChoicesFor: `() => []`,
             usePaperSetupGate: `() => ({blocked:false})`,
             // recent-kill.ts: no row was just killed while a screen renders here.
             useRecentlyKilledRows: `() => ({recent:new Map(), markKilled(){}, clearKilled(){}})`,
