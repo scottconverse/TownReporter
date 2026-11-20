@@ -54,9 +54,15 @@ export async function getPublicRegistryOrigin() { return "https://paper.example"
 `);
 const correctionUrl = await moduleUrl("src/lib/news/registry/registry-correction.ts");
 const methodsUrl = await moduleUrl("src/lib/news/registry/registry-verify-methods.ts");
+// The 988/211 phone links are drawn by the real component (F18/F19); its only
+// import is the pure `telHref` helper, which is loaded for real too.
+const phoneUrl = await moduleUrl("src/components/registry-phone.tsx", {
+  "@/lib/news/registry/registry-phone": await moduleUrl("src/lib/news/registry/registry-phone.ts"),
+});
 const imports = {
   "@tanstack/react-router": routerUrl,
   "@/components/paper-chrome": chromeUrl,
+  "@/components/registry-phone": phoneUrl,
   "@/lib/paper-context-state": contextUrl,
   "@/lib/paper-identity": identityUrl,
   "@/lib/news/registry/registry-public": publicUrl,
@@ -220,7 +226,7 @@ test("each service name links to its own page, and the list keeps what it showed
   assert.match(html, /<h3><a[^>]*href="\/registry\/7"[^>]*>Helping Hands — Food pantry<\/a><\/h3>/);
   for (const text of [
     "Free groceries.",
-    "Phone at this location: 555-0100",
+    "Phone at this location: ",
     "Hours at this location: Mon 9-5",
     "Languages: Spanish",
     "Not verified yet",
@@ -229,6 +235,8 @@ test("each service name links to its own page, and the list keeps what it showed
     "Something wrong here?",
   ])
     assert.ok(html.includes(text), `list still shows ${text}`);
+  // The phone is a tappable `tel:` link, and the printed text is unchanged (F18).
+  assert.match(html, /Phone at this location: <a[^>]*href="tel:5550100"[^>]*>555-0100<\/a>/);
 });
 
 test("the correction link carries the id, the names and the full service URL, exactly", () => {
@@ -309,9 +317,9 @@ test("the detail page shows every field group, in order", () => {
     "Languages: Spanish, Vietnamese",
     "North site",
     "1 North St, Town, CO 80000",
-    "Phone for this service: 555-0300",
+    "Phone for this service: ",
     "Hours for this service: Weekdays 8-4",
-    "Main phone of Helping Hands: 555-0400",
+    "Main phone of Helping Hands: ",
     "County list",
     "Org page",
     "Verified Sep 1, 2026",
@@ -324,6 +332,16 @@ test("the detail page shows every field group, in order", () => {
     at = found;
   }
   assert.match(html, /<h1>Helping Hands — Food pantry<\/h1>/);
+  // Each phone is a `tel:` link that keeps the number as it was printed (F18).
+  for (const [label, phone] of [
+    ["Phone for this service: ", "5550300"],
+    ["Main phone of Helping Hands: ", "5550400"],
+    ["Phone at this location: ", "5550101"],
+  ])
+    assert.match(
+      html,
+      new RegExp(`${label}<a[^>]*href="tel:${phone}"[^>]*>${phone.replace(/^(\d{3})(\d{4})$/, "$1-$2")}</a>`),
+    );
 });
 
 test("an empty field is left out, not shown blank", () => {

@@ -4242,6 +4242,12 @@
     padding: 0;
     border-bottom: 0;
     font-size: 16px;
+    /*
+      The fitted row above is one line, but the menu is a grid of cells. Keep
+      the menu's nowrap from the base rule from spilling a long section name
+      into the next column at phone width (F11).
+    */
+    white-space: normal;
   }
   .reader .sections a:hover {
     text-decoration: none;

@@ -349,6 +349,11 @@ function Home() {
           <h1 className="vh">
             {paper.name} — {paper.location}
           </h1>
+          {search.area ? (
+            <div className="frontsectionhead front-area-head">
+              <h2>{areaLabels[search.area]}</h2>
+            </div>
+          ) : null}
           {lead ? (
             <>
               <section className="fronttop" aria-label="Top stories">
