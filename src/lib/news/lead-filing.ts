@@ -1,6 +1,7 @@
 import { sanitizePublicUrls } from "./schema.ts";
 import { storableText } from "./storable-text.ts";
 import { sourceIdentity } from "./url-guard.ts";
+import { withStoryUrlsForListSources } from "./lead-source-page.ts";
 import { noEventVerdict, standingPageStamp, type LeadEventFields } from "./lead-newsworthiness.ts";
 import type { ScoreParts } from "./lead-score.ts";
 import type { DupCheckOutcome } from "./dup-check.ts";
@@ -29,8 +30,16 @@ export interface SqlTag {
 }
 
 /** A source the scan read this run: its row id, its own URL, and the pages it
- * read under it (feed items, linked agenda pages, newsletter issues). */
-export type ScanReadSource = { id: number; url: string; extras?: { url: string }[] };
+ * read under it (feed items, linked agenda pages, newsletter issues). A page
+ * also carries the article links it held, with their link text, so filing can
+ * put a lead's own story page on `source_urls` when the model cited only the
+ * list page (see `withStoryUrlsForListSources`, ./lead-source-page.ts). */
+export type ScanReadSource = {
+  id: number;
+  url: string;
+  extras?: { url: string }[];
+  storyLinks?: { url: string; title: string }[];
+};
 
 function urlPath(identity: string): { host: string; path: string } {
   const slash = identity.indexOf("/");
@@ -349,7 +358,17 @@ export async function fileScanLeads(
     const why = storableText(lead.why ?? "");
     const topic = storableText(lead.topic ?? "council");
     const evidence = storableText(lead.evidence ?? "");
-    const candidateUrls = sanitizePublicUrls(lead.source_urls);
+    /*
+      G26-HP-2 (walk 2026-11-19): a lead filed only against the front or list
+      page it was read on gave the editor nowhere to check the story. The scan
+      already fetched that page and kept the article links it carried; for a
+      list page, filing now adds the one link whose text plainly names this
+      lead's story, ahead of the list page, and keeps the list page too. No
+      clear match, no addition -- see withStoryUrlsForListSources.
+    */
+    const candidateUrls = sanitizePublicUrls(
+      withStoryUrlsForListSources(headline, sanitizePublicUrls(lead.source_urls), readSources ?? []),
+    );
 
     /*
       The headline is judged AFTER cleaning, not before.

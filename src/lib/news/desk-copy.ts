@@ -3288,6 +3288,7 @@ ${publishedText || "(none yet)"}
 Fetched source text:
 ${payload || "(no source text this run)"}
 
+When a lead comes from a home, section or list page, cite the story's own page for it, not only the list page.
 Return JSON:
 {
   "editor_summary": "2-4 sentences for the editor",
