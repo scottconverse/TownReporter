@@ -42,6 +42,7 @@ import {
   editorActionError,
   mergeFocusSelection,
   PRINTED_TAB_NOTE,
+  ALL_TAB_NOTE,
   printedDupChip,
   editorTitle,
   queueTabCountText,
@@ -1662,6 +1663,8 @@ function QueuePage() {
       </div>
       {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
       <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
+      {/* Walk F15: the five tabs do not add up to All, so the strip says why. */}
+      <span className="queue-tab-note">{ALL_TAB_NOTE}</span>
 
       {/*
         FB6, item 3: the scan's own card, in place, under the press that started

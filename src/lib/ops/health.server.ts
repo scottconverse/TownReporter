@@ -112,7 +112,15 @@ async function checkDatabase(): Promise<HealthCheck[]> {
         id: "db-rows",
         label: "Contents",
         state: "ok",
-        value: `${c?.articles ?? 0} published · ${c?.drafts ?? 0} drafts · ${c?.leads ?? 0} leads · ${c?.sources ?? 0} sources`,
+        /*
+          Walk F15: this is a raw `count(*)` over the drafts table -- every
+          saved draft record, one per version and including those whose lead is
+          killed, held or already published. The Drafts screen lists one row per
+          LIVE lead (5 against 679 here on the live desk), so the same word
+          "drafts" was two different units. The desk's word "drafts" stays
+          (the removed-text guard protects it); the unit is said beside it.
+        */
+        value: `${c?.articles ?? 0} published · ${c?.drafts ?? 0} drafts (every saved version) · ${c?.leads ?? 0} leads · ${c?.sources ?? 0} sources`,
       },
     ];
   } catch (err) {
