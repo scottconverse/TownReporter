@@ -187,10 +187,10 @@ const database = databaseUrl
  * cookie carrying a `Domain` attribute, so no sibling host can toss a
  * `Domain=.example.com` session cookie onto this app's origin.
  */
-export const SESSION_TOKEN_COOKIE = "__Host-tr-auth.session_token";
-const SESSION_DATA_COOKIE = "__Host-tr-auth.session_data";
-const ACCOUNT_DATA_COOKIE = "__Host-tr-auth.account_data";
-const DONT_REMEMBER_COOKIE = "__Host-tr-auth.dont_remember";
+export const SESSION_TOKEN_COOKIE = "__Host-tr-dev-auth.session_token";
+const SESSION_DATA_COOKIE = "__Host-tr-dev-auth.session_data";
+const ACCOUNT_DATA_COOKIE = "__Host-tr-dev-auth.account_data";
+const DONT_REMEMBER_COOKIE = "__Host-tr-dev-auth.dont_remember";
 
 export const auth = betterAuth({
   baseURL,

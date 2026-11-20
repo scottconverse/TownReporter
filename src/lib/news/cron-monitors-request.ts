@@ -12,6 +12,7 @@ export async function handleMonitorsCronRequest(
   request: Request,
   deps: CronWakeDeps = {},
 ): Promise<Response> {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") return new Response("Dev server: cron disabled", { status: 503 });
   const secret = (deps.secret ?? process.env.CRON_SECRET)?.trim();
   if (!secret) return new Response("cron disabled", { status: 503 });
   if ((request.headers.get("authorization") ?? "") !== `Bearer ${secret}`)

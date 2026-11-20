@@ -94,6 +94,7 @@ function darkDeskMonitorPlugin(): Plugin {
     name: "townreporter:dark-desk-monitors",
     apply: "serve",
     configureServer(server) {
+      if (process.env.TOWNREPORTER_DEV_SERVER === "1") return;
       let ticking = false;
       const tick = async () => {
         if (ticking) return;

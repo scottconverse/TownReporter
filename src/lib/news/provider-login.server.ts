@@ -528,6 +528,7 @@ export async function startProviderLogin(
   provider: ProviderId,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ): Promise<ProviderLogin> {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") throw new Error("Dev server: host-wide provider sign-in changes disabled; existing credentials remain usable.");
   await ensureProviderLoginsSchema();
   const sql = await getSql();
 

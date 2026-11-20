@@ -45,6 +45,7 @@ const globalClock = globalThis as typeof globalThis & {
 };
 
 export function startUnattendedScheduler(): void {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") return;
   if (typeof window !== "undefined") return;
   if (globalClock.__unattendedSchedulerStarted__) return;
   globalClock.__unattendedSchedulerStarted__ = true;

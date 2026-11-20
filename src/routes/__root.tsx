@@ -246,6 +246,7 @@ function Root() {
         script above has already applied by the time this element paints.
       */}
       <body>
+        {import.meta.env.VITE_TOWNREPORTER_DEV_SERVER === "1" && <div id="dev-server-banner" style={{position:"fixed",bottom:0,left:0,right:0,zIndex:2147483647,pointerEvents:"none",background:"#f59e0b",color:"#111",textAlign:"center",fontWeight:800,padding:"6px",fontSize:"14px"}}>DEV SERVER · disposable production copy · localhost:3100</div>}
         {/*
           Last resort for a page where React never started.
 
