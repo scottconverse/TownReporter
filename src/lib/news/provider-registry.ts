@@ -1183,6 +1183,25 @@ export function enabledAutomaticLadder(): readonly ProviderId[] {
 }
 
 /**
+ * Is the research writer part of the desk's drafting ladder?
+ *
+ * The news skill writer (the research writer) is what drafts an ordinary news
+ * lead on the ladder's first rung, DeepSeek v4.1 Flash 1017 (D234); the
+ * four-pass writer is only that run's fallback. So the research writer is part
+ * of the ladder exactly while that rung is on it and has not been switched off.
+ *
+ * Deliberately the STATIC ladder, like `automaticLadder()` itself: asking a
+ * live rung whether its endpoint answers would make this depend on when local
+ * discovery happened to run, and the Server page's one use (F02's red row for a
+ * missing Claude Code CLI) must not flake on a page load that raced discovery.
+ */
+export function researchWriterInDraftingLadder(
+  ladder: readonly ProviderId[] = automaticLadder(),
+): boolean {
+  return ladder.includes("deepseek-flash") && notSwitchedOff("TOWNREPORTER_DEEPSEEK");
+}
+
+/**
  * The order OPINION's Automatic tries providers in (unit U29).
  *
  * Derived from `opinionLadderRank`, exactly the way the desk's ladder is

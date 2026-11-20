@@ -124,7 +124,7 @@ export const OPS_CARDS: readonly OpsCardDef[] = [
     panelTitle: "Health",
     sub: "What answers from this machine right now. Checks show what responds here; they do not prove that a reader in another town can reach your paper.",
     ownerOnly: true,
-    rows: ["Database", "Disk", "Last backup", "Errors in 24 h"],
+    rows: ["Database", "Disk", "Last backup", "Errors in 24 h", "Research tool"],
     doors: [
       { label: "View logs", tone: "plain", card: "health" },
       { label: "Restart workers", tone: "plain", card: "health" },

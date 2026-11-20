@@ -193,6 +193,56 @@ export function healthRows(health: OpsHealth): OpsRow[] {
   ];
 }
 
+/** What the desk found when it looked for the Claude Code CLI (F02, Nov 2026). */
+export type ResearchToolStatus = {
+  found: boolean;
+  /** The path the lookup found, when it found one. */
+  path: string | null;
+  /**
+   * Is the research writer part of the drafting ladder? The news skill writer
+   * is the research writer, and it runs ordinary news leads on the ladder's
+   * first rung (DeepSeek v4.1 Flash 1017). When that rung is not the drafting
+   * path, a missing CLI costs nothing and the row says so quietly.
+   */
+  researchWriterInLadder: boolean;
+};
+
+/**
+ * Health: is the research tool on this computer?
+ *
+ * F02 (live walk, Nov 19 2026): the live paper said "the research tool is not
+ * set up on this computer" in draft notes for days while the Server page said
+ * nothing was wrong. The lookup only LOOKS for the binary -- it never runs the
+ * CLI -- so this row costs one file check. A missing CLI is read, not red, on a
+ * desk whose ladder does not include the research writer.
+ */
+export function researchToolRow(status: ResearchToolStatus): OpsRow {
+  if (!status.researchWriterInLadder) {
+    return {
+      label: "Research tool",
+      value: "Not used",
+      tone: "plain",
+      help: "Drafts here run the standard writer, so they do not need the research tool.",
+    };
+  }
+  if (!status.found) {
+    return {
+      label: "Research tool",
+      value: "Research tool not found on this computer. Drafts skip the research step.",
+      tone: "fail",
+      help:
+        "Install Claude Code (npm i -g @anthropic-ai/claude-code), sign in with `claude`, " +
+        "or set CLAUDE_CLI_PATH to its binary.",
+    };
+  }
+  return {
+    label: "Research tool",
+    value: status.path ?? "Found",
+    tone: "plain",
+    help: "The research writer uses this Claude Code CLI.",
+  };
+}
+
 /**
  * Paper setup: the paper's own identity, as the reader sees it.
  *

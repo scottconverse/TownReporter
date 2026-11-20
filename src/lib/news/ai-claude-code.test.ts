@@ -343,6 +343,98 @@ describe("findClaudeCli finds a standard install (D212)", () => {
   });
 });
 
+/*
+  F02 (live walk, Nov 19 2026). The live paper said "the research tool is not
+  set up on this computer" for days: a new Node took over npm's global prefix
+  while the Claude Code CLI stayed under the old one, and the lookup knew
+  neither about npm's `claude.cmd` shim nor about the other scoop Node installs.
+*/
+describe("findClaudeCli finds a CLI under another Node (F02)", () => {
+  it("follows npm's claude.cmd shim on PATH to the real binary beside it", async () => {
+    if (!ON_WINDOWS) return; // npm makes claude.cmd only on Windows
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-shim-profile-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-shim-appdata-"));
+    const pathDir = await mkdtemp(join(tmpdir(), "tr-claude-shim-path-"));
+    const bin = `${pathDir}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: pathDir,
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(null);
+    try {
+      await writeCli(`${pathDir}\\claude.cmd`);
+      await writeCli(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+      await rm(pathDir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds the binary under another scoop Node install when the npm prefix has none", async () => {
+    if (!ON_WINDOWS) return; // scoop's layout is a Windows path
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-scoop-profile-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-scoop-appdata-"));
+    const bin = `${profile}\\scoop\\persist\\nodejs-lts\\bin\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: undefined,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: "",
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(null);
+    try {
+      await writeCli(bin);
+      assert.equal(await findClaudeCli(), bin);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps CLAUDE_CLI_PATH winning over a scoop copy", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "tr-claude-explicit-profile-"));
+    const appData = await mkdtemp(join(tmpdir(), "tr-claude-explicit-appdata-"));
+    const pinnedDir = await mkdtemp(join(tmpdir(), "tr-claude-explicit-bin-"));
+    const pinned = join(pinnedDir, ON_WINDOWS ? "claude.exe" : "claude");
+    const scoopBin = `${profile}\\scoop\\persist\\nodejs-lts\\bin\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+    const restore = withEnv({
+      APPDATA: appData,
+      CLAUDE_CLI_PATH: pinned,
+      HOME: undefined,
+      USERPROFILE: profile,
+      PATH: "",
+    });
+    resetClaudeCliCache();
+    injectNpmPrefix(null);
+    try {
+      await writeCli(pinned);
+      await writeCli(scoopBin);
+      assert.equal(await findClaudeCli(), pinned);
+    } finally {
+      restore();
+      injectNpmPrefix(undefined);
+      resetClaudeCliCache();
+      await rm(profile, { recursive: true, force: true });
+      await rm(appData, { recursive: true, force: true });
+      await rm(pinnedDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("findClaudeCli looks again after a miss", () => {
   it("returns null before the CLI exists, then finds it once it appears", async () => {
     const profile = await mkdtemp(join(tmpdir(), "tr-claude-profile-"));
