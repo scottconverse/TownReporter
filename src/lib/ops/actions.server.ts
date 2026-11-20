@@ -23,6 +23,7 @@ export async function managedInstallRoot(root = process.cwd()): Promise<string |
 }
 
 export async function opsAvailability(root = process.cwd()): Promise<Record<string, string>> {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") return Object.fromEntries(Object.keys(SPECS).map(id => [id, "Dev server: machine ops disabled; use dev-server.ps1."]));
   const managed = Boolean(await managedInstallRoot(root));
   return Object.fromEntries(
     Object.keys(SPECS).flatMap((id) => {
@@ -117,6 +118,7 @@ export async function runOpsActionById(
   id: OpsActionId,
   root = process.cwd(),
 ): Promise<OpsActionResult> {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") return { ok: false, id, output: "Dev server: machine ops disabled; use dev-server.ps1." };
   const action = findOpsAction(id);
   const spec = SPECS[id];
   if (!action || !spec) return { ok: false, id, output: "Unknown action." };

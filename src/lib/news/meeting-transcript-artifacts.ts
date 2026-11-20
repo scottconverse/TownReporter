@@ -26,6 +26,11 @@ export function resolveMeetingStorageRoot(configured: string | null | undefined)
     throw new Error("Meeting transcript storage root is not configured; refusing to write inside the app directory.");
   }
   const value = configured.trim();
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") {
+    const testRoot = normalizeAbsolutePath(process.env.TOWNREPORTER_DATA_ROOT || "").replace(/\\/g, "/").toLowerCase();
+    const candidate = normalizeAbsolutePath(value).replace(/\\/g, "/").toLowerCase();
+    if (!testRoot || !(candidate === testRoot || candidate.startsWith(testRoot + "/"))) throw new Error("Dev server: storage must remain inside Dev data root.");
+  }
   if (!isAbsolutePathAnyPlatform(value)) throw new Error(`Meeting transcript storage root must be absolute: ${value}`);
   return normalizeAbsolutePath(value);
 }

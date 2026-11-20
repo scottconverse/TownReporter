@@ -19,6 +19,7 @@ import { reconcileConfiguredMeetingArtifactStorage } from "../../src/lib/news/me
  * this deployment never sets it.
  */
 export default async function unattendedClock() {
+  if (process.env.TOWNREPORTER_DEV_SERVER === "1") return;
   const reconciliation = await reconcileConfiguredMeetingArtifactStorage(await getSql());
   if (reconciliation.failed.length) {
     console.error("[meeting-artifacts] startup reconciliation could not check every configured newsroom", reconciliation.failed);
