@@ -31,6 +31,12 @@ import type { ModelEffort } from "@/lib/news/provider-registry";
  *     per-job settings set on this screen ("Redraft settings" on the story
  *     page), and the picker is the control that sets them, so it is the control
  *     that goes in the row.
+ *
+ * F57 (Nov 19 2026): the foot note used to say "The current draft is kept.
+ * You'll compare the two before choosing." and the card said "My headline and
+ * my edits". Neither is true: `draftLead` writes the new body over the old one
+ * and there is no compare step. A live redraft of lead 1422 showed it. Both
+ * lines now say what the desk does.
  */
 export type RedraftDialogProps = {
   open: boolean;
@@ -87,7 +93,7 @@ export function RedraftDialog({
       onClose={() => onOpenChange(false)}
       title="Redraft"
       subtitle="Ask for a new version. The AI writes the story; your headline is kept if you wrote it."
-      footNote="The current draft is kept. You'll compare the two before choosing."
+      footNote="The new version replaces the story text, including your edits to it. Copy any text you want to keep before you start."
       cancelLabel="Cancel"
       primaryLabel="Start redraft"
       primaryDisabled={busy}
@@ -111,7 +117,7 @@ export function RedraftDialog({
         </span>
         <div className="astra-choice-set" role="radiogroup" aria-labelledby="redraft-keep">
           <ChoiceCard
-            label="My headline and my edits"
+            label="My headline"
             note="Your headline is kept when you wrote it; the model's own line otherwise."
             selected
           />
