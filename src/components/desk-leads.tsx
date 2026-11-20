@@ -15,6 +15,11 @@ import {
 /* A relative import for the same reason as `lead-source-page.ts` above: the
    render harness resolves only the relative specifiers it maps. */
 import { parseStoredScoreParts, scorePartsLine } from "../lib/news/lead-score.ts";
+/* F01 (live walk 2026-11-19): say plainly when a lead looks like it belongs to
+   another state. Relative, like the two above, for the same harness reason. */
+import { OUT_OF_STATE_WARNING, looksOutOfState } from "../lib/news/out-of-state.ts";
+import { NEARBY_TOWNS } from "../lib/story-area.ts";
+import { isLongmont } from "../lib/news/dark-place.ts";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   editorTitle,
@@ -925,6 +930,23 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
   */
   const leadSourceUrls = parseUrlList(lead.source_urls);
   const listPageSources = homeOrListSourceUrls(leadSourceUrls);
+  /*
+    F01 (live walk 2026-11-19): the Clancy retrial story (Duxbury, Mass.) was
+    filed under Nearby on this Colorado paper. Warn, never block: the lead
+    still files and drafts exactly as before; this only says what the words
+    look like. Read off the row's own headline and summary, so leads filed
+    before this check existed are marked too.
+  */
+  const paperPlace = {
+    city: paper.city,
+    state: paper.state ?? "",
+    county: paper.county ?? null,
+  };
+  const leadLooksOutOfState = looksOutOfState(
+    { headline: lead.headline, body: lead.why },
+    paperPlace,
+    isLongmont({ city: paperPlace.city, state: paperPlace.state }) ? NEARBY_TOWNS : [],
+  );
   return (
     <div className="lead-flags">
       <Chip s={lead.status} />
@@ -940,6 +962,14 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           title="The scan filed this lead under a section the model did not choose. Open the story and confirm the section it belongs in."
         >
           Section not chosen — pick one
+        </span>
+      ) : null}
+      {leadLooksOutOfState ? (
+        <span
+          className="chip out-of-state"
+          title="The lead names a place in another state and nothing in this paper's own ground. Check where the story is before you publish it."
+        >
+          {OUT_OF_STATE_WARNING}
         </span>
       ) : null}
       {/*

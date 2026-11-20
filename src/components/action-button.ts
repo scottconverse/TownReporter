@@ -208,6 +208,13 @@ export type ActionButtonProps = {
   className?: string;
   /** An explicit accessible name, when the drawn word is not the right one. */
   ariaLabel?: string;
+  /**
+   * A stable name for keyboard focus (F06 of the 2026-11-19 walk). An inline
+   * confirm replaces its own trigger, so the button that opened it is a new
+   * element when it comes back; `useConfirmFocus` (confirm-focus.ts) finds both
+   * by this key rather than by a ref that would point at a removed node.
+   */
+  focusKey?: string;
 };
 
 /**
@@ -240,6 +247,7 @@ export function ActionButton(props: ActionButtonProps) {
       disabled: props.disabled || busy ? true : undefined,
       "aria-busy": busy ? true : undefined,
       "aria-label": props.ariaLabel,
+      "data-focus-key": props.focusKey,
       "data-phase": phase,
       "data-token": actionToken(drawn, tone),
       className:

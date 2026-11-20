@@ -204,6 +204,90 @@ describe("TOB-2: the default area follows the place the story names", () => {
 });
 
 /*
+  F01 (live walk 2026-11-19): a Plymouth Superior Court story about Duxbury,
+  Mass. was filed under "Nearby" on the Longmont, Colorado paper. "Superior"
+  is a Nearby town, so a court named after it counted as the town. A town name
+  must not count as part of a court's name, nor when the text puts it in
+  another state, and a story that is plainly about another state gets neither
+  Nearby nor the county by default.
+*/
+describe("F01: a court name or another state is not a Nearby town", () => {
+  const PLACE = { city: "Longmont", state: "Colorado" };
+
+  it("the Clancy retrial story (Plymouth Superior Court, Duxbury, Mass.) gets no Nearby", () => {
+    const story = {
+      headline: "Judge Sets Lindsay Clancy Retrial for March 29, 2027",
+      body: "The retrial was set in Plymouth Superior Court in Duxbury, Mass.",
+    };
+    assert.notEqual(defaultStoryArea(story, PLACE), "nearby");
+    assert.equal(defaultStoryArea(story, PLACE), null);
+  });
+
+  it("'Superior Town Board' and 'in Superior' still give Nearby", () => {
+    assert.equal(
+      defaultStoryArea({ headline: "Superior Town Board meets", body: "The board met." }, PLACE),
+      "nearby",
+    );
+    assert.equal(
+      defaultStoryArea({ headline: "A new park opens", body: "The park is in Superior." }, PLACE),
+      "nearby",
+    );
+  });
+
+  it("a town written into another state is not Nearby", () => {
+    for (const story of [
+      { headline: "A shop in Louisville, Ky. closes", body: "The owner retired." },
+      { headline: "The plan covers Erie, Pennsylvania", body: "The council voted." },
+      { headline: "A Lafayette, La. festival returns", body: "Tickets are on sale." },
+    ]) {
+      assert.notEqual(defaultStoryArea(story, PLACE), "nearby", story.headline);
+    }
+  });
+
+  it("a Nearby town written into another state is not Nearby, even when the text names Colorado", () => {
+    // The F01 gap: the out-of-state flag is off because "Colorado" is named, so
+    // the Nearby match itself has to refuse a town in another state.
+    const stories = [
+      {
+        headline: "Colorado man held in Louisville, Ky.",
+        body: "He was arrested there on Friday.",
+      },
+      {
+        headline: "Erie, Pennsylvania officials met Colorado leaders",
+        body: "The two delegations compared notes.",
+      },
+      {
+        headline: "A Lafayette, La. festival returns",
+        body: "Colorado bands are on the bill.",
+      },
+    ];
+    for (const story of stories) {
+      assert.notEqual(defaultStoryArea(story, PLACE), "nearby", story.headline);
+      assert.equal(defaultStoryArea(story, PLACE), null, story.headline);
+    }
+  });
+
+  it("a Nearby town written into this paper's own state is still Nearby", () => {
+    for (const headline of ["Louisville, Colo. council votes", "Louisville, Colorado council votes"]) {
+      assert.equal(defaultStoryArea({ headline, body: "The vote was 5-2." }, PLACE), "nearby", headline);
+    }
+  });
+
+  it("a Longmont story is untouched by the out-of-state rule", () => {
+    const story = { headline: "Longmont council approves budget", body: "The vote was 5-2." };
+    assert.equal(defaultStoryArea(story, PLACE), "longmont");
+  });
+
+  it("an out-of-state story is given neither Nearby nor the county by default", () => {
+    const story = {
+      headline: "Judge sets retrial in Duxbury, Mass.",
+      body: "Prosecutors filed the case in Plymouth Superior Court.",
+    };
+    assert.equal(defaultStoryArea(story, { ...PLACE, county: "Boulder" }), null);
+  });
+});
+
+/*
   TOB-2 follow-up: the Nearby towns and "Boulder County" are the SHIPPED
   paper's geography. On 909a041a `defaultStoryArea` read them for every paper,
   so a Riverbend, Ohio story naming Erie filed under Nearby. The Riverbend "Erie"

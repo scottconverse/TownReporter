@@ -198,6 +198,68 @@ export function jobQueueCopy(
 }
 
 /**
+ * The 24-hour failure counts, as the Server page's collector found them.
+ *
+ * F25 (Nov 19 walk): "Errors in 24 h" read 0 while a desk job had failed and a
+ * follow-up check could not run. What counts is a FAILED desk job and a
+ * follow-up that could not check -- and a one-shot failover that still finished
+ * is NOT an error: the work was done on another model, so it gets its own line
+ * instead of inflating this number.
+ */
+export type FailureCounts = {
+  /** Desk jobs that failed in the last 24 hours. */
+  failed24h: number;
+  /** Follow-up checks that could not run in the last 24 hours. */
+  followupFailed24h: number;
+  /** Finished jobs that fell back to another model in the last 24 hours. */
+  fallback24h: number;
+};
+
+/**
+ * The two Server-card rows the failure counts draw: "Errors in 24 h", and --
+ * only when there is one -- the "Model switch" line that is not an error.
+ */
+export function failureCountChecks(counts: FailureCounts): HealthCheck[] {
+  const failed24h = Math.max(0, Number(counts.failed24h) || 0);
+  const followupFailed24h = Math.max(0, Number(counts.followupFailed24h) || 0);
+  const fallback24h = Math.max(0, Number(counts.fallback24h) || 0);
+  const errors24h = failed24h + followupFailed24h;
+  return [
+    {
+      id: "errors-24h",
+      label: "Errors in 24 h",
+      state: errors24h > 0 ? "warn" : "ok",
+      value: String(errors24h),
+      note:
+        errors24h > 0
+          ? [
+              failed24h > 0
+                ? `${failed24h} desk job${failed24h === 1 ? "" : "s"} failed in the last 24 hours.`
+                : "",
+              followupFailed24h > 0
+                ? `${followupFailed24h} follow-up check${followupFailed24h === 1 ? "" : "s"} could not run in the last 24 hours.`
+                : "",
+              "Open the work queue or Follow-ups to see which.",
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : "No desk job has failed and no follow-up check has been missed in the last 24 hours.",
+    },
+    ...(fallback24h > 0
+      ? [
+          {
+            id: "fallback-24h",
+            label: "Model switch",
+            state: "ok" as const,
+            value: `fell back to another model: ${fallback24h}`,
+            note: "A job finished on a different model after the chosen one could not run. This is not an error; the work was done.",
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
  * "in 4m", for a time that has not happened yet.
  *
  * Written because reusing `formatAgo` for the watchdog's next run produced

@@ -300,6 +300,12 @@ const { DeskShell } = await import(
 
       "@/components/desk-toaster": deskToasterStub,
       "@/components/escape-to-cancel": escapeToCancelUrl,
+      /*
+        F06 of the 2026-11-19 walk: the shell's "Give up the desk" question moves
+        focus through `useConfirmFocus`. These renders never open it; the
+        specifier only has to resolve.
+      */
+      "@/components/confirm-focus": inlineModule("export function useConfirmFocus() {}"),
       "@/components/desk-jobs": deskJobsUrl,
       /*
         FB1 units 3-4: the shell's Running box and the In-progress strip draw

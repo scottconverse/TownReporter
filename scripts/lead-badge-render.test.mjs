@@ -315,6 +315,11 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
       // The row's visible four-part score line (Nov 15 2026) comes from the
       // real module, so the wording asserted below is the desk's own.
       "../lib/news/lead-score.ts": await sharedModuleUrl("src/lib/news/lead-score.ts"),
+      // F01 (live walk 2026-11-19): the row's out-of-state warning and the
+      // Nearby towns it exempts come from the real modules too.
+      "../lib/news/out-of-state.ts": await sharedModuleUrl("src/lib/news/out-of-state.ts"),
+      "../lib/story-area.ts": await sharedModuleUrl("src/lib/story-area.ts"),
+      "../lib/news/dark-place.ts": await sharedModuleUrl("src/lib/news/dark-place.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
@@ -835,6 +840,17 @@ const { Chip } = await import(
       "@/components/escape-to-cancel": moduleUrl(
         await readFile(new URL("../src/components/escape-to-cancel.ts", import.meta.url), "utf8"),
         "escape-to-cancel.ts",
+        { react: REACT_URL },
+      ),
+      /*
+        F06 (2026-11-19 walk) made desk-chrome.tsx import useConfirmFocus for
+        the Queue's inline confirm. Its only import is react, so the REAL file
+        is loaded; Chip() never reads it, but the specifier has to resolve for
+        the module to load.
+      */
+      "@/components/confirm-focus": moduleUrl(
+        await readFile(new URL("../src/components/confirm-focus.ts", import.meta.url), "utf8"),
+        "confirm-focus.ts",
         { react: REACT_URL },
       ),
       /*
@@ -1374,4 +1390,29 @@ test("killed and published rows offer Edit, Hold, Kill and Draft so the server c
     assert.match(html, />Kill</);
     assert.match(html, />Draft with AI</);
   }
+});
+
+/*
+  F01 (live walk 2026-11-19): a Plymouth Superior Court story about Duxbury,
+  Mass. was filed under "Nearby" on the Longmont, Colorado paper. The row now
+  says so in plain words. Warn, never block: no press or status is asserted,
+  only the chip, because there is no block to assert.
+*/
+test("F01: a lead about another state draws the out-of-state warning chip", () => {
+  const html = renderToStaticMarkup(createElement(LeadRowView, {
+    lead: baseLead({
+      headline: "Judge Sets Lindsay Clancy Retrial for March 29, 2027",
+      why: "The retrial was set in Plymouth Superior Court in Duxbury, Mass.",
+      status: "new",
+    }),
+  }));
+  assert.match(html, /class="chip out-of-state"/);
+  assert.match(html, /This story may be about another state, not Colorado/);
+});
+
+test("F01: a Longmont lead draws no out-of-state warning", () => {
+  const html = renderToStaticMarkup(createElement(LeadRowView, {
+    lead: baseLead({ status: "new" }),
+  }));
+  assert.doesNotMatch(html, /class="chip out-of-state"/);
 });

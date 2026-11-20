@@ -20,9 +20,11 @@
  *
  * What "the real reason" means here, exactly: `deskErrorReason` (desk-toast.ts)
  * carries the sentence the server function already wrote for an editor, and
- * `failedLead` may only be words placed *before* it. There is no shape in this
- * module that can replace the reason with a generic apology, because a generic
- * apology is the silent failure with extra steps.
+ * `failedLead` may only be words placed *before* it. A raw exception -- text
+ * written for a developer, not a sentence ("blocked by walker", F05 of the
+ * 2026-11-19 walk) -- is the one thing that is not carried through: it goes to
+ * the console and the editor gets plain words. A refusal the desk wrote for an
+ * editor is never replaced.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";

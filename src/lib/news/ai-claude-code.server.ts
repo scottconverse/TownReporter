@@ -13,7 +13,8 @@
  * MCP servers are available. Prompts and transport stay owned by the desk.
  */
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
@@ -146,14 +147,59 @@ export function setNpmGlobalPrefixForTest(prefix: string | null | undefined) {
   cachedNpmGlobalPrefix = prefix;
 }
 
-function claudeOnPath(): string[] {
+/** The directories on PATH, in order, without blanks. */
+function pathDirs(): string[] {
   const raw = process.env.PATH;
   if (!raw) return [];
   return raw
     .split(delimiter)
     .map((dir) => dir.trim())
-    .filter(Boolean)
-    .map((dir) => (IS_WINDOWS ? `${dir}\\claude.exe` : `${dir}/claude`));
+    .filter(Boolean);
+}
+
+function claudeOnPath(): string[] {
+  const out: string[] = [];
+  for (const dir of pathDirs()) {
+    out.push(IS_WINDOWS ? `${dir}\\claude.exe` : `${dir}/claude`);
+    /*
+      npm's Windows install puts a `claude.cmd` shim in its prefix's bin folder
+      and the real binary beside it, at `<bin>\node_modules\…\bin\claude.exe`.
+      Node cannot spawn the shim without a shell (see the note above), so when
+      a PATH directory carries the shim, offer the real binary it stands for.
+      This is how a CLI installed under a Node that is no longer the current
+      npm prefix is still found: its bin folder is on PATH.
+    */
+    if (IS_WINDOWS && existsSync(`${dir}\\claude.cmd`)) {
+      out.push(`${dir}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Windows: the binary under every other scoop Node install.
+ *
+ * Scoop keeps each installed Node's global folder in `scoop\persist\<name>\bin`,
+ * including older ones that are no longer the current npm prefix. On this
+ * machine (Nov 2026) a new Node took over npm's prefix while the Claude Code
+ * CLI stayed under the old one, and the desk said "not set up" for days. The
+ * folders are listed, never hard-coded, and this is one directory read.
+ */
+async function scoopNodeCliCandidates(): Promise<string[]> {
+  if (!IS_WINDOWS) return [];
+  const home = process.env.USERPROFILE || process.env.HOME;
+  if (!home) return [];
+  const persist = `${home}\\scoop\\persist`;
+  let names: string[];
+  try {
+    names = await readdir(persist);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name.toLowerCase().startsWith("nodejs"))
+    .sort()
+    .map((name) => `${persist}\\${name}\\bin\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
 }
 
 export function claudeCliCandidates(): string[] {
@@ -202,7 +248,15 @@ export async function findClaudeCli(): Promise<string | null> {
   if (resolvedBin !== undefined) return resolvedBin;
   await npmGlobalPrefix();
   const { access } = await import("node:fs/promises");
-  for (const candidate of claudeCliCandidates()) {
+  /*
+    An explicit CLAUDE_CLI_PATH is the whole answer: it wins, and a miss there
+    does not fall through to a copy the operator did not name (today's rule).
+    Otherwise the scoop Node installs are checked after every current candidate.
+  */
+  const candidates = process.env.CLAUDE_CLI_PATH?.trim()
+    ? claudeCliCandidates()
+    : [...claudeCliCandidates(), ...(await scoopNodeCliCandidates())];
+  for (const candidate of candidates) {
     try {
       await access(candidate);
       // `access()` resolves a relative CLAUDE_CLI_PATH against this process's

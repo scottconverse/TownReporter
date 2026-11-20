@@ -84,9 +84,12 @@ export const DESK_PATHS: readonly string[] = [...new Set(SEARCH_PAGES.map((p) =>
  */
 export function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
   const path = item.to;
+  // A trailing slash is the same page. Without this, a path that arrived as
+  // "/desk/stats/" would match neither Stats nor an exact "/desk".
+  const here = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   const onPath = item.exact
-    ? pathname === path
-    : pathname === path || pathname.startsWith(`${path}/`);
+    ? here === path
+    : here === path || here.startsWith(`${path}/`);
   if (!onPath) return false;
   return !item.hash || hash === `#${item.hash}`;
 }

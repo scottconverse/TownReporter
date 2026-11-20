@@ -138,7 +138,12 @@ export const takeDownRegistryEntry = refuse;
 export const updateRegistryEntry = refuse;
 `),
   "@/lib/news/registry/registry-entry-fields": stubUrl("export {};\n"),
-  "@/lib/news/desk-copy": stubUrl("export function evidenceTierLabel(tier) { return String(tier ?? \"\"); }\n"),
+  // F09 (Nov 19 2026): desk.registry.tsx now also imports isWebAddress, so the
+  // stub carries it too -- the same test as the real one in desk-copy.ts.
+  "@/lib/news/desk-copy": stubUrl(`
+export function evidenceTierLabel(tier) { return String(tier ?? ""); }
+export function isWebAddress(url) { return /^https?:\\/\\//i.test(String(url ?? "").trim()); }
+`),
 };
 const deskPageUrl = await moduleUrl("src/routes/desk.registry.tsx", {
   ...imports,

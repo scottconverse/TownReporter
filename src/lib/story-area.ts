@@ -14,6 +14,7 @@
  */
 
 import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./news/dark-place.ts";
+import { looksOutOfState, nearbyTownKeepsItLocal } from "./news/out-of-state.ts";
 
 /** The stored value on `articles.area`. Stable keys; the labels are display. */
 export const STORY_AREAS = ["longmont", "nearby", "county", "colorado"] as const;
@@ -165,6 +166,18 @@ function namesPlace(text: string, place: string): boolean {
 }
 
 /**
+ * A Nearby town counts only when its own occurrence reads as this paper's town
+ * (F01, live walk 2026-11-19). The two guards live in `news/out-of-state.ts`,
+ * which the desk's out-of-state warning already reads: a court named after a
+ * town is not the town ("Plymouth Superior Court"), and a town followed by a
+ * comma and ANOTHER state is not this one ("Louisville, Ky."). A town in this
+ * paper's own state ("Louisville, Colo.") is still Nearby.
+ */
+function nearbyTownNamed(text: string, town: string, state: string): boolean {
+  return nearbyTownKeepsItLocal(text, town, state);
+}
+
+/**
  * Whether the text names this paper's county. The configured county, when Paper
  * setup has one, is "<County> County". The shipped Longmont paper also keeps
  * its literal "Boulder County" (`isLongmont`), so no other paper ever matches it.
@@ -175,10 +188,22 @@ function namesCounty(text: string, place: NewsroomPlace): boolean {
   return isLongmont(place) && namesPlace(text, "Boulder County");
 }
 
-function groundNamedIn(text: string, place: NewsroomPlace): StoryArea | null {
+function groundNamedIn(text: string, place: NewsroomPlace, outOfState: boolean): StoryArea | null {
+  // Naming the paper's own town is home whatever else the text says.
   if (namesPlace(text, place.city)) return HOME_AREA;
+  /*
+    F01 (live walk 2026-11-19): a story that clearly belongs to another state
+    is given neither the county nor Nearby by default -- the Plymouth Superior
+    Court story was filed under Nearby only because "Superior" is a town here.
+  */
+  if (outOfState) return null;
   if (namesCounty(text, place)) return "county";
-  if (isLongmont(place) && NEARBY_TOWNS.some((town) => namesPlace(text, town))) return "nearby";
+  if (
+    isLongmont(place) &&
+    NEARBY_TOWNS.some((town) => nearbyTownNamed(text, town, place.state))
+  ) {
+    return "nearby";
+  }
   return null;
 }
 
@@ -206,5 +231,10 @@ export function defaultStoryArea(
     state: paper.state ?? "",
     county: paper.county ?? null,
   };
-  return groundNamedIn(story.headline, place) ?? groundNamedIn(story.body, place);
+  const nearbyTowns = isLongmont(place) ? NEARBY_TOWNS : [];
+  const outOfState = looksOutOfState(story, place, nearbyTowns);
+  return (
+    groundNamedIn(story.headline, place, outOfState) ??
+    groundNamedIn(story.body, place, outOfState)
+  );
 }

@@ -49,7 +49,9 @@ import type {
   EvidenceCheckState,
 } from "@/lib/news/evidence-check-state";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
-import { areaPills, cleanStoryArea, defaultStoryArea, HOME_AREA, type StoryArea } from "@/lib/story-area";
+import { areaPills, cleanStoryArea, defaultStoryArea, HOME_AREA, NEARBY_TOWNS, type StoryArea } from "@/lib/story-area";
+import { OUT_OF_STATE_WARNING, looksOutOfState } from "@/lib/news/out-of-state";
+import { isLongmont } from "@/lib/news/dark-place";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -338,6 +340,17 @@ function StoryPage() {
   const [areaChoice, setAreaChoice] = useState<StoryArea | null>(null);
   const area: StoryArea =
     areaChoice ?? defaultStoryArea({ headline, body }, paperIdentity) ?? HOME_AREA;
+  /*
+    F01 (live walk 2026-11-19): a Plymouth Superior Court story about Duxbury,
+    Mass. was filed under Nearby on this Colorado paper. Warn, never block:
+    this never changes a status or stops the press; it puts one plain line on
+    the draft so the editor decides before they publish.
+  */
+  const storyLooksOutOfState = looksOutOfState(
+    { headline, body },
+    paperIdentity,
+    isLongmont(paperIdentity) ? NEARBY_TOWNS : [],
+  );
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
@@ -4516,6 +4529,14 @@ function StoryPage() {
           the claims-of-absence test pins.
         */
         <div className="astra-publish-bar" id="astra-publish-bar">
+          {/*
+            F01 (live walk 2026-11-19): warn, never block. The draft names a
+            place in another state and nothing of this paper's own ground, so
+            it may not belong on this paper. The press still works unchanged.
+          */}
+          {storyLooksOutOfState ? (
+            <span className="note out-of-state">{OUT_OF_STATE_WARNING}</span>
+          ) : null}
           <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
             <PublishTranscriptNotice notice={data?.meetingPublishNotice} />
@@ -4574,6 +4595,7 @@ function StoryPage() {
                     tone="primary"
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
+                    focusKey="publish-confirm-trigger"
                     disabled={publish.isPending || !publishConfirm.enabled}
                     onAct={() => {
                       if (!sectionReady) {

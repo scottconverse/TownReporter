@@ -409,6 +409,16 @@ export const sharesTightName = () => false;
 */
 sharedHelperUrls["@/lib/desk/queue-count-refresh"] = await moduleUrl("src/lib/desk/queue-count-refresh.ts");
 
+/*
+  `@/components/confirm-focus` -- F06 (2026-11-19 walk) made `desk-chrome.tsx`
+  and `ops-panels.tsx` import `useConfirmFocus` for the Queue's inline confirm.
+  Its only import is `react`, which resolves from `node_modules`, so the REAL
+  file is loaded, the same reasoning as `running-head-label.ts` above.
+
+  A fixture's own `imports[specifier]` still wins over this entry.
+*/
+sharedHelperUrls["@/components/confirm-focus"] = await moduleUrl("src/components/confirm-focus.ts");
+
 // lead-score.ts (method B, Nov 13 2026): desk-copy.ts and desk-chrome.tsx import it; it has no imports, so the REAL file is loaded.
 sharedHelperUrls["./lead-score.ts"] = await moduleUrl("src/lib/news/lead-score.ts");
 sharedHelperUrls["@/lib/news/lead-score"] = sharedHelperUrls["./lead-score.ts"];

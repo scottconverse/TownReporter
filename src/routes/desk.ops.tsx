@@ -39,6 +39,7 @@ import {
   namedOutletsRows,
   paperSetupRows,
   recentlyDeletedRows,
+  researchToolRow,
   routineNoticeRows,
   sectionsRows,
   timeBudgetRows,
@@ -64,6 +65,7 @@ import { getProviderStatuses } from "@/lib/news/provider-login";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 import { libreOfficeStatusFn } from "@/lib/news/libreoffice-api";
+import { claudeCliStatusFn } from "@/lib/news/claude-cli-status";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
@@ -216,6 +218,18 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     enabled: isOwner,
     refetchInterval: isOwner ? 30_000 : false,
   });
+  /*
+    F02 (live walk, Nov 19 2026): the Health card also says whether the research
+    tool (the Claude Code CLI) is on this machine. It only looks for the file,
+    and it is the desk's own lookup (`findClaudeCli`), so a red row here and a
+    draft note saying "the research tool is not set up" cannot disagree.
+  */
+  const cli = useQuery({
+    queryKey: ["claude-cli-status"],
+    queryFn: () => claudeCliStatusFn(),
+    enabled: isOwner,
+    refetchInterval: isOwner ? 30_000 : false,
+  });
   const paper = useQuery({
     queryKey: ["paper-config-for-setup"],
     queryFn: () => getPaperConfigForEditor(),
@@ -343,7 +357,7 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
 
   return {
     "writing-models": ladder,
-    health: bodyOf(health, healthRows),
+    health: pairBody(health, cli, (h, c) => [...healthRows(h), researchToolRow(c)]),
     "paper-setup": paperSetupBody(paper, sections, setupState),
     "recently-deleted": bodyOf(trash, recentlyDeletedRows),
     sections: bodyOf(sections, sectionsRows),

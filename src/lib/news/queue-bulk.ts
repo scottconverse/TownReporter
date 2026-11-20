@@ -120,7 +120,12 @@ function refusalIn(value: unknown): string | null {
 export function bulkStatusSummary(report: Pick<BulkStatusReport, "status" | "done" | "failures">): string {
   const head = `${BULK_STATUS_PAST[report.status]} ${report.done} lead${report.done === 1 ? "" : "s"}.`;
   if (report.failures.length === 0) return head;
-  const failed = `${report.failures.length} failed`;
+  /*
+    F04 of the 2026-11-19 walk: the bar's Kill/Hold failed and nothing was said.
+    The count is named as leads ("2 leads failed"), not as a bare number, so the
+    one sentence the editor gets says how many did not take.
+  */
+  const failed = `${report.failures.length} lead${report.failures.length === 1 ? "" : "s"} failed`;
   const first = report.failures[0];
   return first ? `${head} ${failed}: ${first}` : `${head} ${failed}.`;
 }
@@ -214,23 +219,23 @@ export function bulkDeleteReasonLines(
 }
 
 /**
- * G27-KILL-3 (owner, Oct 27 2026: "remove the reason pop-up. Kill shows only a
- * small Undo strip"): a bulk Kill no longer asks "Why?". It kills at once and
- * shows the one Undo strip, like the row's own Kill and the K key. The AI finds
- * duplicates itself, so no reason is needed. The confirm words stay below for
- * the day the owner wants the question back.
+ * F22/F04 of the 2026-11-19 walk: the gold bar's Kill was one press over every
+ * ticked lead, with no question. The bar asks once, before anything is killed
+ * ("Kill 3 leads?"); the row's own Kill and the X key stay instant, with their
+ * Undo, because those act on one lead the editor is looking at.
+ *
+ * G27-KILL-3 (owner, Oct 27 2026) removed the old "Why?" reason prompt. The
+ * confirm is back, and it asks the question only -- the reason box under it is
+ * still optional.
  */
-export function bulkKillNeedsConfirm(_count: number): boolean {
-  return false;
+export function bulkKillNeedsConfirm(count: number): boolean {
+  return count > 0;
 }
 
 /** The words of that confirm, for one lead or for several (TMA-2). */
 export function bulkKillConfirmWords(count: number): { prompt: string; confirm: string } {
-  if (count === 1) {
-    return { prompt: "Killing 1 lead. Why? The reason is written on it.", confirm: "Yes, kill 1" };
-  }
   return {
-    prompt: `Killing ${count} leads. Why? One reason is written on all of them.`,
+    prompt: `Kill ${count} lead${count === 1 ? "" : "s"}?`,
     confirm: `Yes, kill ${count}`,
   };
 }

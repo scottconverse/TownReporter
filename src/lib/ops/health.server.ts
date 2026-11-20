@@ -16,6 +16,7 @@ import {
   formatBytes,
   formatIn,
   formatUptime,
+  failureCountChecks,
   jobQueueCopy,
   jobsState,
   publicState,
@@ -111,7 +112,15 @@ async function checkDatabase(): Promise<HealthCheck[]> {
         id: "db-rows",
         label: "Contents",
         state: "ok",
-        value: `${c?.articles ?? 0} published · ${c?.drafts ?? 0} drafts · ${c?.leads ?? 0} leads · ${c?.sources ?? 0} sources`,
+        /*
+          Walk F15: this is a raw `count(*)` over the drafts table -- every
+          saved draft record, one per version and including those whose lead is
+          killed, held or already published. The Drafts screen lists one row per
+          LIVE lead (5 against 679 here on the live desk), so the same word
+          "drafts" was two different units. The desk's word "drafts" stays
+          (the removed-text guard protects it); the unit is said beside it.
+        */
+        value: `${c?.articles ?? 0} published · ${c?.drafts ?? 0} drafts (every saved version) · ${c?.leads ?? 0} leads · ${c?.sources ?? 0} sources`,
       },
     ];
   } catch (err) {
@@ -156,6 +165,8 @@ async function checkJobs(): Promise<HealthCheck[]> {
       latest_failed: number;
       historical_failed: number;
       failed_24h: number;
+      followup_failed_24h: number;
+      fallback_24h: number;
     }>`
       with latest_terminal_by_kind as (
         select distinct on (kind) kind, status
@@ -168,13 +179,33 @@ async function checkJobs(): Promise<HealthCheck[]> {
         (select count(*)::int from desk_jobs where status = 'failed') as historical_failed,
         (select count(*)::int from desk_jobs
           where status = 'failed'
-            and coalesce(finished_at, updated_at) > now() - interval '24 hours') as failed_24h
+            and coalesce(finished_at, updated_at) > now() - interval '24 hours') as failed_24h,
+        /*
+          F25 (Nov 19 walk): a follow-up check that could not run is a desk
+          error too. It is stored on the follow-up row, not as a failed
+          desk_jobs row, so the old count read 0 while the Follow-ups screen
+          showed an error.
+        */
+        (select count(*)::int from follow_ups
+          where last_state = 'could-not-check'
+            and coalesce(last_run_at, updated_at) > now() - interval '24 hours') as followup_failed_24h,
+        /*
+          A one-shot failover that still finished is NOT an error: the work
+          was done on another model. It is counted on its own line instead of
+          inflating "Errors in 24 h".
+        */
+        (select count(*)::int from desk_jobs
+          where coalesce(failover_note, '') <> ''
+            and status = 'completed'
+            and coalesce(finished_at, updated_at) > now() - interval '24 hours') as fallback_24h
     `;
     const running = rows.filter((r) => r.status === "running").reduce((a, r) => a + r.n, 0);
     const queued = rows.filter((r) => r.status === "queued").reduce((a, r) => a + r.n, 0);
     const latestFailed = Number(failureCounts?.latest_failed ?? 0);
     const historicalFailed = Number(failureCounts?.historical_failed ?? 0);
     const failed24h = Number(failureCounts?.failed_24h ?? 0);
+    const followupFailed24h = Number(failureCounts?.followup_failed_24h ?? 0);
+    const fallback24h = Number(failureCounts?.fallback_24h ?? 0);
     const queueCopy = jobQueueCopy(running, queued, latestFailed, historicalFailed);
     const runningRows = rows.filter((r) => r.status === "running");
     const oldestRunning = runningRows
@@ -216,23 +247,18 @@ async function checkJobs(): Promise<HealthCheck[]> {
         same query as the queue above so the two can never disagree about what
         failed.
 
-        What it counts is failed desk jobs, and the note says so: this app's
-        error LOG is the node process's redirected stderr
-        (ops/start-townreporter.ps1:143), which carries no timestamps and rolls
-        over when the process restarts, so it cannot answer a 24-hour window.
-        The work queue is the desk's own record of work that failed, with the
-        time it failed at.
+        What it counts is failed desk jobs and follow-up checks that could not
+        run, and the note says so: this app's error LOG is the node process's
+        redirected stderr (ops/start-townreporter.ps1:143), which carries no
+        timestamps and rolls over when the process restarts, so it cannot answer
+        a 24-hour window. The work queue and Follow-ups are the desk's own
+        records, with the time each failed at.
+
+        The counts-to-rows decision lives in `failureCountChecks` (health.ts)
+        because that is the part with the rule in it -- and it is tested there
+        without a database.
       */
-      {
-        id: "errors-24h",
-        label: "Errors in 24 h",
-        state: failed24h > 0 ? "warn" : "ok",
-        value: String(failed24h),
-        note:
-          failed24h > 0
-            ? "Failed desk jobs in the last 24 hours. Open the work queue to see which."
-            : "No desk job has failed in the last 24 hours.",
-      },
+      ...failureCountChecks({ failed24h, followupFailed24h, fallback24h }),
     ];
   } catch {
     return [

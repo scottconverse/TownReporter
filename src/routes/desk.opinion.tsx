@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
+import { useConfirmFocus } from "@/components/confirm-focus";
+import { deskErrorHasMessage, deskErrorReason } from "@/components/desk-toast";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { DeskJobCard } from "@/components/JobCard";
@@ -180,6 +182,17 @@ function OpinionPage() {
   const [showAi, setShowAi] = useState(false);
   // Which row is asking "are you sure". Null when nothing is.
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  /*
+    F06 of the 2026-11-19 walk: on Opinion the Delete button is removed when its
+    question opens, so focus fell to "Skip to desk" -- once on open and again on
+    Keep. The keys are per row, because one shared ref would land on another row.
+  */
+  useConfirmFocus(
+    confirmId !== null,
+    confirmId === null
+      ? null
+      : { trigger: `opinion-delete-${confirmId}`, safe: `opinion-delete-${confirmId}-keep` },
+  );
   // The trash id of the last delete, so Undo is here rather than on Server.
   const [undo, setUndo] = useState<number | null>(null);
 
@@ -977,12 +990,12 @@ function OpinionPage() {
                               (discard.isPending && discard.variables === r.id),
                             problem:
                               remove.isError && remove.variables === r.draft_id
-                                ? remove.error instanceof Error
-                                  ? remove.error.message
+                                ? deskErrorHasMessage(remove.error)
+                                  ? deskErrorReason(remove.error, "delete that editorial")
                                   : "That did not delete."
                                 : discard.isError && discard.variables === r.id
-                                  ? discard.error instanceof Error
-                                    ? discard.error.message
+                                  ? deskErrorHasMessage(discard.error)
+                                    ? deskErrorReason(discard.error, "clear that editorial")
                                     : "That did not clear."
                                   : /* Unit UI1a3, finding 1: both of these server
                                        functions answer `{ ok: false, error }`
@@ -1006,6 +1019,7 @@ function OpinionPage() {
                         <ActionButton
                           tone="quiet"
                           phase="idle"
+                          focusKey={`opinion-delete-${r.id}-keep`}
                           disabled={remove.isPending || discard.isPending}
                           disabledReason={
                             remove.isPending || discard.isPending
@@ -1021,6 +1035,7 @@ function OpinionPage() {
                       <ActionButton
                         tone="danger"
                         phase="idle"
+                        focusKey={`opinion-delete-${r.id}`}
                         disabled={remove.isPending || discard.isPending}
                         onAct={() => setConfirmId(r.id)}
                       >

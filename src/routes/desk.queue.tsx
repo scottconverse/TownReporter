@@ -42,6 +42,7 @@ import {
   editorActionError,
   mergeFocusSelection,
   PRINTED_TAB_NOTE,
+  ALL_TAB_NOTE,
   printedDupChip,
   editorTitle,
   queueTabCountText,
@@ -49,7 +50,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { queueDropTicks, queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   bulkKillConfirmWords,
@@ -70,7 +71,13 @@ import { createLeadWrites } from "@/lib/lead-writes-in-flight";
 import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
-import { deskErrorReason, deskToast, dismissDeskToast } from "@/components/desk-toast";
+import { useConfirmFocus } from "@/components/confirm-focus";
+import {
+  deskErrorHasMessage,
+  deskErrorReason,
+  deskToast,
+  dismissDeskToast,
+} from "@/components/desk-toast";
 import {
   KILL_TOAST_MS,
   killPress,
@@ -95,6 +102,12 @@ import { myDesk } from "@/lib/news/claim";
 import { dismissDraftBatch, getDraftBatch, visibleDraftBatchItems, type DraftBatchRuntime } from "@/lib/news/draft-batch";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
+
+/**
+ * F22 of the 2026-11-19 walk: the S key's own confirm, so a second S replaces
+ * the question rather than stacking another one.
+ */
+const QUEUE_START_CONFIRM_TOAST_ID = "desk-queue-start-confirm";
 
 /*
   The drawn tab set (README "3. Queue") and the three orders come from
@@ -430,6 +443,9 @@ function QueuePage() {
       statusOptimistic.rollback(context, input);
     },
     after: async (_result, input) => {
+      // A killed or held lead leaves the Queue; it must not stay ticked for Start.
+      if (input.status === "killed" || (input.status === "held" && !input.release))
+        setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [input.id]));
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (input.release) setReleasedId(input.id);
     },
@@ -516,7 +532,10 @@ function QueuePage() {
     mutationFn: (input: { id: number; killReason: string; override?: string[]; restore?: RestoreStatus }) =>
       setLeadStatus({ data: { ...input, status: "killed" } }),
     warningAction: "Kill",
-    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: (_result, input) => {
+      setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [input.id]));
+      return qc.invalidateQueries({ queryKey: ["leads"] });
+    },
     pending: "Killing…",
     done: () => "The lead moved to Killed.",
     undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore)); } }),
@@ -524,7 +543,7 @@ function QueuePage() {
   });
   const remove = useMutation({
     mutationFn: (id: number) => deleteLead({ data: id }),
-    onSuccess: (res) => {
+    onSuccess: (res, id) => {
       if (!res?.ok) {
         setDeleteError(res?.error ?? "That did not delete.");
         setUndo(null);
@@ -533,6 +552,7 @@ function QueuePage() {
         // durable net; this is the one an editor will actually reach for.
         setDeleteError("");
         setUndo(res.trashId);
+        setSelectedDeleteLeadIds((ids) => queueDropTicks(ids, [id]));
       }
       void qc.invalidateQueries({ queryKey: ["leads"] });
     },
@@ -543,6 +563,15 @@ function QueuePage() {
   const [bulkDeleteNotice, setBulkDeleteNotice] = useState("");
   const [selectedDeleteLeadIds, setSelectedDeleteLeadIds] = useState<number[]>([]);
   const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
+  /*
+    F06 of the 2026-11-19 walk: opening or closing the bar's inline confirms took
+    the keyboard back to the top of the page. The triggers and their safe
+    buttons carry `focusKey`s; the hook moves focus between them.
+  */
+  useConfirmFocus(confirmingBulkDelete, {
+    trigger: "queue-bulk-delete",
+    safe: "queue-bulk-delete-keep",
+  });
   const [undo, setUndo] = useState<number | null>(null);
   /**
    * True only while the bulk strip is fanning a status change out over the
@@ -999,19 +1028,38 @@ function QueuePage() {
       case "move":
         move(cursor + action.delta);
         break;
-      case "start":
+      case "start": {
         if (!lead) break;
-        setDraftNotices((notices) => {
-          const next = { ...notices };
-          delete next[lead.id];
-          return next;
-        });
-        queueDraft.mutate({
-          leadId: lead.id,
-          modelChoice: "auto",
-          modelEffort: defaultModelEffort("auto"),
+        /*
+          F22 of the 2026-11-19 walk: S started a paid AI draft on one keystroke.
+          The key asks first now, in the desk's own toast-confirm shape (the same
+          one a warning's "Continue anyway" uses); the selected lead is named so
+          a stray S is answerable, and the press that starts the draft is the
+          only thing the toast's button does.
+        */
+        const startedLead = lead;
+        deskToast(`Start an AI story from “${startedLead.headline}”? This uses the writing model.`, {
+          tone: "warn",
+          duration: Infinity,
+          id: QUEUE_START_CONFIRM_TOAST_ID,
+          action: {
+            label: "Start story",
+            run: () => {
+              setDraftNotices((notices) => {
+                const next = { ...notices };
+                delete next[startedLead.id];
+                return next;
+              });
+              queueDraft.mutate({
+                leadId: startedLead.id,
+                modelChoice: "auto",
+                modelEffort: defaultModelEffort("auto"),
+              });
+            },
+          },
         });
         break;
+      }
       case "hold":
         // TIA-2: the same press the row's Hold makes, so the keyboard's H and
         // the button beside it both leave a way back the Undo can read.
@@ -1342,6 +1390,11 @@ function QueuePage() {
    * answer ("no reason"), which is the design's fast path.
    */
   const [bulkKillReason, setBulkKillReason] = useState<string | null>(null);
+  // F06: the same focus rule for the Kill question the bar now asks (F04/F22).
+  useConfirmFocus(bulkKillReason !== null, {
+    trigger: "queue-bulk-kill",
+    safe: "queue-bulk-kill-keep",
+  });
   // DLG-2: Escape does what Keep does, for both bulk confirms. Keep on the
   // delete confirm is disabled while the delete is saving, so Escape waits too.
   useEscapeToCancel(bulkKillReason !== null, () => setBulkKillReason(null));
@@ -1415,9 +1468,13 @@ function QueuePage() {
   const bulkProblemFor = (status: "held" | "killed"): string | null => {
     if (bulkStatus.variables?.status !== status) return null;
     if (bulkStatus.isError) {
-      return bulkStatus.error instanceof Error
-        ? bulkStatus.error.message
-        : "That change did not reach the desk.";
+      // F05 of the 2026-11-19 walk: the words beside the bar are the desk's, not
+      // a raw exception's ("blocked by walker").
+      if (!deskErrorHasMessage(bulkStatus.error)) return "That change did not reach the desk.";
+      return deskErrorReason(
+        bulkStatus.error,
+        status === "held" ? "hold those leads" : "kill those leads",
+      );
     }
     const failures = bulkStatus.data?.failures ?? [];
     return failures.length ? failures.join(" ") : null;
@@ -1606,6 +1663,8 @@ function QueuePage() {
       </div>
       {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
       <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
+      {/* Walk F15: the five tabs do not add up to All, so the strip says why. */}
+      <span className="queue-tab-note">{ALL_TAB_NOTE}</span>
 
       {/*
         FB6, item 3: the scan's own card, in place, under the press that started
@@ -1763,6 +1822,7 @@ function QueuePage() {
                 </ActionButton>
                 <ActionButton
                   tone="quiet-danger"
+                  focusKey="queue-bulk-kill"
                   phase={rowActionPhase({
                     isPending: bulkStatus.isPending && bulkStatus.variables?.status === "killed",
                     problem: bulkProblemFor("killed"),
@@ -1807,7 +1867,11 @@ function QueuePage() {
                     >
                       {bulkKillConfirmWords(selectedLeads.length).confirm}
                     </InkButton>
-                    <InkButton tone="quiet" onClick={() => setBulkKillReason(null)}>
+                    <InkButton
+                      tone="quiet"
+                      focusKey="queue-bulk-kill-keep"
+                      onClick={() => setBulkKillReason(null)}
+                    >
                       Keep
                     </InkButton>
                   </div>
@@ -1835,12 +1899,11 @@ function QueuePage() {
                       tone="danger"
                       phase={rowActionPhase({
                         isPending: bulkRemove.isPending,
-                        problem:
-                          bulkRemove.isError
-                            ? bulkRemove.error instanceof Error
-                              ? bulkRemove.error.message
-                              : "Could not delete those leads."
-                            : null,
+                        problem: bulkRemove.isError
+                          ? deskErrorHasMessage(bulkRemove.error)
+                            ? deskErrorReason(bulkRemove.error, "delete those leads")
+                            : "Could not delete those leads."
+                          : null,
                       })}
                       workingLabel="Deleting…"
                       onAct={() => bulkRemove.mutate(selectedDeleteLeads)}
@@ -1850,6 +1913,7 @@ function QueuePage() {
                     <ActionButton
                       tone="quiet"
                       phase="idle"
+                      focusKey="queue-bulk-delete-keep"
                       disabled={bulkRemove.isPending}
                       disabledReason={
                         bulkRemove.isPending ? "The delete is still being saved." : null
@@ -1860,7 +1924,11 @@ function QueuePage() {
                     </ActionButton>
                   </div>
                 ) : (
-                  <InkButton tone="quiet-danger" onClick={() => setConfirmingBulkDelete(true)}>
+                  <InkButton
+                    tone="quiet-danger"
+                    focusKey="queue-bulk-delete"
+                    onClick={() => setConfirmingBulkDelete(true)}
+                  >
                     Delete selected ({selectedDeleteLeads.length})
                   </InkButton>
                 )}

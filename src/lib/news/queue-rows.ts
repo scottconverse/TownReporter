@@ -271,6 +271,16 @@ export function queueRowTick(picked: readonly number[], leadId: number, selected
   return selected ? [...picked.filter((id) => id !== leadId), leadId] : picked.filter((id) => id !== leadId);
 }
 
+/**
+ * Untick leads a press just moved off the Queue (Scott, Nov 19 2026: he ticked
+ * 12 leads, pressed Kill, ticked 5 more, and Start said "Start 17 stories").
+ * Start drafts every ticked lead, also one not on screen (#407), so a lead that
+ * was killed, held or deleted must not stay ticked out of sight.
+ */
+export function queueDropTicks(picked: readonly number[], leadIds: readonly number[]): number[] {
+  return picked.filter((id) => !leadIds.includes(id));
+}
+
 export function queueSelectAllShown(shownIds: readonly number[], checked: boolean): number[] {
   return checked ? [...shownIds] : [];
 }

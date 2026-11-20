@@ -145,7 +145,17 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
     */
     const outstanding = Math.max(0, Number(facts.unreviewed_claims) || 0);
     const accepted = Math.max(0, Number(facts.unreviewed_claims_accepted_count) || 0);
-    const needsYou = readiness.state === "to-check" || readiness.state === "not-checked" || (outstanding > 0 && accepted < outstanding);
+    /*
+      A "Not ready" draft is one the editor has to act on: the publish gate has
+      named a reason it cannot print. Counting only to-check/not-checked left
+      those rows in no filter at all (All 5, Running 0, Needs you 4, Failed 0),
+      so the draft was invisible on every tab but All.
+    */
+    const needsYou =
+      key === "not-ready" ||
+      readiness.state === "to-check" ||
+      readiness.state === "not-checked" ||
+      (outstanding > 0 && accepted < outstanding);
     return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou };
   }
 

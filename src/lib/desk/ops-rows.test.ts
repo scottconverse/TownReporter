@@ -13,6 +13,7 @@ import {
   paperSetupRows,
   perCallText,
   recentlyDeletedRows,
+  researchToolRow,
   routineNoticeRows,
   secondsText,
   sectionsRows,
@@ -187,6 +188,26 @@ describe("Server card rows (CX2)", () => {
     assert.equal(rows.length, 4);
   });
 
+  it("Health: a model switch that still finished is its own line, not an error (F25)", () => {
+    const rows = healthRows({
+      checks: [
+        { id: "db", label: "Database", state: "ok", value: "OK" },
+        { id: "errors-24h", label: "Errors in 24 h", state: "warn", value: "2", note: "one job and one follow-up" },
+        {
+          id: "fallback-24h",
+          label: "Model switch",
+          state: "ok",
+          value: "fell back to another model: 1",
+          note: "The work was done on another model.",
+        },
+      ],
+    });
+    assert.equal(value(rows, "Model switch"), "fell back to another model: 1");
+    assert.equal(row(rows, "Model switch").tone, "plain", "a fallback is not an error chip");
+    // The errors row is unchanged by the fallback: it is not counted there.
+    assert.equal(value(rows, "Errors in 24 h"), "2");
+  });
+
   it("Health: a backup and an error count that answered 'nothing yet' are not 'Not set'", () => {
     /*
       The bug CX3 fixes, in one case: a fresh desk's backup row must print what
@@ -231,6 +252,42 @@ describe("Server card rows (CX2)", () => {
     assert.equal(value(rows, "Database"), "Down");
     assert.equal(row(rows, "Database").tone, "fail");
     assert.equal(row(rows, "Disk").tone, "warn");
+  });
+
+  it("Health: a missing research tool is red only while the ladder needs it (F02)", () => {
+    /*
+      The live paper said "the research tool is not set up on this computer" in
+      draft notes for days and the Health card said nothing. The row is the
+      lookup's answer: red with those words when the CLI is missing and the
+      research writer is on the drafting ladder; otherwise quiet.
+    */
+    const missing = researchToolRow({ found: false, path: null, researchWriterInLadder: true });
+    assert.equal(missing.tone, "fail");
+    assert.equal(missing.value, "Research tool not found on this computer. Drafts skip the research step.");
+
+    const found = researchToolRow({
+      found: true,
+      path: "C:\\Users\\scott\\scoop\\persist\\nodejs-lts\\bin\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe",
+      researchWriterInLadder: true,
+    });
+    assert.equal(found.tone, "plain");
+    assert.equal(found.value, "C:\\Users\\scott\\scoop\\persist\\nodejs-lts\\bin\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe");
+
+    /* A desk whose drafts do not run the research writer is not warned. */
+    const unused = researchToolRow({ found: false, path: null, researchWriterInLadder: false });
+    assert.equal(unused.tone, "plain");
+    assert.equal(unused.value, "Not used");
+  });
+
+  it("Health: the research-tool row joins the four drawn rows", () => {
+    const rows = [...healthRows({ checks: [] }), researchToolRow({ found: false, path: null, researchWriterInLadder: true })];
+    assert.deepEqual(rows.map((r) => r.label), [
+      "Database",
+      "Disk",
+      "Last backup",
+      "Errors in 24 h",
+      "Research tool",
+    ]);
   });
 
   it("Paper setup: the paper's own name, town and editor", () => {
