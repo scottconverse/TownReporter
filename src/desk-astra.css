@@ -9417,7 +9417,18 @@
   Nothing here is a new colour or a new type scale; every value comes from the
   variables the rest of the desk already uses.
 */
+/* Every list heading is the full width of its section, in one shape.
+   `.desk-ltr summary:not(.btn)` draws a bare summary as a quiet button --
+   a 1px edge and `width: fit-content` -- which made each heading a different
+   width depending on its own words (Scott: "unbelievably ugly"). The heading
+   here is the section's title bar, not a button, so it keeps the full width
+   and no edge of its own. */
 .desk-ltr.astra .registry-sec-summary {
+  display: block;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  border: 0;
   list-style: none;
   cursor: pointer;
 }
@@ -9466,10 +9477,14 @@
   font: inherit;
 }
 
-/* Entries: a readable grid, one column on a narrow screen. */
+/* Entries: a readable grid, one column on a narrow screen.
+   `auto-fit` collapses the tracks a list does not need, so one card fills its
+   section and two or more sit side by side -- a lone card no longer leaves
+   half the page empty beside it. At 375px the track is the full width, so
+   there is one column and no sideways scroll. */
 .desk-ltr.astra .astra-plain.registry-cards {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   gap: 16px;
   padding: 16px 24px 0;
 }
@@ -9477,16 +9492,6 @@
   border: 0;
   padding: 0;
   min-width: 0;
-}
-@media (min-width: 860px) {
-  .desk-ltr.astra .astra-plain.registry-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1400px) {
-  .desk-ltr.astra .astra-plain.registry-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 .desk-ltr.astra .registry-card {
   display: flex;
@@ -9504,6 +9509,13 @@
   justify-content: space-between;
   gap: 8px;
 }
+.desk-ltr.astra .registry-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
 .desk-ltr.astra .registry-card-head h3 {
   margin: 0;
   overflow-wrap: anywhere;
@@ -9520,7 +9532,7 @@
 .desk-ltr.astra .registry-tag {
   padding: 2px 6px;
   border: 1px solid var(--line);
-  font-size: calc(0.8125rem * var(--ts));
+  font-size: calc(0.875rem * var(--ts));
   font-weight: 700;
 }
 .desk-ltr.astra .registry-facts {

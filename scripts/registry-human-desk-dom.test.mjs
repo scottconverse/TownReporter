@@ -9,8 +9,9 @@
   - every entry card shows the whole entry: organization, service, category,
     description, every phone, address with a map link, hours, website as a new
     tab, eligibility, fees, languages, and the source page with its capture
-    date; a field the source did not state says "Not listed on the source page."
-    and a missing source says "No source page recorded.";
+    date; a field the source did not state says "Not listed on the source page.",
+    and an entry with no source page says "Not recorded." (it never claims a
+    page listed nothing when there is no page);
   - a proposal says what kind of change it is, the old and new values side by
     side, the page's own sentence, the source link, the capture date and the
     entry it belongs to, with Accept / Reject / Edit;
@@ -419,9 +420,22 @@ test("every entry card shows the whole entry, and empty fields say so in words",
 
   const empty = page.card("Night Shelter");
   const emptyText = empty.textContent.replace(/\s+/g, " ");
-  assert.ok(emptyText.includes("Not listed on the source page."), "an empty field says so");
-  assert.ok(emptyText.includes("No source page recorded."), "a missing source says so");
+  assert.ok(emptyText.includes("Not recorded."), "an entry with no source page says its empty fields were not recorded");
+  assert.ok(
+    !emptyText.includes("Not listed on the source page."),
+    "it never claims a source page listed nothing when there is no source page",
+  );
+  assert.ok(emptyText.includes("No category"), "an entry with no category says so");
   assert.doesNotMatch(emptyText, /^Old Mission — Night Shelter$/, "the card is more than a name");
+});
+
+test("an entry with a source page still says a missing field was not listed there", async (t) => {
+  setup(desk({ published: [{ ...FULL, serviceId: 9, fees: null }], publishedCount: 1, waiting: [], changes: [] }));
+  const page = await mount();
+  t.after(() => page.close());
+
+  const text = page.card("Food Pantry").textContent.replace(/\s+/g, " ");
+  assert.ok(text.includes("Not listed on the source page."), "the source page exists and does not list the fee");
 });
 
 test("a proposal shows the kind, the old and new values, the page's sentence, the source and the entry", async (t) => {

@@ -87,8 +87,8 @@ const CHANGE_KIND_LABELS: Record<string, string> = {
   field_change: "Field change",
   eligibility_change: "Eligibility change",
   hours_change: "Hours change",
-  closure: "Closed",
-  move: "Moved",
+  closure: "Closure",
+  move: "Move",
   contact_change: "Contact change",
   funding_change: "Funding change",
   non_informational: "Not a factual change",
@@ -126,6 +126,10 @@ export const Route = createFileRoute("/desk/registry")({
 });
 
 const field = "w-full border border-rule bg-paper p-2 text-sm";
+
+/** The page's own sentence: what this screen is a list of. */
+const LEDE =
+  "Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches.";
 
 /** The id of the one datalist every entry form draws its categories from. */
 const CATEGORY_LIST_ID = "registry-category-options";
@@ -447,6 +451,8 @@ function RegistryDeskPage() {
   }, [openedFromList, published.length]);
   // Bumped after an add so the add form remounts empty.
   const [addVersion, setAddVersion] = useState(0);
+  // The add form is closed until an editor asks for it.
+  const [addOpen, setAddOpen] = useState(false);
   // The last write's word to the editor. Held here rather than read off a
   // mutation so a later action replaces it instead of leaving the older
   // mutation's "Saved." sitting under the newer one.
@@ -485,6 +491,7 @@ function RegistryDeskPage() {
     mutationFn: (fields: RegistryEntryFields) => addRegistryEntry({ data: { fields } }),
     onSuccess: () => {
       setAddVersion((version) => version + 1);
+      setAddOpen(false);
       setActionError(null);
       setActionMessage("Added. It is in the waiting list.");
       return qc.invalidateQueries({ queryKey: ["registry-desk"] });
@@ -583,7 +590,7 @@ function RegistryDeskPage() {
     <DeskShell
       title="Registry"
       kicker="What the scan found in the community resource directory"
-      lede="Every entry, every change the scan detected in a registry source, and the sources it watches — with the facts, the source page and the date for each one."
+      lede={`${LEDE} Every entry, every change, with the facts, the source page and the date for each one.`}
     >
       <p className="note">
         The scan applies and publishes what it finds in a registry source by itself, and lists those
@@ -839,19 +846,37 @@ function RegistryDeskPage() {
               </>
             )}
             <div className="mt-6">
-              <h3 className="font-display text-xl">Add an entry</h3>
-              <p className="wire-sum">
-                It goes into the waiting list. Readers see it only after you press Publish.
-              </p>
-              <RegistryEntryForm
-                key={addVersion}
-                initial={EMPTY_ENTRY_FIELDS}
-                submitLabel="Add entry"
-                pending={add.isPending}
-                pendingLabel="Adding…"
-                onSubmit={(fields) => add.mutate(fields)}
-                onCancel={() => setAddVersion((version) => version + 1)}
-              />
+              {/*
+                Closed behind one button: an always-open seven-field form sat
+                in the middle of the waiting list and pushed the entries an
+                editor came to read off the screen.
+              */}
+              <InkButton
+                tone="ghost"
+                onClick={() => setAddOpen((open) => !open)}
+              >
+                Add an entry
+              </InkButton>
+              {addOpen ? (
+                <div className="mt-3">
+                  <h3 className="font-display text-xl">Add an entry</h3>
+                  <p className="wire-sum">
+                    It goes into the waiting list. Readers see it only after you press Publish.
+                  </p>
+                  <RegistryEntryForm
+                    key={addVersion}
+                    initial={EMPTY_ENTRY_FIELDS}
+                    submitLabel="Add entry"
+                    pending={add.isPending}
+                    pendingLabel="Adding…"
+                    onSubmit={(fields) => add.mutate(fields)}
+                    onCancel={() => {
+                      setAddVersion((version) => version + 1);
+                      setAddOpen(false);
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
           </Section>
 
@@ -997,7 +1022,7 @@ function RegistryDeskPage() {
           <Section
             title="Detected changes"
             count={matchingChanges.length}
-            sub="One card per change the scan proposed. A change waiting for an editor has not been applied to the directory."
+            sub="One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
           >
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">
@@ -1035,15 +1060,17 @@ function RegistryDeskPage() {
                 const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
                 const entity =
                   change.entityId === null
-                    ? `New ${entityLabel.toLowerCase()} proposal${
-                        change.entityName ? `: ${change.entityName}` : ""
-                      }`
+                    ? "New entry proposal"
                     : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
+                const newEntity = change.entityId === null
+                  ? `A new ${entityLabel.toLowerCase()}${change.entityName ? `: ${change.entityName}` : ""}`
+                  : null;
                 return (
                   <>
                     <div className="astra-row-t">
                       {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind} — {entity}
                     </div>
+                    {newEntity ? <p className="astra-row-meta">{newEntity}</p> : null}
                     <p className="astra-row-meta">
                       {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
                       {" · field "}

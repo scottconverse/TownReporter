@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { DeskEntryFacts } from "@/lib/news/registry/registry-desk";
-import { mapsUrl, NOT_LISTED, NO_SOURCE } from "@/lib/news/registry/registry-entry-copy";
+import { mapsUrl, NOT_LISTED, NOT_RECORDED } from "@/lib/news/registry/registry-entry-copy";
 
 /**
  * One registry entry, drawn for a person (Scott, Nov 20 2026).
@@ -16,8 +16,8 @@ import { mapsUrl, NOT_LISTED, NO_SOURCE } from "@/lib/news/registry/registry-ent
  * cannot disagree about what an entry says.
  */
 
-function orNotListed(value: string | null | undefined): ReactNode {
-  return value && value.trim() !== "" ? value : NOT_LISTED;
+function orNotListed(value: string | null | undefined, missing: string): ReactNode {
+  return value && value.trim() !== "" ? value : missing;
 }
 
 function WebLink({ href }: { href: string }) {
@@ -39,20 +39,23 @@ export function EntryFacts({
   entry: DeskEntryFacts;
   formatDate: (when: string | Date | null | undefined) => string;
 }) {
+  // With no source page there is nothing to be missing from: every empty
+  // field says it was not recorded, not that a page failed to list it.
+  const missing = entry.sourceUrl ? NOT_LISTED : NOT_RECORDED;
   return (
     <dl className="registry-facts">
       <dt>Organization</dt>
-      <dd>{orNotListed(entry.organizationName)}</dd>
+      <dd>{orNotListed(entry.organizationName, missing)}</dd>
       <dt>Service</dt>
-      <dd>{orNotListed(entry.serviceName)}</dd>
+      <dd>{orNotListed(entry.serviceName, missing)}</dd>
       <dt>Category</dt>
-      <dd>{orNotListed(entry.categoryName)}</dd>
+      <dd>{orNotListed(entry.categoryName, missing)}</dd>
       <dt>What it offers</dt>
-      <dd>{orNotListed(entry.description)}</dd>
+      <dd>{orNotListed(entry.description, missing)}</dd>
       <dt>Phone</dt>
       <dd>
         {entry.phones.length === 0 ? (
-          NOT_LISTED
+          missing
         ) : (
           <>
             {entry.phones.map((phone, index) => (
@@ -76,13 +79,13 @@ export function EntryFacts({
             {entry.address} (map) ↗
           </a>
         ) : (
-          NOT_LISTED
+          missing
         )}
       </dd>
       <dt>Hours</dt>
       <dd>
         {entry.hours.length === 0 ? (
-          NOT_LISTED
+          missing
         ) : (
           <ul className="registry-fact-list">
             {entry.hours.map((line) => (
@@ -92,15 +95,15 @@ export function EntryFacts({
         )}
       </dd>
       <dt>Website</dt>
-      <dd>{entry.website ? <WebLink href={entry.website} /> : NOT_LISTED}</dd>
+      <dd>{entry.website ? <WebLink href={entry.website} /> : missing}</dd>
       <dt>Who can use it</dt>
-      <dd>{orNotListed(entry.eligibility)}</dd>
+      <dd>{orNotListed(entry.eligibility, missing)}</dd>
       <dt>Fees</dt>
-      <dd>{orNotListed(entry.fees)}</dd>
+      <dd>{orNotListed(entry.fees, missing)}</dd>
       <dt>How to apply</dt>
-      <dd>{orNotListed(entry.applicationProcess)}</dd>
+      <dd>{orNotListed(entry.applicationProcess, missing)}</dd>
       <dt>Languages</dt>
-      <dd>{entry.languages.length === 0 ? NOT_LISTED : entry.languages.join(", ")}</dd>
+      <dd>{entry.languages.length === 0 ? missing : entry.languages.join(", ")}</dd>
       <dt>Source page</dt>
       <dd>
         {entry.sourceUrl ? (
@@ -118,7 +121,7 @@ export function EntryFacts({
               : " · capture date not recorded"}
           </>
         ) : (
-          NO_SOURCE
+          NOT_RECORDED
         )}
       </dd>
     </dl>
@@ -154,8 +157,11 @@ export function RegistryEntryCard({
             </>
           )}
         </h3>
-        {entry.crisis ? <span className="registry-tag">Crisis service</span> : null}
-        {!entry.published ? <span className="registry-tag">Not published</span> : null}
+        <div className="registry-card-tags">
+          <span className="registry-tag">{entry.categoryName || "No category"}</span>
+          {entry.crisis ? <span className="registry-tag">Crisis service</span> : null}
+          {!entry.published ? <span className="registry-tag">Not published</span> : null}
+        </div>
       </div>
       <EntryFacts entry={entry} formatDate={formatDate} />
       {children ? <div className="registry-card-actions">{children}</div> : null}

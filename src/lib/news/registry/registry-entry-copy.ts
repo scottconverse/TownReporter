@@ -9,8 +9,12 @@
 /** A field the source page did not state. */
 export const NOT_LISTED = "Not listed on the source page.";
 
-/** An entry whose own source page was never recorded. */
-export const NO_SOURCE = "No source page recorded.";
+/**
+ * An entry that has no source page at all. Calling its empty fields "Not
+ * listed on the source page" would be false -- there is no page to list them
+ * (Scott, Nov 20 2026: "not recorded" is the truth).
+ */
+export const NOT_RECORDED = "Not recorded.";
 
 /** A map link for an address, the same one every card uses. */
 export function mapsUrl(address: string): string {
