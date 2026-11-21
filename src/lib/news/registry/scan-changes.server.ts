@@ -77,6 +77,24 @@ export function normalizeSourceUrl(url: string): string {
 }
 
 /**
+ * Whether a change states a fact at all (Scott, Nov 20 2026).
+ *
+ * A proposal with a name and nothing else is useless on the desk: an editor
+ * cannot check it and accepting it changes nothing. The model could send
+ * `field_name: "name"` with neither value, so the scan now stores only a
+ * change that names a value -- the old one in `before_value` or the new one in
+ * `after_value` -- and drops the rest. This is the root of the empty proposal
+ * Scott saw on the registry desk.
+ */
+export function changeHasFact(
+  change: Pick<ParsedResourceChange, "before_value" | "after_value">,
+): boolean {
+  return [change.before_value, change.after_value].some(
+    (value) => typeof value === "string" && value.trim() !== "",
+  );
+}
+
+/**
  * The tier a change's evidence takes, from its source's tier.
  *
  * `resource_changes.evidence_tier` allows A/B/C only; a source whose own tier
@@ -690,6 +708,15 @@ export async function commitScanResourceChanges(
       continue;
     }
 
+    /*
+      A change with a name and no value is not a fact an editor can check or
+      apply. It is dropped here rather than stored as an empty proposal.
+    */
+    if (!changeHasFact(change)) {
+      rejected += 1;
+      continue;
+    }
+
     const directoryName =
       (await directoryNameForSource(sql, input.newsroomId, sourceId)) ?? SCAN_CREATED_DIRECTORY;
 
@@ -709,7 +736,15 @@ export async function commitScanResourceChanges(
         snapshotId,
         directoryName,
       );
-      if (entityId !== null) created += 1;
+      if (entityId !== null) {
+        created += 1;
+        /*
+          The new row starts as a name. Whatever else this change states about
+          it -- a description, a phone, a fee, hours -- is applied now, so the
+          entry does not reach the desk as a name and nothing else.
+        */
+        await applyChangeValue(sql, input.newsroomId, change, entityId);
+      }
     }
 
     /*
@@ -724,8 +759,8 @@ export async function commitScanResourceChanges(
            (newsroom_id, scan_run_id, source_id, source_capture_id, evidence_capture_id,
             evidence_tier, entity_type, entity_id, entity_name, entity_hsds_id,
             field_name, before_value, after_value,
-            change_kind, summary, model_confidence, review_state, lead_id)
-         values ($1, $2, $3, $4, $4, $5, $6, null, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', null)`,
+            change_kind, summary, evidence_quote, model_confidence, review_state, lead_id)
+         values ($1, $2, $3, $4, $4, $5, $6, null, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', null)`,
         [
           input.newsroomId,
           input.scanRunId,
@@ -740,6 +775,7 @@ export async function commitScanResourceChanges(
           change.after_value,
           change.change_kind,
           change.summary || null,
+          change.quote?.trim() || null,
           change.model_confidence,
         ],
       );
@@ -756,10 +792,10 @@ export async function commitScanResourceChanges(
          (newsroom_id, scan_run_id, source_id, source_capture_id, evidence_capture_id,
           evidence_tier, entity_type, entity_id, entity_name, entity_hsds_id,
           field_name, before_value, after_value,
-          change_kind, summary, model_confidence, review_state,
+          change_kind, summary, evidence_quote, model_confidence, review_state,
           applied_at, review_note, lead_id)
-       values ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               'accepted', ${applied ? "now()" : "null"}, $16, null)
+       values ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+               'accepted', ${applied ? "now()" : "null"}, $17, null)
        returning id`,
       [
         input.newsroomId,
@@ -776,6 +812,7 @@ export async function commitScanResourceChanges(
         change.after_value,
         change.change_kind,
         change.summary || null,
+        change.quote?.trim() || null,
         change.model_confidence,
         autoPublishNote(change, applied),
       ],
@@ -813,7 +850,7 @@ export function registryChangeSentence(counts: ScanResourceChangeCommitResult): 
   }
   if (counts.rejected > 0) {
     parts.push(
-      `${counts.rejected} registry change${counts.rejected === 1 ? "" : "s"} rejected for lack of a retained capture`,
+      `${counts.rejected} registry change${counts.rejected === 1 ? "" : "s"} rejected for lack of a retained capture or a stated fact`,
     );
   }
   return `${parts.join("; ")}.`;

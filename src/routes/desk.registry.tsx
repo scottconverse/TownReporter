@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
@@ -8,6 +8,8 @@ import { RegistryExportPanel } from "@/components/registry-export-panel";
 import { RegistryEntryEditor } from "@/components/registry-entry-editor";
 import { RegistryChangeReviewList } from "@/components/registry-change-review";
 import { RegistryNeedsChecking } from "@/components/registry-needs-checking";
+import { RegistryEntryCard } from "@/components/registry-entry-card";
+import { RegistryEntryPanel } from "@/components/registry-entry-panel";
 import { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 import {
   addRegistryEntry,
@@ -26,25 +28,35 @@ import {
 } from "@/lib/news/registry/starter-list";
 import { recheckResultWords } from "@/lib/news/registry/registry-recheck";
 import { evidenceTierLabel, isWebAddress } from "@/lib/news/desk-copy";
+import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /**
  * The desk's view of the community resource registry (spec 24, Phase 1).
  *
- * Phase 3 adds review to the scan's *changes*: a waiting change has Accept and
- * apply, Accept without applying and Reject, with an optional note; a decided
- * change shows who decided it and when. The page also has the two writes
- * Phase 1 approved (load the approved starter list, publish one entry at a
- * time) and a "Needs checking" list of published entries to verify.
+ * Scott, Nov 20 2026: "Make sure that the interface to that registry page is
+ * made for a human. Right now it's unbelievably ugly. It doesn't have anywhere
+ * near the information it's supposed to." So this page is laid out for a person
+ * reading it:
  *
- * Four blocks, each with its own honest empty state:
- *   1. entries waiting to be published, with the starter list's load button
- *      when it has not been loaded, and a Publish button per row;
- *   2. how many entries are published, and a link to the public page;
- *   3. the changes the scan detected, filterable by review state;
- *   4. the HSDS imports;
- *   5. the sources carrying a registry role, and whether the desk could read
- *      them last time.
+ *   - a short summary at the top: the robot's freshness numbers, each a link to
+ *     the list behind it;
+ *   - a search box and a category filter that narrow every entry list and the
+ *     detected changes together;
+ *   - every list is a collapsible block with its count in the heading;
+ *   - every entry is a card that shows the whole entry (organization, service,
+ *     category, description, every phone, address with a map link, hours,
+ *     website, eligibility, fees, languages, and the source page with the date
+ *     it was captured) -- never a name with blank lines;
+ *   - every proposal says what kind of change it is, the old and new values
+ *     side by side, the page's own sentence, the source link and capture date,
+ *     and the entry it belongs to;
+ *   - clicking an entry opens that entry's own page on the desk;
+ *   - long lists are paged, 25 at a time.
+ *
+ * The page also keeps the writes Phase 1 and 2 approved: load the starter list,
+ * publish one entry at a time, edit one entry, take one down, and accept or
+ * reject the changes the scan could not settle.
  */
 
 const REVIEW_STATES = [
@@ -75,8 +87,8 @@ const CHANGE_KIND_LABELS: Record<string, string> = {
   field_change: "Field change",
   eligibility_change: "Eligibility change",
   hours_change: "Hours change",
-  closure: "Closure",
-  move: "Move",
+  closure: "Closed",
+  move: "Moved",
   contact_change: "Contact change",
   funding_change: "Funding change",
   non_informational: "Not a factual change",
@@ -97,11 +109,17 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export const Route = createFileRoute("/desk/registry")({
-  validateSearch: (search: Record<string, unknown>): { state?: ReviewStateFilter } => {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { state?: ReviewStateFilter; entry?: number } => {
     const state = String(search.state ?? "");
-    return REVIEW_STATES.some((option) => option.key === state)
-      ? { state: state as ReviewStateFilter }
-      : {};
+    const entry = Number(search.entry);
+    return {
+      ...(REVIEW_STATES.some((option) => option.key === state)
+        ? { state: state as ReviewStateFilter }
+        : {}),
+      ...(Number.isInteger(entry) && entry > 0 ? { entry } : {}),
+    };
   },
   head: () => ({ meta: [{ title: "Registry — TownReporter" }] }),
   component: RegistryDeskPage,
@@ -121,6 +139,61 @@ const EMPTY_ENTRY_FIELDS: RegistryEntryFields = {
   sourceTitle: "",
   sourceUrl: "",
 };
+
+/**
+ * One collapsible block of the page: the heading (title and count) is the
+ * control that opens and closes the list. `defaultOpen` only sets the first
+ * state; after that the browser owns it.
+ */
+function Section({
+  id,
+  title,
+  count,
+  sub,
+  defaultOpen = true,
+  children,
+}: {
+  id?: string;
+  title: string;
+  count?: number | string | null;
+  sub?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="src-sec" id={id} open={defaultOpen || undefined}>
+      <summary className="registry-sec-summary">
+        <SecHead title={title} count={count} sub={sub} />
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+/** The words a list footer uses: "Showing 25 of 60 entries." plus the button. */
+function ListFoot({
+  shown,
+  total,
+  noun,
+  onMore,
+}: {
+  shown: number;
+  total: number;
+  noun: string;
+  onMore: () => void;
+}) {
+  if (total === 0) return null;
+  return (
+    <div className="astra-list-foot">
+      <span>{showingLine(shown, total, noun)}</span>
+      {shown < total ? (
+        <button type="button" className="astra-list-more" onClick={onMore}>
+          Show {PAGE_SIZE} more
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * The seven fields of one entry, in place: used to edit a row and to add a new
@@ -255,25 +328,115 @@ function entryFieldsOf(row: {
   };
 }
 
+/** The text a search box and the category filter look through, per entry. */
+function entryHaystack(entry: {
+  organizationName: string;
+  serviceName: string;
+  categoryName: string | null;
+  description: string | null;
+  phones: string[];
+  address: string | null;
+  website: string | null;
+  eligibility: string | null;
+  fees: string | null;
+  languages: string[];
+}): string {
+  return [
+    entry.organizationName,
+    entry.serviceName,
+    entry.categoryName,
+    entry.description,
+    entry.phones.join(" "),
+    entry.address,
+    entry.website,
+    entry.eligibility,
+    entry.fees,
+    entry.languages.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function RegistryDeskPage() {
   const search = Route.useSearch();
   const state: ReviewStateFilter = search.state ?? "all";
   const { formatShortDate, formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const query = useQuery({ queryKey: ["registry-desk"], queryFn: () => listRegistryDesk() });
-  const changes = query.data?.changes ?? [];
-  const visible = state === "all" ? changes : changes.filter((c) => c.reviewState === state);
+  const changes = useMemo(() => query.data?.changes ?? [], [query.data]);
   const waiting = query.data?.waiting ?? [];
   const published = query.data?.published ?? [];
   const autoPublished = query.data?.autoPublished ?? [];
   const categories = query.data?.categories ?? [];
   const freshness = query.data?.freshness;
 
+  // The page-wide search and category filter. They narrow the entry lists and
+  // the detected changes together, so one question asked at the top is
+  // answered everywhere below it.
+  const [text, setText] = useState("");
+  const [category, setCategory] = useState("");
+  const needle = text.trim().toLowerCase();
+  const keepEntry = (entry: Parameters<typeof entryHaystack>[0]) =>
+    (category === "" || (entry.categoryName ?? "") === category) &&
+    (needle === "" || entryHaystack(entry).includes(needle));
+  const visibleWaiting = waiting.filter(keepEntry);
+  const visiblePublished = published.filter(keepEntry);
+  const visibleAuto = autoPublished.filter(keepEntry);
+  // The freshness lists are entry lists too, so the same search narrows them.
+  const keepFresh = (row: { organizationName: string; serviceName: string }) =>
+    needle === "" ||
+    `${row.organizationName} ${row.serviceName}`.toLowerCase().includes(needle);
+  const shownRechecked = (freshness?.rechecked ?? []).filter(keepFresh);
+  const shownChanged = (freshness?.changedEntries ?? []).filter(keepFresh);
+  const visibleGone = (freshness?.sourceGoneEntries ?? []).filter(keepFresh);
+
+  const changeHaystack = (change: (typeof changes)[number]) =>
+    [
+      change.entityName,
+      change.fieldName,
+      change.beforeValue,
+      change.afterValue,
+      change.summary,
+      change.quote,
+      change.sourceTitle,
+      change.sourceUrl,
+      CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind,
+      ENTITY_LABELS[change.entityType] ?? change.entityType,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  const matchingChanges = needle === "" ? changes : changes.filter((c) => changeHaystack(c).includes(needle));
+  const visible = state === "all" ? matchingChanges : matchingChanges.filter((c) => c.reviewState === state);
+
+  // 25 rows at a time, the desk's usual window (list-window.ts).
+  const [shown, setShown] = useState({
+    waiting: PAGE_SIZE,
+    published: PAGE_SIZE,
+    auto: PAGE_SIZE,
+    changes: PAGE_SIZE,
+    gone: PAGE_SIZE,
+  });
+  const more = (key: keyof typeof shown) =>
+    setShown((current) => ({ ...current, [key]: current[key] + PAGE_SIZE }));
+
+  // Every category any list already uses, offered by the one filter.
+  const categoryOptions = (() => {
+    const names = new Set(categories);
+    for (const entry of [...waiting, ...published, ...autoPublished]) {
+      if (entry.categoryName) names.add(entry.categoryName);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  })();
+
   // Which row's form is open. One at a time, so the desk never shows two
   // half-edited entries and an editor cannot lose track of which Save is which.
   const [editingId, setEditingId] = useState<number | null>(null);
   // Which row's full details editor (organization, service and contacts) is open.
   const [detailId, setDetailId] = useState<number | null>(null);
+  // The one entry's own page (?entry=<id>, or a card's heading).
+  const [panelId, setPanelId] = useState<number | null>(search.entry ?? null);
   // Set by Needs checking's "Open in the editor": the row to bring into view.
   const [openedFromList, setOpenedFromList] = useState<number | null>(null);
   useEffect(() => {
@@ -347,19 +510,87 @@ function RegistryDeskPage() {
         : "The starter list could not be loaded."
       : "Loading puts the entries here. Nothing shows to readers until you press Publish on each one.";
 
+  /** The buttons every entry card carries, so the three lists behave alike. */
+  const cardActions = (row: (typeof waiting)[number], publishedRow: boolean) => (
+    <>
+      {!publishedRow ? (
+        <InkButton
+          tone="solid"
+          ariaLabel={`Publish: ${row.serviceName}`}
+          disabled={publish.isPending}
+          pending={publish.isPending && publish.variables === row.serviceId}
+          pendingLabel="Publishing…"
+          onClick={() => publish.mutate(row.serviceId)}
+        >
+          Publish
+        </InkButton>
+      ) : null}
+      <InkButton
+        tone="ghost"
+        ariaLabel={`Edit: ${row.serviceName}`}
+        onClick={() => setEditingId(editingId === row.serviceId ? null : row.serviceId)}
+      >
+        Edit
+      </InkButton>
+      <InkButton
+        tone="ghost"
+        ariaLabel={`All details: ${row.serviceName}`}
+        onClick={() => setDetailId(detailId === row.serviceId ? null : row.serviceId)}
+      >
+        All details
+      </InkButton>
+      {publishedRow ? (
+        <InkButton
+          tone="ghost"
+          ariaLabel={`Take down: ${row.serviceName}`}
+          disabled={takeDown.isPending}
+          pending={takeDown.isPending && takeDown.variables === row.serviceId}
+          pendingLabel="Taking down…"
+          onClick={() => takeDown.mutate(row.serviceId)}
+        >
+          Take down
+        </InkButton>
+      ) : null}
+    </>
+  );
+
+  /** A card, the form underneath it when Edit is open, and the full editor. */
+  const entryCard = (row: (typeof waiting)[number], publishedRow: boolean) => (
+    <RegistryEntryCard
+      key={row.serviceId}
+      entry={row}
+      formatDate={formatListDateTime}
+      onOpen={() => setPanelId(row.serviceId)}
+    >
+      {cardActions(row, publishedRow)}
+      {editingId === row.serviceId ? (
+        <RegistryEntryForm
+          initial={entryFieldsOf(row)}
+          submitLabel="Save"
+          pending={edit.isPending}
+          pendingLabel="Saving…"
+          onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
+          onCancel={() => setEditingId(null)}
+        />
+      ) : null}
+      {detailId === row.serviceId ? (
+        <RegistryEntryEditor serviceId={row.serviceId} onClose={() => setDetailId(null)} />
+      ) : null}
+    </RegistryEntryCard>
+  );
+
   return (
     <DeskShell
       title="Registry"
       kicker="What the scan found in the community resource directory"
-      lede="Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches."
+      lede="Every entry, every change the scan detected in a registry source, and the sources it watches — with the facts, the source page and the date for each one."
     >
       <p className="note">
-        The scan now applies and publishes what it finds in a registry source by itself, and lists
-        those entries under Auto-published so you can take one down. Each change it could not
-        settle by itself waits in the Detected changes list, where it can be accepted or rejected.
-        Accept and apply puts the proposed value on the entry; Accept without applying only records
-        your decision; Reject leaves the entry as it is. You can also load the starter list, publish
-        each entry one at a time, and check the entries that need checking.
+        The scan applies and publishes what it finds in a registry source by itself, and lists those
+        entries under Auto-published so you can take one down. Each change it could not settle by
+        itself waits in Detected changes, where it can be accepted or rejected. Accept and apply puts
+        the proposed value on the entry; Accept without applying only records your decision; Reject
+        leaves the entry as it is.
       </p>
 
       {query.isError ? (
@@ -374,11 +605,66 @@ function RegistryDeskPage() {
         <ListSkeleton rows={4} />
       ) : (
         <>
-{/*
-            The Freshness panel (Scott, Nov 20 2026) is the first thing under
-            the page title: how much of the registry the robot has opened
-            again, and the entries behind each number. Every number links to
-            its own list on this page.
+          {/*
+            The search box and category filter narrow everything below them:
+            the three entry lists and the detected changes.
+          */}
+          <div className="astra-toolbar registry-toolbar">
+            <input
+              type="search"
+              className="astra-search"
+              aria-label="Search the registry"
+              placeholder="Search names, phones, addresses, categories…"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+            />
+            <label className="registry-filter">
+              Category
+              <select
+                className="registry-filter-select"
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+              >
+                <option value="">All categories</option>
+                {categoryOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {text || category ? (
+              <button
+                type="button"
+                className="astra-list-more"
+                onClick={() => {
+                  setText("");
+                  setCategory("");
+                }}
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          {panelId !== null ? (
+            <RegistryEntryPanel
+              serviceId={panelId}
+              onClose={() => setPanelId(null)}
+              onEdit={(serviceId) => {
+                setPanelId(null);
+                setDetailId(serviceId);
+              }}
+            />
+          ) : null}
+          {detailId !== null && panelId === null && !published.concat(waiting).some((row) => row.serviceId === detailId) ? (
+            <RegistryEntryEditor serviceId={detailId} onClose={() => setDetailId(null)} />
+          ) : null}
+
+          {/*
+            The Freshness panel is the first thing under the page title: how
+            much of the registry the robot has opened again, and the entries
+            behind each number. Every number links to its own list.
           */}
           <section
             className="src-sec"
@@ -414,7 +700,10 @@ function RegistryDeskPage() {
               {freshness?.oldestUnchecked ? (
                 <>
                   Oldest unchecked entry:{" "}
-                  <a className="inline-link" href={`#registry-entry-${freshness.oldestUnchecked.serviceId}`}>
+                  <a
+                    className="inline-link"
+                    href={`#registry-entry-${freshness.oldestUnchecked.serviceId}`}
+                  >
                     {freshness.oldestUnchecked.organizationName} —{" "}
                     {freshness.oldestUnchecked.serviceName}
                   </a>
@@ -423,55 +712,63 @@ function RegistryDeskPage() {
                 "Every published entry has a robot recheck on record."
               )}
             </p>
-            <h3 id="registry-fresh-rechecked" className="mt-4 font-display text-xl">
-              Rechecked in the last 30 days
-            </h3>
-            {!freshness?.rechecked.length ? (
-              <p className="wire-sum">No entry has been rechecked in the last 30 days yet.</p>
-            ) : (
-              <ul className="astra-plain">
-                {freshness.rechecked.map((row) => (
-                  <li key={`rechecked-${row.serviceId}`}>
-                    <span className="astra-row-t">
-                      {row.organizationName} — {row.serviceName}
-                    </span>
-                    <span className="astra-row-meta">
-                      {row.robotCheckedAt ? ` · ${formatShortDate(row.robotCheckedAt)}` : ""}
-                      {row.robotCheckResult ? ` · ${recheckResultWords(row.robotCheckResult)}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <h3 id="registry-fresh-changed" className="mt-4 font-display text-xl">
-              Changed by the robot
-            </h3>
-            {!freshness?.changedEntries.length ? (
-              <p className="wire-sum">The robot has not found a change yet.</p>
-            ) : (
-              <ul className="astra-plain">
-                {freshness.changedEntries.map((row) => (
-                  <li key={`changed-${row.serviceId}`}>
-                    <span className="astra-row-t">
-                      {row.organizationName} — {row.serviceName}
-                    </span>
-                    <span className="astra-row-meta">
-                      {row.robotCheckedAt
-                        ? ` · changed ${formatShortDate(row.robotCheckedAt)}`
-                        : " · changed at an unrecorded time"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+
+            <details className="src-sec registry-fresh-list" id="registry-fresh-rechecked" open>
+              <summary className="registry-sec-summary">
+                <SecHead
+                  title="Rechecked in the last 30 days"
+                  count={shownRechecked.length}
+                />
+              </summary>
+              {!shownRechecked.length ? (
+                <p className="wire-sum">No entry has been rechecked in the last 30 days yet.</p>
+              ) : (
+                <ul className="astra-plain">
+                  {shownRechecked.map((row) => (
+                    <li key={`rechecked-${row.serviceId}`}>
+                      <span className="astra-row-t">
+                        {row.organizationName} — {row.serviceName}
+                      </span>
+                      <span className="astra-row-meta">
+                        {row.robotCheckedAt ? ` · ${formatShortDate(row.robotCheckedAt)}` : ""}
+                        {row.robotCheckResult ? ` · ${recheckResultWords(row.robotCheckResult)}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+
+            <details className="src-sec registry-fresh-list" id="registry-fresh-changed" open>
+              <summary className="registry-sec-summary">
+                <SecHead title="Changed by the robot" count={shownChanged.length} />
+              </summary>
+              {!shownChanged.length ? (
+                <p className="wire-sum">The robot has not found a change yet.</p>
+              ) : (
+                <ul className="astra-plain">
+                  {shownChanged.map((row) => (
+                    <li key={`changed-${row.serviceId}`}>
+                      <span className="astra-row-t">
+                        {row.organizationName} — {row.serviceName}
+                      </span>
+                      <span className="astra-row-meta">
+                        {row.robotCheckedAt
+                          ? ` · changed ${formatShortDate(row.robotCheckedAt)}`
+                          : " · changed at an unrecorded time"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
           </section>
 
-          <section className="src-sec">
-            <SecHead
-              title="Entries waiting to be published"
-              count={waiting.length}
-              sub="Loaded from the starter list or an import. Nothing here shows to readers until you publish it."
-            />
+          <Section
+            title="Entries waiting to be published"
+            count={visibleWaiting.length}
+            sub="Loaded from the starter list or an import. Nothing here shows to readers until you publish it."
+          >
             <p className="wire-sum">
               There are three ways to add entries: load the starter list (once), add one by hand
               below, or import a directory file under Imports.
@@ -517,86 +814,29 @@ function RegistryDeskPage() {
             </datalist>
             {waiting.length === 0 ? (
               <p className="wire-sum">No entries are waiting.</p>
+            ) : visibleWaiting.length === 0 ? (
+              <p className="wire-sum">No waiting entry matches your search.</p>
             ) : (
-              <ul className="astra-plain">
-                {waiting.map((row) => {
-                  const checkedOn = STARTER_CHECKED_ON_BY_SERVICE_ID[row.serviceHsdsId];
-                  return (
-                    <li key={row.serviceId}>
-                      <div className="astra-row-t">
-                        {row.organizationName} — {row.serviceName}
-                      </div>
-                      <p className="astra-row-meta">{row.categoryName ?? "No category"}</p>
-                      {row.phone ? <p className="astra-row-meta">Phone: {row.phone}</p> : null}
-                      {row.description ? <p className="astra-row-meta">{row.description}</p> : null}
-                      <p className="astra-row-meta">
-                        Source:{" "}
-                        {row.sourceUrl ? (
-                          <a
-                            className="inline-link"
-                            href={row.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {row.sourceTitle || row.sourceUrl} ↗
-                          </a>
-                        ) : (
-                          (row.sourceTitle ?? "not recorded")
-                        )}
-                      </p>
-                      {checkedOn ? (
-                        <p className="astra-row-meta">{checkedOnLabel(checkedOn)}</p>
-                      ) : null}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <InkButton
-                          tone="solid"
-                          ariaLabel={`Publish: ${row.serviceName}`}
-                          disabled={publish.isPending}
-                          pending={publish.isPending && publish.variables === row.serviceId}
-                          pendingLabel="Publishing…"
-                          onClick={() => publish.mutate(row.serviceId)}
-                        >
-                          Publish
-                        </InkButton>
-                        <InkButton
-                          tone="ghost"
-                          ariaLabel={`Edit: ${row.serviceName}`}
-                          onClick={() =>
-                            setEditingId(editingId === row.serviceId ? null : row.serviceId)
-                          }
-                        >
-                          Edit
-                        </InkButton>
-                        <InkButton
-                          tone="ghost"
-                          ariaLabel={`All details: ${row.serviceName}`}
-                          onClick={() =>
-                            setDetailId(detailId === row.serviceId ? null : row.serviceId)
-                          }
-                        >
-                          All details
-                        </InkButton>
-                      </div>
-                      {editingId === row.serviceId ? (
-                        <RegistryEntryForm
-                          initial={entryFieldsOf(row)}
-                          submitLabel="Save"
-                          pending={edit.isPending}
-                          pendingLabel="Saving…"
-                          onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
-                          onCancel={() => setEditingId(null)}
-                        />
-                      ) : null}
-                      {detailId === row.serviceId ? (
-                        <RegistryEntryEditor
-                          serviceId={row.serviceId}
-                          onClose={() => setDetailId(null)}
-                        />
+              <>
+                <ul className="astra-plain registry-cards">
+                  {visibleWaiting.slice(0, shown.waiting).map((row) => (
+                    <li key={row.serviceId} id={`registry-entry-${row.serviceId}`} tabIndex={-1} className="registry-card-anchor">
+                      {entryCard(row, false)}
+                      {STARTER_CHECKED_ON_BY_SERVICE_ID[row.serviceHsdsId] ? (
+                        <p className="astra-row-meta">
+                          {checkedOnLabel(STARTER_CHECKED_ON_BY_SERVICE_ID[row.serviceHsdsId]!)}
+                        </p>
                       ) : null}
                     </li>
-                  );
-                })}
-              </ul>
+                  ))}
+                </ul>
+                <ListFoot
+                  shown={Math.min(shown.waiting, visibleWaiting.length)}
+                  total={visibleWaiting.length}
+                  noun="waiting entries"
+                  onMore={() => more("waiting")}
+                />
+              </>
             )}
             <div className="mt-6">
               <h3 className="font-display text-xl">Add an entry</h3>
@@ -613,210 +853,159 @@ function RegistryDeskPage() {
                 onCancel={() => setAddVersion((version) => version + 1)}
               />
             </div>
-          </section>
+          </Section>
 
-          <section className="src-sec" id="registry-published">
-            <SecHead
-              title="Published entries"
-              count={query.data?.publishedCount ?? 0}
-              sub="Every published entry appears on the public page."
-              aside={
-                <Link to="/registry" className="btn quiet small">
-                  See the public page
-                </Link>
-              }
-            />
+          <Section
+            id="registry-published"
+            title="Published entries"
+            count={query.data?.publishedCount ?? 0}
+            sub="Every published entry appears on the public page."
+          >
+            <Link to="/registry" className="btn quiet small">
+              See the public page
+            </Link>
             {published.length === 0 ? (
               <p className="wire-sum">No entries are published yet.</p>
+            ) : visiblePublished.length === 0 ? (
+              <p className="wire-sum">No published entry matches your search.</p>
             ) : (
-              <ul className="astra-plain">
-                {published.map((row) => (
-                  <li key={row.serviceId} id={`registry-entry-${row.serviceId}`} tabIndex={-1}>
-                    <div className="astra-row-t">
-                      {row.organizationName} — {row.serviceName}
-                    </div>
-                    <p className="astra-row-meta">{row.categoryName ?? "No category"}</p>
-                    {row.phone ? <p className="astra-row-meta">Phone: {row.phone}</p> : null}
-                    {row.description ? <p className="astra-row-meta">{row.description}</p> : null}
-                    <p className="astra-row-meta">
-                      Source:{" "}
-                      {row.sourceUrl ? (
-                        <a
-                          className="inline-link"
-                          href={row.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {row.sourceTitle || row.sourceUrl} ↗
-                        </a>
-                      ) : (
-                        (row.sourceTitle ?? "not recorded")
-                      )}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <InkButton
-                        tone="ghost"
-                        ariaLabel={`Edit: ${row.serviceName}`}
-                        onClick={() =>
-                          setEditingId(editingId === row.serviceId ? null : row.serviceId)
-                        }
-                      >
-                        Edit
-                      </InkButton>
-                      <InkButton
-                        tone="ghost"
-                        ariaLabel={`All details: ${row.serviceName}`}
-                        onClick={() =>
-                          setDetailId(detailId === row.serviceId ? null : row.serviceId)
-                        }
-                      >
-                        All details
-                      </InkButton>
-                      <InkButton
-                        tone="ghost"
-                        ariaLabel={`Take down: ${row.serviceName}`}
-                        disabled={takeDown.isPending}
-                        pending={takeDown.isPending && takeDown.variables === row.serviceId}
-                        pendingLabel="Taking down…"
-                        onClick={() => takeDown.mutate(row.serviceId)}
-                      >
-                        Take down
-                      </InkButton>
-                    </div>
-                    {editingId === row.serviceId ? (
-                      <RegistryEntryForm
-                        initial={entryFieldsOf(row)}
-                        submitLabel="Save"
-                        pending={edit.isPending}
-                        pendingLabel="Saving…"
-                        onSubmit={(fields) => edit.mutate({ serviceId: row.serviceId, fields })}
-                        onCancel={() => setEditingId(null)}
-                      />
-                    ) : null}
-                    {detailId === row.serviceId ? (
-                      <RegistryEntryEditor
-                        serviceId={row.serviceId}
-                        onClose={() => setDetailId(null)}
-                      />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="astra-plain registry-cards">
+                  {visiblePublished.slice(0, shown.published).map((row) => (
+                    <li key={row.serviceId} id={`registry-entry-${row.serviceId}`} tabIndex={-1} className="registry-card-anchor">
+                      {entryCard(row, true)}
+                    </li>
+                  ))}
+                </ul>
+                <ListFoot
+                  shown={Math.min(shown.published, visiblePublished.length)}
+                  total={visiblePublished.length}
+                  noun="published entries"
+                  onMore={() => more("published")}
+                />
+              </>
             )}
-          </section>
+          </Section>
 
-          <section className="src-sec">
-            <SecHead
-              title="Auto-published"
-              count={autoPublished.length}
-              sub="Entries the scan published by itself from a registry source page. Crisis entries are listed first; an editor can take any of them down."
-            />
+          <Section
+            title="Auto-published"
+            count={visibleAuto.length}
+            sub="Entries the scan published by itself from a registry source page. Crisis entries are listed first; an editor can take any of them down."
+          >
             {autoPublished.length === 0 ? (
               <p className="wire-sum">The scan has not auto-published an entry yet.</p>
+            ) : visibleAuto.length === 0 ? (
+              <p className="wire-sum">No auto-published entry matches your search.</p>
             ) : (
-              <ul className="astra-plain">
-                {autoPublished.map((row) => (
-                  <li key={row.auditId}>
-                    <div className="astra-row-t">
-                      {row.organizationName} — {row.serviceName}
-                    </div>
-                    <p className="astra-row-meta">
-                      {row.crisis ? "Crisis resource. " : ""}
-                      {row.published ? "Published." : "Taken down by an editor."}
-                    </p>
-                    <p className="astra-row-meta">
-                      Source:{" "}
-                      {row.sourceUrl ? (
-                        <a
-                          className="inline-link"
-                          href={row.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {row.sourceTitle || row.sourceUrl} ↗
-                        </a>
-                      ) : (
-                        (row.sourceTitle ?? "not recorded")
-                      )}
-                    </p>
-                    <p className="astra-row-meta">
-                      Auto-published{" "}
-                      {row.publishedAt ? formatListDateTime(row.publishedAt) : "at an unrecorded time"}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <InkButton
-                        tone="ghost"
-                        ariaLabel={`Unpublish: ${row.serviceName}`}
-                        disabled={takeDown.isPending || !row.published}
-                        pending={takeDown.isPending && takeDown.variables === row.serviceId}
-                        pendingLabel="Taking down…"
-                        onClick={() => takeDown.mutate(row.serviceId)}
+              <>
+                <ul className="astra-plain registry-cards">
+                  {visibleAuto.slice(0, shown.auto).map((row) => (
+                    <li key={row.auditId} className="registry-card-anchor">
+                      <RegistryEntryCard
+                        entry={row}
+                        formatDate={formatListDateTime}
+                        onOpen={() => setPanelId(row.serviceId)}
                       >
-                        Unpublish
-                      </InkButton>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        <p className="astra-row-meta">
+                          {row.crisis ? "Crisis resource · " : ""}
+                          Auto-published{" "}
+                          {row.publishedAt
+                            ? formatListDateTime(row.publishedAt)
+                            : "at an unrecorded time"}
+                        </p>
+                        <InkButton
+                          tone="ghost"
+                          ariaLabel={`Unpublish: ${row.serviceName}`}
+                          disabled={takeDown.isPending || !row.published}
+                          pending={takeDown.isPending && takeDown.variables === row.serviceId}
+                          pendingLabel="Taking down…"
+                          onClick={() => takeDown.mutate(row.serviceId)}
+                        >
+                          Unpublish
+                        </InkButton>
+                      </RegistryEntryCard>
+                    </li>
+                  ))}
+                </ul>
+                <ListFoot
+                  shown={Math.min(shown.auto, visibleAuto.length)}
+                  total={visibleAuto.length}
+                  noun="auto-published entries"
+                  onMore={() => more("auto")}
+                />
+              </>
             )}
-          </section>
+          </Section>
 
-{/*
-            Scott, Nov 20 2026: an entry whose source page is gone is taken off
-            the public page and listed here, so an editor can decide whether to
-            find a new source, correct it or leave it down.
+          {/*
+            An entry whose source page is gone is taken off the public page and
+            listed here, so an editor can decide whether to find a new source,
+            correct it or leave it down.
           */}
-          <section className="src-sec" id="registry-fresh-gone">
-            <SecHead
-              title="Source gone"
-              count={freshness?.sourceGoneEntries.length ?? 0}
-              sub="Entries the robot took down because their own source page answered 404, 410 or no longer resolved, on two rechecks at least three days apart."
-            />
-            {!freshness?.sourceGoneEntries.length ? (
+          <Section
+            id="registry-fresh-gone"
+            title="Source gone"
+            count={visibleGone.length}
+            sub="Entries the robot took down because their own source page answered 404, 410 or no longer resolved, on two rechecks at least three days apart."
+          >
+            {visibleGone.length === 0 ? (
               <p className="wire-sum">No entry has lost its source page.</p>
             ) : (
-              <ul className="astra-plain">
-                {freshness.sourceGoneEntries.map((row) => (
-                  <li key={`gone-${row.serviceId}`}>
-                    <div className="astra-row-t">
-                      {row.organizationName} — {row.serviceName}
-                    </div>
-                    <p className="astra-row-meta">
-                      Taken down after the source page was found gone
-                      {row.robotCheckedAt ? ` on ${formatShortDate(row.robotCheckedAt)}` : ""}.
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="astra-plain">
+                  {visibleGone.slice(0, shown.gone).map((row) => (
+                    <li key={`gone-${row.serviceId}`}>
+                      <div className="astra-row-t">
+                        {row.organizationName} — {row.serviceName}
+                      </div>
+                      <p className="astra-row-meta">
+                        Taken down after the source page was found gone
+                        {row.robotCheckedAt ? ` on ${formatShortDate(row.robotCheckedAt)}` : ""}.
+                      </p>
+                      <button
+                        type="button"
+                        className="astra-list-more"
+                        onClick={() => setPanelId(row.serviceId)}
+                      >
+                        Open this entry
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <ListFoot
+                  shown={Math.min(shown.gone, visibleGone.length)}
+                  total={visibleGone.length}
+                  noun="entries with a gone source"
+                  onMore={() => more("gone")}
+                />
+              </>
             )}
-          </section>
+          </Section>
 
-          <section className="src-sec">
-            <SecHead
-              title="Needs checking"
-              sub="Published entries with no verification, an old one, or facts that changed since the last one."
-            />
+          <Section
+            title="Needs checking"
+            sub="Published entries with no verification, an old one, or facts that changed since the last one."
+          >
             <RegistryNeedsChecking
               onOpen={(serviceId) => {
                 setDetailId(serviceId);
                 setOpenedFromList(serviceId);
               }}
             />
-          </section>
+          </Section>
 
-          <section className="src-sec">
-            <SecHead
-              title="Detected changes"
-              count={changes.length}
-              sub="One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
-            />
+          <Section
+            title="Detected changes"
+            count={matchingChanges.length}
+            sub="One card per change the scan proposed. A change waiting for an editor has not been applied to the directory."
+          >
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">
                 {REVIEW_STATES.map((option) => {
                   const count =
                     option.key === "all"
-                      ? changes.length
-                      : changes.filter((c) => c.reviewState === option.key).length;
+                      ? matchingChanges.length
+                      : matchingChanges.filter((c) => c.reviewState === option.key).length;
                   return (
                     <a
                       key={option.key}
@@ -832,37 +1021,58 @@ function RegistryDeskPage() {
             </div>
             {/* Always mounted, so the review status line survives the last row leaving the filter. */}
             <RegistryChangeReviewList
-              changes={visible}
+              changes={visible.slice(0, shown.changes)}
               emptyText={
                 changes.length === 0
                   ? "The scan has not found a change in a registry source yet."
                   : `No change is ${REVIEW_STATE_LABELS[state]?.toLowerCase() ?? "in this group"}.`
               }
               formatTime={formatListDateTime}
+              onEdit={(change) => {
+                if (change.serviceId != null) setPanelId(change.serviceId);
+              }}
               renderSummary={(change) => {
                 const entityLabel = ENTITY_LABELS[change.entityType] ?? change.entityType;
                 const entity =
                   change.entityId === null
-                    ? "New entry proposal"
+                    ? `New ${entityLabel.toLowerCase()} proposal${
+                        change.entityName ? `: ${change.entityName}` : ""
+                      }`
                     : `${entityLabel}${change.entityName ? `: ${change.entityName}` : ""} · #${change.entityId}`;
                 return (
                   <>
-                    <div className="astra-row-t">{entity}</div>
+                    <div className="astra-row-t">
+                      {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind} — {entity}
+                    </div>
                     <p className="astra-row-meta">
                       {REVIEW_STATE_LABELS[change.reviewState] ?? change.reviewState}
-                      {" · "}
-                      {CHANGE_KIND_LABELS[change.changeKind] ?? change.changeKind}
+                      {" · field "}
+                      <b>{change.fieldName}</b>
                       {" · "}
                       {evidenceTierLabel(change.evidenceTier)}
                     </p>
-                    <p className="astra-row-meta">
-                      <b>{change.fieldName}</b>
-                      {" — before: "}
-                      {change.beforeValue ?? "nothing recorded"}
-                      {" · after: "}
-                      {change.afterValue ?? "nothing recorded"}
-                    </p>
-                    {change.summary ? <p className="astra-row-meta">{change.summary}</p> : null}
+                    <dl className="registry-change-values">
+                      <div>
+                        <dt>The entry says now</dt>
+                        <dd>{change.beforeValue ?? "nothing recorded"}</dd>
+                      </div>
+                      <div>
+                        <dt>The page now says</dt>
+                        <dd>{change.afterValue ?? "nothing recorded"}</dd>
+                      </div>
+                    </dl>
+                    {change.quote ? (
+                      <blockquote className="registry-quote">
+                        “{change.quote}”
+                      </blockquote>
+                    ) : (
+                      <p className="astra-row-meta">
+                        The exact sentence was not recorded for this proposal.
+                      </p>
+                    )}
+                    {change.summary ? (
+                      <p className="astra-row-meta">The scan&rsquo;s note: {change.summary}</p>
+                    ) : null}
                     <p className="astra-row-meta">
                       Source:{" "}
                       {change.sourceUrl ? (
@@ -878,25 +1088,48 @@ function RegistryDeskPage() {
                         (change.sourceTitle ?? "not recorded")
                       )}
                       {change.captureDate
-                        ? ` · Capture: ${formatListDateTime(change.captureDate)}`
-                        : " · No capture date recorded"}
+                        ? ` · captured ${formatListDateTime(change.captureDate)}`
+                        : " · capture date not recorded"}
                     </p>
                     <p className="astra-row-meta">
+                      Entry:{" "}
+                      {change.serviceId == null ? (
+                        "not tied to one entry yet"
+                      ) : change.servicePublished === true ? (
+                        <a
+                          className="inline-link"
+                          href={`/registry/${change.serviceId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          open the public page ↗
+                        </a>
+                      ) : (
+                        `registry entry #${change.serviceId} (not published)`
+                      )}
+                      {" · "}
                       Scan run {change.scanRunId ?? "not recorded"} ·{" "}
-                      {change.createdAt ? formatListDateTime(change.createdAt) : "date not recorded"}
+                      {change.createdAt
+                        ? formatListDateTime(change.createdAt)
+                        : "date not recorded"}
                     </p>
                   </>
                 );
               }}
             />
-          </section>
-
-          <section className="src-sec">
-            <SecHead
-              title="Imports"
-              count={query.data?.imports.length ?? 0}
-              sub="Directories the desk read into the registry. Every imported row starts unpublished."
+            <ListFoot
+              shown={Math.min(shown.changes, visible.length)}
+              total={visible.length}
+              noun="detected changes"
+              onMore={() => more("changes")}
             />
+          </Section>
+
+          <Section
+            title="Imports"
+            count={query.data?.imports.length ?? 0}
+            sub="Directories the desk read into the registry. Every imported row starts unpublished."
+          >
             <RegistryImportPanel directoryNames={query.data?.directoryNames ?? []} />
             <RegistryExportPanel directoryNames={query.data?.directoryNames ?? []} />
             {!query.data?.imports.length ? (
@@ -950,14 +1183,13 @@ function RegistryDeskPage() {
                 ))}
               </ul>
             )}
-          </section>
+          </Section>
 
-          <section className="src-sec">
-            <SecHead
-              title="Registry sources"
-              count={query.data?.sources.length ?? 0}
-              sub="Sources the scan may read for the registry, and what they are to it."
-            />
+          <Section
+            title="Registry sources"
+            count={query.data?.sources.length ?? 0}
+            sub="Sources the scan may read for the registry, and what they are to it."
+          >
             {!query.data?.sources.length ? (
               <p className="wire-sum">No source carries a registry role yet.</p>
             ) : (
@@ -983,7 +1215,7 @@ function RegistryDeskPage() {
                 ))}
               </ul>
             )}
-          </section>
+          </Section>
         </>
       )}
     </DeskShell>

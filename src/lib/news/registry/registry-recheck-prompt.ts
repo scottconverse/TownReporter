@@ -29,11 +29,12 @@ status, fees, application process, organization name, each place's name and addr
 hours, eligibility and required documents.
 
 Return ONLY a JSON object of this shape:
-{"resource_changes":[{"entity_type":"service","entity_hsds_id":"${target.serviceHsdsId}","entity_name":"${target.serviceName}","field_name":"phone","before_value":"the stored value","after_value":"the value the page states","change_kind":"contact_change","summary":"one sentence","model_confidence":0.9,"source_url":"${target.sourceUrl}"}]}
+{"resource_changes":[{"entity_type":"service","entity_hsds_id":"${target.serviceHsdsId}","entity_name":"${target.serviceName}","field_name":"phone","before_value":"the stored value","after_value":"the value the page states","change_kind":"contact_change","summary":"one sentence","quote":"the page's own sentence that states it","model_confidence":0.9,"source_url":"${target.sourceUrl}"}]}
 
 Rules:
 - Include a change ONLY for a fact the page states differently from the stored value. If every stored fact still matches the page, return {"resource_changes":[]}. Never invent a change.
 - Use the exact stored value in before_value and the page's own words in after_value.
+- Copy the page's sentence that states the fact into "quote", word for word. A change with no after_value and no quote is thrown away.
 - entity_type is one of organization, service, location, service_at_location, schedule, contact, eligibility, required_document, language, accessibility, taxonomy. For a phone, email or website use "contact"; for hours use "schedule"; for eligibility use "eligibility"; for a required document use "required_document".
 - change_kind is one of field_change, eligibility_change, hours_change, closure, move, contact_change, funding_change, non_informational.
 - source_url is always ${target.sourceUrl}.

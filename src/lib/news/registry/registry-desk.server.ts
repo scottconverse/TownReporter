@@ -20,6 +20,10 @@ import type { Sql } from "../../db.ts";
 import { asText, REMOVABLE_TABLES } from "./hsds-import.server.ts";
 import { editorLabel, editorLabels } from "./registry-editor-names.server.ts";
 import { applyTargetFor } from "./registry-review.server.ts";
+import {
+  getRegistryEntryDetail,
+  type RegistryEntryDetail,
+} from "./registry-entry-editor.server.ts";
 import { DESK_DIRECTORY } from "./registry-entry-fields.ts";
 import { STARTER_LIST_DIRECTORY } from "./starter-list.ts";
 
@@ -38,10 +42,21 @@ export interface DeskRegistryChange {
   afterValue: string | null;
   changeKind: string;
   summary: string | null;
+  /**
+   * The sentence, copied from the source page, that states the change (Scott,
+   * Nov 20 2026). Null when the scan stored none; the desk says so.
+   */
+  quote: string | null;
   evidenceTier: string;
   sourceTitle: string | null;
   sourceUrl: string | null;
   captureDate: WhenValue;
+  /**
+   * The published entry this proposal belongs to, when it can be named. A new
+   * entry proposal has none yet; a child row is followed to its service.
+   */
+  serviceId: number | null;
+  servicePublished: boolean;
   scanRunId: number | null;
   createdAt: WhenValue;
   /**
@@ -120,6 +135,8 @@ export async function listDeskChanges(
     after_value: string | null;
     change_kind: string;
     summary: string | null;
+    evidence_quote: string | null;
+    service_id: number | null;
     evidence_tier: string;
     source_title: string | null;
     source_url: string | null;
@@ -166,6 +183,39 @@ export async function listDeskChanges(
             end as entity_name,
             rc.entity_name as stored_entity_name,
             rc.field_name, rc.before_value, rc.after_value, rc.change_kind, rc.summary,
+            rc.evidence_quote,
+            case rc.entity_type
+              when 'service' then rc.entity_id
+              when 'service_at_location' then (select sal.service_id from service_at_locations sal
+                 where sal.id = rc.entity_id and sal.newsroom_id = rc.newsroom_id)
+              when 'schedule' then (select sc.service_id from schedules sc
+                 where sc.id = rc.entity_id and sc.newsroom_id = rc.newsroom_id)
+              when 'contact' then (select ct.service_id from contacts ct
+                 where ct.id = rc.entity_id and ct.newsroom_id = rc.newsroom_id)
+              when 'eligibility' then (select el.service_id from eligibilities el
+                 where el.id = rc.entity_id and el.newsroom_id = rc.newsroom_id)
+              when 'required_document' then (select rd.service_id from required_documents rd
+                 where rd.id = rc.entity_id and rd.newsroom_id = rc.newsroom_id)
+              when 'language' then (select lg.service_id from languages lg
+                 where lg.id = rc.entity_id and lg.newsroom_id = rc.newsroom_id)
+              when 'accessibility' then (
+                 coalesce(
+                   (select a.service_id from accessibilities a
+                     where a.id = rc.entity_id and a.newsroom_id = rc.newsroom_id),
+                   (select min(sx.id) from accessibilities a
+                      join service_at_locations x
+                        on x.newsroom_id = a.newsroom_id and x.location_id = a.location_id
+                       and x.removed_at is null
+                      join services sx on sx.id = x.service_id and sx.newsroom_id = x.newsroom_id
+                     where a.id = rc.entity_id and a.newsroom_id = rc.newsroom_id)))
+              when 'location' then (
+                 select min(x.service_id) from service_at_locations x
+                  where x.newsroom_id = rc.newsroom_id and x.location_id = rc.entity_id
+                    and x.removed_at is null)
+              when 'organization' then (
+                 select min(sx.id) from services sx
+                  where sx.newsroom_id = rc.newsroom_id and sx.organization_id = rc.entity_id)
+            end as service_id,
             rc.evidence_tier, rc.created_at, rc.scan_run_id,
             src.title as source_title, src.url as source_url,
             snap.created_at as capture_date,
@@ -208,6 +258,19 @@ export async function listDeskChanges(
     }
   }
 
+  // Whether the service a proposal belongs to is on the public page, so the
+  // card can link to it only when the link would open something.
+  const serviceIds = [...new Set(rows.map((row) => row.service_id).filter((id): id is number => id != null))];
+  const publishedServices = new Set<number>();
+  if (serviceIds.length > 0) {
+    const live = await sql.query<{ id: number }>(
+      `select id from services
+        where newsroom_id = $1 and published = true and id = any($2::int[])`,
+      [newsroomId, serviceIds],
+    );
+    for (const found of live) publishedServices.add(Number(found.id));
+  }
+
   return rows.map((row) => {
     const target = row.entity_id == null ? null : applyTargetFor(row.entity_type, row.field_name);
     const key = target && row.entity_id != null ? `${target.table}.${target.column}.${Number(row.entity_id)}` : null;
@@ -225,6 +288,9 @@ export async function listDeskChanges(
     afterValue: row.after_value,
     changeKind: row.change_kind,
     summary: row.summary,
+    quote: row.evidence_quote,
+    serviceId: row.service_id == null ? null : Number(row.service_id),
+    servicePublished: row.service_id != null && publishedServices.has(Number(row.service_id)),
     evidenceTier: row.evidence_tier,
     sourceTitle: row.source_title,
     sourceUrl: row.source_url,
@@ -369,63 +435,247 @@ export async function listRegistrySourcesWithHealth(
   }));
 }
 
-/** One service an editor has loaded but not yet published. */
-export interface DeskRegistryWaitingEntry {
+/**
+ * Everything the desk knows about one entry, in the words a person reads
+ * (Scott, Nov 20 2026). Every field is here, so a card can show the entry
+ * instead of its name; a field the source did not state is null or empty and
+ * the card says "Not listed on the source page." rather than leaving a blank.
+ */
+export interface DeskEntryFacts {
   serviceId: number;
   /** The HSDS id the entry was imported under; matches the starter list. */
   serviceHsdsId: string;
   organizationName: string;
   serviceName: string;
   categoryName: string | null;
+  /** The first phone, kept for the editor's one-line form. */
   phone: string | null;
+  /** Every phone the entry has, in the order they were stored. */
+  phones: string[];
   description: string | null;
+  /** One readable line per place: "12 Main St, Boulder, CO 80302". */
+  address: string | null;
+  /** One readable line per set of hours. */
+  hours: string[];
+  /** The entry's own web address, else the organization's, else a contact's. */
+  website: string | null;
+  /** The eligibility rules, joined into one line. */
+  eligibility: string | null;
+  fees: string | null;
+  applicationProcess: string | null;
+  languages: string[];
+  crisis: boolean;
   sourceTitle: string | null;
   sourceUrl: string | null;
+  /** When the capture this entry rests on was taken. */
+  sourceCapturedAt: WhenValue;
+  robotCheckedAt: WhenValue;
+  robotCheckResult: string | null;
+  published: boolean;
+  createdAt: WhenValue;
+  updatedAt: WhenValue;
 }
+
+/** One service an editor has loaded but not yet published. */
+export type DeskRegistryWaitingEntry = DeskEntryFacts;
 
 /**
  * One published service on the desk. The same shape as a waiting entry, so the
  * editor's form can be filled from either list without a second reader.
  */
-export type DeskRegistryPublishedEntry = DeskRegistryWaitingEntry;
+export type DeskRegistryPublishedEntry = DeskEntryFacts;
 
 /**
  * The columns both desk entry lists read. `published` decides which list a row
- * lands in; everything else is what the editor's form is filled from.
+ * lands in; everything else is what the card shows and the editor's form is
+ * filled from.
+ *
+ * The child rows (phones, hours, eligibility, languages) are gathered with
+ * `jsonb_agg` in one statement rather than one query per entry: the desk draws
+ * up to 200 entries a list, and a query per field per entry would be 800
+ * round trips to draw one screen. `loc` picks the entry's first linked place.
  */
 const ENTRY_COLUMNS = `s.id as service_id, s.hsds_id as service_hsds_id, s.name as service_name,
-            s.description as service_description,
-            o.name as organization_name,
+            s.description as service_description, s.url as service_url, s.fees as service_fees,
+            s.application_process as service_application_process, s.crisis as service_crisis,
+            s.published as service_published, s.created_at as service_created_at,
+            s.updated_at as service_updated_at, s.robot_checked_at, s.robot_check_result,
+            o.name as organization_name, o.website as organization_website,
             t.name as category_name,
-            (select c.phone from contacts c
-              where c.newsroom_id = s.newsroom_id and c.service_id = s.id
-                and c.phone is not null and c.phone <> '' and c.removed_at is null
-              order by c.id limit 1) as phone,
-            src.title as source_title, src.url as source_url`;
+            src.title as source_title, src.url as source_url,
+            cap.created_at as source_captured_at,
+            loc.address_1, loc.address_2, loc.city, loc.state_province, loc.postal_code,
+            (select coalesce(jsonb_agg(c.phone order by c.id), '[]'::jsonb)
+               from contacts c
+              where c.newsroom_id = s.newsroom_id and c.removed_at is null
+                and c.phone is not null and trim(c.phone) <> ''
+                and (c.service_id = s.id
+                     or (c.organization_id = o.id and c.service_id is null and c.location_id is null)
+                     or exists (select 1 from service_at_locations x
+                                 where x.newsroom_id = c.newsroom_id and x.service_id = s.id
+                                   and x.location_id = c.location_id and x.removed_at is null))) as phones,
+            (select coalesce(jsonb_agg(c.website order by c.id), '[]'::jsonb)
+               from contacts c
+              where c.newsroom_id = s.newsroom_id and c.removed_at is null
+                and c.website is not null and trim(c.website) <> ''
+                and (c.service_id = s.id or c.organization_id = o.id)) as contact_websites,
+            (select coalesce(jsonb_agg(jsonb_build_object(
+                       'days', sc.days, 'opensAt', sc.opens_at, 'closesAt', sc.closes_at,
+                       'byAppointment', sc.by_appointment, 'notes', sc.notes) order by sc.id), '[]'::jsonb)
+               from schedules sc
+              where sc.newsroom_id = s.newsroom_id and sc.removed_at is null
+                and (sc.service_id = s.id
+                     or exists (select 1 from service_at_locations x
+                                 where x.newsroom_id = sc.newsroom_id and x.service_id = s.id
+                                   and x.removed_at is null
+                                   and (x.schedule_id = sc.id
+                                        or (sc.service_id is null and x.location_id = sc.location_id))))) as hour_rows,
+            (select string_agg(e.description, ' · ' order by e.id)
+               from eligibilities e
+              where e.newsroom_id = s.newsroom_id and e.service_id = s.id and e.removed_at is null
+                and e.description is not null and trim(e.description) <> '') as eligibility_text,
+            (select coalesce(jsonb_agg(lg.language order by lg.id), '[]'::jsonb)
+               from languages lg
+              where lg.newsroom_id = s.newsroom_id and lg.service_id = s.id
+                and lg.removed_at is null) as languages`;
+
+/** The joins `ENTRY_COLUMNS` needs, from a services row aliased `s`. */
+const ENTRY_JOINS = `join organizations o
+         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+       left join taxonomies t
+         on t.id = s.taxonomy_id and t.newsroom_id = s.newsroom_id
+       left join sources src
+         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+       left join snapshots cap
+         on cap.id = coalesce(s.source_capture_id, o.source_capture_id)
+       left join lateral (
+         select l.address_1, l.address_2, l.city, l.state_province, l.postal_code
+           from service_at_locations sal
+           join locations l on l.id = sal.location_id and l.newsroom_id = sal.newsroom_id
+          where sal.newsroom_id = s.newsroom_id and sal.service_id = s.id
+            and sal.removed_at is null
+          order by sal.id limit 1
+       ) loc on true`;
 
 interface EntryRow {
   service_id: number;
   service_hsds_id: string;
   service_name: string;
   service_description: string | null;
+  service_url: string | null;
+  service_fees: string | null;
+  service_application_process: string | null;
+  service_crisis: boolean;
+  service_published: boolean;
+  service_created_at: WhenValue;
+  service_updated_at: WhenValue;
+  robot_checked_at: WhenValue;
+  robot_check_result: string | null;
   organization_name: string;
+  organization_website: string | null;
   category_name: string | null;
-  phone: string | null;
   source_title: string | null;
   source_url: string | null;
+  source_captured_at: WhenValue;
+  address_1: string | null;
+  address_2: string | null;
+  city: string | null;
+  state_province: string | null;
+  postal_code: string | null;
+  phones: unknown;
+  contact_websites: unknown;
+  hour_rows: unknown;
+  eligibility_text: string | null;
+  languages: unknown;
 }
 
-function toEntry(row: EntryRow): DeskRegistryWaitingEntry {
+/** A jsonb array from the driver: parsed already, or a string that parses. */
+function asJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function asStringArray(value: unknown): string[] {
+  return asJsonArray(value)
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item !== "");
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/** One readable line per set of hours, from the stored columns. */
+function hoursLine(row: unknown): string {
+  if (!row || typeof row !== "object") return "";
+  const hours = row as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof hours[key] === "string" ? (hours[key] as string).trim() : "";
+  if (hours.byAppointment === true) {
+    return [text("days"), "By appointment", text("notes")].filter(Boolean).join(" · ");
+  }
+  const times = [text("opensAt"), text("closesAt")].filter(Boolean).join(" to ");
+  const main = [text("days"), times].filter(Boolean).join(": ");
+  return text("notes") ? [main, `(${text("notes")})`].filter(Boolean).join(" ") : main;
+}
+
+/** One address line from the entry's first place. */
+function addressLine(row: EntryRow): string | null {
+  const street = [textOrNull(row.address_1), textOrNull(row.address_2)].filter(Boolean).join(", ");
+  // "Longmont, CO 80501": the state and ZIP read as one part of the line.
+  const stateAndZip = [textOrNull(row.state_province), textOrNull(row.postal_code)]
+    .filter(Boolean)
+    .join(" ");
+  const place = [textOrNull(row.city), stateAndZip].filter(Boolean).join(", ");
+  const line = [street, place].filter(Boolean).join(", ");
+  return line || null;
+}
+
+/** The first web address the entry has: its own, then the organization's, then a contact's. */
+function websiteOf(row: EntryRow): string | null {
+  return (
+    textOrNull(row.service_url) ??
+    textOrNull(row.organization_website) ??
+    asStringArray(row.contact_websites)[0] ??
+    null
+  );
+}
+
+function toEntry(row: EntryRow): DeskEntryFacts {
+  const phones = [...new Set(asStringArray(row.phones))];
   return {
     serviceId: Number(row.service_id),
     serviceHsdsId: row.service_hsds_id,
     organizationName: row.organization_name,
     serviceName: row.service_name,
     categoryName: row.category_name,
-    phone: row.phone,
+    phone: phones[0] ?? null,
+    phones,
     description: row.service_description,
+    address: addressLine(row),
+    hours: asJsonArray(row.hour_rows).map(hoursLine).filter(Boolean),
+    website: websiteOf(row),
+    eligibility: row.eligibility_text,
+    fees: row.service_fees,
+    applicationProcess: row.service_application_process,
+    languages: asStringArray(row.languages),
+    crisis: Boolean(row.service_crisis),
     sourceTitle: row.source_title,
     sourceUrl: row.source_url,
+    sourceCapturedAt: row.source_captured_at,
+    robotCheckedAt: row.robot_checked_at,
+    robotCheckResult: row.robot_check_result,
+    published: Boolean(row.service_published),
+    createdAt: row.service_created_at,
+    updatedAt: row.service_updated_at,
   };
 }
 
@@ -441,12 +691,7 @@ export async function listUnpublishedRegistryEntries(
   const rows = await sql.query<EntryRow>(
     `select ${ENTRY_COLUMNS}
        from services s
-       join organizations o
-         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
-       left join taxonomies t
-         on t.id = s.taxonomy_id and t.newsroom_id = s.newsroom_id
-       left join sources src
-         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+       ${ENTRY_JOINS}
       where s.newsroom_id = $1 and s.published = false
       order by s.created_at desc, s.id desc
       limit 200`,
@@ -468,12 +713,7 @@ export async function listPublishedRegistryEntries(
   const rows = await sql.query<EntryRow>(
     `select ${ENTRY_COLUMNS}
        from services s
-       join organizations o
-         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
-       left join taxonomies t
-         on t.id = s.taxonomy_id and t.newsroom_id = s.newsroom_id
-       left join sources src
-         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+       ${ENTRY_JOINS}
       where s.newsroom_id = $1 and s.published = true
       order by s.updated_at desc, s.id desc
       limit 200`,
@@ -547,16 +787,9 @@ export async function starterListIsLoaded(sql: Sql, newsroomId: number): Promise
 }
 
 /** One entry the scan published by itself (Scott, Nov 20 2026, part 6). */
-export interface DeskAutoPublishedEntry {
+export interface DeskAutoPublishedEntry extends DeskEntryFacts {
   /** The audit row's id; the stable key for the list. */
   auditId: number;
-  serviceId: number;
-  organizationName: string;
-  serviceName: string;
-  sourceUrl: string | null;
-  sourceTitle: string | null;
-  /** False after an editor took the entry down; it stays in the history. */
-  published: boolean;
   /** A crisis service is listed first, as its audit row is marked `[Crisis]`. */
   crisis: boolean;
   publishedAt: WhenValue;
@@ -576,30 +809,15 @@ export async function listAutoPublishedRegistryEntries(
   sql: Sql,
   newsroomId: number,
 ): Promise<DeskAutoPublishedEntry[]> {
-  const rows = await sql.query<{
-    audit_id: number;
-    service_id: number;
-    organization_name: string;
-    service_name: string;
-    source_url: string | null;
-    source_title: string | null;
-    published: boolean;
-    crisis: boolean;
-    published_at: WhenValue;
-  }>(
-    `select ae.id as audit_id, s.id as service_id,
-            o.name as organization_name, s.name as service_name,
-            src.url as source_url, src.title as source_title,
-            s.published,
+  const rows = await sql.query<EntryRow & { audit_id: number; crisis: boolean; published_at: WhenValue }>(
+    `select ae.id as audit_id,
             (ae.detail like '[Crisis]%') as crisis,
-            ae.created_at as published_at
+            ae.created_at as published_at,
+            ${ENTRY_COLUMNS}
        from audit_events ae
        join services s
          on s.id = ae.subject_id and s.newsroom_id = ae.newsroom_id
-       join organizations o
-         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
-       left join sources src
-         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+       ${ENTRY_JOINS}
       where ae.newsroom_id = $1
         and ae.action = 'registry.service.autopublish'
         and ae.subject_kind = 'registry-service'
@@ -608,13 +826,8 @@ export async function listAutoPublishedRegistryEntries(
     [newsroomId],
   );
   return rows.map((row) => ({
+    ...toEntry(row),
     auditId: Number(row.audit_id),
-    serviceId: Number(row.service_id),
-    organizationName: row.organization_name,
-    serviceName: row.service_name,
-    sourceUrl: row.source_url,
-    sourceTitle: row.source_title,
-    published: Boolean(row.published),
     crisis: Boolean(row.crisis),
     publishedAt: row.published_at,
   }));
@@ -744,6 +957,159 @@ export async function readRegistryFreshness(
     rechecked: rechecked.map(toFreshnessEntry),
     changedEntries: changed.map(toFreshnessEntry),
     sourceGoneEntries: sourceGone.map(toFreshnessEntry),
+  };
+}
+
+/* ---- One entry, one page (Scott, Nov 20 2026) ---- */
+
+/** One line of an entry's history, in the desk's own words. */
+export interface DeskEntryHistoryRow {
+  id: number;
+  /** `audit` rows are actions; `change` rows are what the scan proposed. */
+  source: "audit" | "change";
+  action: string;
+  detail: string;
+  at: WhenValue;
+  by: string | null;
+}
+
+/** One page an entry came from, and what the registry uses it for. */
+export interface DeskEntrySourceRow {
+  id: number;
+  title: string;
+  url: string;
+  registryRole: string | null;
+  capturedAt: WhenValue;
+  lastFetchedAt: WhenValue;
+  lastError: string | null;
+}
+
+export interface DeskEntryPanelView {
+  entry: DeskEntryFacts;
+  /** The same detail the editor loads: every place, hours, contact and rule. */
+  detail: RegistryEntryDetail;
+  history: DeskEntryHistoryRow[];
+  sources: DeskEntrySourceRow[];
+}
+
+/**
+ * Everything one entry's own desk page shows: every field, its history and its
+ * sources. Read-only; the editor's save paths are unchanged. Null when the
+ * service is not in this newsroom.
+ */
+export async function readDeskEntryPanel(
+  sql: Sql,
+  newsroomId: number,
+  serviceId: number,
+): Promise<DeskEntryPanelView | null> {
+  const rows = await sql.query<EntryRow>(
+    `select ${ENTRY_COLUMNS}
+       from services s
+       ${ENTRY_JOINS}
+      where s.newsroom_id = $1 and s.id = $2`,
+    [newsroomId, serviceId],
+  );
+  if (!rows[0]) return null;
+  const entry = toEntry(rows[0]);
+
+  const detail = await getRegistryEntryDetail(sql, newsroomId, serviceId);
+  if (!detail) return null;
+
+  const audits = await sql.query<{
+    id: number;
+    action: string;
+    detail: string;
+    created_at: WhenValue;
+    user_id: string | null;
+  }>(
+    `select id, action, detail, created_at, user_id
+       from audit_events
+      where newsroom_id = $1 and subject_kind = 'registry-service' and subject_id = $2
+      order by created_at desc, id desc
+      limit 100`,
+    [newsroomId, serviceId],
+  );
+  const changes = await sql.query<{
+    id: number;
+    review_state: string;
+    field_name: string;
+    before_value: string | null;
+    after_value: string | null;
+    change_kind: string;
+    created_at: WhenValue;
+  }>(
+    `select id, review_state, field_name, before_value, after_value, change_kind, created_at
+       from resource_changes
+      where newsroom_id = $1 and entity_type = 'service' and entity_id = $2
+      order by created_at desc, id desc
+      limit 100`,
+    [newsroomId, serviceId],
+  );
+
+  const names = await editorLabels(sql, [
+    ...audits.map((row) => row.user_id),
+    ...changes.map(() => null),
+  ]);
+
+  const history: DeskEntryHistoryRow[] = [
+    ...audits.map((row) => ({
+      id: Number(row.id),
+      source: "audit" as const,
+      action: row.action,
+      detail: row.detail,
+      at: row.created_at,
+      by: row.user_id == null ? null : editorLabel(names, row.user_id),
+    })),
+    ...changes.map((row) => ({
+      id: Number(row.id),
+      source: "change" as const,
+      action: row.review_state,
+      detail: `${row.field_name}: ${row.before_value ?? "nothing recorded"} → ${
+        row.after_value ?? "nothing recorded"
+      } (${row.change_kind})`,
+      at: row.created_at,
+      by: null,
+    })),
+  ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime());
+
+  const sources = await sql.query<{
+    id: number;
+    title: string;
+    url: string;
+    registry_role: string | null;
+    captured_at: WhenValue;
+    last_fetched_at: WhenValue;
+    last_error: string | null;
+  }>(
+    `select s.id, s.title, s.url, rs.registry_role,
+            cap.created_at as captured_at, s.last_fetched_at, s.last_error
+       from services sv
+       join organizations o
+         on o.id = sv.organization_id and o.newsroom_id = sv.newsroom_id
+       join sources s
+         on s.id = coalesce(sv.source_id, o.source_id) and s.newsroom_id = sv.newsroom_id
+       left join resource_sources rs
+         on rs.source_id = s.id and rs.newsroom_id = s.newsroom_id
+       left join snapshots cap
+         on cap.id = coalesce(sv.source_capture_id, o.source_capture_id)
+      where sv.newsroom_id = $1 and sv.id = $2
+      order by rs.registry_role nulls last`,
+    [newsroomId, serviceId],
+  );
+
+  return {
+    entry,
+    detail,
+    history,
+    sources: sources.map((row) => ({
+      id: Number(row.id),
+      title: row.title,
+      url: row.url,
+      registryRole: row.registry_role,
+      capturedAt: row.captured_at,
+      lastFetchedAt: row.last_fetched_at,
+      lastError: row.last_error,
+    })),
   };
 }
 

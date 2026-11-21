@@ -100,6 +100,91 @@ test("a change whose page has no retained capture is rejected, not stored (guard
   assert.match(registryChangeSentence(counts), /rejected for lack of a retained capture/);
 });
 
+/*
+  Scott, Nov 20 2026: "I looked at one of the needs approval, and it didn't have
+  any data. It had the name of the site, no website URL, nothing." This is that
+  empty proposal: a change that names an entity and states no value at all. It
+  used to be stored (and, for a new place, used to create a row with a name and
+  nothing else); now it is dropped before anything is written.
+*/
+test("a change that names an entry but states no fact is dropped, not stored", async () => {
+  const sql = await getSql();
+  const newsroomId = 9320;
+  const seeded = await seedNewsroom(newsroomId);
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
+    changes: [
+      change({
+        entity_type: "location",
+        entity_name: "Brand New Hall",
+        field_name: "name",
+        before_value: null,
+        after_value: null,
+        change_kind: "field_change",
+        summary: "",
+        quote: "",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+
+  assert.deepEqual(counts, { stored: 0, rejected: 1, published: 0, created: 0, crisis: 0 });
+  const stored = await sql.query("select id from resource_changes where newsroom_id = $1", [
+    newsroomId,
+  ]);
+  assert.equal(stored.length, 0, "no empty proposal is stored");
+  const places = await sql.query("select id from locations where newsroom_id = $1", [newsroomId]);
+  assert.equal(places.length, 0, "no entry is created from a name alone");
+});
+
+test("a proposal stores the full fact, the source and the page's own sentence", async () => {
+  const sql = await getSql();
+  const newsroomId = 9321;
+  const seeded = await seedNewsroom(newsroomId);
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
+    changes: [
+      change({
+        entity_type: "schedule",
+        entity_name: "Weekly grocery pickup",
+        field_name: "days",
+        before_value: null,
+        after_value: "Monday to Friday, 9 to 5",
+        change_kind: "hours_change",
+        summary: "The pantry is open five days a week.",
+        quote: "The pantry is open Monday to Friday, 9 to 5.",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+  assert.equal(counts.stored, 1);
+
+  const [row] = await sql.query<{
+    review_state: string;
+    field_name: string;
+    after_value: string;
+    evidence_quote: string;
+    source_id: number;
+    evidence_capture_id: number;
+  }>(
+    `select review_state, field_name, after_value, evidence_quote, source_id, evidence_capture_id
+       from resource_changes where newsroom_id = $1`,
+    [newsroomId],
+  );
+  assert.equal(row!.review_state, "pending");
+  assert.equal(row!.field_name, "days");
+  assert.equal(row!.after_value, "Monday to Friday, 9 to 5");
+  assert.equal(row!.evidence_quote, "The pantry is open Monday to Friday, 9 to 5.");
+  assert.equal(Number(row!.source_id), seeded.sourceId, "the source page travels with the proposal");
+  assert.equal(Number(row!.evidence_capture_id), seeded.snapshotId);
+});
+
 test("a change on an existing service is applied and the entry is auto-published", async () => {
   const sql = await getSql();
   const newsroomId = 9302;

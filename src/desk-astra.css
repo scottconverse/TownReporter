@@ -9404,3 +9404,198 @@
     grid-template-columns: 96px minmax(0, 1fr) calc(60px * var(--ts)) calc(132px * var(--ts));
   }
 }
+
+/*
+  THE REGISTRY DESK, DRAWN FOR A PERSON (Scott, Nov 20 2026).
+
+  Scott's words: "Make sure that the interface to that registry page is made for
+  a human. Right now it's unbelievably ugly." The page keeps every existing
+  token and family -- cream surface, one-pixel rules, the display face for
+  headings, the body face for facts -- and changes only the layout: entries read
+  as cards in a grid, and each list's heading is the control that opens it.
+
+  Nothing here is a new colour or a new type scale; every value comes from the
+  variables the rest of the desk already uses.
+*/
+.desk-ltr.astra .registry-sec-summary {
+  list-style: none;
+  cursor: pointer;
+}
+.desk-ltr.astra .registry-sec-summary::-webkit-details-marker,
+.desk-ltr.astra .registry-sec-summary::marker {
+  display: none;
+  content: "";
+}
+.desk-ltr.astra .registry-sec-summary .sechead {
+  margin-top: 0;
+  padding: 0 24px;
+}
+.desk-ltr.astra .registry-sec-summary:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.desk-ltr.astra .registry-fresh-list {
+  margin-top: 12px;
+  border: 0;
+  background: transparent;
+}
+
+/* The wide toolbar: the one search box and the category filter. */
+.desk-ltr.astra .registry-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.desk-ltr.astra .registry-toolbar .astra-search {
+  flex: 1 1 320px;
+}
+.desk-ltr.astra .registry-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(1rem * var(--ts));
+}
+.desk-ltr.astra .registry-filter-select {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+/* Entries: a readable grid, one column on a narrow screen. */
+.desk-ltr.astra .astra-plain.registry-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 24px 0;
+}
+.desk-ltr.astra .astra-plain.registry-cards > li {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+@media (min-width: 860px) {
+  .desk-ltr.astra .astra-plain.registry-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1400px) {
+  .desk-ltr.astra .astra-plain.registry-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.desk-ltr.astra .registry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.desk-ltr.astra .registry-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.desk-ltr.astra .registry-card-head h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .registry-card-head button.inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.desk-ltr.astra .registry-tag {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  font-size: calc(0.8125rem * var(--ts));
+  font-weight: 700;
+}
+.desk-ltr.astra .registry-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: calc(1rem * var(--ts));
+}
+.desk-ltr.astra .registry-facts dt {
+  font-weight: 700;
+  color: var(--fg2);
+}
+.desk-ltr.astra .registry-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .registry-fact-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .registry-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.desk-ltr.astra .registry-card-actions .btn {
+  min-height: 44px;
+}
+
+/* A proposal: the old and new values side by side, then the page's own words. */
+.desk-ltr.astra .registry-change-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.desk-ltr.astra .registry-change-values dt {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+  color: var(--fg2);
+}
+.desk-ltr.astra .registry-change-values dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .registry-quote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+/* One entry's own page. */
+.desk-ltr.astra .registry-entry-panel {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 16px 24px;
+  border: 2px solid var(--fg);
+  background: var(--surface);
+}
+.desk-ltr.astra .registry-entry-panel > h4 {
+  margin-top: 12px;
+}
+.desk-ltr.astra .registry-panel-text {
+  margin: 0;
+  font-size: calc(1rem * var(--ts));
+  color: var(--fg2);
+}

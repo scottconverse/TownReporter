@@ -97,7 +97,21 @@ const imports = {
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
   "@/lib/news/registry/registry-sentence": sentenceUrl,
   "@/lib/paper-context-state": paperUrl,
+  "@/lib/news/list-window": await moduleUrl("src/lib/news/list-window.ts"),
+  "@/lib/news/registry/registry-proposal-facts": await moduleUrl(
+    "src/lib/news/registry/registry-proposal-facts.ts",
+  ),
+  "@/lib/news/registry/registry-entry-copy": await moduleUrl(
+    "src/lib/news/registry/registry-entry-copy.ts",
+  ),
 };
+// The desk page's cards are real here: they are plain markup and the page's
+// data decides what they say (scripts/registry-human-desk-dom.test.mjs covers
+// their contents).
+imports["@/components/registry-entry-card"] = await moduleUrl(
+  "src/components/registry-entry-card.tsx",
+  imports,
+);
 const changeReviewUrl = await moduleUrl("src/components/registry-change-review.tsx", imports);
 const { RegistryChangeReviewList } = await import(changeReviewUrl);
 const { RegistryVerificationPanel } = await import(
@@ -125,6 +139,9 @@ export function ListSkeleton() { return null; }
   "@/components/registry-import-panel": stubUrl("export function RegistryImportPanel() { return null; }\n"),
   "@/components/registry-export-panel": stubUrl("export function RegistryExportPanel() { return null; }\n"),
   "@/components/registry-entry-editor": stubUrl("export function RegistryEntryEditor() { return null; }\n"),
+  // Scott, Nov 20 2026: the desk page now opens one entry's own page; the
+  // component is stubbed here because its own read is not what this file tests.
+  "@/components/registry-entry-panel": stubUrl("export function RegistryEntryPanel() { return null; }\n"),
   "@/components/registry-needs-checking": stubUrl("export function RegistryNeedsChecking() { return null; }\n"),
   "@/lib/news/registry/registry-desk": stubUrl(`
 export async function listRegistryDesk() { return globalThis.__desk.data; }
