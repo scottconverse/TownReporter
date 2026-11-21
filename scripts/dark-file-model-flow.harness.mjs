@@ -1,5 +1,28 @@
 import { installDom, moduleUrl, transpileToUrl } from "./dom-harness.mjs";
 const window = installDom();
+/*
+  linkedom's window has no `postMessage`, and `desk.dark.tsx` asks the "Send to
+  Desk" extension for posts on mount (`askBridge`). Deliver a same-window
+  message the way a browser does -- asynchronously, `source` the window itself,
+  `origin` this page's own -- so the mount path runs unchanged. The desk's
+  origin here is `http://localhost`, which is not one of the desk origins, so a
+  fixture that wants the page to ACCEPT a hand-over must dispatch its own
+  `message` event with a real desk origin; nothing is faked on the page's behalf.
+*/
+if (!window.postMessage) {
+  window.postMessage = (data) => {
+    setTimeout(() => {
+      const event = new window.Event("message");
+      for (const [key, value] of Object.entries({
+        data: structuredClone(data),
+        origin: window.location.origin,
+        source: window,
+      }))
+        Object.defineProperty(event, key, { value, configurable: true });
+      window.dispatchEvent(event);
+    }, 0);
+  };
+}
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
 const h = React.createElement;
@@ -124,6 +147,11 @@ const imports = {
   `),
   "@/components/provider-signin-button": nullComponents,
   "@/lib/news/preflight": stub(`export const looksLikeProviderAuthFailure = () => false;`),
+  // "Send to Desk" (Nov 21 2026): the desk validates the extension's hand-over
+  // with these rules. The real module runs -- it only imports `zod`, which
+  // `dom-harness`'s `import.meta.resolve` supplies -- so the tests exercise the
+  // same validation the page runs rather than a second copy of it.
+  "@/lib/news/reddit-desk-posts": await moduleUrl("src/lib/news/reddit-desk-posts.ts"),
   "@/components/dialogs/editor-dialogs": nullComponents,
   "@/components/page-watch-panel": nullComponents,
   "@/components/dialog": nullComponents,
