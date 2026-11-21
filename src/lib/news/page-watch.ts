@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
+import { readableCapture } from "./html-text.ts";
 import { ensureInvestigateSchema, rememberCapture } from "./investigate.ts";
 import { ingestDocument, type OcrOptions } from "./ingest.ts";
 import { assertHttpUrl, sha256 } from "./url-guard.ts";
@@ -8,6 +10,9 @@ import { storyModelChoice } from "./model-choice.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { IngestDocument } from "./ingest.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+/* The Firecrawl Local reader is server-only; load it the same way ingest.ts
+   loads its server modules, and only when an opt-in capture actually runs. */
+const firecrawlReader = createServerOnlyFn(() => import("./firecrawl-local.server.ts"));
 /** Compare complete lines, including short numbers. Excerpts are bounded and labelled. */
 export function watchChangeText(previous: string, current: string): string {
   if (previous === current) return "No text change.";
@@ -407,6 +412,126 @@ export async function checkPageWatchFor(
     return { ok: false as const, error };
   }
 }
+/**
+ * One-time manual capture through Firecrawl Local, opted into per watch.
+ *
+ * It takes and releases the same watch lease a normal check does, so the two
+ * cannot run at once -- but it is NOT a check: the watch baseline columns
+ * (`watch_last_readable_version_id`, `last_version_id`, `last_outcome`,
+ * `last_check_at`, `next_check_at`) are never touched, and nothing is attached
+ * to an investigation automatically. A readable answer is stored as a
+ * `firecrawl-capture` row in the watch history.
+ */
+export async function captureWithFirecrawlLocalFor(
+  who: WatchIdentity,
+  id: number,
+  opts: { read?: (url: string) => Promise<IngestDocument>; now?: Date } = {},
+) {
+  await ensurePageWatchSchema();
+  const sql = await getSql();
+  const now = opts.now ?? new Date(),
+    token = randomUUID();
+  const claimed =
+    await sql<WatchRow>`update source_monitors set watch_lease=${token},watch_check_started_at=${now.toISOString()}::timestamptz,watch_last_error=null
+ where id=${id} and newsroom_id=${who.newsroomId} and manual_watch=true and watch_state='active'
+ and (watch_lease is null or watch_check_started_at < ${new Date(now.getTime() - 30 * 60000).toISOString()}::timestamptz)
+ returning id,url,title,watch_reason,watch_state,watch_model_choice,watch_model_effort,watch_model_requested,watch_failover_note,watch_check_started_at,watch_last_error,last_check_at,last_outcome,next_check_at,investigation_id,watch_last_readable_version_id`;
+  if (!claimed[0]) {
+    const found = await sql<{
+      watch_state: string;
+      watch_lease: string | null;
+    }>`select watch_state,watch_lease from source_monitors where id=${id} and newsroom_id=${who.newsroomId} and manual_watch=true`;
+    return {
+      ok: false as const,
+      busy: !!found[0]?.watch_lease,
+      error: found[0]?.watch_lease
+        ? "A check is already running."
+        : found[0]
+          ? "Resume this watch before checking it."
+          : "Watch not found.",
+    };
+  }
+  const m = claimed[0];
+  try {
+    // Only load the server-only reader when the caller did not hand us one.
+    const read = opts.read ?? (await firecrawlReader()).readWithFirecrawlLocal;
+    let got: IngestDocument;
+    try {
+      got = await read(m.url);
+    } catch (e) {
+      const error =
+        e instanceof Error
+          ? e.message.slice(0, 300)
+          : "Firecrawl Local could not read this page. Nothing was saved.";
+      await sql`update source_monitors set watch_lease=null,watch_check_started_at=null,watch_last_error=${error} where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token}`;
+      return { ok: false as const, error };
+    }
+    const readable = readableCapture({
+      text: got.text,
+      extractionMethod: got.extractionMethod,
+      status: got.status,
+      outcome: got.outcome,
+      title: got.title,
+    });
+    if (readable.kind !== "ok") {
+      await sql`update source_monitors set watch_lease=null,watch_check_started_at=null,watch_last_error=null where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token}`;
+      return {
+        ok: false as const,
+        error:
+          readable.note ||
+          "Firecrawl Local returned no readable text. Nothing was saved.",
+      };
+    }
+    return await withTransaction(async (sql) => {
+      const still =
+        await sql`select id from source_monitors where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token} for update`;
+      if (!still.length)
+        return { ok: false as const, error: "This capture was superseded. Reload the watch." };
+      const record = await rememberCapture({
+        sql,
+        userId: who.userId,
+        newsroomId: who.newsroomId,
+        investigationId: null,
+        url: m.url,
+        title: got.title || m.title,
+        text: readable.body,
+        hash: await sha256(readable.body),
+        status: got.status,
+        outcome: "fetched",
+        triggerKind: "manual-firecrawl-local",
+        monitorId: id,
+        redirectChain: got.redirectChain,
+        contentType: "text/markdown",
+        extractionMethod: "firecrawl-local:0.1.1",
+        pages: [],
+        extras: [],
+        observedAt: now,
+        autoWatch: false,
+      });
+      if (record.versionId == null)
+        return { ok: false as const, error: "Firecrawl Local returned text but nothing could be stored. Nothing was saved." };
+      const checks = await sql<{
+        id: number;
+      }>`insert into manual_watch_checks(newsroom_id,monitor_id,capture_event_id,previous_version_id,state,note,created_at)
+  select ${who.newsroomId},${id},${record.captureEventId},null,'firecrawl-capture',${"Captured once with Firecrawl Local. The watch baseline did not change."},${now.toISOString()}::timestamptz
+  from source_monitors where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token} returning id`;
+      if (!checks[0])
+        return { ok: false as const, error: "This capture was superseded. Reload the watch." };
+      // Release the lease only. The baseline columns are deliberately untouched.
+      await sql`update source_monitors set watch_lease=null,watch_check_started_at=null where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token}`;
+      return {
+        ok: true as const,
+        state: "firecrawl-capture" as const,
+        versionId: record.versionId,
+        captureEventId: record.captureEventId,
+      };
+    });
+  } catch (e) {
+    const error = e instanceof Error ? e.message.slice(0, 300) : "Could not save this capture.";
+    await sql`update source_monitors set watch_lease=null,watch_check_started_at=null,watch_last_error=${error} where id=${id} and newsroom_id=${who.newsroomId} and watch_lease=${token}`;
+    return { ok: false as const, error };
+  }
+}
 export async function pageWatchDetailFor(who: WatchIdentity, id: number, offset = 0) {
   const watch = (await listPageWatchesFor(who)).find((w) => w.id === id);
   if (!watch) return null;
@@ -487,7 +612,7 @@ export async function actOnPageWatchFor(
     await sql`insert into manual_watch_actions(newsroom_id,check_id,action,target_id,result_id) values(${who.newsroomId},${cap.id},'dismiss',0,0) on conflict do nothing`;
     return { ok: true as const, dismissed: true };
   }
-  if (!["first-capture", "changed", "unchanged", "moved"].includes(cap.state) || !cap.full_text)
+  if (!["first-capture", "changed", "unchanged", "moved", "firecrawl-capture"].includes(cap.state) || !cap.full_text)
     return {
       ok: false as const,
       error: "This check has no readable capture to hand off. Open the original or check again.",

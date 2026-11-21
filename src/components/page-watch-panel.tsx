@@ -10,6 +10,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { editorError } from "@/lib/news/desk-copy";
+import { describeWatchHistoryExtraction } from "@/lib/news/extraction-label";
 import {
   listPageWatches,
   createPageWatch,
@@ -19,6 +20,7 @@ import {
   actOnPageWatch,
   setPageWatchModel,
   readPageWatchCapture,
+  captureWithFirecrawlLocal,
 } from "@/lib/news/page-watch-actions";
 const WORDS: Record<string, string> = {
   "first-capture": "First capture saved",
@@ -32,6 +34,7 @@ const WORDS: Record<string, string> = {
   "needs-ocr": "Scanned PDF — not readable yet",
   "refused-too-large": "Source too large to read",
   "refused-content-type": "Unsupported source file type",
+  "firecrawl-capture": "Captured with Firecrawl Local",
 };
 export function PageWatchPanel({
   files,
@@ -92,6 +95,20 @@ export function PageWatchPanel({
       await refresh();
     },
     onError: (e) => setError(editorError(e.message) || "Could not check that page."),
+  });
+  /*
+    Opt-in one-time capture through Firecrawl Local. It is its own mutation so
+    it never shares a pending word with "Check now", and it refreshes the same
+    history without moving the watch baseline.
+  */
+  const firecrawl = useMutation({
+    mutationFn: (id: number) => captureWithFirecrawlLocal({ data: id }),
+    onSuccess: async (r) => {
+      if (r.ok) setNote("Captured with Firecrawl Local. The watch baseline did not change.");
+      else setError(editorError(r.error) || "Could not capture with Firecrawl Local.");
+      await refresh();
+    },
+    onError: (e) => setError(editorError(e.message) || "Could not capture with Firecrawl Local."),
   });
   const create = useMutation({
     mutationFn: () =>
@@ -201,6 +218,7 @@ export function PageWatchPanel({
   const busy =
     create.isPending ||
     check.isPending ||
+    firecrawl.isPending ||
     state.isPending ||
     action.isPending ||
     modelSave.isPending;
@@ -219,8 +237,12 @@ export function PageWatchPanel({
   */
   const checkRefusalRaw = check.isPending ? null : refusedAnswer(check.data);
   const stateRefusalRaw = state.isPending ? null : refusedAnswer(state.data);
+  const firecrawlRefusalRaw = firecrawl.isPending ? null : refusedAnswer(firecrawl.data);
   const checkRefusal = checkRefusalRaw ? editorError(checkRefusalRaw) || "Could not check that page." : null;
   const stateRefusal = stateRefusalRaw ? editorError(stateRefusalRaw) || "Could not change that page's watch." : null;
+  const firecrawlRefusal = firecrawlRefusalRaw
+    ? editorError(firecrawlRefusalRaw) || "Could not capture with Firecrawl Local."
+    : null;
   return (
     <section className="tipbox page-watch" aria-label="Watched pages">
       <h3 className="astra-settings-subhead">Watched pages</h3>
@@ -290,8 +312,13 @@ export function PageWatchPanel({
           {formOpen ? "Close watch form" : "+ Watch a page"}
         </InkButton>
       </div>
+      {/*
+        Only the form itself is behind `formOpen`. The open watch -- Check now,
+        Capture with Firecrawl Local, Pause, Stop and the history -- used to sit
+        inside this block too, and the row click closes the form, so a selected
+        watch drew nothing.
+      */}
       {formOpen ? (
-        <>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -352,7 +379,8 @@ export function PageWatchPanel({
               {create.isPending ? "Saving watch…" : "Save watch and capture page"}
             </InkButton>
           </form>
-          {error ? (
+      ) : null}
+      {error ? (
             <p className="note err" role="alert">
               {error}
             </p>
@@ -458,6 +486,44 @@ export function PageWatchPanel({
                 >
                   Check now
                 </ActionButton>
+                {/*
+                  Opt-in, one-time read through Firecrawl Local on this
+                  computer. It never moves the watch baseline and never runs on
+                  a schedule -- the service is started by hand.
+                */}
+                <ActionButton
+                  tone="quiet"
+                  phase={
+                    firecrawl.isPending
+                      ? "working"
+                      : firecrawl.isError || firecrawlRefusal
+                        ? "failed"
+                        : firecrawl.isSuccess
+                          ? "done"
+                          : "idle"
+                  }
+                  workingLabel="Reading with Firecrawl Local…"
+                  doneLabel="Captured"
+                  reason={
+                    firecrawl.isError
+                      ? firecrawl.error instanceof Error
+                        ? editorError(firecrawl.error.message) || "Could not capture with Firecrawl Local."
+                        : "Could not capture with Firecrawl Local."
+                      : firecrawlRefusal
+                  }
+                  disabled={busy || row.watch_state !== "active"}
+                  disabledReason={
+                    row.watch_state !== "active"
+                      ? "This page is paused, so the desk is not reading it."
+                      : null
+                  }
+                  onAct={() => {
+                    clear();
+                    firecrawl.mutate(row.id);
+                  }}
+                >
+                  Capture with Firecrawl Local
+                </ActionButton>
                 <ActionButton
                   tone="quiet"
                   phase={rowActionPhase({
@@ -519,6 +585,10 @@ export function PageWatchPanel({
                   Stop watching
                 </ActionButton>
               </div>
+              <p className="meta">
+                Uses Firecrawl Local on this computer. Start it by hand first. Your normal checks do
+                not change.
+              </p>
               <h4>Capture history</h4>
               <p className="meta">
                 Newest first, 20 checks per page. Failed checks are not “unchanged.” Comparison uses
@@ -599,7 +669,11 @@ export function PageWatchPanel({
                       </InkButton>
                     ) : null}
                   </div>
-                  <p className="meta">Extraction: {h.extraction_method || "not recorded"}</p>
+                  {/* A Firecrawl Local capture's stored method is a machine
+                      value (`firecrawl-local:0.1.1`); the line shows the same
+                      sentence the rest of the desk uses. Other methods keep
+                      the words this row already printed. */}
+                  <p className="meta">Extraction: {describeWatchHistoryExtraction(h.extraction_method)}</p>
                   {h.redirect_chain !== "[]" ? (
                     <p className="read-url">Redirect trail: {h.redirect_chain}</p>
                   ) : null}
@@ -690,8 +764,6 @@ export function PageWatchPanel({
           ) : detail.isError ? (
             <p role="alert">Could not load capture history.</p>
           ) : null}
-        </>
-      ) : null}
     </section>
   );
 }
