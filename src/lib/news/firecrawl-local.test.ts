@@ -1,11 +1,11 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { writeFile, rm } from "node:fs/promises";
+import { writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readWithFirecrawlLocal } from "./firecrawl-local.server.ts";
-import { describeExtractionMethod } from "./extraction-label.ts";
+import { describeExtractionMethod, describeWatchHistoryExtraction } from "./extraction-label.ts";
 import {
   createPageWatchFor,
   checkPageWatchFor,
@@ -284,6 +284,34 @@ test("extraction label names Firecrawl Local", () => {
   assert.equal(
     describeExtractionMethod("firecrawl-local:0.1.1"),
     "Read by Firecrawl Local 0.1.1 on this computer",
+  );
+});
+
+test("the page-watch history line shows the friendly Firecrawl label, not the stored value", async () => {
+  /*
+    The history row printed `firecrawl-local:0.1.1` raw: the line interpolated
+    the stored column and never called the label module, which already had the
+    Firecrawl sentence. The helper is the line's one source, so it is pinned
+    above the call site below.
+  */
+  assert.equal(
+    describeWatchHistoryExtraction("firecrawl-local:0.1.1"),
+    "Read by Firecrawl Local 0.1.1 on this computer",
+  );
+  assert.notEqual(describeWatchHistoryExtraction("firecrawl-local:0.1.1"), "firecrawl-local:0.1.1");
+  /*
+    Every other method keeps the words it already showed, so no other editor's
+    history reading changes: a readability capture stays raw, and an absent
+    method stays "not recorded".
+  */
+  assert.equal(describeWatchHistoryExtraction("readability"), "readability");
+  assert.equal(describeWatchHistoryExtraction("none"), "none");
+  assert.equal(describeWatchHistoryExtraction(null), "not recorded");
+  const panel = await readFile(new URL("../../components/page-watch-panel.tsx", import.meta.url), "utf8");
+  assert.match(
+    panel,
+    /Extraction: \{describeWatchHistoryExtraction\(h\.extraction_method\)\}/,
+    "the history line must ask the label module for its text",
   );
 });
 

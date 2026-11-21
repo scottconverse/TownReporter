@@ -10,6 +10,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { editorError } from "@/lib/news/desk-copy";
+import { describeWatchHistoryExtraction } from "@/lib/news/extraction-label";
 import {
   listPageWatches,
   createPageWatch,
@@ -662,7 +663,11 @@ export function PageWatchPanel({
                       </InkButton>
                     ) : null}
                   </div>
-                  <p className="meta">Extraction: {h.extraction_method || "not recorded"}</p>
+                  {/* A Firecrawl Local capture's stored method is a machine
+                      value (`firecrawl-local:0.1.1`); the line shows the same
+                      sentence the rest of the desk uses. Other methods keep
+                      the words this row already printed. */}
+                  <p className="meta">Extraction: {describeWatchHistoryExtraction(h.extraction_method)}</p>
                   {h.redirect_chain !== "[]" ? (
                     <p className="read-url">Redirect trail: {h.redirect_chain}</p>
                   ) : null}

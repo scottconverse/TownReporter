@@ -38,3 +38,18 @@ export function describeExtractionMethod(method: string | undefined | null): str
   if (!raw || raw === "none") return "Not read yet.";
   return raw;
 }
+
+/**
+ * The page-watch history line's text for a stored `extraction_method`.
+ *
+ * A Firecrawl Local capture stores a machine value (`firecrawl-local:0.1.1`);
+ * the history row used to print it raw. It gets the same sentence the rest of
+ * the desk shows for that method. Every OTHER method keeps the exact words the
+ * row already printed -- the raw stored value, or "not recorded" -- so this
+ * changes no editor's reading of a readability or PDF capture.
+ */
+export function describeWatchHistoryExtraction(method: string | undefined | null): string {
+  const raw = (method ?? "").trim();
+  if (raw.startsWith("firecrawl-local:")) return describeExtractionMethod(raw);
+  return raw || "not recorded";
+}
