@@ -2,34 +2,44 @@
 /*
  * Content script on the desk's own pages only (see manifest.json).
  *
- * The desk page asks "anything for me?" with a ready message; this answers
- * once with whatever the button stored and then clears it. That direction --
- * page asks, script answers -- means the desk has its listener attached
- * before anything is posted, with no polling and no timers.
+ * A content script cannot read `chrome.storage.session` (Chrome reserves that
+ * area for trusted extension contexts), so this file never touches storage.
+ * Instead, when the desk page asks "anything for me?" it forwards that ask to
+ * the service worker, which reads the stored posts, clears them and replies.
+ * The bridge then hands the reply to the page with `window.postMessage`.
  *
  * The target origin is the page's own origin, and the desk page checks both
- * origin and source before it trusts a single field.
+ * origin and source before it trusts a single field. A missing reply or an
+ * invalidated extension context is swallowed: the desk simply shows nothing.
  */
 (() => {
-  const STORE_KEY = "townreporter.redditSendToDesk";
   const READY = "townreporter:reddit-desk-ready";
   const BRIDGE_READY = "townreporter:reddit-desk-bridge-ready";
   const POSTS = "townreporter:reddit-send-to-desk";
+  const TAKE_POSTS = "take-posts";
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.origin !== window.location.origin) return;
     if (!event.data || event.data.type !== READY) return;
 
-    chrome.storage.session.get(STORE_KEY).then((stored) => {
-      const payload = stored && stored[STORE_KEY];
-      if (!payload || !Array.isArray(payload.posts)) return;
-      window.postMessage(
-        { type: POSTS, posts: payload.posts, capturedAt: payload.capturedAt },
-        window.location.origin,
-      );
-      chrome.storage.session.remove(STORE_KEY);
-    });
+    let sent = false;
+    try {
+      chrome.runtime.sendMessage({ type: TAKE_POSTS }, (reply) => {
+        // Reading lastError clears "message port closed" and friends; a
+        // missing reply is not an error the editor needs to see.
+        if (chrome.runtime.lastError) return;
+        if (!reply || !Array.isArray(reply.posts) || reply.posts.length === 0) return;
+        if (sent) return;
+        sent = true;
+        window.postMessage(
+          { type: POSTS, posts: reply.posts, capturedAt: reply.capturedAt },
+          window.location.origin,
+        );
+      });
+    } catch {
+      // The extension was reloaded or removed while this tab stayed open.
+    }
   });
 
   // Tell a page that asked before this script loaded that it can ask again.

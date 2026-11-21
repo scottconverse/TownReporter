@@ -14,10 +14,15 @@
     return (el.textContent || "").replace(/\s+/g, " ").trim();
   }
 
+  // Old Reddit's data-timestamp is normally epoch SECONDS, but some pages and
+  // mirrors hand over epoch MILLISECONDS. Anything at or above 1e12 is already
+  // milliseconds (that is a 2001 date in ms, a year 33658 date in seconds);
+  // below that it must be multiplied by 1000.
   function isoFromEpoch(raw) {
     if (!/^\d+$/.test(raw)) return raw;
-    const ms = Number(raw) * 1000;
-    if (!Number.isFinite(ms)) return raw;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return raw;
+    const ms = value >= 1e12 ? value : value * 1000;
     const date = new Date(ms);
     return Number.isNaN(date.getTime()) ? raw : date.toISOString();
   }
@@ -53,6 +58,13 @@
     };
   }
 
+  // Old Reddit marks ads with the `promoted` class (and newer builds with a
+  // `data-promoted` attribute). They are not posts the editor can file.
+  function isPromoted(el) {
+    const classes = (el.getAttribute("class") || "").split(/\s+/);
+    return classes.includes("promoted") || el.getAttribute("data-promoted") === "true";
+  }
+
   function collect(max) {
     const limit = Number.isInteger(max) && max > 0 ? Math.min(max, MAX_PER_RUN) : MAX_PER_RUN;
     const posts = [];
@@ -63,6 +75,7 @@
     }
     const things = document.querySelectorAll("div.thing");
     for (const el of things) {
+      if (isPromoted(el)) continue;
       posts.push(fromThing(el));
       if (posts.length >= limit) return posts;
     }

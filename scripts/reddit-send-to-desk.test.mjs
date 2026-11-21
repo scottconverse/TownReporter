@@ -224,6 +224,47 @@ describe("collector.js against fixture HTML", () => {
     assert.match(posts[0].time, /^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("reads data-timestamp in seconds and in milliseconds without blowing up the date", () => {
+    const expected = new Date(1763500000000).toISOString();
+    const seconds = collectFromFixture(
+      `<div class="thing" data-timestamp="1763500000">
+         <a class="title" href="https://example.com/s">Seconds post</a>
+         <a class="comments" href="/r/Longmont/comments/sec1/seconds/">1 comment</a>
+       </div>`,
+    );
+    const millis = collectFromFixture(
+      `<div class="thing" data-timestamp="1763500000000">
+         <a class="title" href="https://example.com/m">Millis post</a>
+         <a class="comments" href="/r/Longmont/comments/ms1/millis/">1 comment</a>
+       </div>`,
+    );
+    assert.equal(seconds[0].time, expected);
+    assert.equal(millis[0].time, expected);
+    assert.match(seconds[0].time, /^2025-11-18T/);
+    assert.match(millis[0].time, /^2025-11-18T/);
+  });
+
+  it("skips promoted ads (class and data-promoted) instead of collecting them", () => {
+    const html = `
+      <div class="thing link" data-timestamp="1763500000">
+        <a class="title" href="https://example.com/real">A real post</a>
+        <a class="comments" href="/r/Longmont/comments/real1/real/">1 comment</a>
+      </div>
+      <div class="thing link promoted" data-timestamp="1763500000">
+        <a class="title" href="https://example.com/ad">A promoted ad</a>
+        <a class="comments" href="/r/Longmont/comments/ad1/ad/">1 comment</a>
+      </div>
+      <div class="thing link" data-promoted="true" data-timestamp="1763500000">
+        <a class="title" href="https://example.com/ad2">Another ad</a>
+        <a class="comments" href="/r/Longmont/comments/ad2/ad2/">1 comment</a>
+      </div>`;
+    const raw = collectFromFixture(html);
+    assert.equal(raw.length, 1);
+    const posts = toDeskPosts(raw);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].title, "A real post");
+  });
+
   it("stops at the 50-post cap even when the page has more", () => {
     const html = Array.from(
       { length: 60 },
