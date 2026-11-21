@@ -95,6 +95,13 @@ export interface PublicRegistryEntry {
   verifiedAt: WhenValue;
   /** How that check was made (one of VERIFY_METHODS); null when none. */
   verifiedMethod: string | null;
+  /**
+   * When the scan's robot last reopened this entry's source page. It is NOT a
+   * verification: the page says "checked against <site>", never "verified".
+   */
+  robotCheckedAt: WhenValue;
+  /** The host of the page the robot checked it against; null when none. */
+  robotCheckedSite: string | null;
   sourceUrl: string | null;
   sourceTitle: string | null;
   editorNote: string | null;
@@ -120,6 +127,16 @@ export interface PublicRegistryPage {
  */
 export type PublicRegistryResult =
   ({ status: "ok" } & PublicRegistryPage) | { status: "unavailable" };
+
+/** The site a page is on, without "www.", for "checked against <site>". */
+export function siteOfUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "").toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
 
 /** Join the address parts that are present, skipping empty ones. */
 export function formatAddress(parts: (string | null | undefined)[]): string | null {
@@ -286,6 +303,7 @@ interface BaseRow {
   organization_name: string;
   organization_note: string | null;
   last_verified_at: WhenValue;
+  robot_checked_at: WhenValue;
   source_url: string | null;
   source_title: string | null;
   category_id: number | null;
@@ -308,6 +326,7 @@ async function readBaseRows(
             o.id as organization_id, o.name as organization_name,
             o.editor_note as organization_note,
             coalesce(s.last_verified_at, o.last_verified_at) as last_verified_at,
+            s.robot_checked_at,
             src.url as source_url, src.title as source_title,
             t.id as category_id, t.name as category_name
        ${PUBLIC_FROM}
@@ -775,6 +794,8 @@ async function buildEntries(
       lastVerifiedAt: row.last_verified_at,
       verifiedAt: verificationByService.get(serviceId)?.at ?? null,
       verifiedMethod: verificationByService.get(serviceId)?.method ?? null,
+      robotCheckedAt: row.robot_checked_at,
+      robotCheckedSite: siteOfUrl(row.source_url),
       sourceUrl: row.source_url,
       sourceTitle: row.source_title,
       editorNote: row.service_note?.trim() || row.organization_note?.trim() || null,

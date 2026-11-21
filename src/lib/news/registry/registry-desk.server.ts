@@ -620,6 +620,133 @@ export async function listAutoPublishedRegistryEntries(
   }));
 }
 
+/** One entry on the desk's freshness panel and its lists. */
+export interface DeskFreshnessEntry {
+  serviceId: number;
+  organizationName: string;
+  serviceName: string;
+  /** The last robot recheck; null when it has never been rechecked. */
+  robotCheckedAt: WhenValue;
+  /** 'same', 'changed' or 'source_gone'; null before the first settled check. */
+  robotCheckResult: string | null;
+  /** When the entry was first loaded into the registry (for the oldest one). */
+  createdAt: WhenValue;
+}
+
+/**
+ * The desk's "Freshness" panel at the top of the page (Scott, Nov 20 2026).
+ *
+ * Five numbers about the robot's own rechecks and the lists behind four of
+ * them, so every number can jump to the entries it counts. The fifth (the
+ * oldest unchecked entry) links to the entry itself. This is the robot's
+ * record only: an editor's verification is the "Needs checking" list and is
+ * never counted here as a recheck.
+ */
+export interface DeskRegistryFreshness {
+  published: number;
+  recheckedLast30Days: number;
+  changed: number;
+  sourceGone: number;
+  oldestUnchecked: DeskFreshnessEntry | null;
+  rechecked: DeskFreshnessEntry[];
+  changedEntries: DeskFreshnessEntry[];
+  sourceGoneEntries: DeskFreshnessEntry[];
+}
+
+const FRESHNESS_COLUMNS = `s.id as service_id, o.name as organization_name,
+            s.name as service_name, s.robot_checked_at, s.robot_check_result,
+            s.created_at`;
+
+function toFreshnessEntry(row: {
+  service_id: number;
+  organization_name: string;
+  service_name: string;
+  robot_checked_at: WhenValue;
+  robot_check_result: string | null;
+  created_at: WhenValue;
+}): DeskFreshnessEntry {
+  return {
+    serviceId: Number(row.service_id),
+    organizationName: row.organization_name,
+    serviceName: row.service_name,
+    robotCheckedAt: row.robot_checked_at,
+    robotCheckResult: row.robot_check_result,
+    createdAt: row.created_at,
+  };
+}
+
+export async function readRegistryFreshness(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskRegistryFreshness> {
+  const counts = await sql.query<{
+    published: string;
+    rechecked_last_30: string;
+    changed: string;
+    source_gone: string;
+  }>(
+    `select
+       count(*) filter (where s.published = true)::text as published,
+       count(*) filter (where s.published = true
+                          and s.robot_checked_at >= now() - interval '30 days')::text as rechecked_last_30,
+       count(*) filter (where s.robot_check_result = 'changed')::text as changed,
+       count(*) filter (where s.robot_check_result = 'source_gone')::text as source_gone
+     from services s
+    where s.newsroom_id = $1`,
+    [newsroomId],
+  );
+  const row = counts[0];
+
+  const rechecked = await sql.query<Parameters<typeof toFreshnessEntry>[0]>(
+    `select ${FRESHNESS_COLUMNS}
+       from services s
+       join organizations o on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.published = true
+        and s.robot_checked_at >= now() - interval '30 days'
+      order by s.robot_checked_at desc, s.id desc
+      limit 100`,
+    [newsroomId],
+  );
+  const changed = await sql.query<Parameters<typeof toFreshnessEntry>[0]>(
+    `select ${FRESHNESS_COLUMNS}
+       from services s
+       join organizations o on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.robot_check_result = 'changed'
+      order by s.robot_checked_at desc nulls last, s.id desc
+      limit 100`,
+    [newsroomId],
+  );
+  const sourceGone = await sql.query<Parameters<typeof toFreshnessEntry>[0]>(
+    `select ${FRESHNESS_COLUMNS}
+       from services s
+       join organizations o on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.robot_check_result = 'source_gone'
+      order by s.robot_checked_at desc nulls last, s.id desc
+      limit 100`,
+    [newsroomId],
+  );
+  const oldest = await sql.query<Parameters<typeof toFreshnessEntry>[0]>(
+    `select ${FRESHNESS_COLUMNS}
+       from services s
+       join organizations o on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+      where s.newsroom_id = $1 and s.published = true and s.robot_checked_at is null
+      order by s.created_at asc, s.id asc
+      limit 1`,
+    [newsroomId],
+  );
+
+  return {
+    published: Number(row?.published ?? 0),
+    recheckedLast30Days: Number(row?.rechecked_last_30 ?? 0),
+    changed: Number(row?.changed ?? 0),
+    sourceGone: Number(row?.source_gone ?? 0),
+    oldestUnchecked: oldest[0] ? toFreshnessEntry(oldest[0]) : null,
+    rechecked: rechecked.map(toFreshnessEntry),
+    changedEntries: changed.map(toFreshnessEntry),
+    sourceGoneEntries: sourceGone.map(toFreshnessEntry),
+  };
+}
+
 export interface RegistryDeskView {
   changes: DeskRegistryChange[];
   imports: DeskRegistryImport[];
@@ -634,4 +761,6 @@ export interface RegistryDeskView {
   directoryNames: string[];
   publishedCount: number;
   starterLoaded: boolean;
+  /** The robot recheck panel at the top of the desk page. */
+  freshness: DeskRegistryFreshness;
 }

@@ -24,6 +24,7 @@ import {
   STARTER_ENTRIES,
   checkedOnLabel,
 } from "@/lib/news/registry/starter-list";
+import { recheckResultWords } from "@/lib/news/registry/registry-recheck";
 import { evidenceTierLabel, isWebAddress } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
@@ -266,6 +267,7 @@ function RegistryDeskPage() {
   const published = query.data?.published ?? [];
   const autoPublished = query.data?.autoPublished ?? [];
   const categories = query.data?.categories ?? [];
+  const freshness = query.data?.freshness;
 
   // Which row's form is open. One at a time, so the desk never shows two
   // half-edited entries and an editor cannot lose track of which Save is which.
@@ -372,6 +374,98 @@ function RegistryDeskPage() {
         <ListSkeleton rows={4} />
       ) : (
         <>
+{/*
+            The Freshness panel (Scott, Nov 20 2026) is the first thing under
+            the page title: how much of the registry the robot has opened
+            again, and the entries behind each number. Every number links to
+            its own list on this page.
+          */}
+          <section
+            className="src-sec"
+            id="registry-freshness"
+            aria-labelledby="registry-freshness-title"
+          >
+            <h2 id="registry-freshness-title" className="font-display text-2xl">
+              Freshness
+            </h2>
+            <p className="wire-sum">
+              The scan reopens every published entry&rsquo;s source page on a schedule, so the
+              registry does not go stale. A robot recheck is not an editor&rsquo;s check; those stay
+              under Needs checking.
+            </p>
+            <p className="wire-sum registry-freshness">
+              <a className="inline-link" href="#registry-published">
+                <b>{freshness?.published ?? 0}</b> published
+              </a>
+              {" · "}
+              <a className="inline-link" href="#registry-fresh-rechecked">
+                <b>{freshness?.recheckedLast30Days ?? 0}</b> rechecked in the last 30 days
+              </a>
+              {" · "}
+              <a className="inline-link" href="#registry-fresh-changed">
+                <b>{freshness?.changed ?? 0}</b> changed
+              </a>
+              {" · "}
+              <a className="inline-link" href="#registry-fresh-gone">
+                <b>{freshness?.sourceGone ?? 0}</b> source gone
+              </a>
+            </p>
+            <p className="astra-row-meta">
+              {freshness?.oldestUnchecked ? (
+                <>
+                  Oldest unchecked entry:{" "}
+                  <a className="inline-link" href={`#registry-entry-${freshness.oldestUnchecked.serviceId}`}>
+                    {freshness.oldestUnchecked.organizationName} —{" "}
+                    {freshness.oldestUnchecked.serviceName}
+                  </a>
+                </>
+              ) : (
+                "Every published entry has a robot recheck on record."
+              )}
+            </p>
+            <h3 id="registry-fresh-rechecked" className="mt-4 font-display text-xl">
+              Rechecked in the last 30 days
+            </h3>
+            {!freshness?.rechecked.length ? (
+              <p className="wire-sum">No entry has been rechecked in the last 30 days yet.</p>
+            ) : (
+              <ul className="astra-plain">
+                {freshness.rechecked.map((row) => (
+                  <li key={`rechecked-${row.serviceId}`}>
+                    <span className="astra-row-t">
+                      {row.organizationName} — {row.serviceName}
+                    </span>
+                    <span className="astra-row-meta">
+                      {row.robotCheckedAt ? ` · ${formatShortDate(row.robotCheckedAt)}` : ""}
+                      {row.robotCheckResult ? ` · ${recheckResultWords(row.robotCheckResult)}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <h3 id="registry-fresh-changed" className="mt-4 font-display text-xl">
+              Changed by the robot
+            </h3>
+            {!freshness?.changedEntries.length ? (
+              <p className="wire-sum">The robot has not found a change yet.</p>
+            ) : (
+              <ul className="astra-plain">
+                {freshness.changedEntries.map((row) => (
+                  <li key={`changed-${row.serviceId}`}>
+                    <span className="astra-row-t">
+                      {row.organizationName} — {row.serviceName}
+                    </span>
+                    <span className="astra-row-meta">
+                      {row.robotCheckedAt
+                        ? ` · changed ${formatShortDate(row.robotCheckedAt)}`
+                        : " · changed at an unrecorded time"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="src-sec">
             <SecHead
               title="Entries waiting to be published"
@@ -521,7 +615,7 @@ function RegistryDeskPage() {
             </div>
           </section>
 
-          <section className="src-sec">
+          <section className="src-sec" id="registry-published">
             <SecHead
               title="Published entries"
               count={query.data?.publishedCount ?? 0}
@@ -661,6 +755,36 @@ function RegistryDeskPage() {
                         Unpublish
                       </InkButton>
                     </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+{/*
+            Scott, Nov 20 2026: an entry whose source page is gone is taken off
+            the public page and listed here, so an editor can decide whether to
+            find a new source, correct it or leave it down.
+          */}
+          <section className="src-sec" id="registry-fresh-gone">
+            <SecHead
+              title="Source gone"
+              count={freshness?.sourceGoneEntries.length ?? 0}
+              sub="Entries the robot took down because their own source page answered 404, 410 or no longer resolved, on two rechecks at least three days apart."
+            />
+            {!freshness?.sourceGoneEntries.length ? (
+              <p className="wire-sum">No entry has lost its source page.</p>
+            ) : (
+              <ul className="astra-plain">
+                {freshness.sourceGoneEntries.map((row) => (
+                  <li key={`gone-${row.serviceId}`}>
+                    <div className="astra-row-t">
+                      {row.organizationName} — {row.serviceName}
+                    </div>
+                    <p className="astra-row-meta">
+                      Taken down after the source page was found gone
+                      {row.robotCheckedAt ? ` on ${formatShortDate(row.robotCheckedAt)}` : ""}.
+                    </p>
                   </li>
                 ))}
               </ul>

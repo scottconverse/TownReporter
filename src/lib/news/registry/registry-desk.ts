@@ -20,6 +20,7 @@ import {
   listRegistryImports,
   listRegistrySourcesWithHealth,
   listUnpublishedRegistryEntries,
+  readRegistryFreshness,
   starterListIsLoaded,
   type RegistryDeskView,
 } from "./registry-desk.server.ts";
@@ -40,6 +41,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       directoryNames,
       publishedCount,
       starterLoaded,
+      freshness,
     ] = await Promise.all([
       listDeskChanges(sql, context.newsroomId),
       listRegistryImports(sql, context.newsroomId),
@@ -51,6 +53,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       listRegistryDirectoryNames(sql, context.newsroomId),
       countPublishedRegistryServices(sql, context.newsroomId),
       starterListIsLoaded(sql, context.newsroomId),
+      readRegistryFreshness(sql, context.newsroomId),
     ]);
     return {
       changes,
@@ -63,5 +66,6 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       directoryNames,
       publishedCount,
       starterLoaded,
+      freshness,
     };
   });

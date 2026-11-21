@@ -99,6 +99,8 @@ function entry(overrides = {}) {
     lastVerifiedAt: null,
     verifiedAt: null,
     verifiedMethod: null,
+    robotCheckedAt: null,
+    robotCheckedSite: null,
     sourceUrl: null,
     sourceTitle: null,
     editorNote: null,
@@ -529,4 +531,41 @@ test("the service link, the correction links, the search box and the Search butt
   assert.match(html, /<a[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*href="\/corrections\?article=/);
   const detail = renderDetail({ status: "ok", entry: fullEntry() });
   assert.match(detail, /<a[^>]*class="[^"]*\bregistry-text\b[^"]*"[^>]*href="\/corrections\?article=/);
+});
+
+test("a robot recheck says when it was last checked and against which site, never 'verified'", () => {
+  const html = renderDetail({
+    status: "ok",
+    entry: entry({
+      robotCheckedAt: "2026-11-18T12:00:00.000Z",
+      robotCheckedSite: "county.example",
+      sourceUrl: "https://county.example/food",
+    }),
+  });
+  assert.match(html, /Last checked .* — checked against county\.example/);
+  assert.doesNotMatch(html, /Verified/);
+  assert.doesNotMatch(html, /Not verified yet/);
+});
+
+test("the newer of the editor's check and the robot's recheck is the one shown", () => {
+  // An editor checked it after the robot did: the editor's "Verified" stands.
+  const editorNewer = renderDetail({
+    status: "ok",
+    entry: entry({
+      verifiedAt: "2026-11-19T12:00:00.000Z",
+      verifiedMethod: "phone",
+      robotCheckedAt: "2026-11-18T12:00:00.000Z",
+      robotCheckedSite: "county.example",
+    }),
+  });
+  assert.match(editorNewer, /Verified .*\(by phone\)/);
+  assert.doesNotMatch(editorNewer, /Last checked/);
+
+  // Only the robot has checked it: no "verified" claim anywhere.
+  const robotOnly = renderDetail({
+    status: "ok",
+    entry: entry({ robotCheckedAt: "2026-11-18T12:00:00.000Z", robotCheckedSite: "county.example" }),
+  });
+  assert.match(robotOnly, /Last checked .* — checked against county\.example/);
+  assert.doesNotMatch(robotOnly, /Verified/);
 });

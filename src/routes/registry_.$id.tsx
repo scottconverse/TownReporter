@@ -117,15 +117,29 @@ function RegistryServicePage() {
   const entry = result.entry;
   if (!entry) return <NotListed />;
 
-  const verification = entry.verifiedAt
-    ? `Verified ${formatShortDate(entry.verifiedAt)}${
-        verifyMethodWords(entry.verifiedMethod)
-          ? ` (${verifyMethodWords(entry.verifiedMethod)})`
-          : ""
-      }`
-    : entry.lastVerifiedAt
-      ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
-      : "Not verified yet";
+  /*
+    Scott, Nov 20 2026: the page says when the entry was last checked, using
+    the newer of the editor's check and the robot's recheck. A robot recheck is
+    never called "verified" -- it says which site it was checked against.
+  */
+  const timeOf = (when: string | Date | null): number =>
+    when == null ? 0 : new Date(when).getTime();
+  const editorCheckedAt = timeOf(entry.verifiedAt);
+  const robotCheckedAt = timeOf(entry.robotCheckedAt);
+  const verification =
+    robotCheckedAt > 0 && robotCheckedAt >= editorCheckedAt
+      ? `Last checked ${formatShortDate(entry.robotCheckedAt)} — checked against ${
+          entry.robotCheckedSite ?? "its source page"
+        }`
+      : entry.verifiedAt
+        ? `Verified ${formatShortDate(entry.verifiedAt)}${
+            verifyMethodWords(entry.verifiedMethod)
+              ? ` (${verifyMethodWords(entry.verifiedMethod)})`
+              : ""
+          }`
+        : entry.lastVerifiedAt
+          ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
+          : "Not verified yet";
   const article = registryCorrectionArticle({
     id: entry.serviceId,
     organizationName: entry.organizationName,

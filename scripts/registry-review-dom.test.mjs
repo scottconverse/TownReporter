@@ -138,6 +138,12 @@ export const takeDownRegistryEntry = refuse;
 export const updateRegistryEntry = refuse;
 `),
   "@/lib/news/registry/registry-entry-fields": stubUrl("export {};\n"),
+  // The Freshness panel's plain-words reader; the real one is registry-recheck.ts.
+  "@/lib/news/registry/registry-recheck": stubUrl(`
+export function recheckResultWords(result) {
+  return { same: "the facts still match", changed: "the facts changed", source_gone: "the source page is gone" }[result] ?? "the result was not recorded";
+}
+`),
   // F09 (Nov 19 2026): desk.registry.tsx now also imports isWebAddress, so the
   // stub carries it too -- the same test as the real one in desk-copy.ts.
   "@/lib/news/desk-copy": stubUrl(`
@@ -870,4 +876,99 @@ test("Needs checking says so when every published entry is current", async (t) =
   t.after(() => page.close());
   assert.match(page.text(), /Every published entry has a current verification\./);
   assert.equal(page.container.querySelectorAll("li").length, 0);
+});
+
+/* ---- Freshness panel and Source gone list (Scott, Nov 20 2026) ---- */
+
+const freshness = (over = {}) => ({
+  published: 12,
+  recheckedLast30Days: 9,
+  changed: 2,
+  sourceGone: 1,
+  oldestUnchecked: {
+    serviceId: 41,
+    organizationName: "Helping Hands",
+    serviceName: "Food Pantry",
+    robotCheckedAt: null,
+    robotCheckResult: null,
+    createdAt: "2026-01-01T00:00:00Z",
+  },
+  rechecked: [
+    {
+      serviceId: 42,
+      organizationName: "Helping Hands",
+      serviceName: "Rent Help",
+      robotCheckedAt: "2026-11-18T00:00:00Z",
+      robotCheckResult: "same",
+      createdAt: "2026-01-02T00:00:00Z",
+    },
+  ],
+  changedEntries: [
+    {
+      serviceId: 43,
+      organizationName: "Our Center",
+      serviceName: "Hot Lunch",
+      robotCheckedAt: "2026-11-17T00:00:00Z",
+      robotCheckResult: "changed",
+      createdAt: "2026-01-03T00:00:00Z",
+    },
+  ],
+  sourceGoneEntries: [
+    {
+      serviceId: 44,
+      organizationName: "Old Mission",
+      serviceName: "Night Shelter",
+      robotCheckedAt: "2026-11-19T00:00:00Z",
+      robotCheckResult: "source_gone",
+      createdAt: "2026-01-04T00:00:00Z",
+    },
+  ],
+  ...over,
+});
+
+test("the Freshness panel comes first and every number links to its own list", async (t) => {
+  setup();
+  globalThis.__desk.data = { ...desk([]), freshness: freshness() };
+  const page = await mount(React.createElement(DeskPage));
+  t.after(() => page.close());
+
+  const panel = page.container.querySelector("#registry-freshness");
+  assert.ok(panel, "the Freshness panel is on the page");
+  assert.equal(
+    page.container.querySelector(".src-sec"),
+    panel,
+    "the panel is the first section under the page title",
+  );
+  const text = panel.textContent.replace(/\s+/g, " ");
+  assert.match(text, /12 published/);
+  assert.match(text, /9 rechecked in the last 30 days/);
+  assert.match(text, /2 changed/);
+  assert.match(text, /1 source gone/);
+  // Each number is a link to a list that exists on this page.
+  for (const id of [
+    "registry-published",
+    "registry-fresh-rechecked",
+    "registry-fresh-changed",
+    "registry-fresh-gone",
+  ]) {
+    const link = panel.querySelector(`a[href="#${id}"]`);
+    assert.ok(link, `a link to #${id}`);
+    assert.ok(page.container.querySelector(`#${id}`), `the target #${id} exists`);
+  }
+  assert.match(text, /Oldest unchecked entry: Helping Hands — Food Pantry/);
+});
+
+test("Source gone is its own list right after Auto-published", async (t) => {
+  setup();
+  globalThis.__desk.data = { ...desk([]), freshness: freshness() };
+  const page = await mount(React.createElement(DeskPage));
+  t.after(() => page.close());
+
+  const sections = [...page.container.querySelectorAll(".src-sec")];
+  const auto = sections.findIndex((section) => /Auto-published/.test(section.textContent));
+  const gone = sections.findIndex((section) => section.id === "registry-fresh-gone");
+  assert.ok(auto >= 0 && gone === auto + 1, "Source gone follows Auto-published");
+  const text = sections[gone].textContent.replace(/\s+/g, " ");
+  assert.match(text, /Old Mission — Night Shelter/);
+  assert.match(text, /Taken down after the source page was found gone/);
 });
