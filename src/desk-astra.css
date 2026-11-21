@@ -9437,9 +9437,17 @@
   display: none;
   content: "";
 }
+/* Every registry panel has the same inner padding, and each heading and the
+   content under it start at the same left edge. The section (.src-sec) had no
+   horizontal padding while the heading carried 24px of its own, so the words
+   under a heading ran to the panel's edge while the heading was indented.
+   The padding lives on the panel now; nothing inside adds a second one. */
+.desk-ltr.astra .src-sec.registry-sec {
+  padding: 22px 24px;
+}
 .desk-ltr.astra .registry-sec-summary .sechead {
   margin-top: 0;
-  padding: 0 24px;
+  padding: 0;
 }
 .desk-ltr.astra .registry-sec-summary:focus-visible {
   outline: 2px solid var(--fg);
@@ -9486,7 +9494,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   gap: 16px;
-  padding: 16px 24px 0;
+  padding: 16px 0 0;
 }
 .desk-ltr.astra .astra-plain.registry-cards > li {
   border: 0;

@@ -165,7 +165,7 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <details className="src-sec" id={id} open={defaultOpen || undefined}>
+    <details className="src-sec registry-sec" id={id} open={defaultOpen || undefined}>
       <summary className="registry-sec-summary">
         <SecHead title={title} count={count} sub={sub} />
       </summary>
@@ -674,13 +674,17 @@ function RegistryDeskPage() {
             behind each number. Every number links to its own list.
           */}
           <section
-            className="src-sec"
+            className="src-sec registry-sec"
             id="registry-freshness"
             aria-labelledby="registry-freshness-title"
           >
-            <h2 id="registry-freshness-title" className="font-display text-2xl">
-              Freshness
-            </h2>
+            <div className="sechead">
+              <div className="sechead-l">
+                <h2 id="registry-freshness-title" className="sec-title">
+                  Freshness
+                </h2>
+              </div>
+            </div>
             <p className="wire-sum">
               The scan reopens every published entry&rsquo;s source page on a schedule, so the
               registry does not go stale. A robot recheck is not an editor&rsquo;s check; those stay
