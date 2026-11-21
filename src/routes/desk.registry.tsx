@@ -353,9 +353,11 @@ function RegistryDeskPage() {
     >
       <p className="note">
         The scan now applies and publishes what it finds in a registry source by itself, and lists
-        those entries under Auto-published so you can take one down. Changes it could not settle by
-        itself wait in Detected changes, where you can accept or reject them. You can also load the
-        starter list, publish each entry one at a time, and check the entries that need checking.
+        those entries under Auto-published so you can take one down. Each change it could not
+        settle by itself waits in the Detected changes list, where it can be accepted or rejected.
+        Accept and apply puts the proposed value on the entry; Accept without applying only records
+        your decision; Reject leaves the entry as it is. You can also load the starter list, publish
+        each entry one at a time, and check the entries that need checking.
       </p>
 
       {query.isError ? (
@@ -682,7 +684,7 @@ function RegistryDeskPage() {
             <SecHead
               title="Detected changes"
               count={changes.length}
-              sub="One row per registry change. A row the scan applied and published says so; a row waiting for an editor has not been applied to the directory."
+              sub="One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
             />
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">

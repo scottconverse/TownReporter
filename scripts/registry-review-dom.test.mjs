@@ -537,16 +537,22 @@ test("filtered to waiting, the only row accepted: the list empties and the statu
   assert.ok(document.activeElement === status, `focus should be on the status line; it is on ${focusedAs()}`);
 });
 
-test("Detected changes says nothing was applied only when no change in the list has been applied", async (t) => {
+test("Detected changes never claims nothing was applied; each row says what happened to it", async (t) => {
+  // The scan now applies and publishes by itself (Scott's ask, Nov 20), so a
+  // list-wide "nothing here has been applied" would be false as soon as the
+  // scan publishes one entry, and the applied row may be filtered out of the
+  // list anyway. The section's line is the same at all times; the row says
+  // whether it was applied.
   const detectedSub = (page) => page.container.querySelector('[data-sec="Detected changes"] p')?.textContent;
   setup();
   globalThis.__desk.data = desk([change({ id: 5 })]);
   const none = await mount(React.createElement(DeskPage));
   t.after(() => none.close());
-  assert.equal(
-    detectedSub(none),
-    "One row per change the scan proposed. Nothing here has been applied to the directory.",
-  );
+  const noneSub = detectedSub(none);
+  assert.ok(noneSub, "the section has a line under its heading");
+  assert.doesNotMatch(noneSub, /nothing here has been applied/i);
+  assert.match(noneSub, /A change waiting for an editor has not been applied to the directory/);
+  assert.equal(none.container.querySelector('[data-testid="resolved-details"]'), null, "a waiting row says it is waiting, not that it was applied");
 
   setup();
   globalThis.__desk.data = desk([
@@ -561,10 +567,8 @@ test("Detected changes says nothing was applied only when no change in the list 
   ]);
   const applied = await mount(React.createElement(DeskPage));
   t.after(() => applied.close());
-  assert.equal(
-    detectedSub(applied),
-    "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory.",
-  );
+  assert.equal(detectedSub(applied), noneSub, "the line does not change with the list");
+  assert.match(applied.text(), /Applied to the entry on .*2026-11-18/);
 });
 
 /* ---- Verify form and history ---- */
