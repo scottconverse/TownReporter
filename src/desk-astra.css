@@ -9445,6 +9445,7 @@
 .desk-ltr.astra .src-sec.registry-sec {
   padding: 22px 24px;
 }
+.desk-ltr.astra .src-sec.registry-sec > .sechead,
 .desk-ltr.astra .registry-sec-summary .sechead {
   margin-top: 0;
   padding: 0;
@@ -9545,10 +9546,16 @@
 }
 .desk-ltr.astra .registry-facts {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: 6px;
   margin: 0;
   font-size: calc(1rem * var(--ts));
+}
+/* Label and value share one row; each label column is the same width, so the
+   values in a card line up. On a phone the label sits over its value. */
+.desk-ltr.astra .registry-fact {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 12px;
 }
 .desk-ltr.astra .registry-facts dt {
   font-weight: 700;
@@ -9557,6 +9564,40 @@
 .desk-ltr.astra .registry-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .desk-ltr.astra .registry-fact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+/* The facts an entry does not have: one quiet line, not a column of rows. */
+.desk-ltr.astra .registry-missing {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--fg2);
+  font-size: calc(0.875rem * var(--ts));
+}
+/* Freshness: four numbers an editor can read at a glance. Each is a link. */
+.desk-ltr.astra .registry-freshness {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.desk-ltr.astra .registry-freshness a {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: calc(0.875rem * var(--ts));
+  text-decoration: none;
+}
+.desk-ltr.astra .registry-freshness b {
+  display: block;
+  font-size: calc(1.75rem * var(--ts));
+  line-height: 1.1;
 }
 .desk-ltr.astra .registry-fact-list {
   display: grid;

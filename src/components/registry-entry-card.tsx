@@ -16,10 +16,6 @@ import { mapsUrl, NOT_LISTED, NOT_RECORDED } from "@/lib/news/registry/registry-
  * cannot disagree about what an entry says.
  */
 
-function orNotListed(value: string | null | undefined, missing: string): ReactNode {
-  return value && value.trim() !== "" ? value : missing;
-}
-
 function WebLink({ href }: { href: string }) {
   return (
     <a className="inline-link" href={href} target="_blank" rel="noreferrer">
@@ -31,100 +27,93 @@ function WebLink({ href }: { href: string }) {
 /**
  * Every field of an entry, in the order a person asks about them. `formatDate`
  * is passed in so the page's own date wording is used everywhere.
+ *
+ * The facts an entry has come first. The ones it does not have share one line
+ * at the end, so an editor can see the gaps without reading a column of
+ * repeated "Not listed" rows. `compact` leaves out the three facts a card
+ * already shows in its heading.
  */
 export function EntryFacts({
   entry,
   formatDate,
+  compact = false,
 }: {
   entry: DeskEntryFacts;
   formatDate: (when: string | Date | null | undefined) => string;
+  compact?: boolean;
 }) {
   // With no source page there is nothing to be missing from: every empty
   // field says it was not recorded, not that a page failed to list it.
   const missing = entry.sourceUrl ? NOT_LISTED : NOT_RECORDED;
-  return (
-    <dl className="registry-facts">
-      <dt>Organization</dt>
-      <dd>{orNotListed(entry.organizationName, missing)}</dd>
-      <dt>Service</dt>
-      <dd>{orNotListed(entry.serviceName, missing)}</dd>
-      <dt>Category</dt>
-      <dd>{orNotListed(entry.categoryName, missing)}</dd>
-      <dt>What it offers</dt>
-      <dd>{orNotListed(entry.description, missing)}</dd>
-      <dt>Phone</dt>
-      <dd>
-        {entry.phones.length === 0 ? (
-          missing
-        ) : (
-          <>
-            {entry.phones.map((phone, index) => (
-              <span key={phone}>
-                {index > 0 ? ", " : ""}
-                {phone}
-              </span>
-            ))}
-          </>
-        )}
-      </dd>
-      <dt>Address</dt>
-      <dd>
-        {entry.address ? (
-          <a
-            className="inline-link"
-            href={mapsUrl(entry.address)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {entry.address} (map) ↗
+  const text = (value: string | null | undefined) =>
+    value && value.trim() !== "" ? value : null;
+  const facts: Array<[label: string, value: ReactNode]> = [
+    ...(compact
+      ? []
+      : ([
+          ["Organization", text(entry.organizationName)],
+          ["Service", text(entry.serviceName)],
+          ["Category", text(entry.categoryName)],
+        ] as Array<[string, ReactNode]>)),
+    ["What it offers", text(entry.description)],
+    ["Phone", entry.phones.length ? entry.phones.join(", ") : null],
+    [
+      "Address",
+      entry.address ? (
+        <a className="inline-link" href={mapsUrl(entry.address)} target="_blank" rel="noreferrer">
+          {entry.address} (map) ↗
+        </a>
+      ) : null,
+    ],
+    [
+      "Hours",
+      entry.hours.length ? (
+        <ul className="registry-fact-list">
+          {entry.hours.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null,
+    ],
+    ["Website", entry.website ? <WebLink href={entry.website} /> : null],
+    ["Who can use it", text(entry.eligibility)],
+    ["Fees", text(entry.fees)],
+    ["How to apply", text(entry.applicationProcess)],
+    ["Languages", entry.languages.length ? entry.languages.join(", ") : null],
+    [
+      "Source page",
+      entry.sourceUrl ? (
+        <>
+          <a className="inline-link" href={entry.sourceUrl} target="_blank" rel="noreferrer">
+            {entry.sourceTitle || entry.sourceUrl} ↗
           </a>
-        ) : (
-          missing
-        )}
-      </dd>
-      <dt>Hours</dt>
-      <dd>
-        {entry.hours.length === 0 ? (
-          missing
-        ) : (
-          <ul className="registry-fact-list">
-            {entry.hours.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        )}
-      </dd>
-      <dt>Website</dt>
-      <dd>{entry.website ? <WebLink href={entry.website} /> : missing}</dd>
-      <dt>Who can use it</dt>
-      <dd>{orNotListed(entry.eligibility, missing)}</dd>
-      <dt>Fees</dt>
-      <dd>{orNotListed(entry.fees, missing)}</dd>
-      <dt>How to apply</dt>
-      <dd>{orNotListed(entry.applicationProcess, missing)}</dd>
-      <dt>Languages</dt>
-      <dd>{entry.languages.length === 0 ? missing : entry.languages.join(", ")}</dd>
-      <dt>Source page</dt>
-      <dd>
-        {entry.sourceUrl ? (
-          <>
-            <a
-              className="inline-link"
-              href={entry.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {entry.sourceTitle || entry.sourceUrl} ↗
-            </a>
-            {entry.sourceCapturedAt
-              ? ` · captured ${formatDate(entry.sourceCapturedAt)}`
-              : " · capture date not recorded"}
-          </>
-        ) : (
-          NOT_RECORDED
-        )}
-      </dd>
-    </dl>
+          {entry.sourceCapturedAt
+            ? ` · captured ${formatDate(entry.sourceCapturedAt)}`
+            : " · capture date not recorded"}
+        </>
+      ) : null,
+    ],
+  ];
+  const present = facts.filter(([, value]) => value !== null);
+  const absent = facts.filter(([, value]) => value === null).map(([label]) => label);
+  return (
+    <>
+      {present.length ? (
+        <dl className="registry-facts">
+          {present.map(([label, value]) => (
+            <div className="registry-fact" key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {absent.length ? (
+        <p className="registry-missing">
+          <b>{missing}</b> {absent.join(", ")}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -163,7 +152,7 @@ export function RegistryEntryCard({
           {!entry.published ? <span className="registry-tag">Not published</span> : null}
         </div>
       </div>
-      <EntryFacts entry={entry} formatDate={formatDate} />
+      <EntryFacts entry={entry} formatDate={formatDate} compact />
       {children ? <div className="registry-card-actions">{children}</div> : null}
     </article>
   );

@@ -690,19 +690,16 @@ function RegistryDeskPage() {
               registry does not go stale. A robot recheck is not an editor&rsquo;s check; those stay
               under Needs checking.
             </p>
-            <p className="wire-sum registry-freshness">
+            <p className="registry-freshness">
               <a className="inline-link" href="#registry-published">
                 <b>{freshness?.published ?? 0}</b> published
               </a>
-              {" · "}
               <a className="inline-link" href="#registry-fresh-rechecked">
                 <b>{freshness?.recheckedLast30Days ?? 0}</b> rechecked in the last 30 days
               </a>
-              {" · "}
               <a className="inline-link" href="#registry-fresh-changed">
                 <b>{freshness?.changed ?? 0}</b> changed
               </a>
-              {" · "}
               <a className="inline-link" href="#registry-fresh-gone">
                 <b>{freshness?.sourceGone ?? 0}</b> source gone
               </a>
@@ -741,8 +738,10 @@ function RegistryDeskPage() {
                         {row.organizationName} — {row.serviceName}
                       </span>
                       <span className="astra-row-meta">
-                        {row.robotCheckedAt ? ` · ${formatShortDate(row.robotCheckedAt)}` : ""}
-                        {row.robotCheckResult ? ` · ${recheckResultWords(row.robotCheckResult)}` : ""}
+                        {row.robotCheckedAt ? formatShortDate(row.robotCheckedAt) : ""}
+                        {row.robotCheckResult
+                          ? `${row.robotCheckedAt ? " · " : ""}${recheckResultWords(row.robotCheckResult)}`
+                          : ""}
                       </span>
                     </li>
                   ))}
@@ -765,8 +764,8 @@ function RegistryDeskPage() {
                       </span>
                       <span className="astra-row-meta">
                         {row.robotCheckedAt
-                          ? ` · changed ${formatShortDate(row.robotCheckedAt)}`
-                          : " · changed at an unrecorded time"}
+                          ? `changed ${formatShortDate(row.robotCheckedAt)}`
+                          : "changed at an unrecorded time"}
                       </span>
                     </li>
                   ))}
