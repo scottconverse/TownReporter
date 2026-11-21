@@ -31,6 +31,8 @@ import {
 } from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { registryRolesBySource } from "./registry/registry-sources.server.ts";
+import { registryRereadDue } from "./registry/registry-auto-grow.ts";
+import { followDirectoryLinksIn } from "./registry/link-following.server.ts";
 import {
   commitScanResourceChanges,
   normalizeSourceUrl,
@@ -2135,6 +2137,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const sources = customSnapshot
     ? selectCustomScanSources(customSnapshot, allSources)
     : selectedScanSources(sectionSnapshot, allSources);
+    /*
+      Scott's Nov 20 2026 order: every registry source is re-read at least once
+      a week even when its page did not change. A registry source with no clean
+      read in the last seven days is treated as registry-relevant even when its
+      hash matches, so the batch prompt asks it for `resource_changes` and the
+      commit retains a capture for it (an unchanged page still has content to
+      cite). The daily planner also pins every registry source into the run, so
+      this set is never left out of the read.
+    */
+    const registryRereadDueIds = new Set(
+      sources
+        .filter((source) => registryRoles.has(source.id) && registryRereadDue(source.last_ok_at, Date.now()))
+        .map((source) => source.id),
+    );
     failureReceipt.sourcesSelected = sources.length;
     if (sectionSnapshot && !sources.length)
     throw new Error(
@@ -2685,16 +2701,19 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const { memory, publishedContext, scanOverrides, scanLocalModel, batchTimeoutMs } =
         await ensureScanModelContext();
       /*
-        NAV-P1 (spec 14 step 4): only a batch that read a SELECTED, CHANGED
-        registry source is asked for resource_changes[]. A registry source that
-        did not change this run has no retained capture, so a proposal from it
-        could not be stored anyway (see commitScanResourceChanges).
+        NAV-P1 (spec 14 step 4) plus Scott's Nov 20 2026 order: a batch that read
+        a registry source is asked for resource_changes[] when the page changed
+        OR when the source is due its weekly re-read. An unchanged page due a
+        re-read still gets a capture at commit (`pendingHashes` below), so a
+        change read from it can be stored.
       */
       const changedIds = new Set(
         pendingHashes.filter((entry) => entry.changed).map((entry) => entry.id),
       );
       const registryBatch = batch.sources.some(
-        (source) => registryRoles.has(source.id) && changedIds.has(source.id),
+        (source) =>
+          registryRoles.has(source.id) &&
+          (changedIds.has(source.id) || registryRereadDueIds.has(source.id)),
       );
       const userMsg = buildScanUserMessage({
       topics: topicChoices,
@@ -3440,8 +3459,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     /*
       NAV-P1: the snapshot ids this transaction just wrote, so a registry
       change can carry `evidence_capture_id` = the capture of the page it was
-      read from. A source that did not change has no entry, and a proposal that
-      cites it is rejected below rather than stored unverified.
+      read from. A source that did not change normally has no entry, but a
+      registry source due its weekly re-read gets one even when unchanged, so a
+      change read from it is not rejected as uncaptured.
     */
     const snapshotIdBySourceId = new Map<number, number>();
     for (const p of pendingHashes) {
@@ -3450,7 +3470,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         set last_hash = ${p.hash}
         where id = ${p.id} and newsroom_id = ${owned(context)}
       `;
-      if (p.changed) {
+      if (p.changed || registryRereadDueIds.has(p.id)) {
         const [capture] = await writeSql<{ id: number }>`
           insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
           values (${context.userId}, ${owned(context)}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
@@ -3461,10 +3481,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
 
     /*
-      Spec 14 steps 4-6: registry changes land as pending proposals only.
-      Nothing here writes a registry field, publishes anything, or creates an
-      entity; a crisis-flagged service's change goes straight to the editor.
-      `lead_id` stays null (filing leads from changes is Phase 2).
+      Scott's Nov 20 2026 order: registry changes are applied and published in
+      the scan's own commit. A change that names no existing entity creates the
+      organization, service or location row first; a crisis service is published
+      too, with a `[Crisis]` audit row so the desk lists it first. `lead_id`
+      stays null (filing leads from changes is Phase 2).
     */
     const sourceIdByUrl = new Map<string, number>();
     const tierBySourceId = new Map<number, string>();
@@ -3473,11 +3494,34 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const registryCounts = await commitScanResourceChanges(writeSql, {
       newsroomId: owned(context),
       scanRunId: runId,
+      userId: context.userId,
       changes: data.resource_changes,
       sourceIdByUrl,
       snapshotIdBySourceId,
       tierBySourceId,
     });
+    /*
+      Follow the links a directory page carried into the registry (part 2).
+      Only directory-role sources grow the list; the caps and the "no search
+      results, no redirectors, no social media" rules live in the registry
+      modules. A failure here must not fail a scan that otherwise did its job,
+      so a link-following error is logged and the run keeps its results.
+    */
+    try {
+      const directoryPages = fetched
+        .filter((source) => registryRoles.get(source.id)?.has("directory"))
+        .map((source) => ({
+          pageUrl: source.url,
+          links: source.storyLinks.map((link) => ({ url: link.url, title: link.title })),
+        }));
+      await followDirectoryLinksIn(writeSql, {
+        newsroomId: owned(context),
+        userId: context.userId,
+        pages: directoryPages,
+      });
+    } catch (error) {
+      console.warn("[scan] registry link following could not run", error);
+    }
 
     /*
       `existingLeads` was read above, outside this transaction, because the

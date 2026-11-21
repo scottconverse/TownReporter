@@ -5,6 +5,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, getPaperPlace, isOnboarded } from "./paper-settings.ts";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { markRegistrySource } from "./registry/registry-sources.server.ts";
+import { ensureRegistryDirectorySeed } from "./registry/directory-seed.server.ts";
 import { storableText } from "./storable-text.ts";
 import { assertHttpUrl, isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
 
@@ -38,6 +39,13 @@ export async function ensureNewsroomSources(userId: string, newsroomId = DEFAULT
   // Spec 22: the registry backbone rides the same seeding path, so an
   // onboarded newsroom gets it whenever its sources are seeded.
   await ensureRegistryBackboneSources(userId, newsroomId);
+  /*
+    Part 5 (Scott, Nov 20 2026): the shipped Longmont directory file is loaded
+    and published beside the backbone when it is present. The loader reads the
+    file itself and returns without writing anything when it is absent, so this
+    changes nothing until the data branch lands it.
+  */
+  await ensureRegistryDirectorySeed(await getSql(), newsroomId, userId);
 }
 
 /**

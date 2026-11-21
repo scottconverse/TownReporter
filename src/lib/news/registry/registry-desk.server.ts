@@ -546,12 +546,88 @@ export async function starterListIsLoaded(sql: Sql, newsroomId: number): Promise
   return Number(rows[0]?.count ?? 0) > 0;
 }
 
+/** One entry the scan published by itself (Scott, Nov 20 2026, part 6). */
+export interface DeskAutoPublishedEntry {
+  /** The audit row's id; the stable key for the list. */
+  auditId: number;
+  serviceId: number;
+  organizationName: string;
+  serviceName: string;
+  sourceUrl: string | null;
+  sourceTitle: string | null;
+  /** False after an editor took the entry down; it stays in the history. */
+  published: boolean;
+  /** A crisis service is listed first, as its audit row is marked `[Crisis]`. */
+  crisis: boolean;
+  publishedAt: WhenValue;
+}
+
+/**
+ * Entries the scan applied and published by itself, newest first, crisis first.
+ *
+ * The source of truth is the audit log the scan wrote (`registry.service
+ * .autopublish`), not a separate table: the log is what the desk already shows
+ * for every other registry action, and it survives an editor taking the entry
+ * down. The join to `services` names the entry and shows whether it is still
+ * published, which is what the Unpublish button acts on. A row whose service
+ * was deleted is left out rather than shown as a dead button.
+ */
+export async function listAutoPublishedRegistryEntries(
+  sql: Sql,
+  newsroomId: number,
+): Promise<DeskAutoPublishedEntry[]> {
+  const rows = await sql.query<{
+    audit_id: number;
+    service_id: number;
+    organization_name: string;
+    service_name: string;
+    source_url: string | null;
+    source_title: string | null;
+    published: boolean;
+    crisis: boolean;
+    published_at: WhenValue;
+  }>(
+    `select ae.id as audit_id, s.id as service_id,
+            o.name as organization_name, s.name as service_name,
+            src.url as source_url, src.title as source_title,
+            s.published,
+            (ae.detail like '[Crisis]%') as crisis,
+            ae.created_at as published_at
+       from audit_events ae
+       join services s
+         on s.id = ae.subject_id and s.newsroom_id = ae.newsroom_id
+       join organizations o
+         on o.id = s.organization_id and o.newsroom_id = s.newsroom_id
+       left join sources src
+         on src.id = coalesce(s.source_id, o.source_id) and src.newsroom_id = s.newsroom_id
+      where ae.newsroom_id = $1
+        and ae.action = 'registry.service.autopublish'
+        and ae.subject_kind = 'registry-service'
+      order by crisis desc, ae.created_at desc, ae.id desc
+      limit 100`,
+    [newsroomId],
+  );
+  return rows.map((row) => ({
+    auditId: Number(row.audit_id),
+    serviceId: Number(row.service_id),
+    organizationName: row.organization_name,
+    serviceName: row.service_name,
+    sourceUrl: row.source_url,
+    sourceTitle: row.source_title,
+    published: Boolean(row.published),
+    crisis: Boolean(row.crisis),
+    publishedAt: row.published_at,
+  }));
+}
+
 export interface RegistryDeskView {
   changes: DeskRegistryChange[];
   imports: DeskRegistryImport[];
   sources: DeskRegistrySource[];
   waiting: DeskRegistryWaitingEntry[];
   published: DeskRegistryPublishedEntry[];
+  /** Entries the scan published by itself, newest first, crisis first. */
+  autoPublished: DeskAutoPublishedEntry[];
   /** The newsroom's category names, for the edit and add forms' datalist. */
   categories: string[];
   /** Directory names earlier imports used, for the import panel's name box. */

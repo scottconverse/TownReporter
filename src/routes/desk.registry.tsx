@@ -264,6 +264,7 @@ function RegistryDeskPage() {
   const visible = state === "all" ? changes : changes.filter((c) => c.reviewState === state);
   const waiting = query.data?.waiting ?? [];
   const published = query.data?.published ?? [];
+  const autoPublished = query.data?.autoPublished ?? [];
   const categories = query.data?.categories ?? [];
 
   // Which row's form is open. One at a time, so the desk never shows two
@@ -351,10 +352,10 @@ function RegistryDeskPage() {
       lede="Every change the scan detected in a registry source, the imports that filled the directory, and the sources it watches."
     >
       <p className="note">
-        Each change the scan detected, in the Detected changes list, can be accepted or rejected.
-        Accept and apply puts the proposed value on the entry; Accept without applying only records
-        your decision; Reject leaves the entry as it is. You can also load the starter list, publish
-        each entry one at a time, and check the entries that need checking.
+        The scan now applies and publishes what it finds in a registry source by itself, and lists
+        those entries under Auto-published so you can take one down. Changes it could not settle by
+        itself wait in Detected changes, where you can accept or reject them. You can also load the
+        starter list, publish each entry one at a time, and check the entries that need checking.
       </p>
 
       {query.isError ? (
@@ -610,6 +611,62 @@ function RegistryDeskPage() {
 
           <section className="src-sec">
             <SecHead
+              title="Auto-published"
+              count={autoPublished.length}
+              sub="Entries the scan published by itself from a registry source page. Crisis entries are listed first; an editor can take any of them down."
+            />
+            {autoPublished.length === 0 ? (
+              <p className="wire-sum">The scan has not auto-published an entry yet.</p>
+            ) : (
+              <ul className="astra-plain">
+                {autoPublished.map((row) => (
+                  <li key={row.auditId}>
+                    <div className="astra-row-t">
+                      {row.organizationName} — {row.serviceName}
+                    </div>
+                    <p className="astra-row-meta">
+                      {row.crisis ? "Crisis resource. " : ""}
+                      {row.published ? "Published." : "Taken down by an editor."}
+                    </p>
+                    <p className="astra-row-meta">
+                      Source:{" "}
+                      {row.sourceUrl ? (
+                        <a
+                          className="inline-link"
+                          href={row.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {row.sourceTitle || row.sourceUrl} ↗
+                        </a>
+                      ) : (
+                        (row.sourceTitle ?? "not recorded")
+                      )}
+                    </p>
+                    <p className="astra-row-meta">
+                      Auto-published{" "}
+                      {row.publishedAt ? formatListDateTime(row.publishedAt) : "at an unrecorded time"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <InkButton
+                        tone="ghost"
+                        ariaLabel={`Unpublish: ${row.serviceName}`}
+                        disabled={takeDown.isPending || !row.published}
+                        pending={takeDown.isPending && takeDown.variables === row.serviceId}
+                        pendingLabel="Taking down…"
+                        onClick={() => takeDown.mutate(row.serviceId)}
+                      >
+                        Unpublish
+                      </InkButton>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="src-sec">
+            <SecHead
               title="Needs checking"
               sub="Published entries with no verification, an old one, or facts that changed since the last one."
             />
@@ -625,11 +682,7 @@ function RegistryDeskPage() {
             <SecHead
               title="Detected changes"
               count={changes.length}
-              sub={
-                changes.some((c) => c.appliedAt != null)
-                  ? "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory."
-                  : "One row per change the scan proposed. Nothing here has been applied to the directory."
-              }
+              sub="One row per registry change. A row the scan applied and published says so; a row waiting for an editor has not been applied to the directory."
             />
             <div className="astra-toolbar">
               <div className="astra-seg" role="group" aria-label="Filter changes by review state">

@@ -55,6 +55,18 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
   const scoreById = yieldScoresByWebsite(pool, yields);
   const preferences = await loadSourceScanPreferences(sql, newsroomId);
   const preferenceById = new Map(preferences.map((preference) => [preference.sourceId, preference]));
+  /*
+    Scott's Nov 20 2026 order: every registry source is in the scheduled daily
+    scan and re-read at least weekly. Pinning them here, rather than trusting
+    the general rotation, is what makes that true on a newsroom with more news
+    sources than the cap.
+  */
+  const registrySourceIds = (
+    await sql.query<{ source_id: number }>(
+      "select distinct source_id from resource_sources where newsroom_id = $1",
+      [newsroomId],
+    )
+  ).map((row) => Number(row.source_id));
   const rotation = planDailySourceRotation({
     facts: pool.map((source: any) => ({
       ...source,
@@ -65,6 +77,7 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
     selectedSourceIds: p.selected_source_ids ?? [],
     everyDayCount: p.every_day_source_count ?? 8,
     preferences,
+    registrySourceIds,
     cap: (p.source_cap_override ?? p.source_cap),
   });
   const prioritySources = rotation.sourceIds.map((id: number) => pool.find((source: any) => source.id === id)).filter(Boolean);

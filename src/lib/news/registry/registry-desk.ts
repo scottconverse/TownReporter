@@ -12,6 +12,7 @@ import { getSql } from "../../db.ts";
 import { deskMiddleware } from "../desk-auth.ts";
 import {
   countPublishedRegistryServices,
+  listAutoPublishedRegistryEntries,
   listDeskChanges,
   listPublishedRegistryEntries,
   listRegistryCategoryNames,
@@ -34,6 +35,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       sources,
       waiting,
       published,
+      autoPublished,
       categories,
       directoryNames,
       publishedCount,
@@ -44,6 +46,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       listRegistrySourcesWithHealth(sql, context.newsroomId),
       listUnpublishedRegistryEntries(sql, context.newsroomId),
       listPublishedRegistryEntries(sql, context.newsroomId),
+      listAutoPublishedRegistryEntries(sql, context.newsroomId),
       listRegistryCategoryNames(sql, context.newsroomId),
       listRegistryDirectoryNames(sql, context.newsroomId),
       countPublishedRegistryServices(sql, context.newsroomId),
@@ -55,6 +58,7 @@ export const listRegistryDesk = createServerFn({ method: "GET" })
       sources,
       waiting,
       published,
+      autoPublished,
       categories,
       directoryNames,
       publishedCount,

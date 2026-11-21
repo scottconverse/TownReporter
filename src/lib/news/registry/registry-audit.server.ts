@@ -11,7 +11,11 @@ export type RegistryAuditAction =
   | "registry.change.reject"
   | "registry.service.verify"
   | "registry.service.publish"
-  | "registry.service.withdraw";
+  | "registry.service.withdraw"
+  /** A scan's commit applied and published an entry by itself (Scott, Nov 20 2026). */
+  | "registry.service.autopublish"
+  /** The same, for a change to an organization or location rather than a service. */
+  | "registry.change.autopublish";
 
 export interface RegistryEventInput {
   newsroomId: number;
