@@ -312,8 +312,13 @@ export function PageWatchPanel({
           {formOpen ? "Close watch form" : "+ Watch a page"}
         </InkButton>
       </div>
+      {/*
+        Only the form itself is behind `formOpen`. The open watch -- Check now,
+        Capture with Firecrawl Local, Pause, Stop and the history -- used to sit
+        inside this block too, and the row click closes the form, so a selected
+        watch drew nothing.
+      */}
       {formOpen ? (
-        <>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -374,7 +379,8 @@ export function PageWatchPanel({
               {create.isPending ? "Saving watch…" : "Save watch and capture page"}
             </InkButton>
           </form>
-          {error ? (
+      ) : null}
+      {error ? (
             <p className="note err" role="alert">
               {error}
             </p>
@@ -758,8 +764,6 @@ export function PageWatchPanel({
           ) : detail.isError ? (
             <p role="alert">Could not load capture history.</p>
           ) : null}
-        </>
-      ) : null}
     </section>
   );
 }
