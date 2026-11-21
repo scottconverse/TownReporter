@@ -277,6 +277,24 @@ it("seeds sources from the owned onboarded room, never the default paper", async
   assert.deepEqual(rows, [{ newsroom_id: 751, url: "https://example.org/riverbend" }]);
 });
 
+it("loads the Longmont directory only for a paper in Longmont", async () => {
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  await sql`
+    insert into paper_settings(newsroom_id,onboarded,city,state,seed_sources)
+    values (7761,true,'Longmont','Colorado','[]'::jsonb),(7762,true,'Riverbend','Colorado','[]'::jsonb)
+  `;
+  await ensureNewsroomSources("section-directory", 7761);
+  await ensureNewsroomSources("section-directory", 7762);
+  const rows = await sql<{ newsroom_id: number; total: string }>`
+    select newsroom_id,count(*)::text as total from services
+    where newsroom_id in (7761,7762) and published = true group by newsroom_id
+  `;
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rows[0]!.newsroom_id), 7761);
+  assert.equal(Number(rows[0]!.total), 151);
+});
+
 it("seeds each configured URL once per newsroom across editors and repeated calls", async () => {
   await ensurePaperSettingsSchema();
   const sql = await getSql();

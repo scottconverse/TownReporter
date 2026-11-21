@@ -120,6 +120,12 @@ export const ScanResourceChangeSchema = z.object({
     z.enum(SCAN_RESOURCE_CHANGE_KINDS),
   ),
   summary: z.preprocess((v) => trimmed(v, 400), z.string().max(400).optional().default("")),
+  /*
+    The sentence, copied word for word from the page, that states the change
+    (Scott, Nov 20 2026). The desk shows it so an editor can check a proposal
+    without opening the source; an empty value is honest ("not recorded").
+  */
+  quote: z.preprocess((v) => trimmed(v, 1000), z.string().max(1000).optional()),
   model_confidence: z.preprocess((v) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
