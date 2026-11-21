@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "TownReporter: Send to Desk",
+  "version": "1.0.0",
+  "description": "Send the Reddit posts on the page you are reading to the TownReporter Dark Desk. Runs only when you click the button.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Send these posts to the desk"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://townreporter.org/*", "http://127.0.0.1:3100/*"],
+      "js": ["desk-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
