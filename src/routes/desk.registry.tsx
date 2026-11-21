@@ -421,6 +421,7 @@ function RegistryDeskPage() {
     auto: PAGE_SIZE,
     changes: PAGE_SIZE,
     gone: PAGE_SIZE,
+    needsChecking: PAGE_SIZE,
   });
   const more = (key: keyof typeof shown) =>
     setShown((current) => ({ ...current, [key]: current[key] + PAGE_SIZE }));
@@ -1015,6 +1016,15 @@ function RegistryDeskPage() {
             sub="Published entries with no verification, an old one, or facts that changed since the last one."
           >
             <RegistryNeedsChecking
+              limit={shown.needsChecking}
+              renderFoot={(total) => (
+                <ListFoot
+                  shown={Math.min(shown.needsChecking, total)}
+                  total={total}
+                  noun="entries that need checking"
+                  onMore={() => more("needsChecking")}
+                />
+              )}
               onOpen={(serviceId) => {
                 setDetailId(serviceId);
                 setOpenedFromList(serviceId);

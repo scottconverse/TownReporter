@@ -895,6 +895,31 @@ test("Needs checking says so when every published entry is current", async (t) =
   assert.equal(page.container.querySelectorAll("li").length, 0);
 });
 
+test("Needs checking draws only the rows the page asks for and reports the full count", async (t) => {
+  setup();
+  globalThis.__rv.needsChecking = Array.from({ length: 30 }, (_, i) => ({
+    serviceId: i + 1,
+    serviceName: `Service ${i + 1}`,
+    organizationName: "Helping Hands",
+    lastCheckedAt: null,
+    reasons: ["Never verified"],
+  }));
+  let footTotal = null;
+  const page = await mount(
+    React.createElement(RegistryNeedsChecking, {
+      onOpen() {},
+      limit: 25,
+      renderFoot: (total) => {
+        footTotal = total;
+        return null;
+      },
+    }),
+  );
+  t.after(() => page.close());
+  assert.equal(page.container.querySelectorAll("li").length, 25);
+  assert.equal(footTotal, 30);
+});
+
 /* ---- Freshness panel and Source gone list (Scott, Nov 20 2026) ---- */
 
 const freshness = (over = {}) => ({
