@@ -190,6 +190,20 @@ const CONTROLS: Control[] = [
     pins: ['doneLabel="Checked"', "This page is paused, so the desk is not checking it."],
   },
   {
+    name: "Capture with Firecrawl Local (page watch)",
+    file: "src/components/page-watch-panel.tsx",
+    tone: "quiet",
+    idle: "Capture with Firecrawl Local",
+    working: "Reading with Firecrawl Local…",
+    done: "Captured",
+    reason: "Could not capture with Firecrawl Local.",
+    pins: [
+      'workingLabel="Reading with Firecrawl Local…"',
+      'doneLabel="Captured"',
+      "Uses Firecrawl Local on this computer. Start it by hand first.",
+    ],
+  },
+  {
     name: "Pause / Resume (page watch)",
     file: "src/components/page-watch-panel.tsx",
     tone: "quiet",

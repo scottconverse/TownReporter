@@ -33,6 +33,8 @@ export function describeExtractionMethod(method: string | undefined | null): str
     const reason = needsOcr[1]!.trim();
     return `Scanned PDF — not readable yet${reason ? `: ${reason}` : ""}`;
   }
+  const firecrawl = /^firecrawl-local:(.+)$/.exec(raw);
+  if (firecrawl) return `Read by Firecrawl Local ${firecrawl[1]!.trim()} on this computer`;
   if (!raw || raw === "none") return "Not read yet.";
   return raw;
 }
