@@ -55,6 +55,12 @@ import {
 } from "@/lib/news/desk-copy";
 
 type RedditScanResult = Extract<Awaited<ReturnType<typeof scanTipSubreddit>>, { ok: true }>;
+import {
+  REDDIT_DESK_BRIDGE_READY,
+  REDDIT_DESK_READY,
+  readRedditDeskEnvelope,
+  type DeskPost,
+} from "@/lib/news/reddit-desk-posts";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -154,6 +160,16 @@ function DarkPage() {
   const [redditElapsed, setRedditElapsed] = useState(0);
   const [redditAnnounce, setRedditAnnounce] = useState("");
   const redditStartRef = useRef<number | null>(null);
+  /*
+    "Send to Desk": posts the editor collected with the Chrome extension while
+    reading Reddit in their own browser. They arrive from the extension's
+    content script on this origin, one message per button press. Nothing is
+    filed until the editor ticks a post and presses the file button below.
+  */
+  const [deskPosts, setDeskPosts] = useState<DeskPost[] | null>(null);
+  const [deskPicked, setDeskPicked] = useState<string[]>([]);
+  const [deskFiled, setDeskFiled] = useState<string[]>([]);
+  const [deskNotice, setDeskNotice] = useState("");
 
   useEffect(() => {
     const timerRef = phaseTimer;
@@ -802,6 +818,94 @@ function DarkPage() {
     },
   });
 
+  /*
+    The extension's content script answers a "ready" message with whatever the
+    toolbar button stored for this page. The listener is attached first, so the
+    answer cannot arrive before it; and every field is re-validated by
+    `readRedditDeskEnvelope` -- origin, source and payload -- before it is
+    shown. A message that is not ours is ignored and changes nothing.
+  */
+  useEffect(() => {
+    const askBridge = () => window.postMessage({ type: REDDIT_DESK_READY }, window.location.origin);
+    const onMessage = (event: MessageEvent) => {
+      /*
+        The extension's bridge announces itself once it is listening. If this
+        page mounted first, its first ask had no listener; this is the cue to
+        ask again. Same two speaker checks as the payload below.
+      */
+      if (
+        event.source === window &&
+        event.origin === window.location.origin &&
+        event.data &&
+        event.data.type === REDDIT_DESK_BRIDGE_READY
+      ) {
+        askBridge();
+        return;
+      }
+      const posts = readRedditDeskEnvelope({
+        origin: event.origin,
+        ownOrigin: window.location.origin,
+        source: event.source,
+        ownWindow: window,
+        data: event.data,
+      });
+      if (posts == null) return;
+      setDeskPosts(posts);
+      setDeskPicked([]);
+      setDeskFiled([]);
+      setDeskNotice(
+        posts.length
+          ? `${posts.length} post${posts.length === 1 ? "" : "s"} sent from Reddit.`
+          : "No posts found on this page.",
+      );
+    };
+    window.addEventListener("message", onMessage);
+    askBridge();
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  /*
+    File the ticked posts one at a time, through the same `fileRedditTip` the
+    Reddit check uses, so the sign-in check and the permalink de-dup are the
+    desk's own and not a second copy. An already-filed tip comes back
+    `{ok:true, filed:false}` and is reported as such rather than as a failure.
+  */
+  const fileDeskPicks = useMutation({
+    mutationFn: async (posts: DeskPost[]) => {
+      const filed: string[] = [];
+      let already = 0;
+      let failed = 0;
+      let error = "";
+      for (const post of posts) {
+        try {
+          const res = await fileRedditTip({
+            data: { url: post.url, title: post.title, excerpt: post.excerpt, updated: post.time, author: post.author },
+          });
+          if (res?.ok && res.filed) filed.push(post.url);
+          else if (res?.ok) already += 1;
+          else failed += 1;
+        } catch (err) {
+          failed += 1;
+          if (!error) error = editorError(err instanceof Error ? err.message : "") ?? "";
+        }
+      }
+      return { filed, already, failed, error };
+    },
+    onSuccess: ({ filed, already, failed, error }) => {
+      setDeskFiled((prev) => [...prev, ...filed]);
+      setDeskPicked((prev) => prev.filter((url) => !filed.includes(url)));
+      const parts: string[] = [];
+      if (filed.length) parts.push(`Filed ${filed.length} tip${filed.length === 1 ? "" : "s"}.`);
+      if (already) parts.push(`${already} already on the desk.`);
+      if (failed) parts.push(error ? `${failed} could not be filed: ${error}` : `${failed} could not be filed.`);
+      setDeskNotice(parts.join(" ") || "Nothing was filed.");
+      if (filed.length) invalidate();
+    },
+    onError: (err) => {
+      setDeskNotice(editorError(err instanceof Error ? err.message : "") || "Could not file those tips.");
+    },
+  });
+
   // Elapsed time for the "Reading r/longmont" panel. The client cannot see
   // per-feed progress — one synchronous server call — so this is honest
   // about what it shows: how long the read has taken, not how far along it
@@ -1112,7 +1216,10 @@ function DarkPage() {
             <PileShowAll count={active.length} expanded={Boolean(expandedPiles.open)} onToggle={() => togglePile("open")} />
           </div>
 
-          <div className="astra-pile" hidden={!inbox.length && !worth.isPending && !worth.isError}>
+          <div
+            className="astra-pile"
+            hidden={!inbox.length && !worth.isPending && !worth.isError && !deskPosts}
+          >
             <div className="astra-pile-h">
               <span>Signals to review</span>
               <span>{inbox.length}</span>
@@ -1168,6 +1275,27 @@ function DarkPage() {
                   onDismiss={() => setRedditResult(null)}
                   onFileTip={(post) => fileTip.mutate(post)}
                   filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
+                />
+              </div>
+            ) : null}
+            {deskPosts ? (
+              <div className="astra-pile-pad">
+                <RedditDeskPanel
+                  posts={deskPosts}
+                  picked={deskPicked}
+                  filed={deskFiled}
+                  notice={deskNotice}
+                  filing={fileDeskPicks.isPending}
+                  onToggle={(url) =>
+                    setDeskPicked((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]))
+                  }
+                  onFile={() => fileDeskPicks.mutate(deskPosts.filter((p) => deskPicked.includes(p.url)))}
+                  onDismiss={() => {
+                    setDeskPosts(null);
+                    setDeskPicked([]);
+                    setDeskFiled([]);
+                    setDeskNotice("");
+                  }}
                 />
               </div>
             ) : null}
@@ -1615,6 +1743,95 @@ function RedditResultPanel({
           Dismiss
         </InkButton>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Posts handed over by the "Send to Desk" Chrome button.
+ *
+ * Same card language as the Reddit read panel above -- `reddit-result`,
+ * `tip-list`, `tip-row`, the `chip` states -- because this is the same kind of
+ * thing: Reddit posts the editor may want as tips. Every field the extension
+ * sent is rendered as text; the title link is the only thing that is markup,
+ * and its href was rebuilt from the validated permalink, so nothing from the
+ * page can arrive as HTML.
+ */
+function RedditDeskPanel({
+  posts,
+  picked,
+  filed,
+  notice,
+  filing,
+  onToggle,
+  onFile,
+  onDismiss,
+}: {
+  posts: DeskPost[];
+  picked: string[];
+  filed: string[];
+  notice: string;
+  filing: boolean;
+  onToggle: (url: string) => void;
+  onFile: () => void;
+  onDismiss: () => void;
+}) {
+  const open = posts.filter((p) => !filed.includes(p.url)).length;
+  return (
+    <div className="reddit-result">
+      <p className="worth-t">Sent from Reddit</p>
+      <p className="reddit-headline">
+        {posts.length} post{posts.length === 1 ? "" : "s"} read from the page you had open.
+      </p>
+      <p className="reddit-sub">
+        Tick the posts you want and file them as tips. Nothing is filed until you press the button.
+      </p>
+      {notice ? (
+        <p className="reddit-sub" role="status" aria-live="polite">
+          {notice}
+        </p>
+      ) : null}
+      <div className="tip-list">
+        {posts.map((p) => {
+          const isFiled = filed.includes(p.url);
+          return (
+            <div key={p.url} className="tip-row">
+              <input
+                type="checkbox"
+                checked={isFiled || picked.includes(p.url)}
+                disabled={isFiled}
+                onChange={() => onToggle(p.url)}
+                aria-label={`Select ${p.title}`}
+              />
+              <div>
+                <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
+                  {p.title}
+                </a>
+                <span className="np-meta block">
+                  {p.time ? `Posted ${p.time.slice(0, 10)}` : "Posted date unknown"}
+                  {p.author ? ` · ${p.author}` : ""}
+                </span>
+                {p.excerpt ? <span className="np-meta block">{excerptForEditor(p.excerpt)}</span> : null}
+              </div>
+              <span className={"chip " + (isFiled ? "st-filed" : "st-new")}>
+                {isFiled ? "Filed" : "Ready to file"}
+              </span>
+              <span />
+            </div>
+          );
+        })}
+      </div>
+      <div className="np-acts">
+        <InkButton disabled={!picked.length || filing} onClick={onFile}>
+          {filing ? "Filing…" : picked.length ? `File ${picked.length} as tip${picked.length === 1 ? "" : "s"}` : "File as tip"}
+        </InkButton>
+        <InkButton tone="quiet" onClick={onDismiss}>
+          Dismiss
+        </InkButton>
+      </div>
+      {open === 0 ? (
+        <p className="reddit-sub">Every post in this list is on the desk.</p>
+      ) : null}
     </div>
   );
 }
