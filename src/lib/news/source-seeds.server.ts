@@ -43,9 +43,12 @@ export async function ensureNewsroomSources(userId: string, newsroomId = DEFAULT
     Part 5 (Scott, Nov 20 2026): the shipped Longmont directory file is loaded
     and published beside the backbone when it is present. The loader reads the
     file itself and returns without writing anything when it is absent, so this
-    changes nothing until the data branch lands it.
+    changes nothing until the data branch lands it. It is Longmont's list, so
+    only a Longmont paper gets it.
   */
-  await ensureRegistryDirectorySeed(await getSql(), newsroomId, userId);
+  if (isLongmontPlace(await backboneRegionPlace(newsroomId))) {
+    await ensureRegistryDirectorySeed(await getSql(), newsroomId, userId);
+  }
 }
 
 /**
@@ -122,6 +125,13 @@ export function isBackboneRegion(place: BackbonePlace | null | undefined): boole
   const city = (place?.city ?? "").trim().toLowerCase();
   const county = (place?.county ?? "").trim().toLowerCase();
   return city === "longmont" || county === "boulder" || county === "boulder county";
+}
+
+/** True only for a paper in Longmont, Colorado: the shipped directory's town. */
+export function isLongmontPlace(place: BackbonePlace | null | undefined): boolean {
+  const state = (place?.state ?? "").trim().toLowerCase();
+  const city = (place?.city ?? "").trim().toLowerCase();
+  return city === "longmont" && (state === "colorado" || state === "co");
 }
 
 /**

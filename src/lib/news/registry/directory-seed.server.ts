@@ -72,6 +72,17 @@ export async function importRegistryDirectorySeedIn(
 
   return withTransaction(async (tx) => {
     /*
+      The desk calls this on many requests. If another request is loading the
+      list now, this one returns at once instead of holding a database
+      connection while it waits. Same key as the importer's own lock.
+    */
+    const lock = await tx.query<{ locked: boolean }>(
+      "select pg_try_advisory_xact_lock($1, hashtext($2)) as locked",
+      [newsroomId, LONGMONT_DIRECTORY_SEED_NAME],
+    );
+    if (!lock[0]?.locked) return { present: true, inserted: 0, published: 0, problems: [] };
+
+    /*
       "Once": if the directory is already loaded, do not parse and re-import it
       on every newsroom setup. The importer would write nothing anyway; this
       just avoids the work.
