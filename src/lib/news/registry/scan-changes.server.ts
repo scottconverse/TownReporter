@@ -572,7 +572,8 @@ function autoPublishNote(change: ParsedResourceChange, applied: boolean): string
 
 export interface ScanResourceChangeCommitInput {
   newsroomId: number;
-  scanRunId: number;
+  /** The scan run that read the page; null for a robot recheck outside a run. */
+  scanRunId: number | null;
   /** The scan's own user; the actor on every auto-publish audit row. */
   userId: string;
   changes: ParsedResourceChange[];
@@ -582,6 +583,12 @@ export interface ScanResourceChangeCommitInput {
   snapshotIdBySourceId: Map<number, number>;
   /** Source id -> its `sources.tier`. */
   tierBySourceId: Map<number, string>;
+  /**
+   * True by default: a change naming no existing entity creates one (part 3).
+   * A robot recheck sets this false -- rechecking a page must never grow the
+   * registry, so an unmatched change stays a proposal for an editor.
+   */
+  createMissing?: boolean;
 }
 
 export interface ScanResourceChangeCommitResult {
@@ -693,7 +700,7 @@ export async function commitScanResourceChanges(
       "Ambiguous Pantry" because two rows share the name would grow the registry
       with a duplicate. Only a name that matches nothing is created.
     */
-    if (entityId === null && !resolved.ambiguous) {
+    if (entityId === null && !resolved.ambiguous && input.createMissing !== false) {
       entityId = await createEntityForChange(
         sql,
         input.newsroomId,

@@ -3739,6 +3739,73 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       owned(context),
     );
     /*
+      Scott's Nov 20 2026 order: "Every so often we need to go through and
+      recheck everything." The scheduled scan's nightly batch rechecks a slice
+      of the published registry against its own source pages, so every entry is
+      opened again within a month (crisis services weekly). It runs AFTER this
+      scan's commit and NEVER throws: a page or a model the desk cannot reach
+      must not turn "the scan worked" into "the scan failed".
+    */
+    if (deps.scheduledCommit) {
+      try {
+        const [{ runRegistryRechecks, fetchRecheckPage }, { recheckUserMessage, parseRecheckChanges }] =
+          await Promise.all([
+            import("./registry/registry-recheck.server.ts"),
+            import("./registry/registry-recheck-prompt.ts"),
+          ]);
+        const { scanLocalModel, batchTimeoutMs } = await ensureScanModelContext();
+        const recheckSummary = await runRegistryRechecks(await getSql(), {
+          newsroomId: job.newsroom_id,
+          userId: job.user_id,
+          scanRunId: runId,
+          deps: {
+            fetchPage: fetchRecheckPage,
+            readChanges: async ({ target, facts, pageText, pageTitle }) => {
+              const ai = await waitForModel({
+                jobId: job.id,
+                label: () => modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
+                run: () =>
+                  runScanChatWithFailover({
+                    job,
+                    newsroomId: job.newsroom_id,
+                    localModel: scanLocalModel,
+                    system:
+                      "You recheck community-resource entries against the page they came from. Answer with JSON only.",
+                    user: recheckUserMessage({ target, facts, pageText, pageTitle }),
+                    maxTokens: 2000,
+                    modelEffort: effortFromJob(job),
+                    timeoutMs: batchTimeoutMs,
+                    grokChat: runChat,
+                    probe: (choice) =>
+                      probe(
+                        choice,
+                        job.newsroom_id,
+                        undefined,
+                        "scan",
+                        choice === "local-model" ? (scanLocalModel ?? undefined) : undefined,
+                      ),
+                    setModelChoice,
+                    setStage,
+                    setFailoverNote: setJobFailoverNote,
+                  }),
+              });
+              if (!ai.ok) throw new Error(ai.error);
+              return parseRecheckChanges(ai.text);
+            },
+          },
+        });
+        if (recheckSummary.planned > 0) {
+          console.log(
+            `[scan] registry rechecks: ${recheckSummary.planned} planned, ${recheckSummary.same} same, ` +
+              `${recheckSummary.changed} changed, ${recheckSummary.sourceGone} source gone, ` +
+              `${recheckSummary.failed} failed, ${recheckSummary.skipped} skipped`,
+          );
+        }
+      } catch (error) {
+        console.warn("[scan] registry rechecks could not run", error);
+      }
+    }
+    /*
       Scott's order (Nov 16 2026): "I want the paper to write a draft on any
       stories that score higher than 13 (14 and up)." The sweep runs AFTER this
       scan's own commit, so the leads it just filed or re-scored are visible,

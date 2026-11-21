@@ -15,7 +15,11 @@ export type RegistryAuditAction =
   /** A scan's commit applied and published an entry by itself (Scott, Nov 20 2026). */
   | "registry.service.autopublish"
   /** The same, for a change to an organization or location rather than a service. */
-  | "registry.change.autopublish";
+  | "registry.change.autopublish"
+  /** The nightly robot pass rechecked an entry against its source page. */
+  | "registry.service.recheck"
+  /** The robot pass found the source page gone and unpublished the entry. */
+  | "registry.service.source_gone";
 
 export interface RegistryEventInput {
   newsroomId: number;
