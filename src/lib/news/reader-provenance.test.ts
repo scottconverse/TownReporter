@@ -7,6 +7,7 @@ import {
   readerSourceUrlLabel,
 } from "./reader-provenance.ts";
 import type { ProvenanceItem } from "./findings.ts";
+import { provenanceHost } from "./findings.ts";
 
 /*
   Unit U11b3: the reader's source list.
@@ -240,5 +241,60 @@ describe("readable source-card titles", () => {
     const items = readerProvenanceItems([], [portal]);
     assert.equal(items[0]!.title, "longmont.primegov.com");
     assert.equal(items[0]!.url, portal, "the full address must stay on the card");
+  });
+});
+
+/*
+  Article 311 (Nov 21 2026): a stored provenance row can be only a URL.
+
+  That story's `provenance_json` holds fourteen rows of `{ "url": "…" }` and
+  nothing else. `ProvenanceBlock` passed `item.title` to
+  `readableSourceTitle`, which called `title.trim()` -- so the whole published
+  article died with "Something went wrong: Cannot read properties of undefined
+  (reading 'trim')". A row with no title is no captured title at all: the card
+  prints the label a bare cited URL already gets, and the rest of the row
+  (organization, document_date, the takedown flags) is absent rather than
+  filled in, which the card already reads defensively.
+*/
+describe("a stored provenance row that carries only a URL", () => {
+  const url = "https://www.longmontcolorado.gov/council/agendas/";
+  const fallback = "longmontcolorado.gov";
+  /* The shape the database actually stores: no title, no other fields. */
+  const urlOnly = () => ({ url }) as unknown as ProvenanceItem;
+
+  it("labels a row whose title is missing the way a bare cited URL is labelled", () => {
+    const items = readerProvenanceItems([urlOnly()], []);
+    assert.equal(items.length, 1);
+    assert.equal(readableSourceTitle(items[0]!.title, items[0]!.url), fallback);
+    assert.equal(readableSourceTitle(undefined, url), readerSourceUrlLabel(url));
+  });
+
+  it("treats a title that is not a string as no title, instead of throwing", () => {
+    for (const title of [null, 42, { name: "agenda" }, ["agenda"]]) {
+      assert.equal(
+        readableSourceTitle(title, url),
+        fallback,
+        `${JSON.stringify(title)} leaked to a card`,
+      );
+    }
+  });
+
+  it("still prints a repeated URL once", () => {
+    const items = readerProvenanceItems([urlOnly(), urlOnly(), urlOnly()], []);
+    assert.equal(items.length, 1, "the same URL was printed more than once");
+    assert.equal(items[0]!.url, url);
+  });
+
+  it("reads the card's other fields as empty instead of crashing", () => {
+    const item = urlOnly();
+    assert.equal(provenanceHost(item), "longmontcolorado.gov");
+    assert.equal(item.organization, undefined);
+    assert.equal(item.document_date, undefined);
+    assert.equal(item.excerpt_removed, undefined);
+  });
+
+  it("does not crash on a row with neither a title nor a url", () => {
+    const broken = {} as unknown as ProvenanceItem;
+    assert.equal(readableSourceTitle(broken.title, broken.url), "Source");
   });
 });
