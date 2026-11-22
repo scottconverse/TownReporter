@@ -146,13 +146,14 @@ function isJunkSourceTitle(title: string, url: string): boolean {
  * (`longmont.primegov.com`): a name a reader can recognize, with the address
  * still one click away on the card. No site is given a name this code invents.
  */
-export function readerSourceUrlLabel(url: string): string {
+export function readerSourceUrlLabel(url: unknown): string {
+  const storedUrl = typeof url === "string" ? url : "";
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(storedUrl);
     const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
-    return hostname || url.trim() || "Source";
+    return hostname || storedUrl.trim() || "Source";
   } catch {
-    return url.trim() || "Source";
+    return storedUrl.trim() || "Source";
   }
 }
 
@@ -164,11 +165,25 @@ export function readerSourceUrlLabel(url: string): string {
  * gets the website plus the path instead. No desk-editable replacement label
  * exists, so this stays a pure, testable display rule.
  */
-export function readableSourceTitle(title: string, url: string): string {
-  const decoded = decodeTitleEscapes(title.trim()).replace(/\s+/g, " ");
+export function readableSourceTitle(title: unknown, url: unknown): string {
+  /*
+    A stored provenance row is JSON written by an earlier build, and not every
+    row has the shape `ProvenanceItem` promises. Story 311 carries fourteen
+    rows of `{ "url": "…" }` and nothing else; the story page read
+    `title.trim()` here and the whole article died with "Something went
+    wrong: Cannot read properties of undefined (reading 'trim')".
+
+    A missing or non-string title is no captured title at all, which is the
+    case this rule already answers: the card shows the label a bare cited URL
+    gets. The other absent fields (organization, document_date, the takedown
+    flags) are already read defensively by the card and `provenanceHost`.
+  */
+  const storedTitle = typeof title === "string" ? title : "";
+  const storedUrl = typeof url === "string" ? url : "";
+  const decoded = decodeTitleEscapes(storedTitle.trim()).replace(/\s+/g, " ");
   const { text: stripped, stripped: hadIdPrefix } = stripHexIdPrefix(decoded);
   const text = hadIdPrefix ? stripped.replace(DOCUMENT_FILE_EXTENSION, "").trim() : stripped;
-  return isJunkSourceTitle(text, url) ? readerSourceUrlLabel(url) : text;
+  return isJunkSourceTitle(text, storedUrl) ? readerSourceUrlLabel(storedUrl) : text;
 }
 
 /**
