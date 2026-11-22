@@ -36,6 +36,22 @@ export const checkPageWatch = createServerFn({ method: "POST" })
     const { checkPageWatchFor } = await import("./page-watch.ts");
     return checkPageWatchFor(context, data);
   });
+export const captureWithFirecrawlLocal = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => id.parse(input))
+  .handler(async ({ context, data }) => {
+    const { captureWithFirecrawlLocalFor } = await import("./page-watch.ts");
+    const result = await captureWithFirecrawlLocalFor(context, data);
+    // Only the outcome crosses to the browser: never the service token.
+    return result.ok
+      ? {
+          ok: true as const,
+          state: result.state,
+          versionId: result.versionId,
+          captureEventId: result.captureEventId,
+        }
+      : { ok: false as const, error: result.error };
+  });
 export const pageWatchDetail = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
