@@ -5,6 +5,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, getPaperPlace, isOnboarded } from "./paper-settings.ts";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { markRegistrySource } from "./registry/registry-sources.server.ts";
+import { ensureRegistryDirectorySeed } from "./registry/directory-seed.server.ts";
 import { storableText } from "./storable-text.ts";
 import { assertHttpUrl, isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
 
@@ -38,6 +39,16 @@ export async function ensureNewsroomSources(userId: string, newsroomId = DEFAULT
   // Spec 22: the registry backbone rides the same seeding path, so an
   // onboarded newsroom gets it whenever its sources are seeded.
   await ensureRegistryBackboneSources(userId, newsroomId);
+  /*
+    Part 5 (Scott, Nov 20 2026): the shipped Longmont directory file is loaded
+    and published beside the backbone when it is present. The loader reads the
+    file itself and returns without writing anything when it is absent, so this
+    changes nothing until the data branch lands it. It is Longmont's list, so
+    only a Longmont paper gets it.
+  */
+  if (isLongmontPlace(await backboneRegionPlace(newsroomId))) {
+    await ensureRegistryDirectorySeed(await getSql(), newsroomId, userId);
+  }
 }
 
 /**
@@ -114,6 +125,13 @@ export function isBackboneRegion(place: BackbonePlace | null | undefined): boole
   const city = (place?.city ?? "").trim().toLowerCase();
   const county = (place?.county ?? "").trim().toLowerCase();
   return city === "longmont" || county === "boulder" || county === "boulder county";
+}
+
+/** True only for a paper in Longmont, Colorado: the shipped directory's town. */
+export function isLongmontPlace(place: BackbonePlace | null | undefined): boolean {
+  const state = (place?.state ?? "").trim().toLowerCase();
+  const city = (place?.city ?? "").trim().toLowerCase();
+  return city === "longmont" && (state === "colorado" || state === "co");
 }
 
 /**

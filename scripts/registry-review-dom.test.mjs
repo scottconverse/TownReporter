@@ -97,7 +97,21 @@ const imports = {
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
   "@/lib/news/registry/registry-sentence": sentenceUrl,
   "@/lib/paper-context-state": paperUrl,
+  "@/lib/news/list-window": await moduleUrl("src/lib/news/list-window.ts"),
+  "@/lib/news/registry/registry-proposal-facts": await moduleUrl(
+    "src/lib/news/registry/registry-proposal-facts.ts",
+  ),
+  "@/lib/news/registry/registry-entry-copy": await moduleUrl(
+    "src/lib/news/registry/registry-entry-copy.ts",
+  ),
 };
+// The desk page's cards are real here: they are plain markup and the page's
+// data decides what they say (scripts/registry-human-desk-dom.test.mjs covers
+// their contents).
+imports["@/components/registry-entry-card"] = await moduleUrl(
+  "src/components/registry-entry-card.tsx",
+  imports,
+);
 const changeReviewUrl = await moduleUrl("src/components/registry-change-review.tsx", imports);
 const { RegistryChangeReviewList } = await import(changeReviewUrl);
 const { RegistryVerificationPanel } = await import(
@@ -125,6 +139,9 @@ export function ListSkeleton() { return null; }
   "@/components/registry-import-panel": stubUrl("export function RegistryImportPanel() { return null; }\n"),
   "@/components/registry-export-panel": stubUrl("export function RegistryExportPanel() { return null; }\n"),
   "@/components/registry-entry-editor": stubUrl("export function RegistryEntryEditor() { return null; }\n"),
+  // Scott, Nov 20 2026: the desk page now opens one entry's own page; the
+  // component is stubbed here because its own read is not what this file tests.
+  "@/components/registry-entry-panel": stubUrl("export function RegistryEntryPanel() { return null; }\n"),
   "@/components/registry-needs-checking": stubUrl("export function RegistryNeedsChecking() { return null; }\n"),
   "@/lib/news/registry/registry-desk": stubUrl(`
 export async function listRegistryDesk() { return globalThis.__desk.data; }
@@ -138,6 +155,12 @@ export const takeDownRegistryEntry = refuse;
 export const updateRegistryEntry = refuse;
 `),
   "@/lib/news/registry/registry-entry-fields": stubUrl("export {};\n"),
+  // The Freshness panel's plain-words reader; the real one is registry-recheck.ts.
+  "@/lib/news/registry/registry-recheck": stubUrl(`
+export function recheckResultWords(result) {
+  return { same: "the facts still match", changed: "the facts changed", source_gone: "the source page is gone" }[result] ?? "the result was not recorded";
+}
+`),
   // F09 (Nov 19 2026): desk.registry.tsx now also imports isWebAddress, so the
   // stub carries it too -- the same test as the real one in desk-copy.ts.
   "@/lib/news/desk-copy": stubUrl(`
@@ -537,16 +560,22 @@ test("filtered to waiting, the only row accepted: the list empties and the statu
   assert.ok(document.activeElement === status, `focus should be on the status line; it is on ${focusedAs()}`);
 });
 
-test("Detected changes says nothing was applied only when no change in the list has been applied", async (t) => {
+test("Detected changes never claims nothing was applied; each row says what happened to it", async (t) => {
+  // The scan now applies and publishes by itself (Scott's ask, Nov 20), so a
+  // list-wide "nothing here has been applied" would be false as soon as the
+  // scan publishes one entry, and the applied row may be filtered out of the
+  // list anyway. The section's line is the same at all times; the row says
+  // whether it was applied.
   const detectedSub = (page) => page.container.querySelector('[data-sec="Detected changes"] p')?.textContent;
   setup();
   globalThis.__desk.data = desk([change({ id: 5 })]);
   const none = await mount(React.createElement(DeskPage));
   t.after(() => none.close());
-  assert.equal(
-    detectedSub(none),
-    "One row per change the scan proposed. Nothing here has been applied to the directory.",
-  );
+  const noneSub = detectedSub(none);
+  assert.ok(noneSub, "the section has a line under its heading");
+  assert.doesNotMatch(noneSub, /nothing here has been applied/i);
+  assert.match(noneSub, /A change waiting for an editor has not been applied to the directory/);
+  assert.equal(none.container.querySelector('[data-testid="resolved-details"]'), null, "a waiting row says it is waiting, not that it was applied");
 
   setup();
   globalThis.__desk.data = desk([
@@ -561,10 +590,8 @@ test("Detected changes says nothing was applied only when no change in the list 
   ]);
   const applied = await mount(React.createElement(DeskPage));
   t.after(() => applied.close());
-  assert.equal(
-    detectedSub(applied),
-    "One row per change the scan proposed. A change waiting for an editor has not been applied to the directory.",
-  );
+  assert.equal(detectedSub(applied), noneSub, "the line does not change with the list");
+  assert.match(applied.text(), /Applied to the entry on .*2026-11-18/);
 });
 
 /* ---- Verify form and history ---- */
@@ -866,4 +893,124 @@ test("Needs checking says so when every published entry is current", async (t) =
   t.after(() => page.close());
   assert.match(page.text(), /Every published entry has a current verification\./);
   assert.equal(page.container.querySelectorAll("li").length, 0);
+});
+
+test("Needs checking draws only the rows the page asks for and reports the full count", async (t) => {
+  setup();
+  globalThis.__rv.needsChecking = Array.from({ length: 30 }, (_, i) => ({
+    serviceId: i + 1,
+    serviceName: `Service ${i + 1}`,
+    organizationName: "Helping Hands",
+    lastCheckedAt: null,
+    reasons: ["Never verified"],
+  }));
+  let footTotal = null;
+  const page = await mount(
+    React.createElement(RegistryNeedsChecking, {
+      onOpen() {},
+      limit: 25,
+      renderFoot: (total) => {
+        footTotal = total;
+        return null;
+      },
+    }),
+  );
+  t.after(() => page.close());
+  assert.equal(page.container.querySelectorAll("li").length, 25);
+  assert.equal(footTotal, 30);
+});
+
+/* ---- Freshness panel and Source gone list (Scott, Nov 20 2026) ---- */
+
+const freshness = (over = {}) => ({
+  published: 12,
+  recheckedLast30Days: 9,
+  changed: 2,
+  sourceGone: 1,
+  oldestUnchecked: {
+    serviceId: 41,
+    organizationName: "Helping Hands",
+    serviceName: "Food Pantry",
+    robotCheckedAt: null,
+    robotCheckResult: null,
+    createdAt: "2026-01-01T00:00:00Z",
+  },
+  rechecked: [
+    {
+      serviceId: 42,
+      organizationName: "Helping Hands",
+      serviceName: "Rent Help",
+      robotCheckedAt: "2026-11-18T00:00:00Z",
+      robotCheckResult: "same",
+      createdAt: "2026-01-02T00:00:00Z",
+    },
+  ],
+  changedEntries: [
+    {
+      serviceId: 43,
+      organizationName: "Our Center",
+      serviceName: "Hot Lunch",
+      robotCheckedAt: "2026-11-17T00:00:00Z",
+      robotCheckResult: "changed",
+      createdAt: "2026-01-03T00:00:00Z",
+    },
+  ],
+  sourceGoneEntries: [
+    {
+      serviceId: 44,
+      organizationName: "Old Mission",
+      serviceName: "Night Shelter",
+      robotCheckedAt: "2026-11-19T00:00:00Z",
+      robotCheckResult: "source_gone",
+      createdAt: "2026-01-04T00:00:00Z",
+    },
+  ],
+  ...over,
+});
+
+test("the Freshness panel comes first and every number links to its own list", async (t) => {
+  setup();
+  globalThis.__desk.data = { ...desk([]), freshness: freshness() };
+  const page = await mount(React.createElement(DeskPage));
+  t.after(() => page.close());
+
+  const panel = page.container.querySelector("#registry-freshness");
+  assert.ok(panel, "the Freshness panel is on the page");
+  assert.equal(
+    page.container.querySelector(".src-sec"),
+    panel,
+    "the panel is the first section under the page title",
+  );
+  const text = panel.textContent.replace(/\s+/g, " ");
+  assert.match(text, /12 published/);
+  assert.match(text, /9 rechecked in the last 30 days/);
+  assert.match(text, /2 changed/);
+  assert.match(text, /1 source gone/);
+  // Each number is a link to a list that exists on this page.
+  for (const id of [
+    "registry-published",
+    "registry-fresh-rechecked",
+    "registry-fresh-changed",
+    "registry-fresh-gone",
+  ]) {
+    const link = panel.querySelector(`a[href="#${id}"]`);
+    assert.ok(link, `a link to #${id}`);
+    assert.ok(page.container.querySelector(`#${id}`), `the target #${id} exists`);
+  }
+  assert.match(text, /Oldest unchecked entry: Helping Hands — Food Pantry/);
+});
+
+test("Source gone is its own list right after Auto-published", async (t) => {
+  setup();
+  globalThis.__desk.data = { ...desk([]), freshness: freshness() };
+  const page = await mount(React.createElement(DeskPage));
+  t.after(() => page.close());
+
+  const sections = [...page.container.querySelectorAll(".src-sec")];
+  const auto = sections.findIndex((section) => /Auto-published/.test(section.textContent));
+  const gone = sections.findIndex((section) => section.id === "registry-fresh-gone");
+  assert.ok(auto >= 0 && gone === auto + 1, "Source gone follows Auto-published");
+  const text = sections[gone].textContent.replace(/\s+/g, " ");
+  assert.match(text, /Old Mission — Night Shelter/);
+  assert.match(text, /Taken down after the source page was found gone/);
 });

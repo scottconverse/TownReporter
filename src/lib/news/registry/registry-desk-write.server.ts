@@ -4,9 +4,12 @@
  * add one, take a published one back down.
  *
  * Every write runs in one transaction through `withTransaction`, so a failure
- * halfway writes nothing. None of them publishes anything by accident: every
- * row an import or an add writes starts unpublished and unverified (spec 15.1),
- * and only `publishRegistryEntryIn` sets `published`.
+ * halfway writes nothing. Every row an editor's import or add writes starts
+ * unpublished and unverified (spec 15.1). The only code that sets `published`
+ * is the publish path: `publishRegistryEntryIn` for an editor, and
+ * `publishRegistryEntryTx` for a caller that already holds a transaction (the
+ * scan's auto-publish commit, Scott's Nov 20 2026 order). Both run the same
+ * statements.
  *
  * The caller passes the `Sql` so a test can drive these against PGlite and the
  * server function can drive them against the live desk.
@@ -21,7 +24,7 @@ import {
 } from "./hsds-import.server.ts";
 import { REGISTRY_TABLE_NAMES, type RegistryTableName } from "./hsds-map.ts";
 import { parseHsdsJson } from "./hsds-validate.ts";
-import { recordRegistryEvent } from "./registry-audit.server.ts";
+import { recordRegistryEvent, type RegistryAuditAction } from "./registry-audit.server.ts";
 import {
   DESK_DIRECTORY,
   deskSlug,
@@ -165,7 +168,25 @@ export async function publishRegistryEntryIn(
   serviceId: number,
   userId: string,
 ): Promise<PublishRegistryEntryResult> {
-  return withTransaction(async (tx) => {
+  return withTransaction((tx) => publishRegistryEntryTx(tx, newsroomId, serviceId, userId));
+}
+
+/**
+ * The same publish, inside a transaction the caller already holds.
+ *
+ * The scan's commit owns one transaction for the whole run, so it cannot call
+ * `publishRegistryEntryIn` (which opens its own). This is the shared code path:
+ * both functions run exactly the statements below, so an auto-published entry
+ * and an editor-published one cannot drift apart.
+ */
+export async function publishRegistryEntryTx(
+  tx: Sql,
+  newsroomId: number,
+  serviceId: number,
+  userId: string,
+  audit?: { action: RegistryAuditAction; detail: string },
+): Promise<PublishRegistryEntryResult> {
+  {
     const found = await tx.query<{ id: number; organization_id: number; name: string }>(
       `select id, organization_id, name from services
         where id = $1 and newsroom_id = $2`,
@@ -268,14 +289,14 @@ export async function publishRegistryEntryIn(
     await recordRegistryEvent(tx, {
       newsroomId,
       userId,
-      action: "registry.service.publish",
+      action: audit?.action ?? "registry.service.publish",
       subjectKind: "registry-service",
       subjectId: id,
-      detail: `Published "${found[0].name}".`,
+      detail: audit?.detail ?? `Published "${found[0].name}".`,
     });
 
     return { serviceId: id };
-  });
+  }
 }
 
 /**

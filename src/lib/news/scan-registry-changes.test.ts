@@ -17,11 +17,10 @@ import { DUP_CHECK_SYSTEM, SAME_STORY_SYSTEM } from "./dup-check.ts";
   registry change that cites a page this run never fetched. After the run:
 
   - the lead is filed exactly as before;
-  - the matched change is a pending `resource_changes` row bound to this run,
-    the source, and this fetch's capture;
+  - the matched change is auto-published: it is applied to the entry, bound to
+    this run, the source, and this fetch's capture, and the service is live;
   - the change that cites an unfetched page is rejected, and the run's own
-    summary says so;
-  - the service row is untouched and still unpublished (guardrail 2).
+    summary says so.
 */
 
 await applyMigrationsToTestPglite();
@@ -54,7 +53,7 @@ const USER = "registry-scan-owner";
 const SOURCE_URL = "https://registry-scan.test/resources";
 const UNFETCHED_URL = "https://registry-scan.test/never-read";
 
-it("a changed registry source proposes changes without writing the registry, and still files its leads", async () => {
+it("a changed registry source auto-publishes its change and still files its leads", async () => {
   const sql = await getSql();
   await sql`insert into newsrooms(id,name) values(${ROOM},'Registry scan fixture')`;
   await sql`insert into newsroom_members(user_id,newsroom_id,role) values(${USER},${ROOM},'owner')`;
@@ -171,7 +170,7 @@ it("a changed registry source proposes changes without writing the registry, and
 
   assert.equal(changes.length, 1, "the uncaptured change was rejected, not stored");
   const stored = changes[0]!;
-  assert.equal(stored.review_state, "pending");
+  assert.equal(stored.review_state, "accepted");
   assert.equal(stored.evidence_tier, "B");
   assert.equal(stored.entity_type, "service");
   assert.equal(Number(stored.entity_id), Number(service!.id));
@@ -184,13 +183,19 @@ it("a changed registry source proposes changes without writing the registry, and
     select id from snapshots where source_id = ${source!.id} order by id desc limit 1`;
   assert.equal(Number(stored.evidence_capture_id), Number(snapshot!.id));
 
-  // Guardrail 2: the registry itself was not written.
+  // Scott's Nov 20 2026 order: the entry is applied and published by the scan.
   const [savedService] = await sql<{ name: string; published: boolean }>`
     select name, published from services where id = ${service!.id}`;
-  assert.deepEqual(savedService, { name: "Weekly grocery pickup", published: false });
+  assert.deepEqual(savedService, { name: "Weekly grocery pickup", published: true });
+  const [contact] = await sql<{ phone: string }>`
+    select phone from contacts where newsroom_id = ${ROOM} and service_id = ${service!.id}`;
+  assert.equal(contact!.phone, "555-0199");
+  const [audit] = await sql<{ action: string }>`
+    select action from audit_events where newsroom_id = ${ROOM} and action = 'registry.service.autopublish'`;
+  assert.ok(audit, "the auto-publish is in the audit log");
 
   const [savedRun] = await sql<{ summary: string }>`
     select summary from scan_runs where id = ${run!.id}`;
-  assert.match(String(savedRun!.summary), /1 registry change proposal filed for review/);
+  assert.match(String(savedRun!.summary), /1 registry change auto-published/);
   assert.match(String(savedRun!.summary), /rejected for lack of a retained capture/);
 });

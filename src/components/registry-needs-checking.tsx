@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { listRegistryNeedsChecking } from "@/lib/news/registry/registry-verify";
@@ -14,7 +15,17 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
  */
 const NEEDS_CHECKING_KEY = ["registry-needs-checking"];
 
-export function RegistryNeedsChecking({ onOpen }: { onOpen: (serviceId: number) => void }) {
+export function RegistryNeedsChecking({
+  onOpen,
+  limit,
+  renderFoot,
+}: {
+  onOpen: (serviceId: number) => void;
+  /** How many rows to draw; a loaded directory can put 151 entries here. */
+  limit?: number;
+  /** The page's own "show more" row, given the full count. */
+  renderFoot?: (total: number) => ReactNode;
+}) {
   const { formatShortDate } = usePaperDateFormatters();
   const query = useQuery({
     queryKey: NEEDS_CHECKING_KEY,
@@ -37,32 +48,38 @@ export function RegistryNeedsChecking({ onOpen }: { onOpen: (serviceId: number) 
   if (query.data.length === 0) {
     return <p className="text-base">Every published entry has a current verification.</p>;
   }
+  const rows = limit === undefined ? query.data : query.data.slice(0, limit);
   return (
-    <ul className="astra-plain" data-testid="needs-checking-list">
-      {query.data.map((item) => (
-        <li key={item.serviceId}>
-          <div className="astra-row-t">
-            {item.organizationName} — {item.serviceName}
-          </div>
-          {item.reasons.map((reason) => (
-            <p className="text-base" key={reason}>
-              {reason}
-            </p>
-          ))}
-          {item.lastCheckedAt ? (
-            <p className="text-base">Last checked {endSentence(formatShortDate(item.lastCheckedAt))}</p>
-          ) : null}
-          <div className="mt-2">
-            <InkButton
-              tone="ghost"
-              ariaLabel={`Open in the editor: ${item.serviceName}`}
-              onClick={() => onOpen(item.serviceId)}
-            >
-              Open in the editor
-            </InkButton>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="astra-plain" data-testid="needs-checking-list">
+        {rows.map((item) => (
+          <li key={item.serviceId}>
+            <div className="astra-row-t">
+              {item.organizationName} — {item.serviceName}
+            </div>
+            {item.reasons.map((reason) => (
+              <p className="text-base" key={reason}>
+                {reason}
+              </p>
+            ))}
+            {item.lastCheckedAt ? (
+              <p className="text-base">
+                Last checked {endSentence(formatShortDate(item.lastCheckedAt))}
+              </p>
+            ) : null}
+            <div className="mt-2">
+              <InkButton
+                tone="ghost"
+                ariaLabel={`Open in the editor: ${item.serviceName}`}
+                onClick={() => onOpen(item.serviceId)}
+              >
+                Open in the editor
+              </InkButton>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {renderFoot?.(query.data.length)}
+    </>
   );
 }

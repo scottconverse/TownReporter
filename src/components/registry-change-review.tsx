@@ -6,6 +6,10 @@ import {
   rejectRegistryChange,
 } from "@/lib/news/registry/registry-review";
 import { endSentence } from "@/lib/news/registry/registry-sentence";
+import {
+  NO_FACTS_TEXT,
+  proposalHasFacts,
+} from "@/lib/news/registry/registry-proposal-facts";
 import type { listRegistryDesk } from "@/lib/news/registry/registry-desk";
 
 /**
@@ -69,16 +73,43 @@ function WaitingControls({
   change,
   busy,
   onAct,
+  onEdit,
 }: {
   change: DeskChange;
   busy: boolean;
   onAct: (change: DeskChange, action: "apply" | "accept" | "reject", note: string) => void;
+  onEdit?: (change: DeskChange) => void;
 }) {
   const [note, setNote] = useState("");
-  const stale = isStale(change);
-  const noTarget = !change.targetLive;
+  /*
+    A proposal stored before the scan stopped storing empty ones (Scott, Nov 20
+    2026): there is nothing to accept and nothing to check. It says so and
+    offers the one action that helps -- Reject.
+  */
+  const noFacts = !proposalHasFacts(change);
+  const stale = !noFacts && isStale(change);
+  const noTarget = !noFacts && !change.targetLive;
   const noteId = `review-note-${change.id}`;
   const label = (change.entityName ?? change.fieldName).slice(0, 80);
+  if (noFacts) {
+    return (
+      <div className="mt-2 grid gap-2" data-testid="review-controls">
+        <p className="text-base font-semibold text-ink" data-testid="no-facts-notice">
+          {NO_FACTS_TEXT}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <InkButton
+            tone="ghost"
+            ariaLabel={`Reject: ${label}`}
+            disabled={busy}
+            onClick={() => onAct(change, "reject", "")}
+          >
+            Reject
+          </InkButton>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-2 grid gap-2" data-testid="review-controls">
       {stale ? (
@@ -132,6 +163,16 @@ function WaitingControls({
         >
           Reject
         </InkButton>
+        {onEdit ? (
+          <InkButton
+            tone="ghost"
+            ariaLabel={`Edit: ${label}`}
+            disabled={busy}
+            onClick={() => onEdit(change)}
+          >
+            Edit
+          </InkButton>
+        ) : null}
       </div>
     </div>
   );
@@ -148,11 +189,14 @@ export function RegistryChangeReviewList({
   emptyText,
   formatTime,
   renderSummary,
+  onEdit,
 }: {
   changes: readonly DeskChange[];
   emptyText: ReactNode;
   formatTime: (when: string | Date | null | undefined) => string;
   renderSummary: (change: DeskChange) => ReactNode;
+  /** Opens the entry a proposal belongs to. Absent: no Edit button. */
+  onEdit?: (change: DeskChange) => void;
 }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState<Status | null>(null);
@@ -226,7 +270,7 @@ export function RegistryChangeReviewList({
             <li key={change.id}>
               {renderSummary(change)}
               {WAITING.has(change.reviewState) ? (
-                <WaitingControls change={change} busy={busy} onAct={act} />
+                <WaitingControls change={change} busy={busy} onAct={act} onEdit={onEdit} />
               ) : (
                 <ResolvedDetails change={change} formatTime={formatTime} />
               )}

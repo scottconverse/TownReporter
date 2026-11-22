@@ -13,6 +13,7 @@ import {
 await applyMigrationsToTestPglite();
 
 const SOURCE_URL = "https://registry.test/resources";
+const USER = "registry-scan";
 
 function change(overrides: Partial<ParsedResourceChange> = {}): ParsedResourceChange {
   return {
@@ -88,17 +89,103 @@ test("a change whose page has no retained capture is rejected, not stored (guard
   const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
+    userId: USER,
     changes: [change({ source_url: "https://never-fetched.test/page" })],
     ...maps(seeded.sourceId, seeded.snapshotId, "B"),
   });
 
-  assert.deepEqual(counts, { stored: 0, rejected: 1, needsEditor: 0 });
+  assert.deepEqual(counts, { stored: 0, rejected: 1, published: 0, created: 0, crisis: 0 });
   const rows = await sql.query("select id from resource_changes where newsroom_id = $1", [newsroomId]);
   assert.equal(rows.length, 0);
   assert.match(registryChangeSentence(counts), /rejected for lack of a retained capture/);
 });
 
-test("a stored change binds the capture, the run and the source, and writes no registry field (guardrails 2 and 5)", async () => {
+/*
+  Scott, Nov 20 2026: "I looked at one of the needs approval, and it didn't have
+  any data. It had the name of the site, no website URL, nothing." This is that
+  empty proposal: a change that names an entity and states no value at all. It
+  used to be stored (and, for a new place, used to create a row with a name and
+  nothing else); now it is dropped before anything is written.
+*/
+test("a change that names an entry but states no fact is dropped, not stored", async () => {
+  const sql = await getSql();
+  const newsroomId = 9320;
+  const seeded = await seedNewsroom(newsroomId);
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
+    changes: [
+      change({
+        entity_type: "location",
+        entity_name: "Brand New Hall",
+        field_name: "name",
+        before_value: null,
+        after_value: null,
+        change_kind: "field_change",
+        summary: "",
+        quote: "",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+
+  assert.deepEqual(counts, { stored: 0, rejected: 1, published: 0, created: 0, crisis: 0 });
+  const stored = await sql.query("select id from resource_changes where newsroom_id = $1", [
+    newsroomId,
+  ]);
+  assert.equal(stored.length, 0, "no empty proposal is stored");
+  const places = await sql.query("select id from locations where newsroom_id = $1", [newsroomId]);
+  assert.equal(places.length, 0, "no entry is created from a name alone");
+});
+
+test("a proposal stores the full fact, the source and the page's own sentence", async () => {
+  const sql = await getSql();
+  const newsroomId = 9321;
+  const seeded = await seedNewsroom(newsroomId);
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
+    changes: [
+      change({
+        entity_type: "schedule",
+        entity_name: "Weekly grocery pickup",
+        field_name: "days",
+        before_value: null,
+        after_value: "Monday to Friday, 9 to 5",
+        change_kind: "hours_change",
+        summary: "The pantry is open five days a week.",
+        quote: "The pantry is open Monday to Friday, 9 to 5.",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+  assert.equal(counts.stored, 1);
+
+  const [row] = await sql.query<{
+    review_state: string;
+    field_name: string;
+    after_value: string;
+    evidence_quote: string;
+    source_id: number;
+    evidence_capture_id: number;
+  }>(
+    `select review_state, field_name, after_value, evidence_quote, source_id, evidence_capture_id
+       from resource_changes where newsroom_id = $1`,
+    [newsroomId],
+  );
+  assert.equal(row!.review_state, "pending");
+  assert.equal(row!.field_name, "days");
+  assert.equal(row!.after_value, "Monday to Friday, 9 to 5");
+  assert.equal(row!.evidence_quote, "The pantry is open Monday to Friday, 9 to 5.");
+  assert.equal(Number(row!.source_id), seeded.sourceId, "the source page travels with the proposal");
+  assert.equal(Number(row!.evidence_capture_id), seeded.snapshotId);
+});
+
+test("a change on an existing service is applied and the entry is auto-published", async () => {
   const sql = await getSql();
   const newsroomId = 9302;
   const seeded = await seedNewsroom(newsroomId, "C");
@@ -106,10 +193,11 @@ test("a stored change binds the capture, the run and the source, and writes no r
   const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
+    userId: USER,
     changes: [change({ entity_hsds_id: "svc-scan", entity_name: "Weekly grocery pickup" })],
     ...maps(seeded.sourceId, seeded.snapshotId, "C"),
   });
-  assert.deepEqual(counts, { stored: 1, rejected: 0, needsEditor: 0 });
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 0, crisis: 0 });
 
   const [row] = await sql.query<{
     review_state: string;
@@ -119,31 +207,45 @@ test("a stored change binds the capture, the run and the source, and writes no r
     scan_run_id: number;
     source_id: number;
     evidence_capture_id: number;
-    lead_id: number | null;
+    applied_at: unknown;
+    review_note: string | null;
   }>(
     `select review_state, evidence_tier, entity_type, entity_id, scan_run_id, source_id,
-            evidence_capture_id, lead_id
+            evidence_capture_id, applied_at, review_note
        from resource_changes where newsroom_id = $1`,
     [newsroomId],
   );
-  assert.equal(row!.review_state, "pending");
+  assert.equal(row!.review_state, "accepted");
   assert.equal(row!.evidence_tier, "C");
   assert.equal(row!.entity_type, "service");
   assert.equal(Number(row!.entity_id), seeded.serviceId);
   assert.equal(Number(row!.scan_run_id), seeded.runId);
   assert.equal(Number(row!.source_id), seeded.sourceId);
   assert.equal(Number(row!.evidence_capture_id), seeded.snapshotId);
-  assert.equal(row!.lead_id, null, "filing leads from changes is Phase 2");
+  assert.ok(row!.applied_at, "the change was applied, not just recorded");
+  assert.match(String(row!.review_note), /Auto-published by the scan/);
 
-  // Guardrail 2/5: nothing in the registry changed.
+  // The phone lives on a contact row; the service itself is now published.
   const [service] = await sql.query<{ name: string; published: boolean }>(
     "select name, published from services where id = $1",
     [seeded.serviceId],
   );
-  assert.deepEqual(service, { name: "Weekly grocery pickup", published: false });
+  assert.deepEqual(service, { name: "Weekly grocery pickup", published: true });
+  const [contact] = await sql.query<{ phone: string }>(
+    "select phone from contacts where newsroom_id = $1 and service_id = $2",
+    [newsroomId, seeded.serviceId],
+  );
+  assert.equal(contact!.phone, "555-0199");
+
+  const [audit] = await sql.query<{ action: string; detail: string }>(
+    "select action, detail from audit_events where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(audit!.action, "registry.service.autopublish");
+  assert.match(audit!.detail, /registry\.test\/resources/);
 });
 
-test("a change matching no entity is a new-entity proposal and creates nothing (guardrail 3)", async () => {
+test("a change naming no existing organization creates it and publishes it (part 3)", async () => {
   const sql = await getSql();
   const newsroomId = 9303;
   const seeded = await seedNewsroom(newsroomId);
@@ -151,30 +253,81 @@ test("a change matching no entity is a new-entity proposal and creates nothing (
   const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
+    userId: USER,
     changes: [
-      change({ entity_type: "organization", entity_name: "Brand New Mutual Aid", entity_hsds_id: "" }),
+      change({
+        entity_type: "organization",
+        entity_name: "Brand New Mutual Aid",
+        entity_hsds_id: "",
+        field_name: "name",
+        after_value: "Brand New Mutual Aid",
+        change_kind: "field_change",
+      }),
     ],
     ...maps(seeded.sourceId, seeded.snapshotId, "B"),
   });
-  assert.equal(counts.stored, 1);
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 1, crisis: 0 });
 
   const [row] = await sql.query<{ entity_id: number | null; review_state: string }>(
     "select entity_id, review_state from resource_changes where newsroom_id = $1",
     [newsroomId],
   );
-  assert.equal(row!.entity_id, null);
-  assert.equal(row!.review_state, "pending");
+  assert.notEqual(row!.entity_id, null, "the new entity is created, not left unresolved");
+  assert.equal(row!.review_state, "accepted");
 
-  const [orgCount] = await sql.query<{ count: string }>(
-    "select count(*)::text as count from organizations where newsroom_id = $1",
+  const [named] = await sql.query<{ id: number; published: boolean }>(
+    "select id, published from organizations where newsroom_id = $1 and name = 'Brand New Mutual Aid'",
     [newsroomId],
   );
-  assert.equal(Number(orgCount!.count), 1, "only the fixture organization exists");
-  const [named] = await sql.query<{ count: string }>(
-    "select count(*)::text as count from organizations where newsroom_id = $1 and name = 'Brand New Mutual Aid'",
+  assert.equal(Number(named!.id), Number(row!.entity_id));
+  assert.equal(named!.published, true);
+
+  const [audit] = await sql.query<{ action: string }>(
+    "select action from audit_events where newsroom_id = $1",
     [newsroomId],
   );
-  assert.equal(Number(named!.count), 0);
+  assert.equal(audit!.action, "registry.change.autopublish");
+});
+
+test("a new service change creates its organization and service, and publishes the entry", async () => {
+  const sql = await getSql();
+  const newsroomId = 9310;
+  const seeded = await seedNewsroom(newsroomId);
+
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
+    changes: [
+      change({
+        entity_type: "service",
+        entity_name: "Free Community Supper",
+        entity_hsds_id: "",
+        field_name: "description",
+        after_value: "A free supper every Wednesday.",
+        change_kind: "field_change",
+      }),
+    ],
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
+  });
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 1, crisis: 0 });
+
+  const [service] = await sql.query<{
+    id: number;
+    published: boolean;
+    description: string;
+  }>(
+    "select id, published, description from services where newsroom_id = $1 and name = 'Free Community Supper'",
+    [newsroomId],
+  );
+  assert.equal(service!.published, true);
+  assert.equal(service!.description, "A free supper every Wednesday.");
+
+  const [org] = await sql.query<{ count: string }>(
+    "select count(*)::text as count from organizations where newsroom_id = $1 and name = 'Free Community Supper' and published = true",
+    [newsroomId],
+  );
+  assert.equal(Number(org!.count), 1);
 });
 
 async function addSchedule(newsroomId: number, serviceId: number, hsdsId: string) {
@@ -186,16 +339,17 @@ async function addSchedule(newsroomId: number, serviceId: number, hsdsId: string
   );
 }
 
-test("a schedule change on a crisis service goes to the editor, and the same change on a normal service does not", async () => {
+test("a crisis service change is still auto-published, and its audit row is marked crisis", async () => {
   const sql = await getSql();
+  const newsroomId = 9305;
+  const seeded = await seedNewsroom(newsroomId);
+  await sql.query("update services set crisis = true where id = $1", [seeded.serviceId]);
+  await addSchedule(newsroomId, seeded.serviceId, "sch-crisis");
 
-  const crisisRoom = 9305;
-  const crisis = await seedNewsroom(crisisRoom);
-  await sql.query("update services set crisis = true where id = $1", [crisis.serviceId]);
-  await addSchedule(crisisRoom, crisis.serviceId, "sch-crisis");
-  const crisisCounts = await commitScanResourceChanges(sql, {
-    newsroomId: crisisRoom,
-    scanRunId: crisis.runId,
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
+    scanRunId: seeded.runId,
+    userId: USER,
     changes: [
       change({
         entity_type: "schedule",
@@ -206,21 +360,39 @@ test("a schedule change on a crisis service goes to the editor, and the same cha
         change_kind: "hours_change",
       }),
     ],
-    ...maps(crisis.sourceId, crisis.snapshotId, "B"),
+    ...maps(seeded.sourceId, seeded.snapshotId, "B"),
   });
-  assert.deepEqual(crisisCounts, { stored: 1, rejected: 0, needsEditor: 1 });
-  const [crisisRow] = await sql.query<{ review_state: string }>(
-    "select review_state from resource_changes where newsroom_id = $1",
-    [crisisRoom],
-  );
-  assert.equal(crisisRow!.review_state, "needs-editor");
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 0, crisis: 1 });
 
-  const normalRoom = 9306;
-  const normal = await seedNewsroom(normalRoom);
-  await addSchedule(normalRoom, normal.serviceId, "sch-normal");
-  const normalCounts = await commitScanResourceChanges(sql, {
-    newsroomId: normalRoom,
+  const [row] = await sql.query<{ review_state: string }>(
+    "select review_state from resource_changes where newsroom_id = $1",
+    [newsroomId],
+  );
+  assert.equal(row!.review_state, "accepted");
+
+  const [schedule] = await sql.query<{ opens_at: string }>(
+    "select opens_at from schedules where newsroom_id = $1 and hsds_id = 'sch-crisis'",
+    [newsroomId],
+  );
+  assert.equal(schedule!.opens_at, "10:00");
+
+  const [audit] = await sql.query<{ detail: string }>(
+    "select detail from audit_events where newsroom_id = $1 and action = 'registry.service.autopublish'",
+    [newsroomId],
+  );
+  assert.match(audit!.detail, /^\[Crisis\]/);
+  assert.match(registryChangeSentence(counts), /crisis service change/);
+});
+
+test("a normal schedule change is auto-published without a crisis mark", async () => {
+  const sql = await getSql();
+  const newsroomId = 9306;
+  const normal = await seedNewsroom(newsroomId);
+  await addSchedule(newsroomId, normal.serviceId, "sch-normal");
+  const counts = await commitScanResourceChanges(sql, {
+    newsroomId,
     scanRunId: normal.runId,
+    userId: USER,
     changes: [
       change({
         entity_type: "schedule",
@@ -233,12 +405,12 @@ test("a schedule change on a crisis service goes to the editor, and the same cha
     ],
     ...maps(normal.sourceId, normal.snapshotId, "B"),
   });
-  assert.deepEqual(normalCounts, { stored: 1, rejected: 0, needsEditor: 0 });
-  const [normalRow] = await sql.query<{ review_state: string }>(
-    "select review_state from resource_changes where newsroom_id = $1",
-    [normalRoom],
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 0, crisis: 0 });
+  const [audit] = await sql.query<{ detail: string }>(
+    "select detail from audit_events where newsroom_id = $1",
+    [newsroomId],
   );
-  assert.equal(normalRow!.review_state, "pending");
+  assert.doesNotMatch(audit!.detail, /^\[Crisis\]/);
 });
 
 test("a schedule reached only through service_at_locations still finds its crisis service", async () => {
@@ -265,6 +437,7 @@ test("a schedule reached only through service_at_locations still finds its crisi
   const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
+    userId: USER,
     changes: [
       change({
         entity_type: "schedule",
@@ -277,31 +450,7 @@ test("a schedule reached only through service_at_locations still finds its crisi
     ],
     ...maps(seeded.sourceId, seeded.snapshotId, "A"),
   });
-  assert.deepEqual(counts, { stored: 1, rejected: 0, needsEditor: 1 });
-});
-
-test("a crisis-flagged service's change always goes to the editor (guardrail 4)", async () => {
-  const sql = await getSql();
-  const newsroomId = 9304;
-  const seeded = await seedNewsroom(newsroomId);
-  await sql.query("update services set crisis = true where id = $1", [seeded.serviceId]);
-
-  const counts = await commitScanResourceChanges(sql, {
-    newsroomId,
-    scanRunId: seeded.runId,
-    changes: [
-      change({ entity_hsds_id: "svc-scan", model_confidence: 0.99, change_kind: "hours_change" }),
-    ],
-    ...maps(seeded.sourceId, seeded.snapshotId, "A"),
-  });
-
-  assert.deepEqual(counts, { stored: 1, rejected: 0, needsEditor: 1 });
-  const [row] = await sql.query<{ review_state: string; evidence_tier: string }>(
-    "select review_state, evidence_tier from resource_changes where newsroom_id = $1",
-    [newsroomId],
-  );
-  assert.equal(row!.review_state, "needs-editor");
-  assert.equal(row!.evidence_tier, "A");
+  assert.deepEqual(counts, { stored: 1, rejected: 0, published: 1, created: 0, crisis: 1 });
 });
 
 test("an HSDS id repeated across directories binds within the change's own directory", async () => {
@@ -327,6 +476,7 @@ test("an HSDS id repeated across directories binds within the change's own direc
   const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
+    userId: USER,
     changes: [change({ entity_hsds_id: "shared-1", entity_name: "" })],
     ...maps(seeded.sourceId, seeded.snapshotId, "B"),
   });
@@ -339,7 +489,7 @@ test("an HSDS id repeated across directories binds within the change's own direc
   assert.equal(Number(row!.entity_id), Number(serviceA!.id));
 });
 
-test("an ambiguous name match is left unresolved instead of picking a row", async () => {
+test("an ambiguous name match is left unresolved instead of picking or duplicating a row", async () => {
   const sql = await getSql();
   const newsroomId = 9309;
   const seeded = await seedNewsroom(newsroomId);
@@ -356,16 +506,19 @@ test("an ambiguous name match is left unresolved instead of picking a row", asyn
     );
   }
 
-  await commitScanResourceChanges(sql, {
+  const counts = await commitScanResourceChanges(sql, {
     newsroomId,
     scanRunId: seeded.runId,
-    changes: [change({ entity_hsds_id: "", entity_name: "Ambiguous Pantry" })],
+    userId: USER,
+    changes: [change({ entity_type: "service", entity_hsds_id: "", entity_name: "Ambiguous Pantry" })],
     ...maps(seeded.sourceId, seeded.snapshotId, "B"),
   });
+  assert.equal(counts.created, 0, "no duplicate is created for an ambiguous name");
 
-  const [row] = await sql.query<{ entity_id: number | null }>(
-    "select entity_id from resource_changes where newsroom_id = $1",
+  const [row] = await sql.query<{ entity_id: number | null; review_state: string }>(
+    "select entity_id, review_state from resource_changes where newsroom_id = $1",
     [newsroomId],
   );
   assert.equal(row!.entity_id, null);
+  assert.equal(row!.review_state, "pending");
 });

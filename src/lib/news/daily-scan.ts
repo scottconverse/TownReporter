@@ -697,11 +697,19 @@ export type DailyRotationPlan = {
   /** The accepted pool the rotation chose from. */
   poolSize: number;
   /**
-   * The budget the plan spent, `<= cap`. The INVARIANT, checked by the tests:
-   * `sourceIds.length <= budget` always. A selected source can no longer push
-   * the read set past the cap.
+   * The rotating budget, `<= cap`. The rotating part of the read set never
+   * grows past it. Registry sources are added on top (see `registryCount`), so
+   * a large registry makes a pass read more than this number; the registry
+   * total cap (`MAX_REGISTRY_SOURCES_TOTAL`) bounds that growth.
    */
   budget: number;
+  /**
+   * Registry sources pinned into this pass even beyond the budget. Scott's
+   * Nov 20 2026 order: every registry source is in the scheduled scan, and
+   * re-read at least weekly. They are ineligible (parked/blocked) like any
+   * other source, so a site asking us to wait is still honoured.
+   */
+  registryCount: number;
   /** Whole days a full rotation takes at this budget, floor 1. */
   fullPassDays: number;
   /** Age in days of the stalest source this pass did not read, or null. */
@@ -736,6 +744,12 @@ export type DailyRotationInput = {
   preferences?: readonly SourcePreference[];
   /** The policy's cap. Clamped to the schema's 1..12 in `clean*`; read here. */
   cap: number;
+  /**
+   * Sources carrying a registry role. Every eligible one is added to the read
+   * set, even beyond `cap`, so the registry keeps its weekly re-read (Scott,
+   * Nov 20 2026). Parked/blocked ones are still deferred.
+   */
+  registrySourceIds?: readonly number[];
   nowMs?: number;
 };
 
@@ -815,6 +829,22 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
     .filter((id) => !taken.has(id) && !ineligible.has(id))
     .slice(0, remaining);
   const sourceIds = [...selected, ...fill];
+  /*
+    Registry sources ride on top of the rotating budget. They are the pages the
+    registry is built from, and Scott's order is that they are read regularly;
+    a registry page left to the general rotation could wait weeks behind a
+    newsroom's news sources. An ineligible registry source is not forced -- the
+    site's wait or block is honoured -- and a duplicate of an already-chosen id
+    adds nothing.
+  */
+  const alreadyChosen = new Set(sourceIds);
+  const registryPinned: number[] = [];
+  for (const id of input.registrySourceIds ?? []) {
+    if (alreadyChosen.has(id) || ineligible.has(id) || !byId.has(id)) continue;
+    alreadyChosen.add(id);
+    registryPinned.push(id);
+  }
+  sourceIds.push(...registryPinned);
 
   // A source-by-source deferral map for the ACTUAL chosen set: everything the run
   // did not read, with its reason. Parked/blocked come first (they are facts), and
@@ -854,6 +884,7 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
     rotatedCount: fill.length,
     poolSize: input.facts.length,
     budget,
+    registryCount: registryPinned.length,
     fullPassDays: freshness.fullPassDays,
     stalestDeferredDays: freshness.stalestDeferredDays,
     deferredIds: deferrals.map((d) => d.sourceId),
