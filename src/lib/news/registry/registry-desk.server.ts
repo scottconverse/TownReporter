@@ -788,9 +788,9 @@ export async function starterListIsLoaded(sql: Sql, newsroomId: number): Promise
 
 /** One entry the scan published by itself (Scott, Nov 20 2026, part 6). */
 export interface DeskAutoPublishedEntry extends DeskEntryFacts {
-  /** The audit row's id; the stable key for the list. */
+  /** The newest audit row's id; the stable key for the list. */
   auditId: number;
-  /** A crisis service is listed first, as its audit row is marked `[Crisis]`. */
+  /** A crisis entry is listed first when any of its audit rows is a `[Crisis]` row. */
   crisis: boolean;
   publishedAt: WhenValue;
 }
@@ -804,24 +804,38 @@ export interface DeskAutoPublishedEntry extends DeskEntryFacts {
  * down. The join to `services` names the entry and shows whether it is still
  * published, which is what the Unpublish button acts on. A row whose service
  * was deleted is left out rather than shown as a dead button.
+ *
+ * One card per service (Nov 22 2026). A rechecked entry writes a second
+ * autopublish row, and listing audit rows drew it twice and counted it twice.
+ * The rows are folded per service: the card takes the newest publish time and
+ * the newest audit id, and the entry is a crisis entry when any of its rows is
+ * a crisis row. The 100 limit is entries, not audit rows.
  */
 export async function listAutoPublishedRegistryEntries(
   sql: Sql,
   newsroomId: number,
 ): Promise<DeskAutoPublishedEntry[]> {
   const rows = await sql.query<EntryRow & { audit_id: number; crisis: boolean; published_at: WhenValue }>(
-    `select ae.id as audit_id,
-            (ae.detail like '[Crisis]%') as crisis,
-            ae.created_at as published_at,
+    `select latest.audit_id, latest.crisis, latest.published_at,
             ${ENTRY_COLUMNS}
-       from audit_events ae
+       from (
+              select distinct on (ae.subject_id)
+                     ae.subject_id,
+                     ae.id as audit_id,
+                     bool_or(ae.detail like '[Crisis]%')
+                       over (partition by ae.subject_id) as crisis,
+                     max(ae.created_at)
+                       over (partition by ae.subject_id) as published_at
+                from audit_events ae
+               where ae.newsroom_id = $1
+                 and ae.action = 'registry.service.autopublish'
+                 and ae.subject_kind = 'registry-service'
+               order by ae.subject_id, ae.created_at desc, ae.id desc
+            ) latest
        join services s
-         on s.id = ae.subject_id and s.newsroom_id = ae.newsroom_id
+         on s.id = latest.subject_id and s.newsroom_id = $1
        ${ENTRY_JOINS}
-      where ae.newsroom_id = $1
-        and ae.action = 'registry.service.autopublish'
-        and ae.subject_kind = 'registry-service'
-      order by crisis desc, ae.created_at desc, ae.id desc
+      order by latest.crisis desc, latest.published_at desc, latest.audit_id desc
       limit 100`,
     [newsroomId],
   );

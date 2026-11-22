@@ -16,6 +16,7 @@ import {
   registryServicePath,
 } from "@/lib/news/registry/registry-correction";
 import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
+import { registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 
 /**
  * The public Registry (spec 15.1, 18.2 and 24, Phase 1).
@@ -247,7 +248,7 @@ function RegistryPage() {
               {total > PAGE_SIZE ? `. Page ${pageNumber}` : ""}
             </p>
             {entries.map((entry) => {
-              const heading = `${entry.organizationName} — ${entry.serviceName}`;
+              const heading = registryEntryHeading(entry.organizationName, entry.serviceName);
               return (
                 <article className="correction-entry" key={entry.serviceId}>
                   <h3>

@@ -14,6 +14,7 @@ import {
   registryServicePath,
 } from "@/lib/news/registry/registry-correction";
 import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
+import { registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 
 /**
  * One community resource at its own address, `/registry/<service id>`
@@ -53,7 +54,9 @@ export const Route = createFileRoute("/registry_/$id")({
       .trim();
     return {
       meta: [
-        { title: `${entry.organizationName} — ${entry.serviceName} — ${paper}` },
+        {
+          title: `${registryEntryHeading(entry.organizationName, entry.serviceName)} — ${paper}`,
+        },
         {
           name: "description",
           content: description.length > 160 ? `${description.slice(0, 157)}...` : description,
@@ -146,7 +149,7 @@ function RegistryServicePage() {
     serviceName: entry.serviceName,
     url: `${origin}${registryServicePath(entry.serviceId)}`,
   });
-  const heading = `${entry.organizationName} — ${entry.serviceName}`;
+  const heading = registryEntryHeading(entry.organizationName, entry.serviceName);
   const status = entry.status.trim();
   const hasServiceWide =
     entry.servicePhones.length > 0 ||

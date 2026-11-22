@@ -34,8 +34,14 @@ test("the desk lists auto-published entries newest first, crisis first, with the
   const sql = await getSql();
   const newsroomId = 9801;
   const seeded = await seed(newsroomId);
+  const [foodService] = await sql.query<{ id: number }>(
+    `insert into services (newsroom_id, hsds_id, organization_id, name, published, source_id)
+     select $1, 'svc-food', organization_id, 'Food bank', true, source_id
+       from services where id = $2 and newsroom_id = $1 returning id`,
+    [newsroomId, seeded.serviceId],
+  );
 
-  // An older normal publish and a newer crisis publish.
+  // An older normal publish on one entry and a newer crisis publish on another.
   await sql.query(
     `insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id, created_at)
      values ('scan-owner', 'registry.service.autopublish', 'Auto-published from https://www.ourcenter.org/',
@@ -46,17 +52,54 @@ test("the desk lists auto-published entries newest first, crisis first, with the
     `insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id, created_at)
      values ('scan-owner', 'registry.service.autopublish', '[Crisis] Auto-published from https://www.ourcenter.org/',
              $1, 'registry-service', $2, now())`,
-    [newsroomId, seeded.serviceId],
+    [newsroomId, foodService!.id],
   );
 
   const rows = await listAutoPublishedRegistryEntries(sql, newsroomId);
   assert.equal(rows.length, 2);
-  assert.equal(rows[0]!.crisis, true, "the crisis row is listed first");
-  assert.equal(rows[0]!.serviceId, seeded.serviceId);
+  assert.equal(rows[0]!.crisis, true, "the crisis entry is listed first");
+  assert.equal(rows[0]!.serviceId, Number(foodService!.id));
   assert.equal(rows[0]!.organizationName, "OUR Center");
-  assert.equal(rows[0]!.serviceName, "Help with basic needs");
+  assert.equal(rows[0]!.serviceName, "Food bank");
   assert.equal(rows[0]!.sourceUrl, "https://www.ourcenter.org/referral-program/");
   assert.equal(rows[0]!.published, true);
+});
+
+/*
+  Scott, Nov 22 2026: a rechecked entry has two autopublish rows, so it drew two
+  cards and the count was too high. One service is one card, whatever its rows:
+  the card takes the newest publish time, and it is a crisis entry when any of
+  its rows is a crisis row (here the crisis row is the older one).
+*/
+test("two auto-publish rows for one service make one card, with the newest time and any crisis row", async () => {
+  const sql = await getSql();
+  const newsroomId = 9803;
+  const seeded = await seed(newsroomId);
+
+  await sql.query(
+    `insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id, created_at)
+     values ('scan-owner', 'registry.service.autopublish', '[Crisis] Auto-published from https://www.ourcenter.org/',
+             $1, 'registry-service', $2, now() - interval '2 days')`,
+    [newsroomId, seeded.serviceId],
+  );
+  const [newest] = await sql.query<{ id: number; created_at: Date | string }>(
+    `insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id, created_at)
+     values ('scan-owner', 'registry.service.autopublish', 'Auto-published from https://www.ourcenter.org/',
+             $1, 'registry-service', $2, now())
+     returning id, created_at`,
+    [newsroomId, seeded.serviceId],
+  );
+
+  const rows = await listAutoPublishedRegistryEntries(sql, newsroomId);
+  assert.equal(rows.length, 1, "one service is one card");
+  assert.equal(rows[0]!.serviceId, seeded.serviceId);
+  assert.equal(rows[0]!.crisis, true, "one crisis row marks the entry as a crisis entry");
+  assert.equal(rows[0]!.auditId, Number(newest!.id), "the card keys on the newest audit row");
+  assert.equal(
+    new Date(rows[0]!.publishedAt as string | Date).getTime(),
+    new Date(newest!.created_at).getTime(),
+    "the card shows the newest auto-publish time",
+  );
 });
 
 /*

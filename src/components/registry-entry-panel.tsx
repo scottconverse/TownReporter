@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { EntryFacts } from "@/components/registry-entry-card";
-import { NOT_LISTED } from "@/lib/news/registry/registry-entry-copy";
+import { NOT_LISTED, registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 import { readRegistryEntryPanel } from "@/lib/news/registry/registry-desk";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { DeskEntryPanelView } from "@/lib/news/registry/registry-desk";
@@ -86,7 +86,9 @@ export function RegistryEntryPanel({
     >
       <div className="registry-card-head">
         <h3 className="font-display text-2xl">
-          {panel ? `${panel.entry.organizationName} — ${panel.entry.serviceName}` : "One entry"}
+          {panel
+            ? registryEntryHeading(panel.entry.organizationName, panel.entry.serviceName)
+            : "One entry"}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
           {onEdit ? (

@@ -28,6 +28,7 @@ import {
 } from "@/lib/news/registry/starter-list";
 import { recheckResultWords } from "@/lib/news/registry/registry-recheck";
 import { evidenceTierLabel, isWebAddress } from "@/lib/news/desk-copy";
+import { registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
@@ -713,8 +714,10 @@ function RegistryDeskPage() {
                     className="inline-link"
                     href={`#registry-entry-${freshness.oldestUnchecked.serviceId}`}
                   >
-                    {freshness.oldestUnchecked.organizationName} —{" "}
-                    {freshness.oldestUnchecked.serviceName}
+                    {registryEntryHeading(
+                      freshness.oldestUnchecked.organizationName,
+                      freshness.oldestUnchecked.serviceName,
+                    )}
                   </a>
                 </>
               ) : (
@@ -736,7 +739,7 @@ function RegistryDeskPage() {
                   {shownRechecked.map((row) => (
                     <li key={`rechecked-${row.serviceId}`}>
                       <span className="astra-row-t">
-                        {row.organizationName} — {row.serviceName}
+                        {registryEntryHeading(row.organizationName, row.serviceName)}
                       </span>
                       <span className="astra-row-meta">
                         {row.robotCheckedAt ? formatShortDate(row.robotCheckedAt) : ""}
@@ -761,7 +764,7 @@ function RegistryDeskPage() {
                   {shownChanged.map((row) => (
                     <li key={`changed-${row.serviceId}`}>
                       <span className="astra-row-t">
-                        {row.organizationName} — {row.serviceName}
+                        {registryEntryHeading(row.organizationName, row.serviceName)}
                       </span>
                       <span className="astra-row-meta">
                         {row.robotCheckedAt
@@ -985,7 +988,7 @@ function RegistryDeskPage() {
                   {visibleGone.slice(0, shown.gone).map((row) => (
                     <li key={`gone-${row.serviceId}`}>
                       <div className="astra-row-t">
-                        {row.organizationName} — {row.serviceName}
+                        {registryEntryHeading(row.organizationName, row.serviceName)}
                       </div>
                       <p className="astra-row-meta">
                         Taken down after the source page was found gone
