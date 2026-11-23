@@ -13,7 +13,15 @@
  *
  * Safe to re-run, and a no-op when there is no build output.
  */
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +39,27 @@ const ASSETS = [
   ["node_modules/@electric-sql/pglite/dist/pglite.wasm", "_libs"],
   ["node_modules/@electric-sql/pglite/dist/initdb.wasm", "_libs"],
 ];
+
+/**
+ * The registry seed loader resolves its JSON with `new URL(..., import.meta.url)`.
+ * The bundler splits that module into chunks, so the file has to sit in
+ * `__fixtures__` beside every chunk that reads it. A silent miss leaves live on
+ * the 15 fallback entries instead of the 151 services in the file.
+ */
+const SEED_SOURCE = "src/lib/news/registry/__fixtures__/longmont-directory-2026-11.json";
+const SEED_MARKER = "__fixtures__/longmont-directory-2026-11.json";
+
+/** Every `.mjs` file under `dir`, skipping installed packages. */
+function listBuiltModules(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...listBuiltModules(full));
+    else if (entry.name.endsWith(".mjs")) found.push(full);
+  }
+  return found;
+}
 
 const serverDir = SERVER_DIRS.find((dir) => existsSync(dir));
 if (!serverDir) {
@@ -73,8 +102,35 @@ if (serverDir === SERVER_DIRS[0]) {
     manifest.dependencies[name] = version;
   }
   writeFileSync(packagePath, JSON.stringify(manifest, null, 2) + "\n");
-  console.log("[assets] packaged Playwright runtime; Chromium uses PLAYWRIGHT_BROWSERS_PATH or the user's Playwright cache");
+  console.log(
+    "[assets] packaged Playwright runtime; Chromium uses PLAYWRIGHT_BROWSERS_PATH or the user's Playwright cache",
+  );
 }
-// A missing source means the PGLite fallback will ENOENT at runtime. Fail the
-// build rather than ship a server that 500s on its first database read.
+const seedSource = join(root, SEED_SOURCE);
+if (!existsSync(seedSource)) {
+  console.warn(`[assets] missing source: ${SEED_SOURCE}`);
+  missing += 1;
+} else {
+  let readers = 0;
+  for (const dir of SERVER_DIRS.filter((candidate) => existsSync(candidate))) {
+    for (const file of listBuiltModules(dir)) {
+      if (!readFileSync(file, "utf8").includes(SEED_MARKER)) continue;
+      const destDir = join(dirname(file), "__fixtures__");
+      mkdirSync(destDir, { recursive: true });
+      copyFileSync(seedSource, join(destDir, SEED_MARKER.split("/").pop()));
+      readers += 1;
+    }
+  }
+  if (readers === 0) {
+    console.warn(
+      `[assets] no built file references ${SEED_MARKER} — the directory seed will not load`,
+    );
+    missing += 1;
+  } else {
+    console.log(`[assets] seeded ${SEED_MARKER.split("/").pop()} beside ${readers} chunk(s)`);
+  }
+}
+// A missing source means the PGLite fallback will ENOENT at runtime, and a
+// missing seed means live serves the fallback directory instead of the seed.
+// Fail the build rather than ship either quietly.
 if (missing > 0) process.exit(1);
