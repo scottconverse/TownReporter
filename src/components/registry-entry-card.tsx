@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { DeskEntryFacts } from "@/lib/news/registry/registry-desk";
-import { mapsUrl, NOT_LISTED, NOT_RECORDED } from "@/lib/news/registry/registry-entry-copy";
+import { mapsUrl, NOT_LISTED, NOT_RECORDED, registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 
 /**
  * One registry entry, drawn for a person (Scott, Nov 20 2026).
@@ -138,11 +138,11 @@ export function RegistryEntryCard({
         <h3 className="astra-row-t">
           {onOpen ? (
             <button type="button" className="inline-link" onClick={onOpen}>
-              {entry.organizationName} — {entry.serviceName}
+              {registryEntryHeading(entry.organizationName, entry.serviceName)}
             </button>
           ) : (
             <>
-              {entry.organizationName} — {entry.serviceName}
+              {registryEntryHeading(entry.organizationName, entry.serviceName)}
             </>
           )}
         </h3>

@@ -20,3 +20,21 @@ export const NOT_RECORDED = "Not recorded.";
 export function mapsUrl(address: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 }
+
+/**
+ * One entry's heading: the organization and the service (Nov 22 2026).
+ *
+ * A scan-created service hangs off an organization the scan created with the
+ * same name, so a plain "organization — service" read "Community Pantry —
+ * Community Pantry" on every card, heading and title. When the two names are
+ * the same after trimming and ignoring case, the heading names the entry once;
+ * any other pair is shown exactly as before.
+ */
+export function registryEntryHeading(organizationName: string, serviceName: string): string {
+  const organization = organizationName.trim();
+  const service = serviceName.trim();
+  if (organization.toLowerCase() === service.toLowerCase()) {
+    return organization || service;
+  }
+  return `${organizationName} — ${serviceName}`;
+}

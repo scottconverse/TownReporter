@@ -53,6 +53,7 @@ export async function getPublicRegistryServicePage({ data }) {
 export async function getPublicRegistryOrigin() { return "https://paper.example"; }
 `);
 const correctionUrl = await moduleUrl("src/lib/news/registry/registry-correction.ts");
+const copyUrl = await moduleUrl("src/lib/news/registry/registry-entry-copy.ts");
 const methodsUrl = await moduleUrl("src/lib/news/registry/registry-verify-methods.ts");
 // The 988/211 phone links are drawn by the real component (F18/F19); its only
 // import is the pure `telHref` helper, which is loaded for real too.
@@ -67,6 +68,7 @@ const imports = {
   "@/lib/paper-identity": identityUrl,
   "@/lib/news/registry/registry-public": publicUrl,
   "@/lib/news/registry/registry-correction": correctionUrl,
+  "@/lib/news/registry/registry-entry-copy": copyUrl,
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
 };
 const { Route: listRoute } = await import(await moduleUrl("src/routes/registry.tsx", imports));

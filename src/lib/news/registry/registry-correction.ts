@@ -6,6 +6,8 @@
  * correction that arrives without its link cannot be traced to the entry.
  */
 
+import { registryEntryHeading } from "./registry-entry-copy.ts";
+
 export const CORRECTION_ARTICLE_MAX = 2000;
 
 export function registryCorrectionArticle(input: {
@@ -16,9 +18,8 @@ export function registryCorrectionArticle(input: {
   url: string;
 }): string {
   const suffix = ` (${input.url})`;
-  const head = wellFormed(
-    `Community resource ${input.id}: ${input.organizationName} — ${input.serviceName}`,
-  );
+  const name = registryEntryHeading(input.organizationName, input.serviceName);
+  const head = wellFormed(`Community resource ${input.id}: ${name}`);
   if (head.length + suffix.length <= CORRECTION_ARTICLE_MAX) return `${head}${suffix}`;
   const room = CORRECTION_ARTICLE_MAX - suffix.length - 1;
   if (room < 1) return wellFormed(`${head}${suffix}`.slice(0, CORRECTION_ARTICLE_MAX));

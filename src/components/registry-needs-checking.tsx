@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { listRegistryNeedsChecking } from "@/lib/news/registry/registry-verify";
 import { endSentence } from "@/lib/news/registry/registry-sentence";
+import { registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /**
@@ -55,7 +56,7 @@ export function RegistryNeedsChecking({
         {rows.map((item) => (
           <li key={item.serviceId}>
             <div className="astra-row-t">
-              {item.organizationName} — {item.serviceName}
+              {registryEntryHeading(item.organizationName, item.serviceName)}
             </div>
             {item.reasons.map((reason) => (
               <p className="text-base" key={reason}>
