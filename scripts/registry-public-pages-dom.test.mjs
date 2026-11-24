@@ -34,6 +34,8 @@ export function createFileRoute(path) {
     useLoaderData: () => globalThis.__registryState.data,
   });
 }
+export function useNavigate() { return () => {}; }
+export function useRouterState({ select }) { return select ? select({ isLoading: false }) : { isLoading: false }; }
 export function notFound() { const e = new Error("NOT_FOUND"); e.isNotFound = true; return e; }
 `);
 const chromeUrl = stubUrl(`export function PaperShell({ children }) { return children; }`);
@@ -54,6 +56,8 @@ export async function getPublicRegistryOrigin() { return "https://paper.example"
 `);
 const correctionUrl = await moduleUrl("src/lib/news/registry/registry-correction.ts");
 const copyUrl = await moduleUrl("src/lib/news/registry/registry-entry-copy.ts");
+const cardUrl = await moduleUrl("src/lib/news/registry/registry-card.ts");
+const phoneHelperUrl = await moduleUrl("src/lib/news/registry/registry-phone.ts");
 const methodsUrl = await moduleUrl("src/lib/news/registry/registry-verify-methods.ts");
 // The 988/211 phone links are drawn by the real component (F18/F19); its only
 // import is the pure `telHref` helper, which is loaded for real too.
@@ -69,6 +73,8 @@ const imports = {
   "@/lib/news/registry/registry-public": publicUrl,
   "@/lib/news/registry/registry-correction": correctionUrl,
   "@/lib/news/registry/registry-entry-copy": copyUrl,
+  "@/lib/news/registry/registry-card": cardUrl,
+  "@/lib/news/registry/registry-phone": phoneHelperUrl,
   "@/lib/news/registry/registry-verify-methods": methodsUrl,
 };
 const { Route: listRoute } = await import(await moduleUrl("src/routes/registry.tsx", imports));
@@ -227,7 +233,9 @@ test("each service name links to its own page, and the list keeps what it showed
       ],
     }),
   );
-  assert.match(html, /<h3><a[^>]*href="\/registry\/7"[^>]*>Helping Hands — Food pantry<\/a><\/h3>/);
+  // The card names the service large and the organization small, each once.
+  assert.match(html, /<h3><a[^>]*href="\/registry\/7"[^>]*>Food pantry<\/a><\/h3>/);
+  assert.match(html, /<p class="rg-org">Helping Hands<\/p>/);
   for (const text of [
     "Free groceries.",
     "Phone at this location: ",

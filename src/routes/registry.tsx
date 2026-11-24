@@ -1,4 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
+import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
 import { CrisisLine, PhoneLink } from "@/components/registry-phone";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -17,6 +18,12 @@ import {
 } from "@/lib/news/registry/registry-correction";
 import { verifyMethodWords } from "@/lib/news/registry/registry-verify-methods";
 import { registryEntryHeading } from "@/lib/news/registry/registry-entry-copy";
+import {
+  registryCardFacts,
+  registryCategoryHue,
+  registryDirectionsHref,
+} from "@/lib/news/registry/registry-card";
+import { telHref } from "@/lib/news/registry/registry-phone";
 
 /**
  * The public Registry (spec 15.1, 18.2 and 24, Phase 1).
@@ -87,10 +94,28 @@ function listHref(search: RegistrySearch): string {
   return text ? `/registry?${text}` : "/registry";
 }
 
+/** "Helping Hands" and " helping hands " are one name, said once. */
+function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** A plain left click moves inside the page; a click with a modifier key still opens a new tab. */
+function softNav(e: MouseEvent<HTMLAnchorElement>, go: () => void) {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  go();
+}
+
 function RegistryPage() {
   const { result, origin } = Route.useLoaderData();
   const { q, category, language, page } = Route.useSearch();
   const { formatShortDate } = usePaperDateFormatters();
+  const navigate = useNavigate();
+  // True while the next search is being read. The page then shows the searching
+  // animation instead of a stale list.
+  const searching = useRouterState({ select: (s) => s.isLoading });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unavailable = result.status === "unavailable";
   const entries = result.status === "ok" ? result.entries : [];
   const categories = result.status === "ok" ? result.categories : [];
@@ -107,6 +132,32 @@ function RegistryPage() {
       : languages;
   const withoutFilters = { q, category, language };
 
+  // When the address changes and the reader is not typing, the box follows it.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (el && document.activeElement !== el) el.value = q ?? "";
+  }, [q]);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const go = (next: RegistrySearch) => {
+    void navigate({ to: "/registry", search: next });
+  };
+  const readForm = (form: HTMLFormElement): RegistrySearch => {
+    const data = new FormData(form);
+    const text = (name: string) => (typeof data.get(name) === "string" ? String(data.get(name)).trim() : "");
+    const next: RegistrySearch = {};
+    if (text("q")) next.q = text("q").slice(0, 200);
+    const cat = registryCategoryNumber(text("category"));
+    if (cat) next.category = cat;
+    if (text("language")) next.language = text("language").slice(0, 100);
+    return next;
+  };
+
   return (
     <PaperShell compact>
       <div className="infopage standing-page registry-page">
@@ -119,12 +170,30 @@ function RegistryPage() {
           </p>
         </div>
 
+        <p className="rg-urgent">
+          <b>Need help right now?</b>
+          <a href="tel:911">
+            <b>911</b> emergency
+          </a>
+          <a href="tel:988">
+            <b>988</b> mental health crisis
+          </a>
+          <a href="tel:211">
+            <b>2-1-1</b> any other help
+          </a>
+        </p>
+
         <form
           method="get"
           action="/registry"
           role="search"
           aria-label="Search community resources"
           className="registry-search"
+          data-searching={searching ? "true" : undefined}
+          onSubmit={(e) => {
+            e.preventDefault();
+            go(readForm(e.currentTarget));
+          }}
         >
           <div className="correction-field">
             <label htmlFor="registry-q">Search</label>
@@ -134,8 +203,17 @@ function RegistryPage() {
               name="q"
               type="search"
               maxLength={200}
+              placeholder="Try food, rent help, dental, or a phone number"
+              autoComplete="off"
+              ref={inputRef}
               defaultValue={q ?? ""}
-              key={`q-${q ?? ""}`}
+              onInput={(e) => {
+                const form = e.currentTarget.form;
+                if (!form) return;
+                if (timer.current) clearTimeout(timer.current);
+                // Search as the reader types, after a short pause.
+                timer.current = setTimeout(() => go(readForm(form)), 350);
+              }}
             />
           </div>
           <div className="correction-field">
@@ -146,6 +224,7 @@ function RegistryPage() {
               name="category"
               defaultValue={category ? String(category) : ""}
               key={`c-${category ?? ""}`}
+              onChange={(e) => e.currentTarget.form && go(readForm(e.currentTarget.form))}
             >
               <option value="">All categories</option>
               {categories.map((item) => (
@@ -163,6 +242,7 @@ function RegistryPage() {
               name="language"
               defaultValue={language ?? ""}
               key={`l-${language ?? ""}`}
+              onChange={(e) => e.currentTarget.form && go(readForm(e.currentTarget.form))}
             >
               <option value="">All languages</option>
               {languageChoices.map((item) => (
@@ -175,21 +255,27 @@ function RegistryPage() {
           <button className="btn text-base registry-text" type="submit">
             Search
           </button>
+          <span className="rg-scan" aria-hidden="true" />
         </form>
 
         {categories.length ? (
-          <nav aria-label="Browse resources by category">
+          <nav aria-label="Browse resources by category" className="rg-chips">
             <ul className="needlist">
               <li>
-                <a href="/registry" aria-current={!category ? "page" : undefined}>
+                <a
+                  href="/registry"
+                  aria-current={!category ? "page" : undefined}
+                  onClick={(e) => softNav(e, () => go({ q, language }))}
+                >
                   All entries
                 </a>
               </li>
               {categories.map((item) => (
-                <li key={item.id}>
+                <li key={item.id} style={{ "--hue": registryCategoryHue(item.name) } as CSSProperties}>
                   <a
                     href={`/registry?category=${item.id}`}
                     aria-current={category === item.id ? "page" : undefined}
+                    onClick={(e) => softNav(e, () => go({ q, language, category: item.id }))}
                   >
                     {item.name}
                   </a>
@@ -207,6 +293,22 @@ function RegistryPage() {
               <a href={listHref({ ...withoutFilters, page })}>Try again</a>.
             </p>
           </div>
+        ) : searching ? (
+          <section aria-busy="true" aria-label="Searching">
+            <p role="status" className="rg-searching">
+              Searching the services…
+            </p>
+            <div className="rg-grid" aria-hidden="true">
+              {[0, 1, 2, 3, 4, 5].map((n) => (
+                <div className="rg-skel" key={n}>
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </div>
+              ))}
+            </div>
+          </section>
         ) : entries.length === 0 ? (
           <div className="empty">
             {total > 0 ? (
@@ -242,109 +344,154 @@ function RegistryPage() {
             <h2 id="registry-entries-title">
               {current ? current.name : "All entries"} ({total})
             </h2>
-            <p role="status">
+            <p role="status" className="rg-count">
               {total} {total === 1 ? "service" : "services"}
               {filtered ? (total === 1 ? " matches your search" : " match your search") : ""}
               {total > PAGE_SIZE ? `. Page ${pageNumber}` : ""}
             </p>
-            {entries.map((entry) => {
-              const heading = registryEntryHeading(entry.organizationName, entry.serviceName);
-              return (
-                <article className="correction-entry" key={entry.serviceId}>
-                  <h3>
-                    <a className="textlink registry-text" href={registryServicePath(entry.serviceId)}>
-                      {heading}
-                    </a>
-                  </h3>
-                  {entry.description ? <p>{entry.description}</p> : null}
-                  {entry.locations.map((location) => (
-                    <section key={location.locationId} aria-label="Location">
-                      <p>
-                        <b>{location.name ?? "Location"}</b>
-                      </p>
-                      <ul className="needlist">
-                        {location.address ? <li>{location.address}</li> : null}
-                        {location.phones.map((phone) => (
-                          <li key={phone}>
-                            Phone at this location: <PhoneLink phone={phone} />
-                          </li>
-                        ))}
-                        {location.hours.map((hours) => (
-                          <li key={hours}>Hours at this location: {hours}</li>
-                        ))}
+            <div className="rg-grid">
+              {entries.map((entry, index) => {
+                const heading = registryEntryHeading(entry.organizationName, entry.serviceName);
+                const showOrg =
+                  entry.serviceName.trim() !== "" &&
+                  entry.organizationName.trim() !== "" &&
+                  !sameName(entry.organizationName, entry.serviceName);
+                const title = showOrg ? entry.serviceName : heading;
+                const facts = registryCardFacts(entry);
+                const call = telHref(facts.phone);
+                const directions = registryDirectionsHref(facts.address);
+                return (
+                  <article
+                    className="correction-entry rg-card"
+                    key={entry.serviceId}
+                    style={
+                      {
+                        "--hue": registryCategoryHue(entry.categoryName),
+                        "--i": Math.min(index, 24),
+                      } as CSSProperties
+                    }
+                  >
+                    {entry.categoryName ? <p className="rg-cat">{entry.categoryName}</p> : null}
+                    <h3>
+                      <a className="textlink registry-text" href={registryServicePath(entry.serviceId)}>
+                        {title}
+                      </a>
+                    </h3>
+                    {showOrg ? <p className="rg-org">{entry.organizationName}</p> : null}
+                    {entry.description ? <p className="rg-desc">{entry.description}</p> : null}
+                    {facts.phone || facts.address || facts.hours ? (
+                      <ul className="rg-facts">
+                        {facts.phone ? <li className="rg-phone">{facts.phone}</li> : null}
+                        {facts.address ? <li className="rg-addr">{facts.address}</li> : null}
+                        {facts.hours ? <li className="rg-hours">{facts.hours}</li> : null}
                       </ul>
-                    </section>
-                  ))}
-                  <section aria-label="About this service">
-                    <p>
-                      <b>About this service</b>
-                    </p>
-                    <ul className="needlist">
-                      {entry.servicePhones.map((phone) => (
-                        <li key={`service-${phone}`}>
-                          Phone for this service: <PhoneLink phone={phone} />
-                        </li>
+                    ) : null}
+                    {call || directions ? (
+                      <div className="rg-actions">
+                        {call ? (
+                          <a className="btn rg-call" href={call}>
+                            Call
+                          </a>
+                        ) : null}
+                        {directions ? (
+                          <a className="btn" href={directions} target="_blank" rel="noreferrer">
+                            Directions
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <details className="rg-more">
+                      <summary>All details, source and corrections</summary>
+                      {entry.locations.map((location) => (
+                        <section key={location.locationId} aria-label="Location">
+                          <p>
+                            <b>{location.name ?? "Location"}</b>
+                          </p>
+                          <ul className="needlist">
+                            {location.address ? <li>{location.address}</li> : null}
+                            {location.phones.map((phone) => (
+                              <li key={phone}>
+                                Phone at this location: <PhoneLink phone={phone} />
+                              </li>
+                            ))}
+                            {location.hours.map((hours) => (
+                              <li key={hours}>Hours at this location: {hours}</li>
+                            ))}
+                          </ul>
+                        </section>
                       ))}
-                      {entry.serviceHours.map((hours) => (
-                        <li key={`service-${hours}`}>Hours for this service: {hours}</li>
-                      ))}
-                      {entry.organizationPhones.map((phone) => (
-                        <li key={`org-${phone}`}>
-                          Main phone of {entry.organizationName}: <PhoneLink phone={phone} />
-                        </li>
-                      ))}
-                      {entry.languages.length ? (
-                        <li>Languages: {entry.languages.join(", ")}</li>
+                      <section aria-label="About this service">
+                        <p>
+                          <b>About this service</b>
+                        </p>
+                        <ul className="needlist">
+                          {entry.servicePhones.map((phone) => (
+                            <li key={`service-${phone}`}>
+                              Phone for this service: <PhoneLink phone={phone} />
+                            </li>
+                          ))}
+                          {entry.serviceHours.map((hours) => (
+                            <li key={`service-${hours}`}>Hours for this service: {hours}</li>
+                          ))}
+                          {entry.organizationPhones.map((phone) => (
+                            <li key={`org-${phone}`}>
+                              Main phone of {entry.organizationName}: <PhoneLink phone={phone} />
+                            </li>
+                          ))}
+                          {entry.languages.length ? (
+                            <li>Languages: {entry.languages.join(", ")}</li>
+                          ) : null}
+                          {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
+                          <li>
+                            {entry.verifiedAt
+                              ? `Verified ${formatShortDate(entry.verifiedAt)}${
+                                  verifyMethodWords(entry.verifiedMethod)
+                                    ? ` (${verifyMethodWords(entry.verifiedMethod)})`
+                                    : ""
+                                }`
+                              : entry.lastVerifiedAt
+                                ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
+                                : "Not verified yet"}
+                          </li>
+                        </ul>
+                      </section>
+                      {entry.editorNote ? (
+                        <p>
+                          <b>Editor's note:</b> {entry.editorNote}
+                        </p>
                       ) : null}
-                      {entry.categoryName ? <li>Category: {entry.categoryName}</li> : null}
-                      <li>
-                        {entry.verifiedAt
-                          ? `Verified ${formatShortDate(entry.verifiedAt)}${
-                              verifyMethodWords(entry.verifiedMethod)
-                                ? ` (${verifyMethodWords(entry.verifiedMethod)})`
-                                : ""
-                            }`
-                          : entry.lastVerifiedAt
-                            ? `Last updated ${formatShortDate(entry.lastVerifiedAt)}. Not verified yet.`
-                            : "Not verified yet"}
-                      </li>
-                    </ul>
-                  </section>
-                  {entry.editorNote ? (
-                    <p>
-                      <b>Editor's note:</b> {entry.editorNote}
-                    </p>
-                  ) : null}
-                  {entry.sourceUrl ? (
-                    <p>
-                      Source:{" "}
-                      {safeWebUrl(entry.sourceUrl) ? (
-                        <a className="textlink break-words" href={entry.sourceUrl} rel="noreferrer">
-                          {entry.sourceTitle || entry.sourceUrl}
+                      {entry.sourceUrl ? (
+                        <p>
+                          Source:{" "}
+                          {safeWebUrl(entry.sourceUrl) ? (
+                            <a className="textlink break-words" href={entry.sourceUrl} rel="noreferrer">
+                              {entry.sourceTitle || entry.sourceUrl}
+                            </a>
+                          ) : (
+                            <span className="break-words">{entry.sourceTitle || entry.sourceUrl}</span>
+                          )}
+                        </p>
+                      ) : null}
+                      <p>
+                        <a
+                          className="textlink registry-text"
+                          href={registryCorrectionHref(
+                            registryCorrectionArticle({
+                              id: entry.serviceId,
+                              organizationName: entry.organizationName,
+                              serviceName: entry.serviceName,
+                              url: `${origin}${registryServicePath(entry.serviceId)}`,
+                            }),
+                          )}
+                        >
+                          Something wrong here?
                         </a>
-                      ) : (
-                        <span className="break-words">{entry.sourceTitle || entry.sourceUrl}</span>
-                      )}
-                    </p>
-                  ) : null}
-                  <p>
-                    <a
-                      className="textlink registry-text"
-                      href={registryCorrectionHref(
-                        registryCorrectionArticle({
-                          id: entry.serviceId,
-                          organizationName: entry.organizationName,
-                          serviceName: entry.serviceName,
-                          url: `${origin}${registryServicePath(entry.serviceId)}`,
-                        }),
-                      )}
-                    >
-                      Something wrong here?
-                    </a>
-                  </p>
-                </article>
-              );
-            })}
+                      </p>
+                    </details>
+                  </article>
+                );
+              })}
+            </div>
             {hasPrevious || hasNext ? (
               <nav aria-label="More results" className="registry-paging">
                 {hasPrevious ? (
