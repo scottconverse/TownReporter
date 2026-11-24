@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.7.0](docs/releases/0.7.0.md)** (2026-11-19). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.0) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.7.1](docs/releases/0.7.1.md)** (2026-11-24). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.1) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,17 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.7.0
+## What is new in 0.7.1
+
+17 changes since 0.7.0 (#420 to #436): 16 code changes and 1 documentation change. The long list is in the [changelog](CHANGELOG.md#071--2026-11-24) and the [release guide](docs/releases/0.7.1.md).
+
+- **The community registry grows and publishes by itself.** The daily scan re-reads registry sources, follows links on directory pages to accepted sources, adds what it finds and publishes a relevant change whose source page it captured in the same run. A nightly batch rechecks published entries against their source pages and unpublishes an entry whose source has gone twice. Migrations 0167 and 0168. `/desk/registry` gains an **Auto-published** list, a **Freshness** panel, a **Source gone** list and richer entry cards and proposals (#429).
+- **A redesigned public Community resources page.** `/registry` uses the full page width, with a **911**, **988** and **2-1-1** row, a card for each service with **Call** and **Directions**, results that appear as you type, and a one-column phone layout (#435).
+- **Queue and desk fixes.** Kill, Hold and Delete untick the lead they move off the list (#420). A bulk Kill or Hold says how many failed, and raw error text becomes plain words (#422). Nine desk findings from the Nov 19 walk (#421), including a confirm before **Publish all drafts** and before **Run scan now**, and Health counting failed jobs. Alike desk counts are labeled (#427). The Redraft dialog no longer promises to keep the old draft (#428). A lead cites the story's own page (#424), and the research tool is found under any Node (#425).
+- **Reader and public-page fixes.** An out-of-state story is not **Nearby** (#423). Geography pills, the Explore menu, registry phone links and the empty-search crisis line are fixed (#426). A stored source with no title no longer breaks a story page (#432).
+- **New tools.** **Capture with Firecrawl Local** on a watched page (#430), and a **Send to Desk** Chrome button for Reddit posts (#431).
+
+## What was new in 0.7.0
 
 21 pull requests since 0.6.92 (#398 to #418): 15 code changes and 6 documentation changes. The long list is in the [changelog](CHANGELOG.md#070--2026-11-19) and the [release guide](docs/releases/0.7.0.md).
 
@@ -61,7 +71,7 @@ MIT licensed. Clone it. Point it at your city.
 37 pull requests since 0.6.87. The short list; the long list is in the [changelog](CHANGELOG.md#0688--2026-11-12) and the [release guide](docs/releases/0.6.88.md).
 
 - **Reader pages and events.** New ICS and site event readers, the `routine_events` table, a front-page events week box and 37 event feeds. The Bulletin redesign changes every reader page, and the events box meets 14px text and 44px tap targets on a phone.
-- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries. The JSON file import, the all-details editor, review, verification and the public search came in 0.7.0 (see **What is new in 0.7.0** above).
+- **Community resources.** Community Navigator Phase 1 adds a registry, HSDS import, a read-only desk view and a public list. The editor can load a starter list, publish each entry, edit, add and take down entries. The JSON file import, the all-details editor, review, verification and the public search came in 0.7.0 (see **What was new in 0.7.0** above).
 - **Phone app install.** Readers can add TownReporter to the Android or iPhone home screen. New icons, manifest and a service worker show **You are offline.** when the phone is offline.
 - **Desk and Drafts.** Same-day routine updates post one short note. The scan model picker moves below the header. Waiting roundups have **Open / Close** and **Kill**. Opinion drafts show on Drafts. Desk text and buttons reach 16px.
 - **Scan, models and Ollama.** The scan reads news first and files leads during a hand-started scan. Repeats and distinct finder refs are fixed. The scan warns when speech-to-text is missing. TownReporter looks after Ollama. Claude Fable uses **Claude Fable 5.2** and `claude-fable-5-2`.
@@ -167,7 +177,7 @@ Every item here is in the code of this release. The full manual covers each one 
 
 **Publish**
 
-- Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are in 0.7.0 (see [What is new in 0.7.0](#what-is-new-in-070)). The card layout below is on the live paper now and is in the next release, after 0.7.0: full width, a row of **911**, **988** and **2-1-1** call links, a card for each service with **Call** and **Directions**, results that appear as you type, and a one-column phone layout (see the [changelog](CHANGELOG.md#unreleased)).
+- Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are in 0.7.0 (see [What was new in 0.7.0](#what-was-new-in-070)). In 0.7.1 the page uses the full width, with a row of **911**, **988** and **2-1-1** call links, a card for each service with **Call** and **Directions**, results that appear as you type, and a one-column phone layout (see the [changelog](CHANGELOG.md#071--2026-11-24)).
 
   ![The public Community resources page: the 911, 988 and 2-1-1 row, the Search box, the category chips and the first service cards](docs/images/29-registry-list.png)
 
@@ -305,7 +315,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.7.0](docs/releases/0.7.0.md)             |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.7.1](docs/releases/0.7.1.md)             |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -319,9 +329,9 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.7.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.0) carries three files: `TownReporter-0.7.0-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.7.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.1) carries three files: `TownReporter-0.7.1-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
-CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.7.0, and no fresh-machine human acceptance of it is claimed here.
+CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.7.1, and no fresh-machine human acceptance of it is claimed here.
 
 Follow the [Windows installation guide](docs/windows-install.md) for setup, start and stop, private data and troubleshooting. Public hosting and AI provider setup are separate from local installation.
 
@@ -606,7 +616,8 @@ Sixteen rendered diagrams, each with its Mermaid source beside it. The index is 
 
 ## Recent releases
 
-- **[0.7.0](docs/releases/0.7.0.md)** (2026-11-19), the current version. Community resources reach their fourth phase (public search, a page for each service, a read-only JSON API, directory import, review and verification), leads that score 14 or more are drafted automatically, and Drafts has tick boxes with bulk publish and kill.
+- **[0.7.1](docs/releases/0.7.1.md)** (2026-11-24), the current version. The community registry grows and publishes by itself and rechecks its entries nightly (migrations 0167 and 0168), the public Community resources page is redesigned as cards, and the Queue and desk get fixes from the Nov 19 walk. New: **Capture with Firecrawl Local** and **Send to Desk** for Reddit posts.
+- **[0.7.0](docs/releases/0.7.0.md)** (2026-11-19). Community resources reach their fourth phase (public search, a page for each service, a read-only JSON API, directory import, review and verification), leads that score 14 or more are drafted automatically, and Drafts has tick boxes with bulk publish and kill.
 - **[0.6.92](docs/releases/0.6.92.md)** (2026-11-15). The four score parts show on Today, the Queue and the story page, and Drafts has **Publish all drafts**.
 - **[0.6.91](docs/releases/0.6.91.md)** (2026-11-14). Lead scores come in four parts (immediacy, impact, conflict, novelty) that add up to the 4-20 newsworthiness, and the Queue tooltip shows them.
 - **[0.6.90](docs/releases/0.6.90.md)** (2026-11-13). With Large desk text at 1280 px, Dark Desk keeps all of Decide in the first screen and the Queue filters wrap under the tabs.
