@@ -4,6 +4,12 @@ Current software version: **0.7.0** (released 2026-11-19). Publication state is 
 
 ## Unreleased
 
+### Community resources
+
+- **The public Community resources page is redesigned for readers, and for phones.** `/registry` now uses the full page width. A row at the top gives **911**, **988** and **2-1-1** as call links. Each service is a card with its category, its name (a link to its own page), its organization, a short description, and the first phone, street address and hours it holds. A card with no phone shows no phone. **Call** dials the number. **Directions** opens a map, and shows only when the address starts with a street number. **All details, source and corrections** on each card opens everything the old page showed: each place with its own address, phone and hours, **About this service**, the check line, the editor's note, the **Source:** link and **Something wrong here?**. Categories are chips with a color for each group of needs. Typing in **Search** now finds results as you type, after a short pause, with no page reload and the cursor kept in the box. A moving bar and grey placeholder cards show while it searches. The form still works with no JavaScript, and **Next page** and **Previous page** are still plain links. On a phone the cards are one column, **Call** is a full-width button, and the category chips scroll sideways. The page uses the paper's own reader colors and type, in light and dark, and holds still for readers who ask for less motion. The page has no **Saved** list and no has-phone filters. No migration (#435).
+- **The desk and the public page show a registry name once when the organization and the service have the same name, and the desk draws one Auto-published card for each service.** (#433)
+- **The server build ships the Longmont directory file.** The build copies the file beside every built chunk that reads it, and fails if it cannot. Before this, a built server kept 15 registry entries instead of the 151 in the file. (#434)
+
 ## 0.7.0 — 2026-11-19
 
 This release covers 21 changes after 0.6.92 (#398 to #418): 15 code changes (#398 to #412) and 6 documentation changes (#413 to #418). The release guide is [docs/releases/0.7.0.md](docs/releases/0.7.0.md). The number after a change is the pull request that made it.

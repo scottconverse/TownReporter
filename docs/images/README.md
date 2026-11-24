@@ -8,6 +8,8 @@ The 27 PNGs in this folder were captured on 2026-11-18 from commit 9d6a5c7e (ori
 - Desk shots use the dark desk theme. Public shots use the paper's default reader theme.
 - There is no 03 file. The numbering skips it.
 
+**Retaken 2026-11-24:** 18, 20, 29 and 30 show the redesigned Community resources page (PR 435, commit f2f84b3a). They were captured on a throwaway in-memory instance with 12 made-up Testerville services, signed out, in the paper's default light theme. 29 and 30 are new. The other 25 images are from the 2026-11-18 capture. The page's category chips, the 911, 988 and 2-1-1 row and the cards are on the live paper now and are in the next release, after 0.7.0.
+
 ## Hidden on purpose
 
 These items come from the test environment and were hidden for the capture:
@@ -44,13 +46,15 @@ These items come from the test environment and were hidden for the capture:
 | 17-drafts.png | /desk/drafts | Drafts list: 5 AI drafts, an opinion piece waiting, Publish all drafts |
 | 18-registry-search.png | /registry?q=help (signed out) | Public Community resources search with 2 results |
 | 19-registry-service.png | /registry/8 (signed out) | Public service page: details, eligibility, hours, places, sources, verified date |
-| 20-registry-phone.png | /registry (signed out, 375 px wide) | Community resources at phone width: stacked filters and the first service |
+| 20-registry-phone.png | /registry (signed out, 375 px wide, top 1591 px) | Community resources at phone width: the 911, 988 and 2-1-1 row, stacked filters, chips and the top of the first card |
 | 21-desk-registry-import.png | /desk/registry (scrolled to Import a directory file) | Import preview: counts for new, unchanged, changed and already waiting, and the list of differences. Nothing imported |
 | 22-desk-registry-editor.png | /desk/registry, All details for Weekly grocery pickup | The entry editor: service details and the start of the organization details |
 | 23-desk-registry-changes.png | /desk/registry (scrolled to Detected changes) | Detected changes with filter tabs and the Accept and apply, Accept without applying and Reject buttons |
 | 24-desk-registry-verification.png | /desk/registry, All details open (scrolled to Verification) | Verification section with the latest and older checks and the Record verification form |
 | 25-desk-registry-needs-checking.png | /desk/registry (scrolled to Needs checking) | Needs checking: never verified, older than 180 days, changed since verified |
 | 26-queue-start-n.png | /desk/queue, 4 leads ticked (scrolled 440 px) | Queue bulk bar: 4 selected, model pickers, Start 4 stories, Hold, Kill, Delete selected, Clear |
+| 29-registry-list.png | /registry (signed out) | Redesigned Community resources page: 911, 988 and 2-1-1 row, search, category chips and 12 service cards |
+| 30-registry-phone-search.png | /registry?q=food (signed out, 375 px wide, top 1591 px) | Redesigned page on a phone after a search for food |
 | 27-drafts-bulk.png | /desk/drafts, 3 drafts ticked | Drafts with ticked boxes, Publish 3 selected and Kill 3 selected |
 | 28-front-around-region.png | / (signed out), crop of the page from y 740 to 1440 | Front page Community resources banner, an Opinion card and the Around the region band |
 
