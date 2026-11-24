@@ -67,13 +67,17 @@ The **Save** button beside any story adds it to **Saved**. It reads **Saved** on
 
 **Community resources** is in the top menu on desktop and mobile, and in one line on the front page. The footer link stays. It opens `/registry`.
 
-The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are in 0.7.0.
+The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are in 0.7.0. The card layout described next is on the live paper now and is in the next release, after 0.7.0.
 
-The page is titled **Where to get help**. It lists only published entries. Each entry shows the organization and service and a description. Each place where the service is offered is listed under its own name, with its own address, **Phone at this location:** and **Hours at this location:**. Below the places, under **About this service**, come **Phone for this service:** and **Hours for this service:** (not tied to one place), **Main phone of** the organization (labeled as the organization’s, not a place’s), **Languages:**, **Category:**, the check line, an editor’s note, and a **Source:** link.
+The page is titled **Where to get help**. It uses the full width of the screen. At the top, a row gives **911**, **988** and **2-1-1**. On a phone, each one is a button that starts the call. The page lists only published entries, as cards.
 
-![The Community resources page, Where to get help, after a search for help: the Search box, the Category and Language lists, and two matching services, each with its place, the check line and Something wrong here?](images/18-registry-search.png)
+![The Community resources page: the 911, 988 and 2-1-1 row, the Search box, the category chips and the first service cards](images/29-registry-list.png)
 
-**Search and filters.** Type a name, a place or a word in **Search** and press **Search**. The search looks at the service name, the organization name, the description and the category name, in any capitals. It takes up to 200 characters. **Category** and **Language** narrow the list. The **Language** list shows the languages that published services offer. The page says how many services there are, or how many match your search. It shows 25 services to a page. When there is more than one page, it says which page you are on, and **Next page** and **Previous page** move you through them. The list is in order by category (services with no category come last), then by organization and service name. If nothing matches, the page says **No services match your search.** and offers **Clear the search**.
+**A card.** Each card shows the category, the service name (select it to open the service’s own page), the organization, a short description, and three facts: **Phone**, **Where** and **Hours**. A card shows only the facts the entry has. **Call** starts a call to the first phone number. **Directions** opens a map for the address, and shows only when the address starts with a street number. **All details, source and corrections** opens the rest of the entry. It lists each place where the service is offered under its own name, with its own address, **Phone at this location:** and **Hours at this location:**. Below the places, under **About this service**, come **Phone for this service:** and **Hours for this service:** (not tied to one place), **Main phone of** the organization (labeled as the organization’s, not a place’s), **Languages:**, **Category:**, the check line, an editor’s note, and a **Source:** link. **Something wrong here?** is in there too.
+
+![The Community resources page after a search for help: the Search box, the Category and Language lists, and two matching service cards, each with Call and Directions](images/18-registry-search.png)
+
+**Search and filters.** Type a name, a place or a word in **Search**. The results change as you type, after a short pause, and the page does not reload. A moving bar and grey placeholder cards show that the page is searching. You can also press **Search**, and that works with JavaScript turned off. The search looks at the service name, the organization name, the description and the category name, in any capitals. It takes up to 200 characters. The category chips, **Category** and **Language** narrow the list. A chip’s color shows its group of needs, such as food, housing, health or crisis help. On a phone the chips scroll sideways. The **Language** list shows the languages that published services offer. The page says how many services there are, or how many match your search. It shows 25 services to a page. When there is more than one page, it says which page you are on, and **Next page** and **Previous page** move you through them. The list is in order by category (services with no category come last), then by organization and service name. If nothing matches, the page says **No services match your search.** and offers **Clear the search**.
 
 **Each service has its own page.** Select a service’s name to open it. Its address is `/registry/` followed by the service’s number, so you can keep or share it. The page shows the public details the entry has, and leaves out the ones it does not have. Contact people’s names are not shown. If the address is not a published service, the page says **This service is not listed.** It may have been removed, or the address may be wrong. A link takes you back to the list.
 
@@ -85,7 +89,11 @@ Use **All entries** and the category links to browse. If nothing is published, t
 
 The page says **Verified** with a date and how the check was made, such as by phone, only when an editor recorded a check. A date that only a save or publish set reads **Last updated** with that date, then **Not verified yet.** An entry with neither reads **Not verified yet**. Change detection is not verification. It never says a program is confirmed open.
 
-![Community resources on a phone: the filters stack above the first service entry](images/20-registry-phone.png)
+**On a phone** the cards stack in one column. **Call** is a full-width button, **Directions** sits under it, and the 911, 988 and 2-1-1 buttons stay at the top.
+
+![Community resources on a phone: the 911, 988 and 2-1-1 row, the stacked search boxes, the category chips and the top of the first service card](images/20-registry-phone.png)
+
+![Community resources on a phone after a search for food: the matching service cards in one column](images/30-registry-phone-search.png)
 
 ## Get the paper on your phone
 

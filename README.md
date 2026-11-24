@@ -167,9 +167,11 @@ Every item here is in the code of this release. The full manual covers each one 
 
 **Publish**
 
-- Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are in 0.7.0 (see [What is new in 0.7.0](#what-is-new-in-070)).
+- Community resources: a public list of local services at `/registry`, built by an editor on `/desk/registry`, by hand or from an imported directory file. Nothing shows until the editor presses Publish on the entry. Search, filters, a page for each service and the JSON API are in 0.7.0 (see [What is new in 0.7.0](#what-is-new-in-070)). The card layout below is on the live paper now and is in the next release, after 0.7.0: full width, a row of **911**, **988** and **2-1-1** call links, a card for each service with **Call** and **Directions**, results that appear as you type, and a one-column phone layout (see the [changelog](CHANGELOG.md#unreleased)).
 
-  ![The public Community resources page after a search: the Search box, the Category and Language lists, and two matching services](docs/images/18-registry-search.png)
+  ![The public Community resources page: the 911, 988 and 2-1-1 row, the Search box, the category chips and the first service cards](docs/images/29-registry-list.png)
+
+  ![The public Community resources page after a search for help: the Search box, the Category and Language lists, and two matching service cards, each with Call and Directions](docs/images/18-registry-search.png)
 
 - The Publish bar lists every warning and reads **Publish anyway in <section>**. A person presses it. Every override is audited.
 - Public corrections, RSS, an evidence page for every cited record, and a side-by-side comparison when a cited record has moved.
