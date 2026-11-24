@@ -106,6 +106,13 @@ function softNav(e: MouseEvent<HTMLAnchorElement>, go: () => void) {
   go();
 }
 
+/**
+ * True while the reader is typing in the search box. The page can be drawn
+ * again when a search lands; this lives outside the component so the box can
+ * get the cursor back at the end of what the reader typed.
+ */
+let readerIsTyping = false;
+
 function RegistryPage() {
   const { result, origin } = Route.useLoaderData();
   const { q, category, language, page } = Route.useSearch();
@@ -135,8 +142,16 @@ function RegistryPage() {
   // When the address changes and the reader is not typing, the box follows it.
   useEffect(() => {
     const el = inputRef.current;
-    if (el && document.activeElement !== el) el.value = q ?? "";
-  }, [q]);
+    if (!el) return;
+    if (readerIsTyping) {
+      if (document.activeElement !== el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+      return;
+    }
+    if (document.activeElement !== el) el.value = q ?? "";
+  }, [q, searching]);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -207,6 +222,15 @@ function RegistryPage() {
               autoComplete="off"
               ref={inputRef}
               defaultValue={q ?? ""}
+              onFocus={() => {
+                readerIsTyping = true;
+              }}
+              onBlur={() => {
+                // A short delay: the box can lose focus for a moment while the page redraws.
+                setTimeout(() => {
+                  if (document.activeElement !== inputRef.current) readerIsTyping = false;
+                }, 800);
+              }}
               onInput={(e) => {
                 const form = e.currentTarget.form;
                 if (!form) return;
