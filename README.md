@@ -16,7 +16,7 @@ MIT licensed. Clone it. Point it at your city.
 
 ## What is new in 0.7.1
 
-17 changes since 0.7.0 (#420 to #436): 16 code changes and 1 documentation change. The long list is in the [changelog](CHANGELOG.md#071--2026-11-24) and the [release guide](docs/releases/0.7.1.md).
+18 changes since 0.7.0 (#420 to #437): 17 code changes and 1 documentation change. The long list is in the [changelog](CHANGELOG.md#071--2026-11-24) and the [release guide](docs/releases/0.7.1.md).
 
 - **The community registry grows and publishes by itself.** The daily scan re-reads registry sources, follows links on directory pages to accepted sources, adds what it finds and publishes a relevant change whose source page it captured in the same run. A nightly batch rechecks published entries against their source pages and unpublishes an entry whose source has gone twice. Migrations 0167 and 0168. `/desk/registry` gains an **Auto-published** list, a **Freshness** panel, a **Source gone** list and richer entry cards and proposals (#429).
 - **A redesigned public Community resources page.** `/registry` uses the full page width, with a **911**, **988** and **2-1-1** row, a card for each service with **Call** and **Directions**, results that appear as you type, and a one-column phone layout (#435).
