@@ -2238,6 +2238,24 @@
   padding-top: 6px;
   padding-bottom: 6px;
 }
+/*
+  0.7.1: a Health value can be a whole sentence (the research tool's "not found
+  on this computer" line). The shared .chip is nowrap, so that one row ran
+  ~75px past the card and the page at 1440. Let the value wrap inside its own
+  card, on the ops page only; short chips are unchanged because they fit.
+*/
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-row dt {
+  /* The labels are short fixed words; only the value should ever give way. */
+  flex-shrink: 0;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-row dd {
+  min-width: 0;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-row dd .chip {
+  white-space: normal;
+  text-align: right;
+  max-width: 100%;
+}
 .desk-ltr.astra[data-desk-page="ops"] .astra-ops-rung {
   padding-top: 10px;
   padding-bottom: 10px;

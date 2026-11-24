@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.7.0 · publication and deployment are recorded separately**
+**Version 0.7.1 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.7.0 release guide and evidence boundaries](releases/0.7.0.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.7.1 release guide and evidence boundaries](releases/0.7.1.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are new in 0.7.0. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.7.0 does.**
+**What TownReporter 0.7.1 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads out of 20 (four parts, 1 to 5 each: immediacy, impact, conflict and novelty, each with a reason), spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.7.0](releases/0.7.0.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.7.1](releases/0.7.1.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -117,7 +117,7 @@ You are responsible for everything that appears on the paper.
 - The sources under every story, as links, including captured copies when the original has moved. A reader can compare captured versions of a record.
 - A public Corrections page, with a form that prepares an email to the editor. The website itself sends nothing.
 - A public **Community resources** page at `/registry`. It shows only published entries, with a source link, the check (**Verified** with its date and how it was made, or **Last updated** with its date and **Not verified yet.**), and each location’s own address, phone and hours. If the list cannot be read, the page says so and offers **Try again**. **Something wrong here?** opens Corrections with the entry name filled in.
-- On `/registry` a reader can **Search** by name, organization, description or category, and filter by category and language. Results come 25 to a page, with **Previous page** and **Next page**. Each service name opens its own page at `/registry/<id>`, with every public detail. An unknown or unlisted id shows “This service is not listed.” Published services are in `sitemap.xml`. (Search, the service page, the JSON feed and the **Verified** check are in 0.7.0.) After 0.7.0 the page is a full-width grid of cards, with a **911**, **988** and **2-1-1** row on top, **Call** and **Directions** on each card, results that appear as you type, and a one-column phone layout. See [Community resources for readers](reader.md#community-resources). This is on the live paper now and is in the next release.
+- On `/registry` a reader can **Search** by name, organization, description or category, and filter by category and language. Results come 25 to a page, with **Previous page** and **Next page**. Each service name opens its own page at `/registry/<id>`, with every public detail. An unknown or unlisted id shows “This service is not listed.” Published services are in `sitemap.xml`. (Search, the service page, the JSON feed and the **Verified** check are in 0.7.0.) In 0.7.1 the page is a full-width grid of cards, with a **911**, **988** and **2-1-1** row on top, **Call** and **Directions** on each card, results that appear as you type, and a one-column phone layout. See [Community resources for readers](reader.md#community-resources).
 - A public JSON feed of the directory at `/api/registry/v1/...`. No sign-in, read-only. See [the API reference](navigator/registry-api.md).
 - A phone install bar on story pages and **Get the app** at `/get-the-app`, with steps for **iPhone or iPad** and **Android**. No app store. An offline page says “You are offline.” and `/sw.js` caches nothing.
 - The reader pages use the Bulletin design with self-hosted fonts.
@@ -128,7 +128,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.7.0, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken on November 18, 2026 from a test copy of the app with made-up data. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.7.1, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken on November 18, 2026 from a test copy of the app with made-up data. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -1004,10 +1004,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.7.0 that is
-`TownReporter-0.7.0-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.7.1 that is
+`TownReporter-0.7.1-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.7.0
+artifact; use a release's Setup.exe only if that release lists one. The 0.7.1
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
@@ -2901,6 +2901,8 @@ For the shape of the whole database see the
 | 0164      | Nullable `leads.score_parts` (the four score parts); fills nothing                                                         |
 | 0165      | Registry removal markers: nullable `removed_at` and `removed_by` on `contacts`, `service_at_locations`, `schedules`, `eligibilities`, `required_documents`, `languages`, `accessibilities`; additive, nothing filled or dropped. In 0.7.0 |
 | 0166      | Community resources review and verification: new table `resource_verifications` (explicit checks with a key-facts snapshot); nullable `review_note` and `applied_at` on `resource_changes`; additive. In 0.7.0 |
+| 0167      | Registry robot rechecks: `services.robot_checked_at`, `robot_check_result`, `robot_failures` and `robot_first_failure_at`, and a `registry_rechecks` history table; separate from every editor verification field. In 0.7.1 |
+| 0168      | Registry change quote: the source page's own sentence on a proposed change. In 0.7.1 |
 
 ## Manual investigative page watches
 

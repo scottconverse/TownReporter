@@ -8,7 +8,7 @@ The 27 PNGs in this folder were captured on 2026-11-18 from commit 9d6a5c7e (ori
 - Desk shots use the dark desk theme. Public shots use the paper's default reader theme.
 - There is no 03 file. The numbering skips it.
 
-**Retaken 2026-11-24:** 18, 20, 29 and 30 show the redesigned Community resources page (PR 435, commit f2f84b3a). They were captured on a throwaway in-memory instance with 12 made-up Testerville services, signed out, in the paper's default light theme. 29 and 30 are new. The other 25 images are from the 2026-11-18 capture. The page's category chips, the 911, 988 and 2-1-1 row and the cards are on the live paper now and are in the next release, after 0.7.0.
+**Retaken 2026-11-24:** 18, 20, 29 and 30 show the redesigned Community resources page (PR 435, commit f2f84b3a). They were captured on a throwaway in-memory instance with 12 made-up Testerville services, signed out, in the paper's default light theme. 29 and 30 are new. The other 25 images are from the 2026-11-18 capture. The page's category chips, the 911, 988 and 2-1-1 row and the cards are in 0.7.1.
 
 ## Hidden on purpose
 

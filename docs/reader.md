@@ -1,6 +1,6 @@
 # Reading TownReporter
 
-For TownReporter 0.7.0. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
+For TownReporter 0.7.1. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
 ![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
@@ -67,7 +67,7 @@ The **Save** button beside any story adds it to **Saved**. It reads **Saved** on
 
 **Community resources** is in the top menu on desktop and mobile, and in one line on the front page. The footer link stays. It opens `/registry`.
 
-The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are in 0.7.0. The card layout described next is on the live paper now and is in the next release, after 0.7.0.
+The search and filters, the page for each service, the **Something wrong here?** link, the per-place phone and hours, and the check lines below are in 0.7.0. The card layout described next is in 0.7.1.
 
 The page is titled **Where to get help**. It uses the full width of the screen. At the top, a row gives **911**, **988** and **2-1-1**. On a phone, each one is a button that starts the call. The page lists only published entries, as cards.
 
