@@ -26,6 +26,7 @@ bash docs/diagrams/render.sh
 | Diagram | Rendered | Source | What it shows |
 | --- | --- | --- | --- |
 | Pipeline: source to printed page | [pipeline-source-to-page.svg](pipeline-source-to-page.svg) | [.mmd](pipeline-source-to-page.mmd) | Watch list to lead to draft to editor to paper — the red box is the only way to print |
+| How a lead gets its score | [lead-score.svg](lead-score.svg) | [.mmd](lead-score.mmd) | Four parts from 1 to 5 added into newsworthiness (4 to 20), the plain-number fallback, and the Queue colors |
 | A job, end to end | [job-end-to-end.svg](job-end-to-end.svg) | [.mmd](job-end-to-end.mmd) | Resolve the model, queue in a lane, claim, heartbeat, work, fail over, finish with a receipt |
 | Choosing a provider at call time | [provider-at-call-time.svg](provider-at-call-time.svg) | [.mmd](provider-at-call-time.mmd) | The Automatic ladder (DeepSeek, Local model, Codex Sol 6.1, Claude Sonnet 5.5), named picks, technical failover, terminal refusal, the run receipt |
 | Dark Desk, one round | [dark-desk-one-round.svg](dark-desk-one-round.svg) | [.mmd](dark-desk-one-round.mmd) | Competing hypotheses, the whole tape, trails that reopen |
@@ -48,8 +49,8 @@ Full write-up: [scan-architecture.md](scan-architecture.md)
 
 ## Rendering notes
 
-`render.sh` expects exactly **thirteen** Mermaid blocks in `docs/manual.md`, in
-this order: system-context, pipeline-source-to-page, job-end-to-end,
+`render.sh` expects exactly **fourteen** Mermaid blocks in `docs/manual.md`, in
+this order: system-context, pipeline-source-to-page, lead-score, job-end-to-end,
 dark-desk-one-round, opinion-voice-handoff, keeping-it-online, data-model,
 provider-at-call-time, meeting-to-story, routine-edition-flow,
 meaning-search-index, promote-and-rollback,

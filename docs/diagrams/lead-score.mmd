@@ -1,0 +1,7 @@
+flowchart LR
+    M["Scan, or Research and score it<br/>(model reply)"] --> V{"Four valid parts?<br/>each an integer 1-5"}
+    V -->|yes| S["Desk adds them<br/>immediacy + impact + conflict + novelty"]
+    S --> N["leads.newsworthiness 4-20<br/>leads.score_parts: parts + reasons"]
+    V -->|no| F["Plain 0-20 number<br/>score_parts stays empty"]
+    F --> N
+    N --> Q["Queue: sort, warm at 10, hot at 14<br/>tooltip: Newsworthiness N/20 + parts"]
