@@ -48,7 +48,7 @@ export function useReader() { return { saved: [], ready: true }; }
 `);
 
 const sharedUrl = stubUrl(`
-export const APP_VERSION = "0.7.0";
+export const APP_VERSION = "0.0.0-test";
 export function usePaper() {
   return { name: "The Longmont Paper", city: "Longmont", state: "Colorado", location: "Longmont, Colorado" };
 }

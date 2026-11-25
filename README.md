@@ -294,7 +294,7 @@ flowchart LR
 - **Evidence.** Captured records are content-hashed; transcripts are immutable revisions; the meaning index is a table of vectors with no text.
 - **Operations.** PowerShell scripts in `ops/` for backup, promote, staging, the watchdog and the control page; a Cloudflare Tunnel can front the app.
 
-The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The sixteen diagrams are listed [below](#architecture-diagrams).
+The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The seventeen diagrams are listed [below](#architecture-diagrams).
 
 ### All documents and manuals
 
@@ -597,7 +597,7 @@ Dark Desk walks the same Automatic ladder as stories and scans (DeepSeek v4.1 Fl
 
 ## Architecture diagrams
 
-Sixteen rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
+Seventeen rendered diagrams, each with its Mermaid source beside it. The index is [docs/diagrams/README.md](docs/diagrams/README.md); the write-ups are [docs/manual.md](docs/manual.md) Part 5 and [docs/diagrams/scan-architecture.md](docs/diagrams/scan-architecture.md). Two are drawn above.
 
 | Diagram | Rendered | Source | What it shows |
 | --- | --- | --- | --- |
@@ -606,6 +606,7 @@ Sixteen rendered diagrams, each with its Mermaid source beside it. The index is 
 | Keeping it online | [keeping-it-online.svg](docs/diagrams/keeping-it-online.svg) | [.mmd](docs/diagrams/keeping-it-online.mmd) | Tunnel, watchdog, and what keeps a deployment answering |
 | Pipeline: source to printed page | [pipeline-source-to-page.svg](docs/diagrams/pipeline-source-to-page.svg) | [.mmd](docs/diagrams/pipeline-source-to-page.mmd) | Watch list to lead to draft to editor to paper; the red box is the only way to print |
 | How a meeting becomes a story | [meeting-to-story.svg](docs/diagrams/meeting-to-story.svg) | [.mmd](docs/diagrams/meeting-to-story.mmd) | A recording to a lead to a bounded draft to the publication gate, shown above |
+| How a lead gets its score | [lead-score.svg](docs/diagrams/lead-score.svg) | [.mmd](docs/diagrams/lead-score.mmd) | Four parts from 1 to 5 added into newsworthiness (4 to 20), and the Queue colors |
 | A job, end to end | [job-end-to-end.svg](docs/diagrams/job-end-to-end.svg) | [.mmd](docs/diagrams/job-end-to-end.mmd) | Lease, claim, work, checkpoint, finish |
 | Choosing a provider at call time | [provider-at-call-time.svg](docs/diagrams/provider-at-call-time.svg) | [.mmd](docs/diagrams/provider-at-call-time.mmd) | First choice, technical failover, terminal refusal |
 | Dark Desk, one round | [dark-desk-one-round.svg](docs/diagrams/dark-desk-one-round.svg) | [.mmd](docs/diagrams/dark-desk-one-round.mmd) | Competing hypotheses, the whole tape, trails that reopen |
