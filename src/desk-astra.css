@@ -4315,6 +4315,14 @@
   align-items: center;
   gap: 8px;
   min-height: 44px;
+  /*
+    UI1b-8: the label takes the press, so the label is the control. The native
+    checkbox is drawn by the browser (its computed edge is `0px none`), so the
+    row needs the desk's Quiet box -- the same 1px `--fg2` edge `.choice-row`
+    and `.astra-check` take -- or the whole "Select all shown" reads as text.
+  */
+  padding: 4px 10px;
+  border: 1px solid var(--fg2);
   cursor: pointer;
 }
 .desk-ltr.astra .drafts-bulk-all > input {
@@ -9445,8 +9453,14 @@
   display: block;
   width: 100%;
   max-width: none;
-  padding: 0;
-  border: 0;
+  /*
+    UI1b: a summary is a control -- it opens and closes the section -- so it
+    wears the desk's Quiet box (1px `--fg2`, the 3:1 edge) like every other
+    disclosure. Full width stays (the complaint this replaced was headings of
+    different widths); only the rule under it becomes a real edge.
+  */
+  padding: 6px 10px;
+  border: 1px solid var(--fg2);
   list-style: none;
   cursor: pointer;
 }
@@ -9498,7 +9512,8 @@
 .desk-ltr.astra .registry-filter-select {
   min-height: 44px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  /* UI1b: the border is what says "this opens"; `--line` is under 3:1. */
+  border: 1px solid var(--fg2);
   background: var(--surface);
   color: var(--fg);
   font: inherit;
@@ -9607,7 +9622,10 @@
 .desk-ltr.astra .registry-freshness a {
   display: block;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  /* UI1b: each card is a link a press goes somewhere with, and its edge is
+     what says so. `--line` is a hairline rule (under 3:1); `--fg2` is the
+     Quiet box's 3:1 edge, the same one `.choice-row` takes. */
+  border: 1px solid var(--fg2);
   background: var(--surface);
   font-size: calc(0.875rem * var(--ts));
   text-decoration: none;

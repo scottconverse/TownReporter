@@ -427,7 +427,7 @@ function OpinionPage() {
         </ul>
       </div>
     ) : ready.data && !ready.data.voiceReady ? (
-      <div role="status" className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-ink">
+      <p role="status" className="m-0 border border-rule bg-paper-2 px-3 py-2.5 text-sm text-ink">
         The paper's editorial voice has not been saved.{" "}
         {deskIdentity.data?.role === "owner" ? (
           <a className="inline-link" href="#paper-editorial-voice">Paper's editorial voice</a>
@@ -435,7 +435,7 @@ function OpinionPage() {
           <span>Ask the owner to set the paper's voice on this screen.</span>
         )}
         {" "}You can also choose Write anyway to use a neutral house voice.
-      </div>
+      </p>
     ) : null;
 
   return (

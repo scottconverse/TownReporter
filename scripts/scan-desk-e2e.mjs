@@ -591,15 +591,16 @@ async function draftBatchJourney() {
   batch = await openBatchDialog(5);
   await batch.getByText("5 selected").waitFor();
   await batch.getByRole("button", { name: /^Add suggested focus \(0\)/ }).waitFor();
-  // ...and a sixth selected lead no longer disables the press that opens the
-  // batch: the batch asks for the editor's approval instead of standing down.
+  // A sixth selected lead no longer disables the press that opens the batch:
+  // there is no size cap any more (d6a9ec67 removed the 1-to-5 warning and the
+  // "larger batch asks for your approval" line), so six opens the same dialog
+  // with all six named.
   await closeBatchDialog(batch);
   await rowChoice(extras[3]).check();
   await bulkStrip.getByText("6 selected", { exact: true }).waitFor();
   await expect(startPress(6)).toBeEnabled();
   batch = await openBatchDialog(6);
   await batch.getByText("6 selected").waitFor();
-  await batch.getByText(/a larger batch asks for your approval/).waitFor();
   await closeBatchDialog(batch);
   for (const headline of extras) {
     await rowChoice(headline).uncheck();

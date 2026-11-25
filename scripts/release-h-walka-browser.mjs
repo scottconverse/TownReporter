@@ -171,12 +171,16 @@ async function main() {
             .getByRole("button", { name: "Kill", exact: true })
             .click();
           /*
-            G27-KILL-3 (owner, Oct 27 2026): a bulk Kill kills at once, with no
-            reason question or second confirmation. D2-a's drafted warning is
-            settled inside that press (settleBulkKill, queue-bulk.ts), so what is
-            left to prove is the outcome: the lead is killed and its Undo brings
-            the draft back.
+            TMA-2 (ae6ff2a7) is still the app: a bulk Kill asks once for one
+            optional reason, one lead included ("Kill 1 lead?" / "Yes, kill 1"),
+            before anything is killed. The press that removed this step on
+            Oct 30 (97e8ec6e) was wrong -- bulkKillNeedsConfirm still returns
+            true for every count -- so the walk presses the confirm again.
+            D2-a's drafted warning is settled inside that confirm
+            (settleBulkKill, queue-bulk.ts), so what is left to prove is the
+            outcome: the lead is killed and its Undo brings the draft back.
           */
+          await page.getByRole("button", { name: "Yes, kill 1", exact: true }).click();
           for (let i = 0; i < 60; i++) {
             if ((await sql.query("select status from leads where id=$1", [id]))[0].status === "killed")
               break;
