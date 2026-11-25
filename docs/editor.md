@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current software version: [0.7.1](releases/0.7.1.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
+**Current software version: [0.8.0](releases/0.8.0.md).** This guide is for a running newsroom with an editor account, in the order you use it. The release guide separates source, package metadata, GitHub publication, deployment and provider-run evidence. Operators should start at [setup](setup.md). The whole system, including how it is built, is the [manual](manual.md); [Part 2](manual.md#part-2--the-desk-screen-by-screen) is the screen-by-screen tour of the same desk. A one-page version is [editor-desk.md](editor-desk.md). The contract for the Dark Desk screen is [dark-desk-editor.md](dark-desk-editor.md), and its doctrine is [dark-desk.md](dark-desk.md).
 
 The screenshots in this guide were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are new in 0.7.0. If a label ever differs from a picture, the words in the text and on screen are right.
 
@@ -16,7 +16,7 @@ The screenshots in this guide were taken on November 18, 2026 from a test copy o
 
 The **paper** (`/`) is what the public reads: published stories, About, How we report, Corrections, RSS. Ordinary reporting reaches it through your review and publication; approved sources can produce automatic roundups of routine notices through fixed templates.
 
-The **desk** (`/desk`) is the newsroom: Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Models, Server and Stats. Sign-in required.
+The **desk** (`/desk`) is the newsroom: Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Registry, Models, Server and Stats. Sign-in required.
 
 ![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 
@@ -93,7 +93,7 @@ Every desk screen has the same frame: a navigation column on the left and the wo
 
 ### The navigation
 
-Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), the **Running** box when something is running, then eleven links:
+Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), the **Running** box when something is running, then twelve links:
 
 | Link | What it is | Number beside it |
 |---|---|---|
@@ -105,6 +105,7 @@ Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), 
 | **Follow-ups** | AI agents watching for answers | Active follow-ups |
 | **Dark Desk** | Open-ended investigations | Files on the desk |
 | **Sources & scan** | The watch list and the scan | none |
+| **Registry** | The community directory | none |
 | **Models** | Which AI does which job | none |
 | **Server** | Owner settings and health | none |
 | **Stats** | Anonymous reader counts | none |
@@ -385,7 +386,7 @@ Tick rows to open the bulk bar: “N selected”, **Model for these stories**, *
 
 ![The Queue with four leads ticked: the bulk bar shows 4 selected, the model and thinking effort pickers, Start 4 stories, Hold, Kill, Delete selected (4) and Clear](images/26-queue-start-n.png)
 
-- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in 0.7.0.)
+- **Start N stories** opens **Draft the selected leads**. Any number of leads can be drafted in one batch. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in 0.7.0.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.

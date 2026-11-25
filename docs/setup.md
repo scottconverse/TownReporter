@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.7.1](releases/README.md)** (released 2026-11-24, tag `v0.7.1`; the release assets are `TownReporter-0.7.1-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.8.0](releases/README.md)** (released 2026-11-25, tag `v0.8.0`; the release assets are `TownReporter-0.8.0-windows-x64.zip` with its `.zip.json` and `.zip.sha256`). See the release guides for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 

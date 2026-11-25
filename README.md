@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.7.1](docs/releases/0.7.1.md)** (2026-11-24). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.1) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.8.0](docs/releases/0.8.0.md)** (2026-11-25). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,15 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.7.1
+## What is new in 0.8.0
+
+1 change since 0.7.1 (#438). The long list is in the [changelog](CHANGELOG.md#080--2026-11-25) and the [release guide](docs/releases/0.8.0.md).
+
+- **Desk buttons look like buttons.** The Registry section headers, the Registry filter menu and freshness cards, and the Drafts **Select all shown** box now draw a visible edge (#438).
+- **The Opinion page notice is a paragraph.** Its link reads as prose, not as a lone control (#438).
+- **Four nightly browser tests were brought up to date** with the app: Undo after Kill, the batch-drafting dialog, a registry entry page, and the clickable check (#438).
+
+## What was new in 0.7.1
 
 18 changes since 0.7.0 (#420 to #437): 17 code changes and 1 documentation change. The long list is in the [changelog](CHANGELOG.md#071--2026-11-24) and the [release guide](docs/releases/0.7.1.md).
 
@@ -268,7 +276,7 @@ TownReporter is one Node 22 web application (TanStack Start on Vite) with a Post
 
 - **Front end.** The public paper and the desk are React routes in `src/routes`. The paper is self-contained: fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to an outside host.
 - **Server functions.** Every desk and Dark Desk mutation runs through `deskMiddleware`, which resolves the signed-in user and requires owner or editor membership.
-- **Database.** Migrations in `migrations/` (0001 to 0166); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
+- **Database.** Migrations in `migrations/` (0001 to 0168); the server answers 503 until the database matches them. Without `DATABASE_URL` it runs on an embedded database that is lost when the process stops.
 - **Lead scores.** The model rates each lead 1 to 5 on four parts. The desk adds them (`src/lib/news/lead-score.ts`). `leads.newsworthiness` keeps the 4-20 total and `leads.score_parts` keeps the parts and reasons:
 
 ```mermaid
@@ -286,7 +294,7 @@ flowchart LR
 - **Evidence.** Captured records are content-hashed; transcripts are immutable revisions; the meaning index is a table of vectors with no text.
 - **Operations.** PowerShell scripts in `ops/` for backup, promote, staging, the watchdog and the control page; a Cloudflare Tunnel can front the app.
 
-The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The fifteen diagrams are listed [below](#architecture-diagrams).
+The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 4 to 6. The sixteen diagrams are listed [below](#architecture-diagrams).
 
 ### All documents and manuals
 
@@ -315,7 +323,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.7.1](docs/releases/0.7.1.md)             |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.8.0](docs/releases/0.8.0.md)             |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -329,9 +337,9 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.7.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.1) carries three files: `TownReporter-0.7.1-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.8.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0) carries three files: `TownReporter-0.8.0-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
-CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.7.1, and no fresh-machine human acceptance of it is claimed here.
+CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.8.0, and no fresh-machine human acceptance of it is claimed here.
 
 Follow the [Windows installation guide](docs/windows-install.md) for setup, start and stop, private data and troubleshooting. Public hosting and AI provider setup are separate from local installation.
 
@@ -616,7 +624,8 @@ Sixteen rendered diagrams, each with its Mermaid source beside it. The index is 
 
 ## Recent releases
 
-- **[0.7.1](docs/releases/0.7.1.md)** (2026-11-24), the current version. The community registry grows and publishes by itself and rechecks its entries nightly (migrations 0167 and 0168), the public Community resources page is redesigned as cards, and the Queue and desk get fixes from the Nov 19 walk. New: **Capture with Firecrawl Local** and **Send to Desk** for Reddit posts.
+- **[0.8.0](docs/releases/0.8.0.md)** (2026-11-25), the current version. The desk's Registry and Drafts buttons and the Registry filter menu draw a visible edge, the Opinion page notice is a paragraph so its link reads as prose, and four nightly browser tests match the app (no migration).
+- **[0.7.1](docs/releases/0.7.1.md)** (2026-11-24). The community registry grows and publishes by itself and rechecks its entries nightly (migrations 0167 and 0168), the public Community resources page is redesigned as cards, and the Queue and desk get fixes from the Nov 19 walk. New: **Capture with Firecrawl Local** and **Send to Desk** for Reddit posts.
 - **[0.7.0](docs/releases/0.7.0.md)** (2026-11-19). Community resources reach their fourth phase (public search, a page for each service, a read-only JSON API, directory import, review and verification), leads that score 14 or more are drafted automatically, and Drafts has tick boxes with bulk publish and kill.
 - **[0.6.92](docs/releases/0.6.92.md)** (2026-11-15). The four score parts show on Today, the Queue and the story page, and Drafts has **Publish all drafts**.
 - **[0.6.91](docs/releases/0.6.91.md)** (2026-11-14). Lead scores come in four parts (immediacy, impact, conflict, novelty) that add up to the 4-20 newsworthiness, and the Queue tooltip shows them.

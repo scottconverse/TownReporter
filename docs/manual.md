@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.7.1 · publication and deployment are recorded separately**
+**Version 0.8.0 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.7.1 release guide and evidence boundaries](releases/0.7.1.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.8.0 release guide and evidence boundaries](releases/0.8.0.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshots:** The screenshots in Parts 1 and 2 were taken on November 18, 2026 from a test copy of the app (commit 9d6a5c7e) with made-up data. The town is Testerville, Wyoming and the paper is the Testerville Ledger. Some of them show screens that are new in 0.7.0. The [current desk guide](editor-desk.md) is the short written reference and the [editor’s manual](editor.md) is the long one; if a label ever differs from a picture, the words here and on screen are right.
 
@@ -41,7 +41,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 
 ## Current capabilities and remaining work
 
-**What TownReporter 0.7.1 does.**
+**What TownReporter 0.8.0 does.**
 
 - **Watches and scans.** A watch list of civic sources is read on demand or once a day. Each page is compared with the last saved copy and what changed, vanished or failed to appear becomes a lead. Sources the site refuses are tried through a real browser and the site’s public feeds. A newsletter mailbox can feed in email newsletters. The scan says how many sources it read, skipped and why.
 - **Files and sorts leads.** The Queue scores leads out of 20 (four parts, 1 to 5 each: immediacy, impact, conflict and novelty, each with a reason), spots repeats (“Came back N times”) and possible duplicates, and compares a lead with stories already in print.
@@ -61,7 +61,7 @@ The public paper is the front of the house: a front page, a searchable archive, 
 - A scan interrupted midway does not resume; run it again.
 - Local readiness is not public access. The Windows package installs no tunnel or watchdog.
 
-The [canonical queue](../TODO.md) records current work. [Release 0.7.1](releases/0.7.1.md) separates what is in the source from what is published and deployed.
+The [canonical queue](../TODO.md) records current work. [Release 0.8.0](releases/0.8.0.md) separates what is in the source from what is published and deployed.
 
 ## Newspaper sections
 
@@ -72,7 +72,7 @@ The owner manages sections on **Server → Sections** (the **Newspaper sections*
 |                        | What it is                                                                              | Who sees it       |
 | ---------------------- | --------------------------------------------------------------------------------------- | ----------------- |
 | **The paper** (`/`)    | Stories and editorials, plus routine notice roundups from approved sources, with sources shown | Anyone            |
-| **The desk** (`/desk`) | Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Models, Server, Stats | Signed-in editors |
+| **The desk** (`/desk`) | Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan, Registry, Models, Server, Stats | Signed-in editors |
 
 There is no automated path to the masthead for ordinary reporting. A machine can find a lead, fetch the document, write a draft and tell you what it thinks; a person reads it and presses Publish. Approved routine sources use a separate fixed-template path.
 
@@ -128,7 +128,7 @@ You are responsible for everything that appears on the paper.
 
 # Part 2 — The desk, screen by screen
 
-This is the tour of every screen an editor can use at 0.7.1, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken on November 18, 2026 from a test copy of the app with made-up data. If a label ever differs from a picture, the words here and on screen are right.
+This is the tour of every screen an editor can use at 0.8.0, with what to click and the exact words on the buttons. The [editor’s manual](editor.md) arranges the same ground as a working day. The screenshots were taken on November 18, 2026 from a test copy of the app with made-up data. If a label ever differs from a picture, the words here and on screen are right.
 
 The steps are written for any signed-in editor. Where only the owner can do something, the text says so.
 
@@ -181,7 +181,7 @@ Every desk screen has the same frame: a navigation column on the left and the wo
 
 ### The navigation
 
-Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), the **Running** box when something is running, then eleven links:
+Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), the **Running** box when something is running, then twelve links:
 
 | Link | What it is | Number beside it |
 |---|---|---|
@@ -193,6 +193,7 @@ Top to bottom: **TownReporter / Editor’s desk** (a link to the public paper), 
 | **Follow-ups** | AI agents watching for answers | Active follow-ups |
 | **Dark Desk** | Open-ended investigations | Files on the desk |
 | **Sources & scan** | The watch list and the scan | none |
+| **Registry** | The community directory | none |
 | **Models** | Which AI does which job | none |
 | **Server** | Owner settings and health | none |
 | **Stats** | Anonymous reader counts | none |
@@ -437,7 +438,7 @@ Tick rows to open the bulk bar: “N selected”, **Model for these stories**, *
 
 ![The Queue with four leads ticked: the bulk bar shows 4 selected, the model and thinking effort pickers, Start 4 stories, Hold, Kill, Delete selected (4) and Clear](images/26-queue-start-n.png)
 
-- **Start N stories** opens **Draft the selected leads**. A usual batch is one to five leads. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. A bigger batch, or a held, killed or published lead, warns first and offers **Draft this batch anyway**. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in 0.7.0.)
+- **Start N stories** opens **Draft the selected leads**. Any number of leads can be drafted in one batch. Pick a model (Automatic is allowed). **Suggested focus size** (3 to 5) and **Add suggested focus (N)** add a balanced set of the best open leads without replacing the ones you ticked. Each lead keeps its own research scope. After you start, the dialog shows the latest batch: each lead’s status and a link to its story, and **Redraft with <model>** when it finishes. **Dismiss** puts a finished batch away. **Start N stories** drafts every ticked lead, including one that the list on screen no longer shows. When some ticked leads are off screen, the bar says **N more ticked leads are not in the list on screen now. Start still drafts them.** **Hold**, **Kill** and **Delete selected (N)** still act only on the rows on screen. (The off-screen note is in 0.7.0.)
 - **Kill** on several leads kills at once. It does not ask **Why?** and shows one strip, **Killed N leads.**, with **Undo**.
 - **Delete selected** asks first and lists each lead.
 - A strip may offer **Hold all anyway** or **Kill all anyway** when some selected leads have drafts or published stories.
@@ -1004,10 +1005,10 @@ the machine underneath.
 
 Each release publishes `TownReporter-<version>-windows-x64.zip`, its
 `.zip.json` metadata and its `.zip.sha256` sidecar (built by CI with
-`scripts/package-windows.mjs`). For 0.7.1 that is
-`TownReporter-0.7.1-windows-x64.zip`. `Setup.exe` is built by the separate
+`scripts/package-windows.mjs`). For 0.8.0 that is
+`TownReporter-0.8.0-windows-x64.zip`. `Setup.exe` is built by the separate
 "Windows packaged installation" CI workflow into its `windows-setup` Actions
-artifact; use a release's Setup.exe only if that release lists one. The 0.7.1
+artifact; use a release's Setup.exe only if that release lists one. The 0.8.0
 release lists the ZIP, `.zip.json` and `.zip.sha256`.
 
 ## What you need
@@ -1124,8 +1125,8 @@ process stops** — fine for a look, not for a newsroom.
 DATABASE_URL=postgres://user:pass@host:5432/townreporter
 ```
 
-Migrations are numbered `.sql` files in `migrations/` (153 files, the newest
-`0158_story_meaning_vectors.sql`). `scripts/migrate.mjs` applies each pending
+Migrations are numbered `.sql` files in `migrations/` (160 files, the newest
+`0168_registry_change_quote.sql`). `scripts/migrate.mjs` applies each pending
 file in one transaction and records it in the `_migrations` table. It runs at
 the end of `npm run build`, before `npm run dev`, and alone as `npm run
 db:migrate`. PGLite applies the same files itself at start-up.
@@ -1609,7 +1610,7 @@ older release current.
 | `src/lib/db.ts`         | The SQL handle, `ensureSchemaOnce`, transactions, the PGLite fallback                                                               |
 | `server/middleware/`    | Nitro middleware: schema ledger check, canonical host, security headers, head chrome                                                |
 | `server/plugins/`       | Boot work: auth-secret check, setup code, schema warm-up, the unattended clock                                                      |
-| `migrations/`           | The numbered `.sql` schema (153 files); `migrations/auth/` is an opt-in auth schema that the runner does not read                  |
+| `migrations/`           | The numbered `.sql` schema (160 files); `migrations/auth/` is an opt-in auth schema that the runner does not read                  |
 | `scripts/`              | Build helpers, `migrate.mjs`, `package-windows.mjs`, browser walks, tests of the tooling                                            |
 | `ops/`                  | The legacy Windows installation's scripts: watchdog, promote, stage, backup, Control page                                           |
 | `installer/`            | The Windows package: `Install.ps1`, `Start.ps1`, `Stop.ps1`, `Health.ps1`, `Configure-AI.ps1`, `dependencies.json`, `windows-setup/` |
