@@ -1,6 +1,6 @@
 # Reading TownReporter
 
-For TownReporter 0.7.1. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
+For TownReporter 0.8.0. This guide is for readers of the public paper. You need no account, no app and no cookie banner. The paper uses its own name, town and sections, which its owner sets.
 
 ![The Testerville Ledger front page: a section menu, the lead story, two more stories, a top-stories list and the Community resources banner](images/01-front-page.png)
 

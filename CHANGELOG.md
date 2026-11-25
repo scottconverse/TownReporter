@@ -1,8 +1,18 @@
 # Changelog
 
-Current software version: **0.7.1** (released 2026-11-24). Publication state is recorded by GitHub: [release v0.7.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.7.1).
+Current software version: **0.8.0** (released 2026-11-25). Publication state is recorded by GitHub: [release v0.8.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0).
 
 ## Unreleased
+
+## 0.8.0 — 2026-11-25
+
+This release covers 1 change after 0.7.1 (#438). The release guide is [docs/releases/0.8.0.md](docs/releases/0.8.0.md). The number after a change is the pull request that made it.
+
+### Desk
+
+- **The desk's registry and drafts controls look like controls.** The Registry section headers, the Registry category and language menu and the four freshness cards now draw a visible edge instead of a hairline rule, and the Drafts **Select all shown** label draws the same edge around its box, with a little padding (#438).
+- **The Opinion page notice is a paragraph.** The line that says the paper's editorial voice has not been saved is now a paragraph, so its **Paper's editorial voice** link is read as prose. The words did not change (#438).
+- **Four nightly browser tests match the app.** The 0.5.1 walk presses the bulk Kill confirm again; the scan desk walk no longer waits for a batch-size warning that was removed; the every-route walk opens a published registry entry instead of an unknown id that answers 404 on purpose; and the clickable guard found the missing edges fixed above. Two tests were stale, one used a made-up id, and one found a real app fault (#438).
 
 ## 0.7.1 — 2026-11-24
 
