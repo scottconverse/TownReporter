@@ -728,7 +728,37 @@ async function seed(pg, userId) {
 
   await seedJobStates(pg, userId, { leadId, leadId2, leadId3 });
 
-  return { leadId, leadId2, leadId3, draftId, ordinanceId, studyId };
+  /*
+    One published community resource, so `/registry/$id` is visited at a real
+    entry instead of the literal `$id`. The detail route answers 404 for an
+    unknown id ON PURPOSE (registry_.$id.tsx), so asking it for `$id` was the
+    walk calling a deliberate 404 a failure. Everything read by
+    getPublicRegistryService needs only a published, active organization and
+    service.
+  */
+  const registryOrg = await q(
+    `insert into organizations (newsroom_id, hsds_id, directory_name, name, status, published)
+     values (1, 'walk-org-1', 'walk', 'Walk Community Center', 'active', true)
+     returning id`,
+  );
+  const registryService = await q(
+    `insert into services (newsroom_id, hsds_id, directory_name, organization_id, name,
+                           description, status, published)
+     values (1, 'walk-service-1', 'walk', $1, 'Walk Community Center food pantry',
+             'A pantry the walk seeds so the public entry has a real address.', 'active', true)
+     returning id`,
+    [registryOrg.rows[0].id],
+  );
+
+  return {
+    leadId,
+    leadId2,
+    leadId3,
+    draftId,
+    ordinanceId,
+    studyId,
+    registryServiceId: registryService.rows[0].id,
+  };
 }
 
 /* ─────────────────────────────── the routes ─────────────────────────────── */
@@ -798,6 +828,7 @@ function routeAddress(route, seeded) {
     "/desk/story/draft/$draftId": `/desk/story/draft/${seeded.draftId}`,
     "/desk/transcript/$artifactId": `/desk/transcript/1`,
     "/desk/ops/$card": "/desk/ops/health",
+    "/registry/$id": `/registry/${seeded.registryServiceId}`,
   };
   return map[route.path] ?? route.path;
 }
