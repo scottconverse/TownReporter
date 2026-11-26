@@ -12,6 +12,7 @@ import { PaperProvider } from "@/lib/paper-context";
 import { getPaperConfigForEditor, type PaperConfig } from "@/lib/news/paper-settings";
 import { countDraftsDesk } from "@/lib/news/desk";
 import { holdsFirstPaint } from "@/lib/desk/first-paint";
+import { installDeskTextareaGrow } from "@/lib/desk/textarea-grow";
 
 export const Route = createFileRoute("/desk")({
   component: DeskGate,
@@ -87,6 +88,14 @@ function editorPaperIdentity(config: PaperConfig): PaperIdentity {
   which theme is on.
 */
 function DeskGate() {
+  /*
+    Every desk text box grows to fit its text. The CSS does it in every
+    browser that can (src/desk-astra.css); this installs the one small
+    fallback for the ones that cannot, once for the whole desk. It listens on
+    the document, so dialog portals are covered too. It does nothing where the
+    CSS path works.
+  */
+  useEffect(() => installDeskTextareaGrow(document), []);
   const { user, isPending } = useCurrentUserState();
   /*
     The sign-in remedy waits a beat before it appears.

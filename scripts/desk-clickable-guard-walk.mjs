@@ -102,10 +102,14 @@ import {
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** This walk's own listen port; see scripts/integration-ports-are-unique.test.mjs. */
-const PORT_GUARD_DESK = 3595;
+/**
+ * This walk's own listen port; see scripts/integration-ports-are-unique.test.mjs.
+ * The environment overrides exist for a local run from a shared machine, where
+ * another agent may already own 3595. CI sets neither, so the defaults stand.
+ */
+const PORT_GUARD_DESK = Number(process.env.GUARD_PORT || 3595);
 /** The address a model would be reached on. NOTHING listens here. */
-const PORT_GUARD_NO_MODEL = 3596;
+const PORT_GUARD_NO_MODEL = Number(process.env.GUARD_NO_MODEL_PORT || 3596);
 
 const base = checkedUrl(`http://127.0.0.1:${PORT_GUARD_DESK}`);
 
