@@ -161,7 +161,6 @@ export function FollowUpDialog({
           <span>What to find out</span>
           <textarea
             className="fu-input"
-            style={{ minHeight: 60 }}
             maxLength={WHAT_MAX}
             placeholder="e.g. Which Oct. 8 meeting was cancelled?"
             value={what}
@@ -182,7 +181,6 @@ export function FollowUpDialog({
           </span>
           <textarea
             className="fu-input"
-            style={{ minHeight: 60 }}
             placeholder={
               targetsRequired
                 ? "http:// or https:// links, one per line"

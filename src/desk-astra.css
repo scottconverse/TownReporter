@@ -793,7 +793,8 @@
   overflow-y: auto;
 }
 /* Frames that differ from the field rule above. Same box, same words. */
-.desk-ltr .fu-input {
+.desk-ltr .fu-input,
+.desk-ltr.astra-modal-layer .fu-input {
   --desk-ta-frame: 22px; /* 10px padding + 1px border */
 }
 .desk-ltr .astra-field textarea {
