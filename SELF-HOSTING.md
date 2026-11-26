@@ -1,8 +1,8 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.8.0**
+Repository documentation version: **0.8.1**
 
-Release baseline: **0.8.0**, released 2026-11-25 (tag `v0.8.0`). The live paper runs 0.7.1, deployed 2026-11-24 at about 9:43 PM Mountain. The one code change after that release (PR #438) gives the desk's Registry and Drafts controls a visible edge and updates four nightly browser tests. The 0.8.0 release adds the version number and its documents on top of that change; it reaches the live paper at the next deploy. The release assets are `TownReporter-0.8.0-windows-x64.zip`, its `.zip.json` metadata and its `.zip.sha256` sidecar. See the [release guides](docs/releases/README.md) for each release's recorded source and package evidence. Publication does not establish production deployment.
+Release baseline: **0.8.1**, released 2026-11-26 (tag `v0.8.1`). The live paper runs 0.7.1, deployed 2026-11-24 at about 9:43 PM Mountain. The two changes after 0.8.0 are PR #441 (every desk text box grows to fit its text) and PR #440 (the lead-score drawing is in `render.sh` and the diagram lists). The 0.8.1 release adds the version number and its documents on top of those changes; it reaches the live paper at the deploy planned for 2026-11-26, and it also carries the 0.8.0 changes. The release assets are `TownReporter-0.8.1-windows-x64.zip`, its `.zip.json` metadata and its `.zip.sha256` sidecar. See the [release guides](docs/releases/README.md) for each release's recorded source and package evidence. Publication does not establish production deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 

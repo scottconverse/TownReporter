@@ -1,12 +1,20 @@
 # Changelog
 
-Current software version: **0.8.0** (released 2026-11-25). Publication state is recorded by GitHub: [release v0.8.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0).
+Current software version: **0.8.1** (released 2026-11-26). Publication state is recorded by GitHub: [release v0.8.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.1).
 
 ## Unreleased
 
+## 0.8.1 — 2026-11-26
+
+This release covers 2 changes after 0.8.0 (#440 and #441): 1 code change and 1 documentation change. The release guide is [docs/releases/0.8.1.md](docs/releases/0.8.1.md). The number after a change is the pull request that made it.
+
 ### Desk
 
-- **Every desk text box grows to fit its text.** A box now grows as text is typed, pasted or set by code, shrinks when text is removed, and never gets shorter than its `rows` height. At 70% of the window height it stops growing and scrolls inside; the drag corner stays. The story editor's headline, dek and body keep their own sizing. Browsers that cannot do it in CSS get one small fallback.
+- **Every desk text box grows to fit its text.** A box now grows as text is typed, pasted or set by code, shrinks when text is removed, and never gets shorter than its `rows` height. At 70% of the window height it stops growing and scrolls inside; the drag corner stays. The story editor's headline, dek and body keep their own sizing. Browsers that cannot do it in CSS get one small fallback (#441).
+
+### Documentation
+
+- **The lead-score drawing is in the diagram tool and the lists.** `docs/diagrams/render.sh` now names all fourteen Mermaid blocks in the manual, so a render run no longer stops with a count error. The missing drawing, "How a lead gets its score", is added as a Mermaid source and an SVG, and the diagram lists in `README.md` and `docs/diagrams/README.md` name it (#440).
 
 ## 0.8.0 — 2026-11-25
 
