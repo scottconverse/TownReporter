@@ -746,6 +746,110 @@
   width: 100%;
 }
 /*
+  EVERY DESK TEXT BOX GROWS TO FIT ITS TEXT.
+
+  Scott, 2026-11-26: a long piece pasted into Opinion's "The piece" box showed
+  a few lines and would not grow. Every desk text box does that now: it grows
+  as text is typed, pasted or set by code, shrinks when text is removed, and
+  never gets shorter than its `rows` height -- the size it has today when
+  empty. At 70% of the window height it stops growing and scrolls inside. The
+  drag corner stays (`resize: vertical`, above).
+
+  The floor is `rows` x one line (`1lh`) plus the box's own padding and
+  border, which `--desk-ta-frame` names. The field rule above is 11px padding
+  and a 1px border, so 24px; a style that draws a different frame sets its own
+  value below. `attr(rows type(<integer>), 2)` is the HTML default when the
+  attribute is absent.
+
+  The story editor's three fields (headline, dek, body) keep their own JS in
+  desk.story.$leadId.tsx and are excluded: they have no 70vh cap.
+
+  `field-sizing` is not in every browser. src/lib/desk/textarea-grow.ts holds
+  one small JS fallback, installed once from the desk layout, for browsers that
+  cannot do this in CSS.
+*/
+.desk-ltr textarea {
+  /* Padding plus border, top and bottom. */
+  --desk-ta-frame: 24px;
+}
+.desk-ltr textarea:not(.astra-headline):not(.astra-dek):not(.astra-story-body),
+/*
+  The dialog layer's own floor rule
+  (`.desk-ltr.astra-modal-layer .astra-modal :is(...)`, min-height 44px) is
+  more specific than the line above, so it took the min-height back and an
+  empty composer box drew one line. The same box, named at the dialog's own
+  specificity, keeps the floor.
+*/
+.desk-ltr.astra-modal-layer .astra-modal textarea:not(.astra-headline):not(.astra-dek):not(
+    .astra-story-body
+  ) {
+  field-sizing: content;
+  height: auto;
+  min-height: max(
+    var(--desk-ta-min, 0px),
+    calc(attr(rows type(<integer>), 2) * 1lh + var(--desk-ta-frame))
+  );
+  max-height: 70vh;
+  overflow-y: auto;
+}
+/* Frames that differ from the field rule above. Same box, same words. */
+.desk-ltr .fu-input,
+.desk-ltr.astra-modal-layer .fu-input {
+  --desk-ta-frame: 22px; /* 10px padding + 1px border */
+}
+.desk-ltr .astra-field textarea {
+  --desk-ta-frame: 18px; /* 8px padding + 1px border */
+}
+.desk-ltr .ledger-field textarea {
+  --desk-ta-frame: 14px; /* 6px padding + 1px border */
+}
+.desk-ltr .r2-correction-fields > textarea {
+  --desk-ta-frame: 22px; /* 10px padding + 1px border */
+}
+.desk-ltr .f textarea,
+.desk-ltr .corr-form textarea,
+.desk-ltr .tipbox textarea {
+  --desk-ta-frame: 16px; /* 7px padding + 1px border */
+}
+.desk-ltr :is(.story-composer, .composer-fields) textarea {
+  --desk-ta-frame: 30px; /* 14px padding + 1px border */
+}
+/* A box that is taller than its rows height today keeps that floor. */
+.desk-ltr .transcript-plaintext {
+  --desk-ta-min: 240px;
+}
+.desk-ltr .tipbox textarea {
+  --desk-ta-min: 72px;
+}
+/*
+  Boxes whose empty height today comes from an older min-height. The rule above
+  has more specificity than those min-heights, so it would draw the box shorter
+  than it is on main; each one names its old floor here instead.
+*/
+.desk-ltr .composer-pasted textarea {
+  --desk-ta-min: 160px; /* styles.css */
+}
+.desk-ltr .composer-instructions textarea {
+  --desk-ta-min: 96px; /* styles.css */
+}
+.desk-ltr textarea.min-h-24 {
+  --desk-ta-min: 96px; /* Tailwind min-h-24 */
+}
+.desk-ltr textarea.min-h-20 {
+  --desk-ta-min: 80px; /* Tailwind min-h-20 */
+}
+.desk-ltr textarea.min-h-32 {
+  --desk-ta-min: 128px; /* Tailwind min-h-32 */
+}
+/* Their frames differ from the field rule's 24px, too. */
+.desk-ltr textarea.min-h-24,
+.desk-ltr textarea.min-h-20 {
+  --desk-ta-frame: 26px; /* p-3 (12px) + 1px border */
+}
+.desk-ltr textarea.min-h-32 {
+  --desk-ta-frame: 18px; /* py-2 (8px) + 1px border */
+}
+/*
   UI1b-8: THE FILE PICKER IS A PRESS, SO IT GETS THE SAME BOX.
 
   `input[type=file]` is excluded from the field rule above (it is not a field

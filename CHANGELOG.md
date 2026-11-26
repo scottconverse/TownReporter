@@ -4,6 +4,10 @@ Current software version: **0.8.0** (released 2026-11-25). Publication state is 
 
 ## Unreleased
 
+### Desk
+
+- **Every desk text box grows to fit its text.** A box now grows as text is typed, pasted or set by code, shrinks when text is removed, and never gets shorter than its `rows` height. At 70% of the window height it stops growing and scrolls inside; the drag corner stays. The story editor's headline, dek and body keep their own sizing. Browsers that cannot do it in CSS get one small fallback.
+
 ## 0.8.0 — 2026-11-25
 
 This release covers 1 change after 0.7.1 (#438). The release guide is [docs/releases/0.8.0.md](docs/releases/0.8.0.md). The number after a change is the pull request that made it.
