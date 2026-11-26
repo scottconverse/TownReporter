@@ -772,7 +772,17 @@
   /* Padding plus border, top and bottom. */
   --desk-ta-frame: 24px;
 }
-.desk-ltr textarea:not(.astra-headline):not(.astra-dek):not(.astra-story-body) {
+.desk-ltr textarea:not(.astra-headline):not(.astra-dek):not(.astra-story-body),
+/*
+  The dialog layer's own floor rule
+  (`.desk-ltr.astra-modal-layer .astra-modal :is(...)`, min-height 44px) is
+  more specific than the line above, so it took the min-height back and an
+  empty composer box drew one line. The same box, named at the dialog's own
+  specificity, keeps the floor.
+*/
+.desk-ltr.astra-modal-layer .astra-modal textarea:not(.astra-headline):not(.astra-dek):not(
+    .astra-story-body
+  ) {
   field-sizing: content;
   height: auto;
   min-height: max(
@@ -809,6 +819,34 @@
 }
 .desk-ltr .tipbox textarea {
   --desk-ta-min: 72px;
+}
+/*
+  Boxes whose empty height today comes from an older min-height. The rule above
+  has more specificity than those min-heights, so it would draw the box shorter
+  than it is on main; each one names its old floor here instead.
+*/
+.desk-ltr .composer-pasted textarea {
+  --desk-ta-min: 160px; /* styles.css */
+}
+.desk-ltr .composer-instructions textarea {
+  --desk-ta-min: 96px; /* styles.css */
+}
+.desk-ltr textarea.min-h-24 {
+  --desk-ta-min: 96px; /* Tailwind min-h-24 */
+}
+.desk-ltr textarea.min-h-20 {
+  --desk-ta-min: 80px; /* Tailwind min-h-20 */
+}
+.desk-ltr textarea.min-h-32 {
+  --desk-ta-min: 128px; /* Tailwind min-h-32 */
+}
+/* Their frames differ from the field rule's 24px, too. */
+.desk-ltr textarea.min-h-24,
+.desk-ltr textarea.min-h-20 {
+  --desk-ta-frame: 26px; /* p-3 (12px) + 1px border */
+}
+.desk-ltr textarea.min-h-32 {
+  --desk-ta-frame: 18px; /* py-2 (8px) + 1px border */
 }
 /*
   UI1b-8: THE FILE PICKER IS A PRESS, SO IT GETS THE SAME BOX.

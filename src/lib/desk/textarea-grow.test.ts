@@ -63,6 +63,42 @@ describe("desk text box growth", () => {
     assert.equal(textareaRowsHeight(-3, 25.6, 24), textareaRowsHeight(2, 25.6, 24));
   });
 
+  it("keeps a floor taller than the rows height, empty and cleared", () => {
+    // A pasted-story box on main is 160px when empty; rows say 2 lines (75.2px).
+    const empty = textareaGrowSize({
+      ...FIELD,
+      rows: 2,
+      scrollHeightPx: 2 * 25.6 + 22,
+      minHeightPx: 160,
+    });
+    assert.ok(near(empty.heightPx, 160));
+    assert.equal(empty.capped, false);
+
+    const typed = textareaGrowSize({
+      ...FIELD,
+      rows: 2,
+      scrollHeightPx: 3 * 25.6 + 22,
+      minHeightPx: 160,
+    });
+    assert.ok(near(typed.heightPx, 160), "three lines still short of the 160px floor");
+
+    const grown = textareaGrowSize({
+      ...FIELD,
+      rows: 2,
+      scrollHeightPx: 12 * 25.6 + 22,
+      minHeightPx: 160,
+    });
+    assert.ok(near(grown.heightPx, 12 * 25.6 + 22 + 2), "grows past the floor");
+
+    const cleared = textareaGrowSize({
+      ...FIELD,
+      rows: 2,
+      scrollHeightPx: 0,
+      minHeightPx: 160,
+    });
+    assert.ok(near(cleared.heightPx, 160), "cleared back to the floor, not the rows height");
+  });
+
   it("never goes below the rows floor even in a window shorter than the box", () => {
     const size = textareaGrowSize({ ...FIELD, rows: 14, scrollHeightPx: 5_000, viewportHeightPx: 200 });
     assert.ok(near(size.heightPx, 382.4), "the floor wins over a 70vh cap of 140px");

@@ -40,6 +40,12 @@ export type TextareaGrowMeasure = {
   scrollHeightPx: number;
   /** The window's inner height. */
   viewportHeightPx: number;
+  /**
+   * A floor that is taller than the rows height, in border-box pixels, from
+   * `--desk-ta-min` or a computed `min-height` (a box the design already drew
+   * taller than its rows). Absent or 0 means the rows height alone.
+   */
+  minHeightPx?: number;
 };
 
 /** The height to give the box, and whether it hit the cap. */
@@ -62,13 +68,15 @@ export function textareaRowsHeight(rows: number, lineHeightPx: number, framePx: 
  * The height to give the box.
  *
  * `scrollHeight` is the text's own height and already includes padding, so the
- * border is added here. The result is never below the rows floor and never
- * above the cap. When 70% of the window is less than the rows floor (a very
- * short window), the floor wins: the design says a box never gets shorter than
- * its rows height.
+ * border is added here. The result is never below the floor and never above the
+ * cap. The floor is the taller of the rows height and any `min-height` the
+ * design already set (a box that is taller than its rows when empty). When 70%
+ * of the window is less than the floor (a very short window), the floor wins:
+ * the design says a box never gets shorter than it is today when empty.
  */
 export function textareaGrowSize(measure: TextareaGrowMeasure): TextareaGrowSize {
-  const floor = textareaRowsHeight(measure.rows, measure.lineHeightPx, measure.framePx);
+  const rowsFloor = textareaRowsHeight(measure.rows, measure.lineHeightPx, measure.framePx);
+  const floor = Math.max(rowsFloor, Math.max(0, measure.minHeightPx ?? 0));
   const content = Math.max(0, measure.scrollHeightPx) + Math.max(0, measure.borderPx);
   const cap = Math.max(floor, Math.max(0, measure.viewportHeightPx) * TEXTAREA_GROW_CAP);
   const wanted = Math.max(floor, content);
@@ -130,6 +138,23 @@ function resizeOne(el: HTMLTextAreaElement, win: GrowWindow): void {
 
   const rows = el.rows;
   const boxSizing = style.boxSizing;
+  /*
+    A box the design already draws taller than its rows when empty keeps that
+    height. The CSS floor rule names it `--desk-ta-min`; a browser that cannot
+    read that declaration still reports the older `min-height` here, and an
+    inline one (a dialog's `style={{ minHeight: 60 }}`) only shows up this way.
+    Take whichever is taller. Values are border-box, like the rows floor.
+  */
+  const customFloor = Number.parseFloat(style.getPropertyValue("--desk-ta-min"));
+  const computedFloor = Number.parseFloat(style.minHeight);
+  const computedFloorBorderBox =
+    Number.isFinite(computedFloor) && boxSizing === "content-box"
+      ? computedFloor + paddingPx + borderPx
+      : computedFloor;
+  const minHeightPx = Math.max(
+    Number.isFinite(customFloor) ? customFloor : 0,
+    Number.isFinite(computedFloorBorderBox) ? computedFloorBorderBox : 0,
+  );
 
   const previous = el.style.height;
   el.style.height = "auto";
@@ -143,6 +168,7 @@ function resizeOne(el: HTMLTextAreaElement, win: GrowWindow): void {
     borderPx,
     scrollHeightPx,
     viewportHeightPx: win.innerHeight,
+    minHeightPx,
   });
 
   // `style.height` is read against the box model: content-box wants the
