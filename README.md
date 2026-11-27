@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.8.0](docs/releases/0.8.0.md)** (2026-11-25). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
+**Current software version: [0.8.1](docs/releases/0.8.1.md)** (2026-11-26). The live paper is [townreporter.org](https://townreporter.org), the Longmont, Colorado edition. [Download the Windows release](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.1) · [Landing page](https://scottconverse.github.io/TownReporter/) · [Manual](docs/manual.md) · [Changelog](CHANGELOG.md)
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado: meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person. Approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices through fixed templates.
 
@@ -14,7 +14,14 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-## What is new in 0.8.0
+## What is new in 0.8.1
+
+2 changes since 0.8.0 (#440 and #441): 1 code change and 1 documentation change. The long list is in the [changelog](CHANGELOG.md#081--2026-11-26) and the [release guide](docs/releases/0.8.1.md).
+
+- **Every desk text box grows to fit its text.** It grows as you type or paste, stops at 70% of the window height and then scrolls, shrinks when text is removed, and is never shorter than its empty size. The story editor fields keep their own sizing, and the reader site does not change (#441).
+- **The lead-score drawing is in the diagram tool and the lists.** `render.sh` now names all fourteen Mermaid blocks, and the drawing is in `docs/diagrams` and the diagram lists (#440).
+
+## What was new in 0.8.0
 
 1 change since 0.7.1 (#438). The long list is in the [changelog](CHANGELOG.md#080--2026-11-25) and the [release guide](docs/releases/0.8.0.md).
 
@@ -323,7 +330,7 @@ The full write-up, with the drawings, is [docs/manual.md](docs/manual.md) Parts 
 | Security policy and how to report a vulnerability          | [SECURITY.md](SECURITY.md)                                                                      |
 | **Architecture diagrams** (rendered SVG + Mermaid source)  | [docs/diagrams/README.md](docs/diagrams/README.md) · [scan architecture](docs/diagrams/scan-architecture.md) |
 | Screenshots and how they were taken                        | [docs/images/README.md](docs/images/README.md)                                                  |
-| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.8.0](docs/releases/0.8.0.md)             |
+| Release history and per-version guides                     | [docs/releases/README.md](docs/releases/README.md) · [0.8.1](docs/releases/0.8.1.md)             |
 | Every change, line by line                                 | [CHANGELOG.md](CHANGELOG.md)                                                                    |
 | Third-party licenses                                       | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [LICENSE](LICENSE)                           |
 | Landing page                                               | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -337,9 +344,9 @@ GitHub Pages is the landing page, not the newsroom. It is served from `main` / `
 
 ## Install on Windows
 
-The release at [github.com/scottconverse/TownReporter/releases/tag/v0.8.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.0) carries three files: `TownReporter-0.8.0-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
+The release at [github.com/scottconverse/TownReporter/releases/tag/v0.8.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.8.1) carries three files: `TownReporter-0.8.1-windows-x64.zip`, its `.zip.json` (the exact source commit) and its `.zip.sha256` (the hash). Download the ZIP, not the "Source code" archive, and extract it completely into a folder you intend to keep. Open **Install TownReporter.cmd**. It downloads pinned Node and PostgreSQL, checks their hashes, installs the application, Chromium and a private database, and builds the app on your computer. The default local paper is **http://127.0.0.1:4388**, and the installer prints the one-time setup code for claiming the desk. A first manual workflow takes under an hour on a normal connection; that is a goal, not a measured result for every computer.
 
-CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.8.0, and no fresh-machine human acceptance of it is claimed here.
+CI also builds a self-contained `TownReporter-<version>-Setup.exe` and its SHA-256 sidecar in the **windows-setup** Actions artifact. It bundles Node, PostgreSQL, Chromium and the compiled application and installs without downloading. It is not a release asset of 0.8.1, and no fresh-machine human acceptance of it is claimed here.
 
 Follow the [Windows installation guide](docs/windows-install.md) for setup, start and stop, private data and troubleshooting. Public hosting and AI provider setup are separate from local installation.
 
@@ -625,7 +632,8 @@ Seventeen rendered diagrams, each with its Mermaid source beside it. The index i
 
 ## Recent releases
 
-- **[0.8.0](docs/releases/0.8.0.md)** (2026-11-25), the current version. The desk's Registry and Drafts buttons and the Registry filter menu draw a visible edge, the Opinion page notice is a paragraph so its link reads as prose, and four nightly browser tests match the app (no migration).
+- **[0.8.1](docs/releases/0.8.1.md)** (2026-11-26), the current version. Every desk text box grows to fit its text: it grows as you type or paste, stops at 70% of the window height and then scrolls, shrinks when text is removed, and is never shorter than its empty size (the story editor fields keep their own sizing, and the reader site is unchanged). The lead-score drawing is added to `render.sh` and the diagram lists (no migration).
+- **[0.8.0](docs/releases/0.8.0.md)** (2026-11-25). The desk's Registry and Drafts buttons and the Registry filter menu draw a visible edge, the Opinion page notice is a paragraph so its link reads as prose, and four nightly browser tests match the app (no migration).
 - **[0.7.1](docs/releases/0.7.1.md)** (2026-11-24). The community registry grows and publishes by itself and rechecks its entries nightly (migrations 0167 and 0168), the public Community resources page is redesigned as cards, and the Queue and desk get fixes from the Nov 19 walk. New: **Capture with Firecrawl Local** and **Send to Desk** for Reddit posts.
 - **[0.7.0](docs/releases/0.7.0.md)** (2026-11-19). Community resources reach their fourth phase (public search, a page for each service, a read-only JSON API, directory import, review and verification), leads that score 14 or more are drafted automatically, and Drafts has tick boxes with bulk publish and kill.
 - **[0.6.92](docs/releases/0.6.92.md)** (2026-11-15). The four score parts show on Today, the Queue and the story page, and Drafts has **Publish all drafts**.
